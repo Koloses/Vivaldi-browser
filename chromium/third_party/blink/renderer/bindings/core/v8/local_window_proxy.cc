@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/local_window_proxy.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/initialize_v8_extras_binding.h"
+#include "third_party/blink/renderer/bindings/core/v8/isolated_world_csp.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
@@ -57,7 +58,6 @@
 #include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
 #include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_violation_reporting_policy.h"
@@ -145,14 +145,6 @@ void LocalWindowProxy::DisposeContext(Lifecycle next_status,
 void LocalWindowProxy::Initialize() {
   TRACE_EVENT1("v8", "LocalWindowProxy::Initialize", "IsMainFrame",
                GetFrame()->IsMainFrame());
-  DEFINE_STATIC_LOCAL(
-      CustomCountHistogram, main_frame_hist,
-      ("Blink.Binding.InitializeMainLocalWindowProxy", 0, 10000000, 50));
-  DEFINE_STATIC_LOCAL(
-      CustomCountHistogram, non_main_frame_hist,
-      ("Blink.Binding.InitializeNonMainLocalWindowProxy", 0, 10000000, 50));
-  ScopedUsHistogramTimer timer(GetFrame()->IsMainFrame() ? main_frame_hist
-                                                         : non_main_frame_hist);
   CHECK(!GetFrame()->IsProvisional());
 
   ScriptForbiddenScope::AllowUserAgentScript allow_script;
@@ -176,19 +168,30 @@ void LocalWindowProxy::Initialize() {
 
   SetupWindowPrototypeChain();
 
-  const SecurityOrigin* origin = nullptr;
-  if (world_->IsMainWorld()) {
-    // ActivityLogger for main world is updated within updateDocumentInternal().
-    UpdateDocumentInternal();
-    origin = GetFrame()->GetDocument()->GetSecurityOrigin();
-    // FIXME: Can this be removed when CSP moves to browser?
+  // Setup handling for eval checks for the context. Isolated worlds which don't
+  // specify their own CSPs are exempt from eval checks currently.
+  // TODO(crbug.com/982388): For other CSP checks, we use the main world CSP
+  // when an isolated world doesn't specify its own CSP. We should do the same
+  // here.
+  const bool evaluate_csp_for_eval =
+      world_->IsMainWorld() ||
+      (world_->IsIsolatedWorld() &&
+       IsolatedWorldCSP::Get().HasContentSecurityPolicy(world_->GetWorldId()));
+  if (evaluate_csp_for_eval) {
     ContentSecurityPolicy* csp =
-        GetFrame()->GetDocument()->GetContentSecurityPolicy();
+        GetFrame()->GetDocument()->GetContentSecurityPolicyForWorld();
     context->AllowCodeGenerationFromStrings(csp->AllowEval(
         nullptr, SecurityViolationReportingPolicy::kSuppressReporting,
         ContentSecurityPolicy::kWillNotThrowException, g_empty_string));
     context->SetErrorMessageForCodeGenerationFromStrings(
         V8String(GetIsolate(), csp->EvalDisabledErrorMessage()));
+  }
+
+  const SecurityOrigin* origin = nullptr;
+  if (world_->IsMainWorld()) {
+    // ActivityLogger for main world is updated within updateDocumentInternal().
+    UpdateDocumentInternal();
+    origin = GetFrame()->GetDocument()->GetSecurityOrigin();
   } else {
     UpdateActivityLogger();
     origin = world_->IsolatedWorldSecurityOrigin();
@@ -225,15 +228,6 @@ void LocalWindowProxy::CreateContext() {
 
   v8::Local<v8::Context> context;
   {
-    DEFINE_STATIC_LOCAL(
-        CustomCountHistogram, main_frame_hist,
-        ("Blink.Binding.CreateV8ContextForMainFrame", 0, 10000000, 50));
-    DEFINE_STATIC_LOCAL(
-        CustomCountHistogram, non_main_frame_hist,
-        ("Blink.Binding.CreateV8ContextForNonMainFrame", 0, 10000000, 50));
-    ScopedUsHistogramTimer timer(
-        GetFrame()->IsMainFrame() ? main_frame_hist : non_main_frame_hist);
-
     v8::Isolate* isolate = GetIsolate();
     V8PerIsolateData::UseCounterDisabledScope use_counter_disabled(
         V8PerIsolateData::From(isolate));
@@ -260,7 +254,7 @@ void LocalWindowProxy::CreateContext() {
   DidAttachGlobalObject();
 #endif
 
-  script_state_ = ScriptState::Create(context, world_);
+  script_state_ = MakeGarbageCollected<ScriptState>(context, world_);
 
   DCHECK(lifecycle_ == Lifecycle::kContextIsUninitialized ||
          lifecycle_ == Lifecycle::kGlobalObjectIsDetached);

@@ -60,12 +60,11 @@ cr.define('multidevice_setup', function() {
       delegate_: Object,
 
       /**
-       * Text to be shown on the forward navigation button.
+       * ID of loadTimeData string to be shown on the forward navigation button.
        * @private {string|undefined}
        */
-      forwardButtonText_: {
+      forwardButtonTextId_: {
         type: String,
-        value: '',
       },
 
       /**
@@ -78,18 +77,23 @@ cr.define('multidevice_setup', function() {
       },
 
       /**
-       * Text to be shown on the cancel button.
+       * ID of loadTimeData string to be shown on the cancel button.
        * @private {string|undefined}
        */
-      cancelButtonText_: {
+      cancelButtonTextId_: {
         type: String,
-        value: '',
       },
 
       /** Whether the webview overlay should be hidden. */
       webviewOverlayHidden_: {
         type: Boolean,
         value: true,
+      },
+
+      /** Whether the webview is currently loading. */
+      isWebviewLoading_: {
+        type: Boolean,
+        value: false,
       },
 
       /**
@@ -109,10 +113,24 @@ cr.define('multidevice_setup', function() {
     /** @override */
     attached: function() {
       this.delegate_ = new MultiDeviceSetupFirstRunDelegate();
+      this.$.multideviceHelpOverlayWebview.addEventListener(
+          'contentload', () => {
+            this.isWebviewLoading_ = false;
+          });
+    },
+
+    /** @override */
+    ready: function() {
+      this.updateLocalizedContent();
+    },
+
+    updateLocalizedContent: function() {
+      this.i18nUpdateLocale();
+      this.$.multideviceSetup.updateLocalizedContent();
     },
 
     onForwardButtonFocusRequested_: function() {
-      this.$$('#next-button').focus();
+      this.$.nextButton.focus();
     },
 
     /**
@@ -129,21 +147,9 @@ cr.define('multidevice_setup', function() {
       }
     },
 
-    /**
-     * @param {boolean} shouldShow
-     * @param {string=} opt_url
-     * @private
-     */
-    setWebviewOverlayVisibility_: function(shouldShow, opt_url) {
-      if (opt_url) {
-        this.webviewSrc_ = opt_url;
-      }
-      this.webviewOverlayHidden_ = !shouldShow;
-    },
-
     /** @private */
     hideWebviewOverlay_: function() {
-      this.setWebviewOverlayVisibility_(false /* shouldShow */);
+      this.webviewOverlayHidden_ = true;
     },
 
     /**
@@ -151,8 +157,9 @@ cr.define('multidevice_setup', function() {
      * @private
      */
     onOpenLearnMoreWebviewRequested_: function(event) {
-      this.setWebviewOverlayVisibility_(
-          true /* shouldShow */, event.detail /* url */);
+      this.isWebviewLoading_ = true;
+      this.webviewSrc_ = event.detail;
+      this.webviewOverlayHidden_ = false;
     },
 
     /** @private */

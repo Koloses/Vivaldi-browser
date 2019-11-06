@@ -7,12 +7,12 @@
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/test/accessibility_notification_waiter.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/hit_test_region_observer.h"
 #include "content/shell/browser/shell.h"
-#include "content/test/accessibility_browser_test_utils.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -140,7 +140,8 @@ IN_PROC_BROWSER_TEST_F(TouchAccessibilityBrowserTest,
   // Send a touch exploration event to the button in the first iframe.
   // A touch exploration event is just a mouse move event with
   // the ui::EF_TOUCH_ACCESSIBILITY flag set.
-  AccessibilityNotificationWaiter waiter(child_frame, ax::mojom::Event::kHover);
+  AccessibilityNotificationWaiter waiter(shell()->web_contents(), ui::AXMode(),
+                                         ax::mojom::Event::kHover);
   SendTouchExplorationEvent(50, 350);
   waiter.WaitForNotification();
   int target_id = waiter.event_target_id();
@@ -177,7 +178,8 @@ IN_PROC_BROWSER_TEST_F(TouchAccessibilityBrowserTest,
   // Send a touch exploration event to the button in the first iframe.
   // A touch exploration event is just a mouse move event with
   // the ui::EF_TOUCH_ACCESSIBILITY flag set.
-  AccessibilityNotificationWaiter waiter(child_frame, ax::mojom::Event::kHover);
+  AccessibilityNotificationWaiter waiter(shell()->web_contents(), ui::AXMode(),
+                                         ax::mojom::Event::kHover);
   SendTouchExplorationEvent(50, 350);
   waiter.WaitForNotification();
   int target_id = waiter.event_target_id();

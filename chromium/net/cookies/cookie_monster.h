@@ -40,7 +40,6 @@ class HistogramBase;
 
 namespace net {
 
-class ChannelIDService;
 class CookieChangeDispatcher;
 
 // The cookie monster is the system for storing and retrieving cookies. It has
@@ -127,16 +126,16 @@ class NET_EXPORT CookieMonster : public CookieStore {
   static const size_t kDomainCookiesQuotaMedium;
   static const size_t kDomainCookiesQuotaHigh;
 
+  // The number of days since last access that cookies will not be subject
+  // to global garbage collection.
+  static const int kSafeFromGlobalPurgeDays;
+
   // The store passed in should not have had Init() called on it yet. This
   // class will take care of initializing it. The backing store is NOT owned by
   // this class, but it must remain valid for the duration of the cookie
   // monster's existence. If |store| is NULL, then no backing store will be
-  // updated. |channel_id_service| is a non-owninng pointer for the
-  // corresponding ChannelIDService used with this CookieStore. The
-  // |channel_id_service| must outlive the CookieMonster. |net_log| must outlive
-  // the CookieMonster. Both |channel_id_service| and |net_log| can be null.
+  // updated. |net_log| must outlive the CookieMonster and can be null.
   CookieMonster(scoped_refptr<PersistentCookieStore> store,
-                ChannelIDService* channel_id_service,
                 NetLog* net_log);
 
   // Only used during unit testing.
@@ -162,7 +161,7 @@ class NET_EXPORT CookieMonster : public CookieStore {
                                  SetCookiesCallback callback) override;
   void SetCanonicalCookieAsync(std::unique_ptr<CanonicalCookie> cookie,
                                std::string source_scheme,
-                               bool modify_http_only,
+                               const CookieOptions& options,
                                SetCookiesCallback callback) override;
   void GetCookieListWithOptionsAsync(const GURL& url,
                                      const CookieOptions& options,
@@ -179,11 +178,8 @@ class NET_EXPORT CookieMonster : public CookieStore {
   void FlushStore(base::OnceClosure callback) override;
   void SetForceKeepSessionState() override;
   CookieChangeDispatcher& GetChangeDispatcher() override;
-
-  // Resets the list of cookieable schemes to the supplied schemes. Does
-  // nothing if called after first use of the instance (i.e. after the
-  // instance initialization process).
-  void SetCookieableSchemes(const std::vector<std::string>& schemes);
+  void SetCookieableSchemes(const std::vector<std::string>& schemes,
+                            SetCookieableSchemesCallback callback) override;
 
   // Enables writing session cookies into the cookie database. If this this
   // method is called, it must be called before first use of the instance
@@ -198,8 +194,6 @@ class NET_EXPORT CookieMonster : public CookieStore {
   static const char* const kDefaultCookieableSchemes[];
   static const int kDefaultCookieableSchemesCount;
 
-  bool IsEphemeral() override;
-
   void DumpMemoryStats(base::trace_event::ProcessMemoryDump* pmd,
                        const std::string& parent_absolute_name) const override;
 
@@ -210,14 +204,8 @@ class NET_EXPORT CookieMonster : public CookieStore {
   static std::string GetKey(base::StringPiece domain);
 
  private:
-  CookieMonster(scoped_refptr<PersistentCookieStore> store,
-                ChannelIDService* channel_id_service,
-                base::TimeDelta last_access_threshold,
-                NetLog* net_log);
-
   // For garbage collection constants.
   FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest, TestHostGarbageCollection);
-  FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest, GarbageCollectionTriggers);
   FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest,
                            GarbageCollectWithSecureCookiesOnly);
   FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest, TestGCTimes);
@@ -351,21 +339,19 @@ class NET_EXPORT CookieMonster : public CookieStore {
     COOKIE_DELETE_EQUIVALENT_LAST_ENTRY
   };
 
-  // The number of days since last access that cookies will not be subject
-  // to global garbage collection.
-  static const int kSafeFromGlobalPurgeDays;
-
   // Record statistics every kRecordStatisticsIntervalSeconds of uptime.
   static const int kRecordStatisticsIntervalSeconds = 10 * 60;
 
   // Sets a canonical cookie, deletes equivalents and performs garbage
-  // collection.  |source_secure| indicates if the cookie is being set
-  // from a secure source (e.g. a cryptographic scheme).
-  // |modify_http_only| indicates if this setting operation is allowed
-  // to affect http_only cookies.
+  // collection.  |source_scheme| indicates what scheme the cookie is being set
+  // from; secure cookies cannot be altered from insecure schemes, and some
+  // schemes may not be authorized.
+  //
+  // |options| indicates if this setting operation is allowed
+  // to affect http_only or same-site cookies.
   void SetCanonicalCookie(std::unique_ptr<CanonicalCookie> cookie,
                           std::string source_scheme,
-                          bool can_modify_httponly,
+                          const CookieOptions& options,
                           SetCookiesCallback callback);
 
   void GetAllCookies(GetCookieListCallback callback);
@@ -631,15 +617,13 @@ class NET_EXPORT CookieMonster : public CookieStore {
 
   std::vector<std::string> cookieable_schemes_;
 
-  ChannelIDService* channel_id_service_;
-
   base::Time last_statistic_record_time_;
 
   bool persist_session_cookies_;
 
   base::ThreadChecker thread_checker_;
 
-  base::WeakPtrFactory<CookieMonster> weak_ptr_factory_;
+  base::WeakPtrFactory<CookieMonster> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CookieMonster);
 };
@@ -650,7 +634,8 @@ typedef base::RefCountedThreadSafe<CookieMonster::PersistentCookieStore>
 class NET_EXPORT CookieMonster::PersistentCookieStore
     : public RefcountedPersistentCookieStore {
  public:
-  typedef base::Callback<void(std::vector<std::unique_ptr<CanonicalCookie>>)>
+  typedef base::OnceCallback<void(
+      std::vector<std::unique_ptr<CanonicalCookie>>)>
       LoadedCallback;
 
   // Initializes the store and retrieves the existing cookies. This will be
@@ -660,7 +645,7 @@ class NET_EXPORT CookieMonster::PersistentCookieStore
   // |loaded_callback| may not be NULL.
   // |net_log| is a NetLogWithSource that may be copied if the persistent
   // store wishes to log NetLog events.
-  virtual void Load(const LoadedCallback& loaded_callback,
+  virtual void Load(LoadedCallback loaded_callback,
                     const NetLogWithSource& net_log) = 0;
 
   // Does a priority load of all cookies for the domain key (eTLD+1). The
@@ -671,7 +656,7 @@ class NET_EXPORT CookieMonster::PersistentCookieStore
   //
   // |loaded_callback| may not be NULL.
   virtual void LoadCookiesForKey(const std::string& key,
-                                 const LoadedCallback& loaded_callback) = 0;
+                                 LoadedCallback loaded_callback) = 0;
 
   virtual void AddCookie(const CanonicalCookie& cc) = 0;
   virtual void UpdateCookieAccessTime(const CanonicalCookie& cc) = 0;
@@ -683,7 +668,7 @@ class NET_EXPORT CookieMonster::PersistentCookieStore
   // Sets a callback that will be run before the store flushes.  If |callback|
   // performs any async operations, the store will not wait for those to finish
   // before flushing.
-  virtual void SetBeforeFlushCallback(base::RepeatingClosure callback) = 0;
+  virtual void SetBeforeCommitCallback(base::RepeatingClosure callback) = 0;
 
   // Flushes the store and posts |callback| when complete. |callback| may be
   // NULL.

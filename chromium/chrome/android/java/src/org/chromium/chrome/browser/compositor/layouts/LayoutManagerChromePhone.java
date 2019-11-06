@@ -17,6 +17,7 @@ import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
+import org.chromium.chrome.features.start_surface.StartSurface;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 
 /**
@@ -29,12 +30,12 @@ public class LayoutManagerChromePhone extends LayoutManagerChrome {
 
     /**
      * Creates an instance of a {@link LayoutManagerChromePhone}.
-     * @param host                A {@link LayoutManagerHost} instance.
-     * @param swipeDownDelegate   OverviewModeController to delegate tab switcher behavior.
+     * @param host         A {@link LayoutManagerHost} instance.
+     * @param startSurface An interface to talk to the Grid Tab Switcher. If it's NULL, VTS
+     *                     should be used, otherwise GTS should be used.
      */
-    public LayoutManagerChromePhone(
-            LayoutManagerHost host, OverviewModeController swipeDownDelegate) {
-        super(host, true, swipeDownDelegate);
+    public LayoutManagerChromePhone(LayoutManagerHost host, StartSurface startSurface) {
+        super(host, true, startSurface);
         Context context = host.getContext();
         LayoutRenderHost renderHost = host.getLayoutRenderHost();
 
@@ -110,7 +111,7 @@ public class LayoutManagerChromePhone extends LayoutManagerChrome {
         if (nextTab != null) nextTab.requestFocus();
         boolean animate = !tabRemoved && animationsEnabled();
         if (getActiveLayout() != overviewLayout && showOverview && !animate) {
-            mOverviewModeDelegate.showOverview(false);
+            showOverview(false);
         }
     }
 

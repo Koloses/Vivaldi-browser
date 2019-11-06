@@ -135,8 +135,10 @@ bool ParseIconRestrictedUrl(const GURL& url,
 
   // Get the starting index of the page URL.
   chrome::ParsedFaviconPath parsed;
-  if (!chrome::ParseFaviconPath(raw_path, &parsed))
+  if (!chrome::ParseFaviconPath(
+          raw_path, chrome::FaviconUrlFormat::kFaviconLegacy, &parsed)) {
     return false;
+  }
   int path_index = parsed.path_index;
 
   std::string id_part = raw_path.substr(path_index);
@@ -200,8 +202,7 @@ SearchBox::SearchBox(content::RenderFrame* render_frame)
       is_input_in_progress_(false),
       is_key_capture_enabled_(false),
       most_visited_items_cache_(kMaxInstantMostVisitedItemCacheSize),
-      has_received_most_visited_(false),
-      weak_ptr_factory_(this) {
+      has_received_most_visited_(false) {
   // Connect to the embedded search interface in the browser.
   chrome::mojom::EmbeddedSearchConnectorAssociatedPtr connector;
   render_frame->GetRemoteAssociatedInterfaces()->GetInterface(&connector);
@@ -221,6 +222,17 @@ void SearchBox::LogEvent(NTPLoggingEventType event) {
   embedded_search_service_->LogEvent(page_seq_no_, event, delta);
 }
 
+void SearchBox::LogSuggestionEventWithValue(
+    NTPSuggestionsLoggingEventType event,
+    int data) {
+  base::Time navigation_start = base::Time::FromDoubleT(
+      render_frame()->GetWebFrame()->Performance().NavigationStart());
+  base::Time now = base::Time::Now();
+  base::TimeDelta delta = now - navigation_start;
+  embedded_search_service_->LogSuggestionEventWithValue(page_seq_no_, event,
+                                                        data, delta);
+}
+
 void SearchBox::LogMostVisitedImpression(
     const ntp_tiles::NTPTileImpression& impression) {
   embedded_search_service_->LogMostVisitedImpression(page_seq_no_, impression);
@@ -229,19 +241,6 @@ void SearchBox::LogMostVisitedImpression(
 void SearchBox::LogMostVisitedNavigation(
     const ntp_tiles::NTPTileImpression& impression) {
   embedded_search_service_->LogMostVisitedNavigation(page_seq_no_, impression);
-}
-
-void SearchBox::CheckIsUserSignedInToChromeAs(const base::string16& identity) {
-  embedded_search_service_->ChromeIdentityCheck(
-      page_seq_no_, identity,
-      base::BindOnce(&SearchBox::ChromeIdentityCheckResult,
-                     weak_ptr_factory_.GetWeakPtr(), identity));
-}
-
-void SearchBox::CheckIsUserSyncingHistory() {
-  embedded_search_service_->HistorySyncCheck(
-      page_seq_no_, base::BindOnce(&SearchBox::HistorySyncCheckResult,
-                                   weak_ptr_factory_.GetWeakPtr()));
 }
 
 void SearchBox::DeleteMostVisitedItem(
@@ -303,7 +302,15 @@ void SearchBox::UndoMostVisitedDeletion(
 }
 
 bool SearchBox::IsCustomLinks() const {
-  return is_custom_links_;
+  return most_visited_info_.items_are_custom_links;
+}
+
+bool SearchBox::IsUsingMostVisited() const {
+  return most_visited_info_.use_most_visited;
+}
+
+bool SearchBox::AreShortcutsVisible() const {
+  return most_visited_info_.is_visible;
 }
 
 void SearchBox::AddCustomLink(const GURL& url, const std::string& title) {
@@ -358,21 +365,26 @@ void SearchBox::ResetCustomLinks() {
   embedded_search_service_->ResetCustomLinks(page_seq_no_);
 }
 
+void SearchBox::ToggleMostVisitedOrCustomLinks() {
+  embedded_search_service_->ToggleMostVisitedOrCustomLinks(page_seq_no_);
+}
+
+void SearchBox::ToggleShortcutsVisibility(bool do_notify) {
+  embedded_search_service_->ToggleShortcutsVisibility(page_seq_no_, do_notify);
+}
+
 std::string SearchBox::FixupAndValidateUrl(const std::string& url) const {
   return internal::FixupAndValidateUrl(url);
 }
 
-void SearchBox::SetCustomBackgroundURL(const GURL& background_url) {
-  embedded_search_service_->SetCustomBackgroundURL(background_url);
-}
-
-void SearchBox::SetCustomBackgroundURLWithAttributions(
-    const GURL& background_url,
-    const std::string& attribution_line_1,
-    const std::string& attribution_line_2,
-    const GURL& action_url) {
-  embedded_search_service_->SetCustomBackgroundURLWithAttributions(
-      background_url, attribution_line_1, attribution_line_2, action_url);
+void SearchBox::SetCustomBackgroundInfo(const GURL& background_url,
+                                        const std::string& attribution_line_1,
+                                        const std::string& attribution_line_2,
+                                        const GURL& action_url,
+                                        const std::string& collection_id) {
+  embedded_search_service_->SetCustomBackgroundInfo(
+      background_url, attribution_line_1, attribution_line_2, action_url,
+      collection_id);
 }
 
 void SearchBox::SelectLocalBackgroundImage() {
@@ -402,16 +414,24 @@ void SearchBox::OptOutOfSearchSuggestions() {
   embedded_search_service_->OptOutOfSearchSuggestions();
 }
 
-void SearchBox::SetPageSequenceNumber(int page_seq_no) {
-  page_seq_no_ = page_seq_no;
+void SearchBox::ApplyDefaultTheme() {
+  embedded_search_service_->ApplyDefaultTheme();
 }
 
-void SearchBox::ChromeIdentityCheckResult(const base::string16& identity,
-                                          bool identity_match) {
-  if (can_run_js_in_renderframe_) {
-    SearchBoxExtension::DispatchChromeIdentityCheckResult(
-        render_frame()->GetWebFrame(), identity, identity_match);
-  }
+void SearchBox::ApplyAutogeneratedTheme(SkColor color) {
+  embedded_search_service_->ApplyAutogeneratedTheme(color);
+}
+
+void SearchBox::RevertThemeChanges() {
+  embedded_search_service_->RevertThemeChanges();
+}
+
+void SearchBox::ConfirmThemeChanges() {
+  embedded_search_service_->ConfirmThemeChanges();
+}
+
+void SearchBox::SetPageSequenceNumber(int page_seq_no) {
+  page_seq_no_ = page_seq_no;
 }
 
 void SearchBox::FocusChanged(OmniboxFocusState new_focus_state,
@@ -444,13 +464,6 @@ void SearchBox::FocusChanged(OmniboxFocusState new_focus_state,
   }
 }
 
-void SearchBox::HistorySyncCheckResult(bool sync_history) {
-  if (can_run_js_in_renderframe_) {
-    SearchBoxExtension::DispatchHistorySyncCheckResult(
-        render_frame()->GetWebFrame(), sync_history);
-  }
-}
-
 void SearchBox::AddCustomLinkResult(bool success) {
   if (can_run_js_in_renderframe_) {
     SearchBoxExtension::DispatchAddCustomLinkResult(
@@ -472,20 +485,26 @@ void SearchBox::DeleteCustomLinkResult(bool success) {
   }
 }
 
-void SearchBox::MostVisitedChanged(
-    const std::vector<InstantMostVisitedItem>& items,
-    bool is_custom_links) {
+void SearchBox::MostVisitedInfoChanged(
+    const InstantMostVisitedInfo& most_visited_info) {
   has_received_most_visited_ = true;
-  is_custom_links_ = is_custom_links;
+  most_visited_info_.items_are_custom_links =
+      most_visited_info.items_are_custom_links;
 
   std::vector<InstantMostVisitedItemIDPair> last_known_items;
   GetMostVisitedItems(&last_known_items);
 
-  if (AreMostVisitedItemsEqual(last_known_items, items)) {
+  if (AreMostVisitedItemsEqual(last_known_items, most_visited_info.items) &&
+      most_visited_info_.use_most_visited ==
+          most_visited_info.use_most_visited &&
+      most_visited_info_.is_visible == most_visited_info.is_visible) {
     return;  // Do not send duplicate onmostvisitedchange events.
   }
 
-  most_visited_items_cache_.AddItems(items);
+  most_visited_info_.use_most_visited = most_visited_info.use_most_visited;
+  most_visited_info_.is_visible = most_visited_info.is_visible;
+
+  most_visited_items_cache_.AddItems(most_visited_info.items);
   if (can_run_js_in_renderframe_) {
     SearchBoxExtension::DispatchMostVisitedChanged(
         render_frame()->GetWebFrame());
@@ -514,6 +533,13 @@ void SearchBox::ThemeChanged(const ThemeBackgroundInfo& theme_info) {
   theme_info_ = theme_info;
   if (can_run_js_in_renderframe_)
     SearchBoxExtension::DispatchThemeChange(render_frame()->GetWebFrame());
+}
+
+void SearchBox::LocalBackgroundSelected() {
+  if (can_run_js_in_renderframe_) {
+    SearchBoxExtension::DispatchLocalBackgroundSelected(
+        render_frame()->GetWebFrame());
+  }
 }
 
 GURL SearchBox::GetURLForMostVisitedItem(InstantRestrictedID item_id) const {

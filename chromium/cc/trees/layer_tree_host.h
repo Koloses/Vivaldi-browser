@@ -19,10 +19,8 @@
 #include "base/cancelable_callback.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "cc/benchmarks/micro_benchmark.h"
@@ -35,7 +33,7 @@
 #include "cc/input/scrollbar.h"
 #include "cc/layers/layer_collections.h"
 #include "cc/layers/layer_list_iterator.h"
-#include "cc/paint/node_holder.h"
+#include "cc/paint/node_id.h"
 #include "cc/trees/compositor_mode.h"
 #include "cc/trees/layer_tree_frame_sink.h"
 #include "cc/trees/layer_tree_host_client.h"
@@ -57,6 +55,7 @@ struct PresentationFeedback;
 }
 
 namespace cc {
+
 class HeadsUpDisplayLayer;
 class Layer;
 class LayerTreeHostClient;
@@ -128,7 +127,10 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
       LayerTreeHostSingleThreadClient* single_thread_client,
       InitParams params);
 
+  LayerTreeHost(const LayerTreeHost&) = delete;
   virtual ~LayerTreeHost();
+
+  LayerTreeHost& operator=(const LayerTreeHost&) = delete;
 
   // Returns the process global unique identifier for this LayerTreeHost.
   int GetId() const;
@@ -245,7 +247,7 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   void StartDeferringCommits(base::TimeDelta timeout);
 
   // Stop deferring commits immediately.
-  void StopDeferringCommits();
+  void StopDeferringCommits(PaintHoldingCommitTrigger);
 
   // Returns whether there are any outstanding ScopedDeferMainFrameUpdate,
   // though commits may be deferred also when the local_surface_id_from_parent()
@@ -272,11 +274,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   void SetNeedsCommitWithForcedRedraw();
 
   // Input Handling ---------------------------------------------
-
-  // Notifies the compositor that input from the browser is being throttled till
-  // the next commit. The compositor will prioritize activation of the pending
-  // tree so a commit can be performed.
-  void NotifyInputThrottledUntilCommit();
 
   // Sets the state of the browser controls. (Used for URL bar animations on
   // android).
@@ -405,7 +402,11 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
                                 float bottom_height,
                                 bool shrink);
   void SetBrowserControlsShownRatio(float ratio);
+
   void SetOverscrollBehavior(const OverscrollBehavior& overscroll_behavior);
+  const OverscrollBehavior& overscroll_behavior() const {
+    return overscroll_behavior_;
+  }
 
   void SetPageScaleFactorAndLimits(float page_scale_factor,
                                    float min_page_scale_factor,
@@ -431,9 +432,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
     return painted_device_scale_factor_;
   }
 
-  void SetContentSourceId(uint32_t);
-  uint32_t content_source_id() const { return content_source_id_; }
-
   // Clears image caches and resets the scheduling history for the content
   // produced by this host so far.
   void ClearCachesOnNextCommit();
@@ -448,11 +446,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
       const {
     return local_surface_id_allocation_from_parent_;
   }
-
-  // Generates a new child surface sequence number (from a LocalSurfaceId). This
-  // results in disabling drawing until the LocalSurfaceIdAllocation is received
-  // via the active tree. This only works in single threaded mode.
-  uint32_t GenerateChildSurfaceSequenceNumberSync();
 
   // Requests the allocation of a new LocalSurfaceId on the compositor thread.
   void RequestNewLocalSurfaceId();
@@ -474,7 +467,11 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   // 'external_page_scale_factor', a value that affects raster scale in the
   // same way that page_scale_factor does, but doesn't affect any geometry
   // calculations.
-  void SetExternalPageScaleFactor(float page_scale_factor);
+  void SetExternalPageScaleFactor(float page_scale_factor,
+                                  bool is_external_pinch_gesture_active);
+  bool is_external_pinch_gesture_active_for_testing() {
+    return is_external_pinch_gesture_active_;
+  }
 
   // Requests that we force send RenderFrameMetadata with the next frame.
   void RequestForceSendMetadata() { force_send_metadata_request_ = true; }
@@ -542,9 +539,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
 
   void PushPropertyTreesTo(LayerTreeImpl* tree_impl);
   void PushLayerTreePropertiesTo(LayerTreeImpl* tree_impl);
-  // TODO(flackr): This list should be on the property trees and pushed
-  // as part of PushPropertyTreesTo.
-  void PushRegisteredElementIdsTo(LayerTreeImpl* tree_impl);
   void PushSurfaceRangesTo(LayerTreeImpl* tree_impl);
   void PushLayerTreeHostPropertiesTo(LayerTreeHostImpl* host_impl);
 
@@ -558,15 +552,7 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
                        Layer* layer);
   void UnregisterElement(ElementId element_id, ElementListType list_type);
 
-  // Registers the new active element ids, updating |registered_element_ids_|,
-  // and unregisters any element ids that were previously registered. This is
-  // similar to |RegisterElement| and |UnregisterElement| but for layer lists
-  // where we do not have a unique element id to layer mapping.
-  using ElementIdSet = std::unordered_set<ElementId, ElementIdHash>;
-  void SetActiveRegisteredElementIds(const ElementIdSet&);
-  const ElementIdSet& elements_in_property_trees() {
-    return elements_in_property_trees_;
-  }
+  void UpdateActiveElements();
 
   void SetElementIdsForTesting();
 
@@ -604,8 +590,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
       uint32_t frame_token,
       std::vector<LayerTreeHost::PresentationTimeCallback> callbacks,
       const gfx::PresentationFeedback& feedback);
-  void DidGenerateLocalSurfaceIdAllocation(
-      const viz::LocalSurfaceIdAllocation& allocation);
   // Called when the compositor completed page scale animation.
   void DidCompletePageScaleAnimation();
   void ApplyScrollAndScale(ScrollAndScaleSet* info);
@@ -637,13 +621,17 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   bool IsUsingLayerLists() const;
 
   // MutatorHostClient implementation.
-  bool IsElementInList(ElementId element_id,
-                       ElementListType list_type) const override;
+  bool IsElementInPropertyTrees(ElementId element_id,
+                                ElementListType list_type) const override;
   void SetMutatorsNeedCommit() override;
   void SetMutatorsNeedRebuildPropertyTrees() override;
   void SetElementFilterMutated(ElementId element_id,
                                ElementListType list_type,
                                const FilterOperations& filters) override;
+  void SetElementBackdropFilterMutated(
+      ElementId element_id,
+      ElementListType list_type,
+      const FilterOperations& backdrop_filters) override;
   void SetElementOpacityMutated(ElementId element_id,
                                 ElementListType list_type,
                                 float opacity) override;
@@ -659,6 +647,10 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
                                  ElementListType list_type,
                                  const PropertyAnimationState& mask,
                                  const PropertyAnimationState& state) override;
+  void AnimationScalesChanged(ElementId element_id,
+                              ElementListType list_type,
+                              float maximum_scale,
+                              float starting_scale) override;
 
   void ScrollOffsetAnimationFinished() override {}
   gfx::ScrollOffset GetScrollOffsetForAnimation(
@@ -675,7 +667,7 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
 
   float recording_scale_factor() const { return recording_scale_factor_; }
 
-  void SetURLForUkm(const GURL& url);
+  void SetSourceURL(ukm::SourceId source_id, const GURL& url);
 
   void SetRenderFrameObserver(
       std::unique_ptr<RenderFrameMetadataObserver> observer);
@@ -683,8 +675,8 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   std::string LayersAsString() const;
 
   // Captures the on-screen text content, if success, fills the associated
-  // NodeHolder in |content| and return true, otherwise return false.
-  bool CaptureContent(std::vector<NodeHolder>* content);
+  // NodeId in |content| and return true, otherwise return false.
+  bool CaptureContent(std::vector<NodeId>* content);
 
  protected:
   LayerTreeHost(InitParams params, CompositorMode mode);
@@ -727,7 +719,7 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   enum { kNumFramesToConsiderBeforeRemovingSlowPathFlag = 60 };
 
   void ApplyViewportChanges(const ScrollAndScaleSet& info);
-  void RecordWheelAndTouchScrollingCount(const ScrollAndScaleSet& info);
+  void RecordManipulationTypeCounts(const ScrollAndScaleSet& scroll_info);
   void SendOverscrollAndScrollEndEventsFromImplSide(
       const ScrollAndScaleSet& info);
   void ApplyPageScaleDeltaFromImplSide(float page_scale_delta);
@@ -804,21 +796,19 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   float min_page_scale_factor_ = 1.f;
   float max_page_scale_factor_ = 1.f;
   float external_page_scale_factor_ = 1.f;
+  bool is_external_pinch_gesture_active_ = false;
+  // Used to track the out-bound state for ApplyViewportChanges.
+  bool is_pinch_gesture_active_from_impl_ = false;
 
   int raster_color_space_id_ = -1;
   gfx::ColorSpace raster_color_space_;
 
   bool clear_caches_on_next_commit_ = false;
-  uint32_t content_source_id_;
   viz::LocalSurfaceIdAllocation local_surface_id_allocation_from_parent_;
   // Used to detect surface invariant violations.
   bool has_pushed_local_surface_id_from_parent_ = false;
   bool new_local_surface_id_request_ = false;
   uint32_t defer_main_frame_update_count_ = 0;
-
-  // Last value returned from GenerateChildSurfaceSequenceNumberSync(). This is
-  // reset once a LocalSurfaceId is submitted with a higher id.
-  base::Optional<uint32_t> generated_child_surface_sequence_number_;
 
   SkColor background_color_ = SK_ColorWHITE;
 
@@ -861,10 +851,6 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
   // In layer-list mode, this map is only used for scrollable layers.
   std::unordered_map<ElementId, Layer*, ElementIdHash> element_layers_map_;
 
-  // The set of registered element ids when using layer list mode. In non-layer-
-  // list mode, |element_layers_map_| is used.
-  ElementIdSet elements_in_property_trees_;
-
   bool in_paint_layer_contents_ = false;
 
   // This is true if atleast one layer in the layer tree has a copy request. We
@@ -892,9 +878,8 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
 
   // Used to vend weak pointers to LayerTreeHost to ScopedDeferMainFrameUpdate
   // objects.
-  base::WeakPtrFactory<LayerTreeHost> defer_main_frame_update_weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(LayerTreeHost);
+  base::WeakPtrFactory<LayerTreeHost> defer_main_frame_update_weak_ptr_factory_{
+      this};
 };
 
 }  // namespace cc

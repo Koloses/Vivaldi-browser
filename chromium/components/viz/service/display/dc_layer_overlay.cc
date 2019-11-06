@@ -52,21 +52,21 @@ DCLayerResult FromYUVQuad(const YUVVideoDrawQuad* quad,
   // Hardware protected video must use Direct Composition Overlay
   if (quad->shared_quad_state->blend_mode != SkBlendMode::kSrcOver &&
       quad->protected_video_type !=
-          ui::ProtectedVideoType::kHardwareProtected) {
+          gfx::ProtectedVideoType::kHardwareProtected) {
     return DC_LAYER_FAILED_QUAD_BLEND_MODE;
   }
   // To support software protected video on machines without hardware overlay
   // capability. Don't do dc layer overlay if no hardware support.
   if (!has_hw_overlay_support &&
       quad->protected_video_type !=
-          ui::ProtectedVideoType::kSoftwareProtected) {
+          gfx::ProtectedVideoType::kSoftwareProtected) {
     return DC_LAYER_FAILED_NO_HW_OVERLAY_SUPPORT;
   }
 
   if (!quad->shared_quad_state->quad_to_target_transform
            .Preserves2dAxisAlignment() &&
       quad->protected_video_type !=
-          ui::ProtectedVideoType::kHardwareProtected &&
+          gfx::ProtectedVideoType::kHardwareProtected &&
       !base::FeatureList::IsEnabled(
           features::kDirectCompositionComplexOverlays)) {
     return DC_LAYER_FAILED_COMPLEX_TRANSFORM;
@@ -74,7 +74,7 @@ DCLayerResult FromYUVQuad(const YUVVideoDrawQuad* quad,
 
   if (current_frame_processed_overlay_count > 0 &&
       quad->protected_video_type !=
-          ui::ProtectedVideoType::kHardwareProtected) {
+          gfx::ProtectedVideoType::kHardwareProtected) {
     return DC_LAYER_FAILED_TOO_MANY_OVERLAYS;
   }
 
@@ -140,15 +140,10 @@ gfx::RectF ClippedQuadRectangle(const DrawQuad* quad) {
   return quad_rect;
 }
 
-// GetOcclusionBounds() - Find a rectangle containing all the quads in a list
-// that occlude the area in target_quad.
-// |has_occluding_surface_damage| - used for underlay power optimization.
-gfx::RectF GetOcclusionBounds(const gfx::RectF& target_quad,
-                              QuadList::ConstIterator quad_list_begin,
-                              QuadList::ConstIterator quad_list_end,
-                              bool* has_occluding_surface_damage) {
-  gfx::RectF occlusion_bounding_box;
-  *has_occluding_surface_damage = false;
+// Any occluding quads in the quad list on top of the overlay/underlay
+bool HasOccludingQuads(const gfx::RectF& target_quad,
+                       QuadList::ConstIterator quad_list_begin,
+                       QuadList::ConstIterator quad_list_end) {
   for (auto overlap_iter = quad_list_begin; overlap_iter != quad_list_end;
        ++overlap_iter) {
     float opacity = overlap_iter->shared_quad_state->opacity;
@@ -156,39 +151,48 @@ gfx::RectF GetOcclusionBounds(const gfx::RectF& target_quad,
       continue;
     const DrawQuad* quad = *overlap_iter;
     gfx::RectF overlap_rect = ClippedQuadRectangle(quad);
-    if (quad->material == DrawQuad::SOLID_COLOR) {
+    if (quad->material == DrawQuad::Material::kSolidColor) {
       SkColor color = SolidColorDrawQuad::MaterialCast(quad)->color;
       float alpha = (SkColorGetA(color) * (1.0f / 255.0f)) * opacity;
       if (quad->ShouldDrawWithBlending() &&
           alpha < std::numeric_limits<float>::epsilon())
         continue;
     }
-    overlap_rect.Intersect(target_quad);
-    if (!overlap_rect.IsEmpty()) {
-      occlusion_bounding_box.Union(overlap_rect);
-      *has_occluding_surface_damage |=
-          overlap_iter->shared_quad_state->has_surface_damage;
-    }
+    if (overlap_rect.Intersects(target_quad))
+      return true;
   }
-  return occlusion_bounding_box;
+  return false;
 }
 
 void RecordDCLayerResult(DCLayerResult result,
-                         ui::ProtectedVideoType protected_video_type) {
+                         gfx::ProtectedVideoType protected_video_type) {
   switch (protected_video_type) {
-    case ui::ProtectedVideoType::kClear:
+    case gfx::ProtectedVideoType::kClear:
       UMA_HISTOGRAM_ENUMERATION("GPU.DirectComposition.DCLayerResult2.Clear",
                                 result);
       break;
-    case ui::ProtectedVideoType::kSoftwareProtected:
+    case gfx::ProtectedVideoType::kSoftwareProtected:
       UMA_HISTOGRAM_ENUMERATION(
           "GPU.DirectComposition.DCLayerResult2.SoftwareProtected", result);
       break;
-    case ui::ProtectedVideoType::kHardwareProtected:
+    case gfx::ProtectedVideoType::kHardwareProtected:
       UMA_HISTOGRAM_ENUMERATION(
           "GPU.DirectComposition.DCLayerResult2.HardwareProtected", result);
       break;
   }
+}
+
+void RecordOverlayHistograms(bool is_overlay,
+                             const gfx::Rect& occluding_damage_rect,
+                             gfx::Rect* damage_rect) {
+  UMA_HISTOGRAM_BOOLEAN("GPU.DirectComposition.IsUnderlay", !is_overlay);
+
+  bool has_occluding_surface_damage = !occluding_damage_rect.IsEmpty();
+  bool occluding_damage_equal_to_damage_rect =
+      occluding_damage_rect == *damage_rect;
+  OverlayProcessor::RecordOverlayDamageRectHistograms(
+      is_overlay, has_occluding_surface_damage, damage_rect->IsEmpty(),
+      occluding_damage_equal_to_damage_rect);
 }
 }  // namespace
 
@@ -198,9 +202,9 @@ DCLayerOverlay& DCLayerOverlay::operator=(const DCLayerOverlay& other) =
     default;
 DCLayerOverlay::~DCLayerOverlay() = default;
 
-DCLayerOverlayProcessor::DCLayerOverlayProcessor(OutputSurface* surface) {
+DCLayerOverlayProcessor::DCLayerOverlayProcessor(
+    const ContextProvider* context_provider) {
 #if defined(OS_WIN)
-  auto* context_provider = surface->context_provider();
   if (context_provider) {
     has_hw_overlay_support_ =
         context_provider->ContextCapabilities().dc_layers &&
@@ -230,7 +234,6 @@ void DCLayerOverlayProcessor::Process(
 
 void DCLayerOverlayProcessor::ClearOverlayState() {
   previous_frame_underlay_rect_ = gfx::Rect();
-  previous_frame_underlay_occlusion_ = gfx::Rect();
   previous_frame_overlay_rect_union_ = gfx::Rect();
   previous_frame_processed_overlay_count_ = 0;
 }
@@ -239,7 +242,7 @@ QuadList::Iterator DCLayerOverlayProcessor::ProcessRenderPassDrawQuad(
     RenderPass* render_pass,
     gfx::Rect* damage_rect,
     QuadList::Iterator it) {
-  DCHECK_EQ(DrawQuad::RENDER_PASS, it->material);
+  DCHECK_EQ(DrawQuad::Material::kRenderPass, it->material);
   const RenderPassDrawQuad* rpdq = RenderPassDrawQuad::MaterialCast(*it);
 
   ++it;
@@ -317,8 +320,8 @@ QuadList::Iterator DCLayerOverlayProcessor::ProcessRenderPassDrawQuad(
         gfx::ToEnclosingRect(ClippedQuadRectangle(solid_quad));
     // Propagate punch through rect as damage up the stack of render passes.
     // TODO(sunnyps): We should avoid this extra damage if we knew that the
-    // video (in child render surface) was the only thing damaging this render
-    // surface.
+    // video (in child render surface) was the only thing damaging this
+    // render surface.
     damage_rect->Union(clipped_quad_rect);
 
     // Add transformed info to list in case this renderpass is included in
@@ -336,7 +339,6 @@ void DCLayerOverlayProcessor::ProcessRenderPass(
     gfx::Rect* damage_rect,
     DCLayerOverlayList* dc_layer_overlays) {
   gfx::Rect this_frame_underlay_rect;
-  gfx::Rect this_frame_underlay_occlusion;
 
   QuadList* quad_list = &render_pass->quad_list;
   auto next_it = quad_list->begin();
@@ -346,16 +348,16 @@ void DCLayerOverlayProcessor::ProcessRenderPass(
     next_it = it;
     ++next_it;
 
-    if (it->material == DrawQuad::RENDER_PASS) {
+    if (it->material == DrawQuad::Material::kRenderPass) {
       next_it = ProcessRenderPassDrawQuad(render_pass, damage_rect, it);
       continue;
     }
 
     DCLayerOverlay dc_layer;
     DCLayerResult result;
-    auto uma_protected_video_type = ui::ProtectedVideoType::kClear;
+    auto uma_protected_video_type = gfx::ProtectedVideoType::kClear;
     switch (it->material) {
-      case DrawQuad::YUV_VIDEO_CONTENT:
+      case DrawQuad::Material::kYuvVideoContent:
         result = FromYUVQuad(YUVVideoDrawQuad::MaterialCast(*it),
                              render_pass->transform_to_root_target,
                              has_hw_overlay_support_,
@@ -375,12 +377,14 @@ void DCLayerOverlayProcessor::ProcessRenderPass(
 
     gfx::Rect quad_rectangle_in_target_space =
         gfx::ToEnclosingRect(ClippedQuadRectangle(*it));
-    bool has_occluding_surface_damage = false;
-    gfx::RectF occlusion_bounding_box = GetOcclusionBounds(
-        gfx::RectF(quad_rectangle_in_target_space), quad_list->begin(), it,
-        &has_occluding_surface_damage);
+    gfx::Rect occluding_damage_rect =
+        it->shared_quad_state->occluding_damage_rect.has_value()
+            ? it->shared_quad_state->occluding_damage_rect.value()
+            : quad_rectangle_in_target_space;
     // Non-root video is always treated as underlay.
-    bool is_overlay = occlusion_bounding_box.IsEmpty() && is_root;
+    bool is_overlay = is_root && !HasOccludingQuads(
+                                     gfx::RectF(quad_rectangle_in_target_space),
+                                     quad_list->begin(), it);
 
     // Skip quad if it's an underlay and underlays are not allowed
     if (!is_overlay) {
@@ -424,10 +428,8 @@ void DCLayerOverlayProcessor::ProcessRenderPass(
       next_it = it;
     } else {
       ProcessForUnderlay(display_rect, render_pass,
-                         quad_rectangle_in_target_space, occlusion_bounding_box,
-                         it, is_root, has_occluding_surface_damage, damage_rect,
-                         &this_frame_underlay_rect,
-                         &this_frame_underlay_occlusion, &dc_layer);
+                         quad_rectangle_in_target_space, it, is_root,
+                         damage_rect, &this_frame_underlay_rect, &dc_layer);
     }
 
     gfx::Rect rect_in_root = cc::MathUtil::MapEnclosingClippedRect(
@@ -435,6 +437,8 @@ void DCLayerOverlayProcessor::ProcessRenderPass(
     current_frame_overlay_rect_union_.Union(rect_in_root);
 
     RecordDCLayerResult(DC_LAYER_SUCCESS, dc_layer.protected_video_type);
+    RecordOverlayHistograms(is_overlay, occluding_damage_rect, damage_rect);
+
     dc_layer_overlays->push_back(dc_layer);
 
     // Only allow one overlay unless it's hardware protected video.
@@ -461,7 +465,6 @@ void DCLayerOverlayProcessor::ProcessRenderPass(
     damage_rect->Intersect(gfx::ToEnclosingRect(display_rect));
     previous_display_rect_ = display_rect;
     previous_frame_underlay_rect_ = this_frame_underlay_rect;
-    previous_frame_underlay_occlusion_ = this_frame_underlay_occlusion;
   }
 }
 
@@ -486,13 +489,10 @@ void DCLayerOverlayProcessor::ProcessForUnderlay(
     const gfx::RectF& display_rect,
     RenderPass* render_pass,
     const gfx::Rect& quad_rectangle,
-    const gfx::RectF& occlusion_bounding_box,
     const QuadList::Iterator& it,
     bool is_root,
-    bool has_occluding_surface_damage,
     gfx::Rect* damage_rect,
     gfx::Rect* this_frame_underlay_rect,
-    gfx::Rect* this_frame_underlay_occlusion,
     DCLayerOverlay* dc_layer) {
   // Assign decreasing z-order so that underlays processed earlier, and hence
   // which are above the subsequent underlays, are placed above in the direct
@@ -543,12 +543,12 @@ void DCLayerOverlayProcessor::ProcessForUnderlay(
 
   if (is_root && current_frame_processed_overlay_count_ == 0 &&
       is_axis_aligned && is_opaque && !underlay_rect_changed &&
-      !display_rect_changed) {
+      !display_rect_changed &&
+      shared_quad_state->occluding_damage_rect.has_value()) {
     // If this underlay rect is the same as for last frame, subtract its area
     // from the damage of the main surface, as the cleared area was already
     // cleared last frame. Add back the damage from the occluded area for this
-    // and last frame, as that may have changed.
-    gfx::Rect occluding_damage_rect = *damage_rect;
+    // frame.
     damage_rect->Subtract(quad_rectangle);
 
     // If none of the quads on top give any damage, we can skip compositing
@@ -557,19 +557,9 @@ void DCLayerOverlayProcessor::ProcessForUnderlay(
     // compositor will be empty. If the incoming damage rect is bigger than the
     // video quad, we don't have an oppertunity for power optimization even if
     // no damage on top. The output damage rect will not be empty in this case.
-    if (has_occluding_surface_damage) {
-      gfx::Rect occlusion = gfx::ToEnclosingRect(occlusion_bounding_box);
-      occlusion.Union(previous_frame_underlay_occlusion_);
-
-      occluding_damage_rect.Intersect(quad_rectangle);
-      occluding_damage_rect.Intersect(occlusion);
-
-      damage_rect->Union(occluding_damage_rect);
-    }
+    damage_rect->Union(shared_quad_state->occluding_damage_rect.value());
   } else {
     // Entire replacement quad must be redrawn.
-    // TODO(sunnyps): We should avoid this extra damage if we knew that the
-    // video was the only thing damaging this render surface.
     damage_rect->Union(quad_rectangle);
   }
 
@@ -579,8 +569,6 @@ void DCLayerOverlayProcessor::ProcessForUnderlay(
   if (is_root && current_frame_processed_overlay_count_ == 0 &&
       is_axis_aligned && is_opaque) {
     *this_frame_underlay_rect = quad_rectangle;
-    *this_frame_underlay_occlusion =
-        gfx::ToEnclosingRect(occlusion_bounding_box);
   }
 
   // Propagate the punched holes up the chain of render passes. Punch through

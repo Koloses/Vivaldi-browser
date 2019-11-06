@@ -58,7 +58,9 @@ StyledMarkupAccumulator::StyledMarkupAccumulator(
     Document* document,
     AnnotateForInterchange should_annotate,
     ConvertBlocksToInlines convert_blocks_to_inlines)
-    : formatter_(should_resolve_urls),
+    : formatter_(should_resolve_urls,
+                 document->IsHTMLDocument() ? SerializationType::kHTML
+                                            : SerializationType::kXML),
       start_(start),
       end_(end),
       document_(document),
@@ -102,9 +104,10 @@ void StyledMarkupAccumulator::AppendTextWithInlineStyle(
   if (inline_style) {
     // wrappingStyleForAnnotatedSerialization should have removed
     // -webkit-text-decorations-in-effect.
-    DCHECK(!ShouldAnnotate() || PropertyMissingOrEqualToNone(
-                                    inline_style->Style(),
-                                    CSSPropertyWebkitTextDecorationsInEffect));
+    DCHECK(!ShouldAnnotate() ||
+           PropertyMissingOrEqualToNone(
+               inline_style->Style(),
+               CSSPropertyID::kWebkitTextDecorationsInEffect));
     DCHECK(document_);
 
     result_.Append("<span style=\"");
@@ -173,7 +176,7 @@ void StyledMarkupAccumulator::AppendAttribute(StringBuilder& result,
                                               const Element& element,
                                               const Attribute& attribute) {
   String value = formatter_.ResolveURLIfNeeded(element, attribute);
-  if (formatter_.SerializeAsHTMLDocument(element)) {
+  if (formatter_.SerializeAsHTML()) {
     MarkupFormatter::AppendAttributeAsHTML(result, attribute, value);
   } else {
     MarkupFormatter::AppendAttributeAsXMLWithoutNamespace(result, attribute,
@@ -185,7 +188,7 @@ void StyledMarkupAccumulator::WrapWithStyleNode(CSSPropertyValueSet* style) {
   // wrappingStyleForSerialization should have removed
   // -webkit-text-decorations-in-effect.
   DCHECK(PropertyMissingOrEqualToNone(
-      style, CSSPropertyWebkitTextDecorationsInEffect));
+      style, CSSPropertyID::kWebkitTextDecorationsInEffect));
   DCHECK(document_);
 
   StringBuilder open_tag;

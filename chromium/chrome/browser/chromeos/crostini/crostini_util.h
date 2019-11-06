@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/optional.h"
 #include "ui/base/resource/scale_factor.h"
 
@@ -55,6 +56,10 @@ bool IsCrostiniEnabled(Profile* profile);
 
 // Returns whether the default Crostini VM is running for the user.
 bool IsCrostiniRunning(Profile* profile);
+
+// Returns whether infrastructure for applying Ansible playbook to default
+// Crostini container is enabled.
+bool IsCrostiniAnsibleInfrastructureEnabled();
 
 // Launches the Crostini app with ID of |app_id| on the display with ID of
 // |display_id|. |app_id| should be a valid Crostini app list id.
@@ -149,6 +154,8 @@ constexpr char kCrostiniFolderId[] = "ddolnhmblagmcagkedkbfejapapdimlk";
 constexpr char kCrostiniDefaultImageServerUrl[] =
     "https://storage.googleapis.com/cros-containers/%d";
 constexpr char kCrostiniDefaultImageAlias[] = "debian/stretch";
+constexpr base::FilePath::CharType kHomeDirectory[] =
+    FILE_PATH_LITERAL("/home");
 
 // Whether running Crostini is allowed for unaffiliated users per enterprise
 // policy.
@@ -168,7 +175,7 @@ void RemoveLxdContainerFromPrefs(Profile* profile,
 // Returns a string to be displayed in a notification with the estimated time
 // left for an operation to run which started and time |start| and is current
 // at |percent| way through.
-base::string16 GetTimeRemainingMessage(base::Time start, int percent);
+base::string16 GetTimeRemainingMessage(base::TimeTicks start, int percent);
 
 }  // namespace crostini
 

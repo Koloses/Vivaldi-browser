@@ -32,7 +32,6 @@
 #include "chrome/browser/metrics/subprocess_metrics_provider.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
-#include "chrome/browser/ssl/chrome_mock_cert_verifier.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/translate_service.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
@@ -49,8 +48,8 @@
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/autofill_manager_test_delegate.h"
-#include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_util.h"
@@ -67,6 +66,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/content_mock_cert_verifier.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/net_errors.h"
@@ -269,11 +269,16 @@ class AutofillInteractiveTestBase : public AutofillUiTest {
 
   // InProcessBrowserTest:
   void SetUp() override {
+    LOG(ERROR) << "crbug/967588: AutofillInteractiveTestBase::SetUp() entered";
     ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
+    LOG(ERROR) << "crbug/967588: embedded_test_server InitializeAndListen";
     InProcessBrowserTest::SetUp();
+    LOG(ERROR) << "crbug/967588: AutofillInteractiveTestBase::SetUp() exited";
   }
 
   void SetUpOnMainThread() override {
+    LOG(ERROR) << "crbug/967588: "
+                  "AutofillInteractiveTestBase::SetUpOnMainThread() entered";
     AutofillUiTest::SetUpOnMainThread();
 
     https_server_.SetSSLConfig(net::EmbeddedTestServer::CERT_OK);
@@ -282,6 +287,7 @@ class AutofillInteractiveTestBase : public AutofillUiTest {
         &AutofillInteractiveTestBase::HandleTestURL, base::Unretained(this)));
     ASSERT_TRUE(https_server_.InitializeAndListen());
     https_server_.StartAcceptingConnections();
+    LOG(ERROR) << "crbug/967588: https_server started accepting connections";
 
     controllable_http_response_ =
         std::make_unique<net::test_server::ControllableHttpResponse>(
@@ -293,10 +299,14 @@ class AutofillInteractiveTestBase : public AutofillUiTest {
     embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
         &AutofillInteractiveTestBase::HandleTestURL, base::Unretained(this)));
     embedded_test_server()->StartAcceptingConnections();
+    LOG(ERROR)
+        << "crbug/967588: embedded_test_server started accepting connections";
 
     // By default, all SSL cert checks are valid. Can be overriden in tests if
     // needed.
     cert_verifier_.mock_cert_verifier()->set_default_result(net::OK);
+    LOG(ERROR) << "crbug/967588: "
+                  "AutofillInteractiveTestBase::SetUpOnMainThread() exited";
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -511,6 +521,7 @@ class AutofillInteractiveTestBase : public AutofillUiTest {
     ExpectFieldValue("zip", "78744");
     ExpectFieldValue("country", "US");
     ExpectFieldValue("phone", "15125551234");
+    LOG(ERROR) << "crbug/967588: Verified form was filled as expected";
   }
 
   void ExpectClearedForm() {
@@ -554,16 +565,21 @@ class AutofillInteractiveTestBase : public AutofillUiTest {
 
   void TryBasicFormFill() {
     FocusFirstNameField();
+    LOG(ERROR) << "crbug/967588: Focussed first name field";
 
     // Start filling the first name field with "M" and wait for the popup to be
     // shown.
     SendKeyToPageAndWait(ui::DomKey::FromCharacter('M'), ui::DomCode::US_M,
                          ui::VKEY_M, {ObservedUiEvents::kSuggestionShown});
 
+    LOG(ERROR) << "crbug/967588: Sent 'M' and saw suggestion";
+
     // Press the down arrow to select the suggestion and preview the autofilled
     // form.
     SendKeyToPopupAndWait(ui::DomKey::ARROW_DOWN,
                           {ObservedUiEvents::kPreviewFormData});
+
+    LOG(ERROR) << "crbug/967588: Sent '<down arrow>' and saw preview";
 
     // The previewed values should not be accessible to JavaScript.
     ExpectFieldValue("firstname", "M");
@@ -578,9 +594,14 @@ class AutofillInteractiveTestBase : public AutofillUiTest {
     // TODO(isherman): It would be nice to test that the previewed values are
     // displayed: http://crbug.com/57220
 
+    LOG(ERROR)
+        << "crbug/967588: Verified field contents remain unfilled for preview";
+
     // Press Enter to accept the autofill suggestions.
     SendKeyToPopupAndWait(ui::DomKey::ENTER,
                           {ObservedUiEvents::kFormDataFilled});
+
+    LOG(ERROR) << "crbug/967588: Form was filled after pressing enter";
 
     // The form should be filled.
     ExpectFilledTestForm();
@@ -661,9 +682,8 @@ class AutofillInteractiveTestBase : public AutofillUiTest {
   net::EmbeddedTestServer https_server_;
 
   // Similar to net::MockCertVerifier, but also updates the CertVerifier
-  // used by the NetworkService. This is needed for when tests run with
-  // the NetworkService enabled.
-  ChromeMockCertVerifier cert_verifier_;
+  // used by the NetworkService.
+  content::ContentMockCertVerifier cert_verifier_;
 
   net::TestURLFetcherFactory url_fetcher_factory_;
 
@@ -707,15 +727,20 @@ class AutofillInteractiveTest : public AutofillInteractiveTestBase {
 
 // Test that basic form fill is working.
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, BasicFormFill) {
+  LOG(ERROR) << "crbug/967588: In case of flakes, report log statements to "
+                "crbug.com/967588";
   CreateTestProfile();
+  LOG(ERROR) << "crbug/967588: Test profile created";
 
   // Load the test page.
   SetTestUrlResponse(kTestShippingFormString);
   ASSERT_NO_FATAL_FAILURE(
       ui_test_utils::NavigateToURL(browser(), GetTestUrl()));
+  LOG(ERROR) << "crbug/967588: Loaded test page";
 
   // Invoke Autofill.
   TryBasicFormFill();
+  LOG(ERROR) << "crbug/967588: Basic form filling completed";
 }
 
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, BasicClear) {
@@ -1934,6 +1959,7 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, ComparePhoneNumbers) {
   profile.SetRawInfo(ADDRESS_HOME_CITY, ASCIIToUTF16("San Jose"));
   profile.SetRawInfo(ADDRESS_HOME_STATE, ASCIIToUTF16("CA"));
   profile.SetRawInfo(ADDRESS_HOME_ZIP, ASCIIToUTF16("95110"));
+  profile.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("US"));
   profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("1-408-555-4567"));
   SetTestProfile(browser(), profile);
 
@@ -2215,36 +2241,6 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
                         {ObservedUiEvents::kPreviewFormData});
 }
 
-// Test that dynamic forms don't get filled when the feature is disabled.
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, DynamicChangingFormFill) {
-  // Explicitly disable the filling of dynamic forms.
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndDisableFeature(features::kAutofillDynamicForms);
-
-  CreateTestProfile();
-
-  GURL url =
-      embedded_test_server()->GetURL("/autofill/dynamic_form_disabled.html");
-  ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(browser(), url));
-
-  TriggerFormFill("firstname");
-
-  // Wait for the re-fill to happen.
-  bool has_refilled = false;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      GetWebContents(), "hasRefilled()", &has_refilled));
-  ASSERT_FALSE(has_refilled);
-
-  // Make sure that the new form was not filled.
-  ExpectFieldValue("firstname_form1", "");
-  ExpectFieldValue("address_form1", "");
-  ExpectFieldValue("state_form1", "CA");  // Default value.
-  ExpectFieldValue("city_form1", "");
-  ExpectFieldValue("company_form1", "");
-  ExpectFieldValue("email_form1", "");
-  ExpectFieldValue("phone_form1", "");
-}
-
 // Test that a page with 2 forms with no name and id containing fields with no
 // name or if get filled properly.
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
@@ -2309,8 +2305,6 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
                        Dynamic_MultipleNoNameForms_BadNames_FourthForm) {
   CreateTestProfile();
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kAutofillDynamicForms);
 
   GURL url = embedded_test_server()->GetURL(
       "a.com", "/autofill/multiple_noname_forms_badnames.html");
@@ -2337,8 +2331,6 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
                        Dynamic_MultipleNoNameForms_BadNames_ThirdForm) {
   CreateTestProfile();
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kAutofillDynamicForms);
 
   GURL url = embedded_test_server()->GetURL(
       "a.com", "/autofill/multiple_noname_forms_badnames.html");
@@ -2365,8 +2357,6 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
                        Dynamic_MultipleNoNameForms_BadNames_SecondForm) {
   CreateTestProfile();
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kAutofillDynamicForms);
 
   GURL url = embedded_test_server()->GetURL(
       "a.com", "/autofill/multiple_noname_forms_badnames.html");
@@ -2390,8 +2380,6 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
 IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
                        Dynamic_MultipleNoNameForms_BadNames_FirstForm) {
   CreateTestProfile();
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kAutofillDynamicForms);
 
   GURL url = embedded_test_server()->GetURL(
       "a.com", "/autofill/multiple_noname_forms_badnames.html");
@@ -2849,12 +2837,6 @@ class AutofillDynamicFormInteractiveTest
     } else {
       disabled_features.push_back(features::kAutofillEnableCompanyName);
     }
-
-    // Explicitly enable the filling of dynamic forms and disabled the
-    // requirement for a secure context to fill credit cards.
-    enabled_features.push_back(features::kAutofillDynamicForms);
-    disabled_features.push_back(
-        features::kAutofillRestrictUnownedFieldsToFormlessCheckout);
 
     scoped_feature_list_.InitWithFeatures(enabled_features, disabled_features);
     AutofillInteractiveTestBase::SetUp();

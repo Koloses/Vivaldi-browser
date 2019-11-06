@@ -48,6 +48,10 @@ enum UpdateEventFields {
   ETAG = 1 << 13,
   HREF = 1 << 14,
   UID = 1 << 15,
+  EVENT_TYPE_ID = 1 << 16,
+  TASK = 1 << 17,
+  COMPLETE = 1 << 18,
+  TRASH = 1 << 18,
 };
 
 // Represents a simplified version of a event.
@@ -71,6 +75,11 @@ struct CalendarEvent {
   std::string etag;
   std::string href;
   std::string uid;
+  EventTypeID event_type_id;
+  bool task;
+  bool complete;
+  bool trash;
+  base::Time trash_time;
   int updateFields;
 };
 
@@ -96,7 +105,11 @@ class EventRow {
            EventRecurrence recurrence,
            std::string etag,
            std::string href,
-           std::string uid);
+           std::string uid,
+           EventTypeID event_type_id,
+           bool task,
+           bool complete,
+           bool trash);
   ~EventRow();
 
   EventRow(const EventRow& row);
@@ -162,9 +175,26 @@ class EventRow {
   EventRecurrence recurrence() const { return recurrence_; }
   void set_recurrence(EventRecurrence recurrence) { recurrence_ = recurrence; }
 
+  EventTypeID event_type_id() const { return event_type_id_; }
+  void set_event_type_id(EventTypeID event_type_id) {
+    event_type_id_ = event_type_id;
+  }
+
+  bool task() const { return task_; }
+  void set_task(bool task) { task_ = task; }
+
+  bool complete() const { return complete_; }
+  void set_complete(bool complete) { complete_ = complete; }
+
+  bool trash() const { return trash_; }
+  void set_trash(bool trash) { trash_ = trash; }
+
+  base::Time trash_time() const { return trash_time_; }
+  void set_trash_time(base::Time trash_time) { trash_time_ = trash_time; }
+
   EventID id_;
   CalendarID calendar_id_;
-  AlarmID alarm_id_;
+  AlarmID alarm_id_ = 0;
   base::string16 title_;
   base::string16 description_;
   base::Time start_;
@@ -179,6 +209,11 @@ class EventRow {
   std::string etag_;
   std::string href_;
   std::string uid_;
+  EventTypeID event_type_id_ = 0;
+  bool task_;
+  bool complete_;
+  bool trash_ = false;
+  base::Time trash_time_;
 
  protected:
   void Swap(EventRow* other);
@@ -275,6 +310,76 @@ class DeleteEventResult {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DeleteEventResult);
+};
+
+class EventTypeRow {
+ public:
+  EventTypeRow() = default;
+  ~EventTypeRow() = default;
+
+  EventTypeID id() const { return id_; }
+  void set_id(EventTypeID id) { id_ = id; }
+  base::string16 name() const { return name_; }
+  void set_name(base::string16 name) { name_ = name; }
+  std::string color() const { return color_; }
+  void set_color(std::string color) { color_ = color; }
+  int iconindex() const { return iconindex_; }
+  void set_iconindex(int iconindex) { iconindex_ = iconindex; }
+
+  EventTypeID id_;
+  base::string16 name_;
+  std::string color_;
+  int iconindex_;
+};
+
+class CreateEventTypeResult {
+ public:
+  CreateEventTypeResult() = default;
+  bool success;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(CreateEventTypeResult);
+};
+
+class UpdateEventTypeResult {
+ public:
+  UpdateEventTypeResult();
+  bool success;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(UpdateEventTypeResult);
+};
+
+typedef std::vector<calendar::EventTypeRow> EventTypeRows;
+
+// Represents a simplified version of a event type.
+struct EventType {
+  EventType();
+  ~EventType();
+  EventType(const EventType& event_type);
+  EventTypeID event_type_id;
+  base::string16 name;
+  std::string color = "";
+  int iconindex = 0;
+  int updateFields;
+};
+
+// Bit flags determing which fields should be updated in the
+// UpdateEventType method
+enum UpdateEventTypeFields {
+  CALENDAR_TYPE_ID = 1 << 0,
+  NAME = 1 << 2,
+  COLOR = 1 << 3,
+  ICONINDEX = 1 << 4,
+};
+
+class DeleteEventTypeResult {
+ public:
+  DeleteEventTypeResult() = default;
+  bool success;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DeleteEventTypeResult);
 };
 
 }  // namespace calendar

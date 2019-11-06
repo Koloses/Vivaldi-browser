@@ -19,6 +19,7 @@
 #include "net/base/filename_util.h"
 
 #if defined(OS_MACOSX)
+#include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #endif
 
@@ -70,8 +71,6 @@ namespace content {
 
 void ExportWebTestSpecificPreferences(const test_runner::TestPreferences& from,
                                       WebPreferences* to) {
-  to->allow_universal_access_from_file_urls =
-      from.allow_universal_access_from_file_urls;
   to->javascript_can_access_clipboard = from.java_script_can_access_clipboard;
   to->xss_auditor_enabled = from.xss_auditor_enabled;
   to->editing_behavior = static_cast<EditingBehavior>(from.editing_behavior);
@@ -102,7 +101,7 @@ void ExportWebTestSpecificPreferences(const test_runner::TestPreferences& from,
 void ApplyWebTestDefaultPreferences(WebPreferences* prefs) {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
-  prefs->allow_universal_access_from_file_urls = true;
+  prefs->allow_universal_access_from_file_urls = false;
   prefs->dom_paste_enabled = true;
   prefs->javascript_can_access_clipboard = true;
   prefs->xslt_enabled = true;
@@ -143,9 +142,6 @@ void ApplyWebTestDefaultPreferences(WebPreferences* prefs) {
   prefs->mock_scrollbars_enabled = false;
   prefs->smart_insert_delete_enabled = true;
   prefs->minimum_accelerated_2d_canvas_size = 0;
-#if defined(OS_ANDROID)
-  prefs->text_autosizing_enabled = false;
-#endif
   prefs->viewport_enabled = command_line.HasSwitch(switches::kEnableViewport);
   prefs->default_minimum_page_scale_factor = 1.f;
   prefs->default_maximum_page_scale_factor = 4.f;
@@ -155,20 +151,18 @@ void ApplyWebTestDefaultPreferences(WebPreferences* prefs) {
 }
 
 base::FilePath GetBuildDirectory() {
+#if defined(OS_MACOSX)
+  if (base::mac::AmIBundled()) {
+    // If this is a bundled Content Shell.app, go up one from the outer bundle
+    // directory.
+    return base::mac::OuterBundlePath().DirName();
+  }
+#endif
+
   base::FilePath result;
   bool success = base::PathService::Get(base::DIR_EXE, &result);
   CHECK(success);
 
-#if defined(OS_MACOSX)
-  if (base::mac::AmIBundled()) {
-    // The bundled app executables live three levels down from the build
-    // directory, eg:
-    // Content Shell.app/Contents/Frameworks/Content Shell Helper.app
-    // And this helper executable lives an additional three levels down:
-    // Content Shell Helper.app/Contents/MacOS/Content Shell Helper
-    result = result.DirName().DirName().DirName().DirName().DirName().DirName();
-  }
-#endif
   return result;
 }
 

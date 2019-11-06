@@ -63,14 +63,17 @@ def cmp_tests(a, b):
 
 
 class GPUTelemetryTestGenerator(BaseGenerator):
-  def __init__(self, bb_gen):
+
+  def __init__(self, bb_gen, is_android_webview=False):
     super(GPUTelemetryTestGenerator, self).__init__(bb_gen)
+    self._is_android_webview = is_android_webview
 
   def generate(self, waterfall, tester_name, tester_config, input_tests):
     isolated_scripts = []
     for test_name, test_config in sorted(input_tests.iteritems()):
       test = self.bb_gen.generate_gpu_telemetry_test(
-        waterfall, tester_name, tester_config, test_name, test_config)
+          waterfall, tester_name, tester_config, test_name, test_config,
+          self._is_android_webview)
       if test:
         isolated_scripts.append(test)
     return isolated_scripts
@@ -276,6 +279,12 @@ class BBJSONGenerator(object):
       return None
     return exception.get('modifications', {}).get(tester_name)
 
+  def get_test_replacements(self, test, test_name, tester_name):
+    exception = self.get_exception_for_test(test_name, test)
+    if not exception:
+      return None
+    return exception.get('replacements', {}).get(tester_name)
+
   def merge_command_line_args(self, arr, prefix, splitter):
     prefix_len = len(prefix)
     idx = 0
@@ -350,12 +359,15 @@ class BBJSONGenerator(object):
                 raise BBGenErr('Error merging list keys ' + str(key) +
                                ' and indices ' + str(idx) + ' between ' +
                                str(a) + ' and ' + str(b)) # pragma: no cover
-        elif update: # pragma: no cover
-          a[key] = b[key] # pragma: no cover
+        elif update:
+          if b[key] is None:
+            del a[key]
+          else:
+            a[key] = b[key]
         else:
           raise BBGenErr('Conflict at %s' % '.'.join(
             path + [str(key)])) # pragma: no cover
-      else:
+      elif b[key] is not None:
         a[key] = b[key]
     return a
 
@@ -374,6 +386,7 @@ class BBJSONGenerator(object):
     add_conditional_args('desktop_args', lambda cfg: not self.is_android(cfg))
     add_conditional_args('linux_args', self.is_linux)
     add_conditional_args('android_args', self.is_android)
+    add_conditional_args('chromeos_args', self.is_chromeos)
 
     for key in additional_arg_keys or []:
       args.extend(generated_test.pop(key, []))
@@ -434,7 +447,49 @@ class BBJSONGenerator(object):
       test = self.dictionary_merge(test, modifications)
     if 'swarming' in test:
       self.clean_swarming_dictionary(test['swarming'])
+    # Ensure all Android Swarming tests run only on userdebug builds if another
+    # build type was not specified.
+    if 'swarming' in test and self.is_android(tester_config):
+      for d in test['swarming'].get('dimension_sets', []):
+        if d.get('os') == 'Android' and not d.get('device_os_type'):
+          d['device_os_type'] = 'userdebug'
+    self.replace_test_args(test, test_name, tester_name)
+
     return test
+
+  def replace_test_args(self, test, test_name, tester_name):
+    replacements = self.get_test_replacements(
+        test, test_name, tester_name) or {}
+    valid_replacement_keys = ['args', 'non_precommit_args', 'precommit_args']
+    for key, replacement_dict in replacements.iteritems():
+      if key not in valid_replacement_keys:
+        raise BBGenErr(
+            'Given replacement key %s for %s on %s is not in the list of valid '
+            'keys %s' % (key, test_name, tester_name, valid_replacement_keys))
+      for replacement_key, replacement_val in replacement_dict.iteritems():
+        found_key = False
+        for i, test_key in enumerate(test.get(key, [])):
+          # Handle both the key/value being replaced being defined as two
+          # separate items or as key=value.
+          if test_key == replacement_key:
+            found_key = True
+            # Handle flags without values.
+            if replacement_val == None:
+              del test[key][i]
+            else:
+              test[key][i+1] = replacement_val
+            break
+          elif test_key.startswith(replacement_key + '='):
+            found_key = True
+            if replacement_val == None:
+              del test[key][i]
+            else:
+              test[key][i] = '%s=%s' % (replacement_key, replacement_val)
+            break
+        if not found_key:
+          raise BBGenErr('Could not find %s in existing list of values for key '
+                         '%s in %s on %s' % (replacement_key, key, test_name,
+                             tester_name))
 
   def add_common_test_properties(self, test, tester_config):
     if tester_config.get('use_multi_dimension_trigger_script'):
@@ -462,13 +517,14 @@ class BBJSONGenerator(object):
 
   def add_android_presentation_args(self, tester_config, test_name, result):
     args = result.get('args', [])
-    args.append('--gs-results-bucket=chromium-result-details')
+    bucket = tester_config.get('results_bucket', 'chromium-result-details')
+    args.append('--gs-results-bucket=%s' % bucket)
     if (result['swarming']['can_use_on_swarming_builders'] and not
         tester_config.get('skip_merge_script', False)):
       result['merge'] = {
         'args': [
           '--bucket',
-          'chromium-result-details',
+          bucket,
           '--test-name',
           test_name
         ],
@@ -521,6 +577,14 @@ class BBJSONGenerator(object):
     result = self.update_and_cleanup_test(
         result, test_name, tester_name, tester_config, waterfall)
     self.add_common_test_properties(result, tester_config)
+
+    if not result.get('merge'):
+      # TODO(https://crbug.com/958376): Consider adding the ability to not have
+      # this default.
+      result['merge'] = {
+        'script': '//testing/merge_scripts/standard_gtest_merge.py',
+        'args': [],
+      }
     return result
 
   def generate_isolated_script_test(self, waterfall, tester_name, tester_config,
@@ -538,10 +602,24 @@ class BBJSONGenerator(object):
     result = self.update_and_cleanup_test(
         result, test_name, tester_name, tester_config, waterfall)
     self.add_common_test_properties(result, tester_config)
+
+    if not result.get('merge'):
+      # TODO(https://crbug.com/958376): Consider adding the ability to not have
+      # this default.
+      result['merge'] = {
+        'script': '//testing/merge_scripts/standard_isolated_script_merge.py',
+        'args': [],
+      }
     return result
 
   def generate_script_test(self, waterfall, tester_name, tester_config,
                            test_name, test_config):
+    # TODO(https://crbug.com/953072): Remove this check whenever a better
+    # long-term solution is implemented.
+    if (waterfall.get('forbid_script_tests', False) or
+        waterfall['machines'][tester_name].get('forbid_script_tests', False)):
+      raise BBGenErr('Attempted to generate a script test on tester ' +
+                     tester_name + ', which explicitly forbids script tests')
     if not self.should_run_on_tester(waterfall, tester_name, test_name,
                                      test_config):
       return None
@@ -590,13 +668,19 @@ class BBJSONGenerator(object):
     if 'gpu' in dimension_set:
       # First remove the driver version, then split into vendor and device.
       gpu = dimension_set['gpu']
-      gpu = gpu.split('-')[0].split(':')
+      # Handle certain specialized named GPUs.
+      if gpu.startswith('nvidia-quadro-p400'):
+        gpu = ['10de', '1cb3']
+      elif gpu.startswith('intel-hd-630'):
+        gpu = ['8086', '5912']
+      else:
+        gpu = gpu.split('-')[0].split(':')
       substitutions['gpu_vendor_id'] = gpu[0]
       substitutions['gpu_device_id'] = gpu[1]
     return [string.Template(arg).safe_substitute(substitutions) for arg in args]
 
   def generate_gpu_telemetry_test(self, waterfall, tester_name, tester_config,
-                                  test_name, test_config):
+                                  test_name, test_config, is_android_webview):
     # These are all just specializations of isolated script tests with
     # a bunch of boilerplate command line arguments added.
 
@@ -626,16 +710,18 @@ class BBJSONGenerator(object):
     # queue.
     result['should_retry_with_patch'] = False
 
+    browser = ('android-webview-instrumentation'
+               if is_android_webview else tester_config['browser_config'])
     args = [
-      test_to_run,
-      '--show-stdout',
-      '--browser=%s' % tester_config['browser_config'],
-      # --passthrough displays more of the logging in Telemetry when
-      # run via typ, in particular some of the warnings about tests
-      # being expected to fail, but passing.
-      '--passthrough',
-      '-v',
-      '--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc',
+        test_to_run,
+        '--show-stdout',
+        '--browser=%s' % browser,
+        # --passthrough displays more of the logging in Telemetry when
+        # run via typ, in particular some of the warnings about tests
+        # being expected to fail, but passing.
+        '--passthrough',
+        '-v',
+        '--extra-browser-args=--enable-logging=stderr --js-flags=--expose-gc',
     ] + args
     result['args'] = self.maybe_fixup_args_array(self.substitute_gpu_args(
       tester_config, result['swarming'], args))
@@ -643,19 +729,29 @@ class BBJSONGenerator(object):
 
   def get_test_generator_map(self):
     return {
-      'cts_tests': CTSGenerator(self),
-      'gpu_telemetry_tests': GPUTelemetryTestGenerator(self),
-      'gtest_tests': GTestGenerator(self),
-      'instrumentation_tests': InstrumentationTestGenerator(self),
-      'isolated_scripts': IsolatedScriptTestGenerator(self),
-      'junit_tests': JUnitGenerator(self),
-      'scripts': ScriptGenerator(self),
+        'android_webview_gpu_telemetry_tests':
+            GPUTelemetryTestGenerator(self, is_android_webview=True),
+        'cts_tests':
+            CTSGenerator(self),
+        'gpu_telemetry_tests':
+            GPUTelemetryTestGenerator(self),
+        'gtest_tests':
+            GTestGenerator(self),
+        'instrumentation_tests':
+            InstrumentationTestGenerator(self),
+        'isolated_scripts':
+            IsolatedScriptTestGenerator(self),
+        'junit_tests':
+            JUnitGenerator(self),
+        'scripts':
+            ScriptGenerator(self),
     }
 
   def get_test_type_remapper(self):
     return {
       # These are a specialization of isolated_scripts with a bunch of
       # boilerplate command line arguments added to each one.
+      'android_webview_gpu_telemetry_tests': 'isolated_scripts',
       'gpu_telemetry_tests': 'isolated_scripts',
     }
 
@@ -899,6 +995,12 @@ class BBJSONGenerator(object):
     # are defined only to be mirrored into trybots, and don't actually
     # exist on any of the waterfalls or consoles.
     return [
+      'GPU FYI Fuchsia Builder',
+      'ANGLE GPU Linux Release (Intel HD 630)',
+      'ANGLE GPU Linux Release (NVIDIA)',
+      'ANGLE GPU Mac Release (Intel)',
+      'ANGLE GPU Mac Retina Release (AMD)',
+      'ANGLE GPU Mac Retina Release (NVIDIA)',
       'ANGLE GPU Win10 Release (Intel HD 630)',
       'ANGLE GPU Win10 Release (NVIDIA)',
       'Dawn GPU Linux Release (Intel HD 630)',
@@ -933,8 +1035,18 @@ class BBJSONGenerator(object):
       # chromium, due to https://crbug.com/878915
       'win-dbg',
       'win32-dbg',
+      'win-archive-dbg',
+      'win32-archive-dbg',
+      # chromium.mac, see https://crbug.com/943804
+      'mac-dummy-rel',
       # Defined in internal configs.
       'chromeos-amd64-generic-google-rel',
+      'chromeos-betty-google-rel',
+      # code coverage, see see https://crbug.com/930364
+      'Linux Builder Code Coverage',
+      'Linux Tests Code Coverage',
+      'GPU Linux Builder Code Coverage',
+      'Linux Release Code Coverage (NVIDIA)',
     ]
 
   def check_input_file_consistency(self, verbose=False):

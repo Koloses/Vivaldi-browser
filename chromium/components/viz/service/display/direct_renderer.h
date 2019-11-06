@@ -61,9 +61,11 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   void SetVisible(bool visible);
   void DecideRenderPassAllocationsForFrame(
       const RenderPassList& render_passes_in_draw_order);
-  void DrawFrame(RenderPassList* render_passes_in_draw_order,
-                 float device_scale_factor,
-                 const gfx::Size& device_viewport_size);
+  void DrawFrame(
+      RenderPassList* render_passes_in_draw_order,
+      float device_scale_factor,
+      const gfx::Size& device_viewport_size,
+      float sdr_white_level = gfx::ColorSpace::kDefaultSDRWhiteLevel);
 
   // Public interface implemented by subclasses.
   virtual void SwapBuffers(std::vector<ui::LatencyInfo> latency_info) = 0;
@@ -83,6 +85,7 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
     gfx::Rect root_damage_rect;
     std::vector<gfx::Rect> root_content_bounds;
     gfx::Size device_viewport_size;
+    float sdr_white_level = gfx::ColorSpace::kDefaultSDRWhiteLevel;
 
     gfx::Transform projection_matrix;
     gfx::Transform window_matrix;
@@ -100,6 +103,11 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   void SetEnlargePassTextureAmountForTesting(const gfx::Size& amount) {
     enlarge_pass_texture_amount_ = amount;
   }
+
+  bool has_overlay_validator() const {
+    return !!overlay_processor_->GetOverlayCandidateValidator();
+  }
+  bool OverlayNeedsSurfaceOccludingDamageRect() const;
 
  protected:
   friend class BspWalkActionDrawPolygon;
@@ -157,9 +165,9 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
                      bool use_render_pass_scissor);
 
   const cc::FilterOperations* FiltersForPass(RenderPassId render_pass_id) const;
-  const cc::FilterOperations* BackgroundFiltersForPass(
+  const cc::FilterOperations* BackdropFiltersForPass(
       RenderPassId render_pass_id) const;
-  const gfx::RRectF* BackgroundFilterBoundsForPass(
+  const base::Optional<gfx::RRectF> BackdropFilterBoundsForPass(
       RenderPassId render_pass_id) const;
 
   // Private interface implemented by subclasses for use by DirectRenderer.
@@ -210,6 +218,8 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
     return reshape_surface_size_;
   }
 
+  bool ShouldApplyRoundedCorner(const DrawQuad* quad) const;
+
   const RendererSettings* const settings_;
   OutputSurface* const output_surface_;
   DisplayResourceProvider* const resource_provider_;
@@ -240,7 +250,7 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   base::flat_map<RenderPassId, cc::FilterOperations*> render_pass_filters_;
   base::flat_map<RenderPassId, cc::FilterOperations*>
       render_pass_backdrop_filters_;
-  base::flat_map<RenderPassId, gfx::RRectF*>
+  base::flat_map<RenderPassId, base::Optional<gfx::RRectF>>
       render_pass_backdrop_filter_bounds_;
 
   bool visible_ = false;

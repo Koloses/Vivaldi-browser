@@ -10,7 +10,6 @@
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/numerics/ranges.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
@@ -241,8 +240,7 @@ TestDownloadHttpResponse::TestDownloadHttpResponse(
       parameters_(std::move(parameters)),
       request_(request),
       transferred_bytes_(0u),
-      on_response_sent_callback_(on_response_sent_callback),
-      weak_ptr_factory_(this) {
+      on_response_sent_callback_(on_response_sent_callback) {
   DCHECK_GT(parameters.size, 0) << "File size need to be greater than 0.";
   ParseRequestHeader();
 }
@@ -332,13 +330,19 @@ void TestDownloadHttpResponse::SendResponseHeaders() {
 std::string TestDownloadHttpResponse::GetDefaultResponseHeaders() {
   std::string headers;
   // Send partial response.
-  if (parameters_.support_partial_response && parameters_.support_byte_ranges &&
-      request_.headers.find(net::HttpRequestHeaders::kIfRange) !=
-          request_.headers.end() &&
-      request_.headers.at(net::HttpRequestHeaders::kIfRange) ==
-          parameters_.etag &&
-      HandleRangeAssumingValidatorMatch(headers)) {
-    return headers;
+  if (parameters_.support_partial_response && parameters_.support_byte_ranges) {
+    bool has_if_range =
+        request_.headers.find(net::HttpRequestHeaders::kIfRange) !=
+        request_.headers.end();
+    if (((has_if_range &&
+          request_.headers.at(net::HttpRequestHeaders::kIfRange) ==
+              parameters_.etag) ||
+         (!has_if_range &&
+          request_.headers.find(net::HttpRequestHeaders::kRange) !=
+              request_.headers.end())) &&
+        HandleRangeAssumingValidatorMatch(headers)) {
+      return headers;
+    }
   }
 
   // Send precondition failed for "If-Match" request header.
@@ -612,7 +616,7 @@ std::unique_ptr<net::test_server::HttpResponse>
 TestDownloadResponseHandler::HandleTestDownloadRequest(
     const TestDownloadHttpResponse::OnResponseSentCallback& callback,
     const net::test_server::HttpRequest& request) {
-  server_task_runner_ = base::MessageLoopCurrent::Get()->task_runner();
+  server_task_runner_ = base::ThreadTaskRunnerHandle::Get();
 
   if (request.headers.find(net::HttpRequestHeaders::kHost) ==
       request.headers.end()) {

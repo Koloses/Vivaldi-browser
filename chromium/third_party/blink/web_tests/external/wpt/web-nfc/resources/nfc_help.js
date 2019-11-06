@@ -6,6 +6,7 @@ const test_number_data = 42;
 const test_json_data = {level: 1, score: 100, label: 'Game'};
 const test_url_data = "https://w3c.github.io/web-nfc";
 const test_buffer_data = new ArrayBuffer(test_text_byte_array.length);
+const test_buffer_view = new Uint8Array(test_buffer_data).set(test_text_byte_array);
 
 function noop() {};
 
@@ -48,32 +49,37 @@ function createUrlRecord(url) {
 }
 
 function assertWebNDEFMessagesEqual(a, b) {
+  if (b.url) assert_equals(a.url, `${location.origin}${b.url}`);
   assert_equals(a.records.length, b.records.length);
   for(let i in a.records) {
     let recordA = a.records[i];
     let recordB = b.records[i];
     assert_equals(recordA.recordType, recordB.recordType);
     assert_equals(recordA.mediaType, recordB.mediaType);
-    if (recordA.data instanceof ArrayBuffer) {
-      assert_array_equals(new Uint8Array(recordA.data),
-          new Uint8Array(recordB.data));
-    } else if (typeof recordA.data === 'object') {
-      assert_object_equals(recordA.data, recordB.data);
-    }
-    if (typeof recordA.data === 'number'
-        || typeof recordA.data === 'string') {
-      assert_true(recordA.data == recordB.data);
+    if (recordA.data() instanceof ArrayBuffer) {
+      assert_array_equals(new Uint8Array(recordA.data()),
+          new Uint8Array(recordB.data()));
+    } else if (typeof recordA.data() === 'object') {
+      assert_object_equals(recordA.data(), recordB.data());
+    } else if (typeof recordA.data() === 'number'
+        || typeof recordA.data() === 'string') {
+      assert_true(recordA.data() == recordB.data());
     }
   }
 }
 
-function testNDEFMessage(pushedMessage, readOptions, desc) {
+function testNFCReaderOptions(pushedMessage, readOptions, unacceptableReadOptions, desc) {
   promise_test(async t => {
     const writer = new NFCWriter();
-    const reader = new NFCReader();
+    const reader1 = new NFCReader(unacceptableReadOptions);
+    const reader2 = new NFCReader(readOptions);
     await writer.push(pushedMessage);
-    const readerWatcher = new EventWatcher(t, reader, ["reading", "error"]);
-    reader.start();
+
+    reader1.onreading = t.unreached_func("reading event should not be fired.");
+    reader1.start();
+
+    const readerWatcher = new EventWatcher(t, reader2, ["reading", "error"]);
+    reader2.start();
     const event = await readerWatcher.wait_for("reading");
     assertWebNDEFMessagesEqual(event.message, pushedMessage);
   }, desc);

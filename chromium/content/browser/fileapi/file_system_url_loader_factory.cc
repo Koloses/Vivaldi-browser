@@ -19,7 +19,7 @@
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "build/build_config.h"
-#include "components/services/filesystem/public/interfaces/types.mojom.h"
+#include "components/services/filesystem/public/mojom/types.mojom.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -27,7 +27,9 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/child_process_host.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "mojo/public/cpp/system/string_data_pipe_producer.h"
+#include "mojo/public/cpp/system/data_pipe_producer.h"
+#include "mojo/public/cpp/system/string_data_source.h"
+#include "net/base/completion_repeating_callback.h"
 #include "net/base/directory_listing.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
@@ -141,7 +143,7 @@ class FileSystemEntryURLLoader
   mojo::Binding<network::mojom::URLLoader> binding_;
   network::mojom::URLLoaderClientPtr client_;
   FactoryParams params_;
-  std::unique_ptr<mojo::StringDataPipeProducer> data_producer_;
+  std::unique_ptr<mojo::DataPipeProducer> data_producer_;
   net::HttpByteRange byte_range_;
   FileSystemURL url_;
 
@@ -160,8 +162,11 @@ class FileSystemEntryURLLoader
       return;
     }
 
+    // If the requested URL is not commitable in the current process, block the
+    // request.  This prevents one origin from fetching filesystem: resources
+    // belonging to another origin, see https://crbug.com/964245.
     if (params_.render_process_host_id != ChildProcessHost::kInvalidUniqueID &&
-        !ChildProcessSecurityPolicyImpl::GetInstance()->CanRequestURL(
+        !ChildProcessSecurityPolicyImpl::GetInstance()->CanCommitURL(
             params_.render_process_host_id, request.url)) {
       DVLOG(1) << "Denied unauthorized request for "
                << request.url.possibly_invalid_spec();
@@ -335,8 +340,7 @@ class FileSystemDirectoryURLLoader : public FileSystemEntryURLLoader {
     options.struct_size = sizeof(MojoCreateDataPipeOptions);
     options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
     options.element_num_bytes = 1;
-    options.capacity_num_bytes =
-        std::max(data_.size(), kDefaultFileSystemUrlPipeSize);
+    options.capacity_num_bytes = kDefaultFileSystemUrlPipeSize;
 
     mojo::ScopedDataPipeProducerHandle producer_handle;
     mojo::ScopedDataPipeConsumerHandle consumer_handle;
@@ -356,13 +360,13 @@ class FileSystemDirectoryURLLoader : public FileSystemEntryURLLoader {
     client_->OnReceiveResponse(head);
     client_->OnStartLoadingResponseBody(std::move(consumer_handle));
 
-    data_producer_ = std::make_unique<mojo::StringDataPipeProducer>(
-        std::move(producer_handle));
+    data_producer_ =
+        std::make_unique<mojo::DataPipeProducer>(std::move(producer_handle));
 
     data_producer_->Write(
-        base::StringPiece(data_),
-        mojo::StringDataPipeProducer::AsyncWritingMode::
-            STRING_STAYS_VALID_UNTIL_COMPLETION,
+        std::make_unique<mojo::StringDataSource>(
+            base::StringPiece(data_), mojo::StringDataSource::AsyncWritingMode::
+                                          STRING_STAYS_VALID_UNTIL_COMPLETION),
         base::BindOnce(&FileSystemDirectoryURLLoader::OnDirectoryWritten,
                        base::Unretained(this)));
   }
@@ -474,7 +478,7 @@ class FileSystemFileURLLoader : public FileSystemEntryURLLoader {
     options.struct_size = sizeof(MojoCreateDataPipeOptions);
     options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
     options.element_num_bytes = 1;
-    options.capacity_num_bytes = remaining_bytes_;
+    options.capacity_num_bytes = kDefaultFileSystemUrlPipeSize;
 
     mojo::ScopedDataPipeProducerHandle producer_handle;
     MojoResult rv =
@@ -489,18 +493,19 @@ class FileSystemFileURLLoader : public FileSystemEntryURLLoader {
     head_.content_length = remaining_bytes_;
     head_.headers = CreateHttpResponseHeaders(200);
 
-    data_producer_ = std::make_unique<mojo::StringDataPipeProducer>(
-        std::move(producer_handle));
+    data_producer_ =
+        std::make_unique<mojo::DataPipeProducer>(std::move(producer_handle));
 
-    file_data_ =
-        base::MakeRefCounted<net::IOBuffer>(kDefaultFileSystemUrlPipeSize);
+    size_t bytes_to_read = std::min(
+        static_cast<int64_t>(kDefaultFileSystemUrlPipeSize), remaining_bytes_);
+    file_data_ = base::MakeRefCounted<net::IOBuffer>(bytes_to_read);
     ReadMoreFileData();
   }
 
   void ReadMoreFileData() {
     int64_t bytes_to_read = std::min(
         static_cast<int64_t>(kDefaultFileSystemUrlPipeSize), remaining_bytes_);
-    if (!bytes_to_read) {
+    if (bytes_to_read == 0) {
       if (consumer_handle_.is_valid()) {
         // This was an empty file; make sure to call OnReceiveResponse and
         // OnStartLoadingResponseBody regardless.
@@ -510,7 +515,7 @@ class FileSystemFileURLLoader : public FileSystemEntryURLLoader {
       OnFileWritten(MOJO_RESULT_OK);
       return;
     }
-    net::CompletionCallback read_callback = base::BindRepeating(
+    net::CompletionRepeatingCallback read_callback = base::BindRepeating(
         &FileSystemFileURLLoader::DidReadMoreFileData, base::AsWeakPtr(this));
     const int rv =
         reader_->Read(file_data_.get(), bytes_to_read, read_callback);
@@ -549,9 +554,10 @@ class FileSystemFileURLLoader : public FileSystemEntryURLLoader {
 
   void WriteFileData(int bytes_read) {
     data_producer_->Write(
-        base::StringPiece(file_data_->data(), bytes_read),
-        mojo::StringDataPipeProducer::AsyncWritingMode::
-            STRING_STAYS_VALID_UNTIL_COMPLETION,
+        std::make_unique<mojo::StringDataSource>(
+            base::StringPiece(file_data_->data(), bytes_read),
+            mojo::StringDataSource::AsyncWritingMode::
+                STRING_STAYS_VALID_UNTIL_COMPLETION),
         base::BindOnce(&FileSystemFileURLLoader::OnFileDataWritten,
                        base::AsWeakPtr(this)));
   }
@@ -644,19 +650,12 @@ class FileSystemURLLoaderFactory : public network::mojom::URLLoaderFactory {
 
 std::unique_ptr<network::mojom::URLLoaderFactory>
 CreateFileSystemURLLoaderFactory(
-    RenderFrameHost* render_frame_host,
-    bool is_navigation,
+    int render_process_host_id,
+    int frame_tree_node_id,
     scoped_refptr<FileSystemContext> file_system_context,
     const std::string& storage_domain) {
-  // Get the RPH ID for security checks for non-navigation resource requests.
-  int render_process_host_id = is_navigation
-                                   ? ChildProcessHost::kInvalidUniqueID
-                                   : render_frame_host->GetProcess()->GetID();
-
-  FactoryParams params = {render_process_host_id,
-                          render_frame_host->GetFrameTreeNodeId(),
+  FactoryParams params = {render_process_host_id, frame_tree_node_id,
                           file_system_context, storage_domain};
-
   return std::make_unique<FileSystemURLLoaderFactory>(
       std::move(params),
       base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}));

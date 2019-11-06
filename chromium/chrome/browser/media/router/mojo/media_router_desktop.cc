@@ -17,10 +17,10 @@
 #include "chrome/browser/media/router/providers/wired_display/wired_display_media_route_provider.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_features.h"
-#include "chrome/common/media_router/media_source_helper.h"
+#include "chrome/common/media_router/media_source.h"
 #include "components/cast_channel/cast_socket_service.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "extensions/common/extension.h"
 #include "services/service_manager/public/cpp/connector.h"
 #if defined(OS_WIN)
@@ -31,11 +31,12 @@ namespace media_router {
 
 namespace {
 
-// Returns the Connector object for the current process. It is the caller's
-// responsibility to clone the returned object to be used in another thread.
+// Returns the system Connector object for the browser process. It is the
+// caller's responsibility to clone the returned object to be used in another
+// thread.
 service_manager::Connector* GetConnector() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  return content::ServiceManagerConnection::GetForProcess()->GetConnector();
+  return content::GetSystemConnector();
 }
 
 }  // namespace
@@ -59,7 +60,7 @@ void MediaRouterDesktop::OnUserGesture() {
   MediaRouterMojoImpl::OnUserGesture();
   // Allow MRPM to intelligently update sinks and observers by passing in a
   // media source.
-  UpdateMediaSinks(MediaSourceForDesktop().id());
+  UpdateMediaSinks(MediaSource::ForDesktop().id());
 
   media_sink_service_->OnUserGesture();
 
@@ -80,7 +81,8 @@ MediaRouterDesktop::GetProviderIdForPresentation(
   if (presentation_id == kAutoJoinPresentationId ||
       base::StartsWith(presentation_id, kCastPresentationIdPrefix,
                        base::CompareCase::SENSITIVE)) {
-    return MediaRouteProviderId::EXTENSION;
+    return CastMediaRouteProviderEnabled() ? MediaRouteProviderId::CAST
+                                           : MediaRouteProviderId::EXTENSION;
   }
   return MediaRouterMojoImpl::GetProviderIdForPresentation(presentation_id);
 }
@@ -99,8 +101,7 @@ MediaRouterDesktop::MediaRouterDesktop(content::BrowserContext* context,
     : MediaRouterMojoImpl(context),
       cast_provider_(nullptr, base::OnTaskRunnerDeleter(nullptr)),
       dial_provider_(nullptr, base::OnTaskRunnerDeleter(nullptr)),
-      media_sink_service_(media_sink_service),
-      weak_factory_(this) {
+      media_sink_service_(media_sink_service) {
   InitializeMediaRouteProviders();
 }
 
@@ -116,7 +117,6 @@ void MediaRouterDesktop::RegisterMediaRouteProvider(
   config->enable_cast_discovery = !CastDiscoveryEnabled();
   config->enable_dial_sink_query = !DialMediaRouteProviderEnabled();
   config->enable_cast_sink_query = !CastMediaRouteProviderEnabled();
-  config->use_views_dialog = ShouldUseViewsDialog();
   config->use_mirroring_service = ShouldUseMirroringService();
   std::move(callback).Run(instance_id(), std::move(config));
 
@@ -217,8 +217,7 @@ void MediaRouterDesktop::ProvideSinks(
 
 void MediaRouterDesktop::InitializeMediaRouteProviders() {
   InitializeExtensionMediaRouteProviderProxy();
-  if (base::FeatureList::IsEnabled(features::kLocalScreenCasting))
-    InitializeWiredDisplayMediaRouteProvider();
+  InitializeWiredDisplayMediaRouteProvider();
   if (CastMediaRouteProviderEnabled())
     InitializeCastMediaRouteProvider();
   if (DialMediaRouteProviderEnabled())

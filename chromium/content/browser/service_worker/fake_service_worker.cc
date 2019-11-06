@@ -36,7 +36,8 @@ void FakeServiceWorker::RunUntilInitializeGlobalScope() {
 
 void FakeServiceWorker::InitializeGlobalScope(
     blink::mojom::ServiceWorkerHostAssociatedPtrInfo service_worker_host,
-    blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration_info) {
+    blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration_info,
+    blink::mojom::FetchHandlerExistence fetch_handler_existence) {
   host_.Bind(std::move(service_worker_host));
 
   // Enable callers to use these endpoints without us actually binding them
@@ -58,6 +59,8 @@ void FakeServiceWorker::InitializeGlobalScope(
   registration_info_ = std::move(registration_info);
   if (quit_closure_for_initialize_global_scope_)
     std::move(quit_closure_for_initialize_global_scope_).Run();
+
+  fetch_handler_existence_ = fetch_handler_existence;
 }
 
 void FakeServiceWorker::DispatchInstallEvent(
@@ -102,10 +105,10 @@ void FakeServiceWorker::DispatchCookieChangeEvent(
   std::move(callback).Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
 }
 
-void FakeServiceWorker::DispatchFetchEvent(
+void FakeServiceWorker::DispatchFetchEventForMainResource(
     blink::mojom::DispatchFetchEventParamsPtr params,
     blink::mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
-    DispatchFetchEventCallback callback) {
+    DispatchFetchEventForMainResourceCallback callback) {
   auto response = blink::mojom::FetchAPIResponse::New();
   response->status_code = 200;
   response->status_text = "OK";
@@ -137,10 +140,24 @@ void FakeServiceWorker::DispatchPushEvent(
   std::move(callback).Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
 }
 
+void FakeServiceWorker::DispatchPushSubscriptionChangeEvent(
+    blink::mojom::PushSubscriptionPtr old_subscription,
+    blink::mojom::PushSubscriptionPtr new_subscription,
+    DispatchPushSubscriptionChangeEventCallback callback) {
+  std::move(callback).Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
+}
+
 void FakeServiceWorker::DispatchSyncEvent(const std::string& tag,
                                           bool last_chance,
                                           base::TimeDelta timeout,
                                           DispatchSyncEventCallback callback) {
+  NOTIMPLEMENTED();
+}
+
+void FakeServiceWorker::DispatchPeriodicSyncEvent(
+    const std::string& tag,
+    base::TimeDelta timeout,
+    DispatchPeriodicSyncEventCallback callback) {
   NOTIMPLEMENTED();
 }
 
@@ -178,6 +195,12 @@ void FakeServiceWorker::DispatchExtendableMessageEventWithCustomTimeout(
     blink::mojom::ExtendableMessageEventPtr event,
     base::TimeDelta timeout,
     DispatchExtendableMessageEventWithCustomTimeoutCallback callback) {
+  std::move(callback).Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
+}
+
+void FakeServiceWorker::DispatchContentDeleteEvent(
+    const std::string& id,
+    DispatchContentDeleteEventCallback callback) {
   std::move(callback).Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
 }
 

@@ -8,8 +8,8 @@
 
 #include "base/threading/platform_thread.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
+#include "components/arc/session/arc_bridge_service.h"
 #include "components/arc/test/fake_arc_session.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "content/public/browser/tts_controller.h"
@@ -59,6 +59,10 @@ class TestableTtsController : public content::TtsController {
   }
   void SetTtsPlatform(content::TtsPlatform* tts_platform) override {}
   int QueueSize() override { return 0; }
+
+  void StripSSML(
+      const std::string& utterance,
+      base::OnceCallback<void(const std::string&)> callback) override {}
 
   int last_utterance_id_;
   content::TtsEventType last_event_type_;

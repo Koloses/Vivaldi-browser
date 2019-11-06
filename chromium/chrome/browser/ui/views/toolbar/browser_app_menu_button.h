@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/ui/toolbar/app_menu_icon_controller.h"
 #include "chrome/browser/ui/views/frame/app_menu_button.h"
@@ -18,9 +19,7 @@
 #include "ui/views/view.h"
 
 class ToolbarView;
-#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
 enum class InProductHelpFeature;
-#endif
 
 // The app menu button in the main browser window (as opposed to hosted app
 // windows, which is implemented in HostedAppMenuButton).
@@ -37,16 +36,14 @@ class BrowserAppMenuButton : public AppMenuButton,
     return type_and_severity_.severity;
   }
 
-  // Shows the app menu. |for_drop| indicates whether the menu is opened for a
-  // drag-and-drop operation.
-  void ShowMenu(bool for_drop);
+  // Shows the app menu. |run_types| denotes the MenuRunner::RunTypes associated
+  // with the menu.
+  void ShowMenu(int run_types);
 
-#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
   // Called to inform the button that it's being used as an anchor for a promo
   // for |promo_feature|.  When this is non-null, the button is highlighted in a
   // noticeable color, and the menu item appearance may be affected.
   void SetPromoFeature(base::Optional<InProductHelpFeature> promo_feature);
-#endif
 
   // views::MenuButton:
   gfx::Rect GetAnchorBoundsInScreen() const override;
@@ -70,10 +67,9 @@ class BrowserAppMenuButton : public AppMenuButton,
  private:
   void UpdateBorder();
 
-#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
-  // Picks the best promo color given the current background color.
-  SkColor GetPromoHighlightColor() const;
-#endif
+  // If the button is being used as an anchor for a promo, returns the best
+  // promo color given the current background color.
+  base::Optional<SkColor> GetPromoHighlightColor() const;
 
   // AppMenuButton:
   const char* GetClassName() const override;
@@ -89,6 +85,7 @@ class BrowserAppMenuButton : public AppMenuButton,
       const override;
   std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
   SkColor GetInkDropBaseColor() const override;
+  base::string16 GetTooltipText(const gfx::Point& p) const override;
 
   AppMenuIconController::TypeAndSeverity type_and_severity_{
       AppMenuIconController::IconType::NONE,
@@ -97,10 +94,8 @@ class BrowserAppMenuButton : public AppMenuButton,
   // Our owning toolbar view.
   ToolbarView* const toolbar_view_;
 
-#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
   // The feature, if any, for which this button is anchoring a promo.
   base::Optional<InProductHelpFeature> promo_feature_;
-#endif
 
   ScopedObserver<ui::MaterialDesignController,
                  ui::MaterialDesignControllerObserver>

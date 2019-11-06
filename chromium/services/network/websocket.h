@@ -52,6 +52,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) WebSocket : public mojom::WebSocket {
         const GURL& url,
         int child_id,
         int frame_id,
+        int net_error,
         const net::SSLInfo& ssl_info,
         bool fatal) = 0;
     // This function may delete |impl|.
@@ -63,13 +64,19 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) WebSocket : public mojom::WebSocket {
   };
 
   WebSocket(std::unique_ptr<Delegate> delegate,
-            mojom::WebSocketRequest request,
+            const GURL& url,
+            const std::vector<std::string>& requested_protocols,
+            const GURL& site_for_cookies,
+            std::vector<mojom::HttpHeaderPtr> additional_headers,
+            int32_t process_id,
+            int32_t render_frame_id,
+            const url::Origin& origin,
+            uint32_t options,
+            mojom::WebSocketHandshakeClientPtr handshake_client,
+            mojom::WebSocketClientPtr client,
             mojom::AuthenticationHandlerPtr auth_handler,
             mojom::TrustedHeaderClientPtr header_client,
             WebSocketThrottler::PendingConnection pending_connection_tracker,
-            int child_id,
-            int frame_id,
-            url::Origin origin,
             base::TimeDelta delay);
   ~WebSocket() override;
 
@@ -78,18 +85,18 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) WebSocket : public mojom::WebSocket {
   virtual void GoAway();
 
   // mojom::WebSocket methods:
-  void AddChannelRequest(const GURL& url,
-                         const std::vector<std::string>& requested_protocols,
-                         const GURL& site_for_cookies,
-                         std::vector<mojom::HttpHeaderPtr> additional_headers,
-                         mojom::WebSocketClientPtr client) override;
   void SendFrame(bool fin,
                  mojom::WebSocketMessageType type,
                  const std::vector<uint8_t>& data) override;
-  void SendFlowControl(int64_t quota) override;
+  void AddReceiveFlowControlQuota(int64_t quota) override;
   void StartClosingHandshake(uint16_t code, const std::string& reason) override;
 
   bool handshake_succeeded() const { return handshake_succeeded_; }
+
+  // Whether to allow sending/setting cookies during WebSocket handshakes for
+  // |url|. This decision is based on the |options_| and |origin_| this
+  // WebSocket was created with.
+  bool AllowCookies(const GURL& url) const;
 
   // These methods are called by the network delegate to forward these events to
   // the |header_client_|.
@@ -149,6 +156,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) WebSocket : public mojom::WebSocket {
   std::unique_ptr<Delegate> delegate_;
   mojo::Binding<mojom::WebSocket> binding_;
 
+  mojom::WebSocketHandshakeClientPtr handshake_client_;
   mojom::WebSocketClientPtr client_;
   mojom::AuthenticationHandlerPtr auth_handler_;
   mojom::TrustedHeaderClientPtr header_client_;
@@ -161,13 +169,15 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) WebSocket : public mojom::WebSocket {
   // Delay used for per-renderer WebSocket throttling.
   base::TimeDelta delay_;
 
-  // SendFlowControl() is delayed when OnFlowControl() is called before
-  // AddChannel() is called.
-  // Zero indicates there is no pending SendFlowControl().
+  // AddReceiveFlowControlQuota() is delayed when OnFlowControl() is called
+  // before AddChannel() is called.
+  // Zero indicates there is no pending AddReceiveFlowControlQuota().
   int64_t pending_flow_control_quota_;
 
-  int child_id_;
-  int frame_id_;
+  uint32_t options_;
+
+  int32_t child_id_;
+  int32_t frame_id_;
 
   // The web origin to use for the WebSocket.
   const url::Origin origin_;
@@ -176,7 +186,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) WebSocket : public mojom::WebSocket {
   // per-renderer WebSocket throttling.
   bool handshake_succeeded_;
 
-  base::WeakPtrFactory<WebSocket> weak_ptr_factory_;
+  base::WeakPtrFactory<WebSocket> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WebSocket);
 };

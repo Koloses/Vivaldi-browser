@@ -4,9 +4,9 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/task/task_scheduler/task_scheduler.h"
+#include "base/task/single_thread_task_executor.h"
+#include "base/task/thread_pool/thread_pool.h"
 #include "mojo/core/embedder/embedder.h"
 #include "remoting/test/ftl_signaling_playground.h"
 
@@ -14,7 +14,7 @@ int main(int argc, char const* argv[]) {
   base::AtExitManager exitManager;
   base::CommandLine::Init(argc, argv);
 
-  base::MessageLoopForIO message_loop;
+  base::SingleThreadTaskExecutor io_task_executor(base::MessagePump::Type::IO);
   remoting::FtlSignalingPlayground playground;
 
   if (playground.ShouldPrintHelp()) {
@@ -22,11 +22,11 @@ int main(int argc, char const* argv[]) {
     return 0;
   }
 
-  base::TaskScheduler::CreateAndStartWithDefaultParams(
+  base::ThreadPoolInstance::CreateAndStartWithDefaultParams(
       "FtlSignalingPlayground");
   mojo::core::Init();
 
-  playground.StartAndAuthenticate();
+  playground.StartLoop();
 
   return 0;
 }

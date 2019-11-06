@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COLOR_SCHEME_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COLOR_SCHEME_H_
 
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -16,17 +16,6 @@ namespace blink {
 enum ColorScheme {
   kLight = 1,
   kDark = 2,
-};
-
-class ColorSchemeSet {
-  DISALLOW_NEW();
-
- public:
-  void Set(ColorScheme scheme) { schemes_ |= scheme; }
-  bool Contains(ColorScheme scheme) const { return schemes_ & scheme; }
-
- private:
-  unsigned schemes_ = 0;
 };
 
 }  // namespace blink

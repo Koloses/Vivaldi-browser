@@ -17,6 +17,7 @@
 
 class ChromeMetricsServiceClient;
 class ChromePasswordManagerClient;
+class NavigationMetricsRecorder;
 class PrefService;
 class Profile;
 
@@ -28,11 +29,6 @@ class FlashDOMHandler;
 namespace chrome {
 void AttemptRestart();
 }
-
-namespace contextual_suggestions {
-struct ContextualSuggestionsResult;
-void RegisterSyntheticFieldTrials(const ContextualSuggestionsResult& result);
-}  // namespace contextual_suggestions
 
 namespace domain_reliability {
 class DomainReliabilityServiceFactory;
@@ -53,7 +49,7 @@ class BackgroundProfilingTriggers;
 }
 
 namespace nux {
-bool IsNuxOnboardingEnabled(Profile* profile);
+void JoinOnboardingGroup(Profile* profile);
 }
 
 namespace safe_browsing {
@@ -92,8 +88,6 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class ChromeBrowserMainParts;
   friend class ChromeMetricsServicesManagerClient;
   friend class ChromeRenderMessageFilter;
-  friend void contextual_suggestions::RegisterSyntheticFieldTrials(
-      const contextual_suggestions::ContextualSuggestionsResult& result);
   friend class DataReductionProxyChromeSettings;
   friend class domain_reliability::DomainReliabilityServiceFactory;
   friend class extensions::ChromeGuestViewManagerDelegate;
@@ -114,9 +108,11 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class safe_browsing::SafeBrowsingUIManager;
   friend class ChromeMetricsServiceClient;
   friend class ChromePasswordManagerClient;
-  friend bool nux::IsNuxOnboardingEnabled(Profile* profile);
+  friend void nux::JoinOnboardingGroup(Profile* profile);
+  friend class NavigationMetricsRecorder;
 
   // Testing related friends.
+  friend class ForceFieldTrialsBrowserTest;
   friend class MetricsReportingStateTest;
   friend class metrics::UkmConsentParamBrowserTest;
   FRIEND_TEST_ALL_PREFIXES(ChromeMetricsServiceAccessorTest,

@@ -240,6 +240,8 @@ function mouseRequestPointerLockAndCaptureInTarget(targetSelector, targetFrame) 
             {name: 'pointerMove', x: xPosition + 30, y: yPosition + 20},
             {name: 'pointerMove', x: xPosition + 10, y: yPosition + 50},
             {name: 'pointerMove', x: xPosition + 40, y: yPosition + 10},
+            {name: 'pointerMove', x: xPosition + 10, y: yPosition + 50},
+            {name: 'pointerMove', x: xPosition + 40, y: yPosition + 10},
         ]}], resolve);
     } else {
       reject();
@@ -552,23 +554,6 @@ function mouseDragAndDropInTargets(targetSelectorList) {
         eventSender.mouseMoveTo(xPosition, yPosition);
       }
       eventSender.mouseUp();
-      resolve();
-    } else {
-      reject();
-    }
-  });
-}
-
-// Keyboard inputs.
-function keyboardScroll(direction) {
-  return new Promise(function(resolve, reject) {
-    if (window.eventSender) {
-      if (direction == 'down')
-        eventSender.keyDown('ArrowDown');
-      else if (direction == 'right')
-        eventSender.keyDown('ArrowRight');
-      else
-        reject();
       resolve();
     } else {
       reject();

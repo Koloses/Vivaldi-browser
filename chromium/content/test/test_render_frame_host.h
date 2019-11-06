@@ -23,8 +23,6 @@
 #include "content/test/test_render_widget_host.h"
 #include "ui/base/page_transition_types.h"
 
-struct FrameHostMsg_DidCommitProvisionalLoad_Params;
-
 namespace net {
 class IPEndPoint;
 }
@@ -49,7 +47,7 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
                             public RenderFrameHostTester {
  public:
   TestRenderFrameHost(SiteInstance* site_instance,
-                      RenderViewHostImpl* render_view_host,
+                      scoped_refptr<RenderViewHostImpl> render_view_host,
                       RenderFrameHostDelegate* delegate,
                       FrameTree* frame_tree,
                       FrameTreeNode* frame_tree_node,
@@ -62,8 +60,21 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   TestRenderViewHost* GetRenderViewHost() override;
   MockRenderProcessHost* GetProcess() override;
   TestRenderWidgetHost* GetRenderWidgetHost() override;
-  void AddMessageToConsole(ConsoleMessageLevel level,
+  void AddMessageToConsole(blink::mojom::ConsoleMessageLevel level,
                            const std::string& message) override;
+  void AddUniqueMessageToConsole(blink::mojom::ConsoleMessageLevel level,
+                                 const std::string& message) override;
+  bool IsTestRenderFrameHost() const override;
+
+  // Public overrides to expose RenderFrameHostImpl's mojo methods to tests.
+  void DidFailProvisionalLoadWithError(
+      const GURL& url,
+      int error_code,
+      const base::string16& error_description,
+      bool showing_repost_interstitial) override;
+  void DidFailLoadWithError(const GURL& url,
+                            int error_code,
+                            const base::string16& error_description) override;
 
   // RenderFrameHostTester implementation.
   void InitializeRenderFrameIfNeeded() override;
@@ -73,7 +84,7 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   void SendNavigateWithTransition(int nav_entry_id,
                                   bool did_create_new_entry,
                                   const GURL& url,
-                                  ui::PageTransition transition) override;
+                                  ui::PageTransition transition);
   void SendBeforeUnloadACK(bool proceed) override;
   void SimulateSwapOutACK() override;
   void SimulateFeaturePolicyHeader(
@@ -81,21 +92,9 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
       const std::vector<url::Origin>& whitelist) override;
   const std::vector<std::string>& GetConsoleMessages() override;
 
-  void SendNavigateWithReplacement(int nav_entry_id,
-                                   bool did_create_new_entry,
-                                   const GURL& url);
-
-  using ModificationCallback =
-      base::Callback<void(FrameHostMsg_DidCommitProvisionalLoad_Params*)>;
-
   void SendNavigate(int nav_entry_id,
                     bool did_create_new_entry,
                     const GURL& url);
-  void SendNavigateWithModificationCallback(
-      int nav_entry_id,
-      bool did_create_new_entry,
-      const GURL& url,
-      const ModificationCallback& callback);
   void SendNavigateWithParams(
       FrameHostMsg_DidCommitProvisionalLoad_Params* params,
       bool was_within_same_document);
@@ -147,22 +146,10 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   // remove this function.
   void PrepareForCommitDeprecatedForNavigationSimulator(
       const net::IPEndPoint& remote_endpoint,
+      bool was_fetched_via_cache,
       bool is_signed_exchange_inner_response,
       net::HttpResponseInfo::ConnectionInfo connection_info,
       base::Optional<net::SSLInfo> ssl_info);
-
-  // This method does the same as PrepareForCommit.
-  // PlzNavigate: Beyond doing the same as PrepareForCommit, this method will
-  // also simulate a server redirect to |redirect_url|. If the URL is empty the
-  // redirect step is ignored.
-  void PrepareForCommitWithServerRedirect(const GURL& redirect_url);
-
-  // If we are doing a cross-site navigation, this simulates the current
-  // RenderFrameHost notifying that BeforeUnload has executed so the pending
-  // RenderFrameHost is resumed and can navigate.
-  // PlzNavigate: This simulates a BeforeUnload ACK from the renderer, and the
-  // interaction with the IO thread up until the response is ready to commit.
-  void PrepareForCommitIfNecessary();
 
   // Used to simulate the commit of a navigation having been processed in the
   // renderer. If parameters required to commit are not provided, they will be
@@ -216,9 +203,10 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   void SendCommitNavigation(
       mojom::NavigationClient* navigation_client,
       NavigationRequest* navigation_request,
-      const network::ResourceResponseHead& head,
       const content::CommonNavigationParams& common_params,
       const content::CommitNavigationParams& commit_params,
+      const network::ResourceResponseHead& response_head,
+      mojo::ScopedDataPipeConsumerHandle response_body,
       network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints,
       std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
           subresource_loader_factories,
@@ -226,7 +214,9 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
           subresource_overrides,
       blink::mojom::ControllerServiceWorkerInfoPtr
           controller_service_worker_info,
-      network::mojom::URLLoaderFactoryPtr prefetch_loader_factory,
+      blink::mojom::ServiceWorkerProviderInfoForClientPtr provider_info,
+      mojo::PendingRemote<network::mojom::URLLoaderFactory>
+          prefetch_loader_factory,
       const base::UnguessableToken& devtools_navigation_token) override;
   void SendCommitFailedNavigation(
       mojom::NavigationClient* navigation_client,
@@ -242,15 +232,13 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
  private:
   void SendNavigateWithParameters(int nav_entry_id,
                                   bool did_create_new_entry,
-                                  bool should_replace_entry,
                                   const GURL& url,
                                   ui::PageTransition transition,
-                                  int response_code,
-                                  const ModificationCallback& callback);
+                                  int response_code);
 
   void PrepareForCommitInternal(
-      const GURL& redirect_url,
       const net::IPEndPoint& remote_endpoint,
+      bool was_fetched_via_cache,
       bool is_signed_exchange_inner_response,
       net::HttpResponseInfo::ConnectionInfo connection_info,
       base::Optional<net::SSLInfo> ssl_info);
@@ -261,7 +249,6 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   std::unique_ptr<FrameHostMsg_DidCommitProvisionalLoad_Params>
   BuildDidCommitParams(int nav_entry_id,
                        bool did_create_new_entry,
-                       bool should_replace_entry,
                        const GURL& url,
                        ui::PageTransition transition,
                        int response_code);

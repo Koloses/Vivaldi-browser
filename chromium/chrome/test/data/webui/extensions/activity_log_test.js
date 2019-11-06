@@ -19,54 +19,22 @@ suite('ExtensionsActivityLogTest', function() {
 
   /**
    * Backing extension info for the activity log.
-   * @type {chrome.developerPrivate.ExtensionInfo}
+   * @type {chrome.developerPrivate.ExtensionInfo|
+   *        extensions.ActivityLogExtensionPlaceholder}
    */
   let extensionInfo;
 
   let proxyDelegate;
   let testVisible;
 
-  const testActivityEvent = {
+  const testActivities = {activities: []};
+
+  const activity1 = {
     extensionId: EXTENSION_ID,
     activityType: chrome.activityLogPrivate.ExtensionActivityType.API_CALL,
     time: 1550101623113,
     args: JSON.stringify([null]),
     apiCall: 'testAPI.testMethod',
-  };
-
-  const testActivities = {
-    activities: [
-      {
-        activityId: '299',
-        activityType: 'api_call',
-        apiCall: 'i18n.getUILanguage',
-        args: 'null',
-        count: 10,
-        extensionId: EXTENSION_ID,
-        time: 1541203132002.664
-      },
-      {
-        activityId: '309',
-        activityType: 'dom_access',
-        apiCall: 'Storage.getItem',
-        args: 'null',
-        count: 35,
-        extensionId: EXTENSION_ID,
-        other: {domVerb: 'method'},
-        pageTitle: 'Test Extension',
-        pageUrl: `chrome-extension://${EXTENSION_ID}/index.html`,
-        time: 1541203131994.837
-      },
-      {
-        activityId: '301',
-        activityType: 'api_call',
-        apiCall: 'i18n.getUILanguage',
-        args: 'null',
-        count: 30,
-        extensionId: EXTENSION_ID,
-        time: 1541203172002.664
-      },
-    ]
   };
 
   // Initialize an extension activity log before each test.
@@ -96,68 +64,13 @@ suite('ExtensionsActivityLogTest', function() {
     activityLog.remove();
   });
 
-  test('activities shown match search query', function() {
-    const activityLogHistory = activityLog.$$('activity-log-history');
-    testVisible =
-        extension_test_util.testVisible.bind(null, activityLogHistory);
-
-    const search = activityLog.$$('cr-search-field');
-    assertTrue(!!search);
-
-    // Partial, case insensitive search for i18n.getUILanguage. Whitespace is
-    // also appended to the search term to test trimming.
-    search.setValue('getuilanguage   ');
-
-    return proxyDelegate.whenCalled('getFilteredExtensionActivityLog')
-        .then(() => {
-          Polymer.dom.flush();
-
-          const activityLogItems =
-              activityLogHistory.shadowRoot.querySelectorAll(
-                  'activity-log-history-item');
-
-          // Since we searched for an API call, we expect only one match as
-          // activity log entries are grouped by their API call.
-          expectEquals(activityLogItems.length, 1);
-          expectEquals(
-              activityLogItems[0].$$('#activity-key').innerText,
-              'i18n.getUILanguage');
-
-          // Change search query so no results match.
-          proxyDelegate.resetResolver('getFilteredExtensionActivityLog');
-          search.setValue('query that does not match any activities');
-
-          return proxyDelegate.whenCalled('getFilteredExtensionActivityLog');
-        })
-        .then(() => {
-          Polymer.dom.flush();
-
-          testVisible('#no-activities', true);
-          testVisible('#loading-activities', false);
-          testVisible('#activity-list', false);
-
-          expectEquals(
-              activityLogHistory.shadowRoot
-                  .querySelectorAll('activity-log-history-item')
-                  .length,
-              0);
-
-          proxyDelegate.resetResolver('getExtensionActivityLog');
-
-          // Finally, we clear the search query via the #clearSearch button. We
-          // should see all the activities displayed.
-          search.$$('#clearSearch').click();
-          return proxyDelegate.whenCalled('getExtensionActivityLog');
-        })
-        .then(() => {
-          Polymer.dom.flush();
-
-          const activityLogItems =
-              activityLogHistory.shadowRoot.querySelectorAll(
-                  'activity-log-history-item');
-          expectEquals(activityLogItems.length, 2);
-        });
-  });
+  // Returns a list of visible stream items. The not([hidden]) selector is
+  // needed for iron-list as it reuses components but hides them when not in
+  // use.
+  function getStreamItems() {
+    return activityLog.$$('activity-log-stream')
+        .shadowRoot.querySelectorAll('activity-log-stream-item:not([hidden])');
+  }
 
   test('clicking on back button navigates to the details page', function() {
     Polymer.dom.flush();
@@ -169,26 +82,59 @@ suite('ExtensionsActivityLogTest', function() {
 
     activityLog.$$('#closeButton').click();
     expectDeepEquals(
-        currentPage, {page: Page.DETAILS, extensionId: EXTENSION_ID});
+        currentPage,
+        {page: extensions.Page.DETAILS, extensionId: EXTENSION_ID});
   });
 
-  test('tab transitions', function() {
+  test(
+      'clicking on back button for a placeholder page navigates to list view',
+      function() {
+        activityLog.extensionInfo = {id: EXTENSION_ID, isPlaceholder: true};
+
+        Polymer.dom.flush();
+
+        let currentPage = null;
+        extensions.navigation.addListener(newPage => {
+          currentPage = newPage;
+        });
+
+        activityLog.$$('#closeButton').click();
+        expectDeepEquals(currentPage, {page: extensions.Page.LIST});
+      });
+
+  test('tab transitions', async () => {
     Polymer.dom.flush();
     // Default view should be the history view.
     testVisible('activity-log-history', true);
 
     // Navigate to the activity log stream.
-    activityLog.$$('#real-time-tab').click();
+    activityLog.$$('cr-tabs').selected = 1;
+    Polymer.dom.flush();
+
+    // One activity is recorded and should appear in the stream.
+    proxyDelegate.getOnExtensionActivity().callListeners(activity1);
+
     Polymer.dom.flush();
     testVisible('activity-log-stream', true);
+    expectEquals(1, getStreamItems().length);
 
     // Navigate back to the activity log history tab.
-    activityLog.$$('#history-tab').click();
+    activityLog.$$('cr-tabs').selected = 0;
 
     // Expect a refresh of the activity log.
-    proxyDelegate.whenCalled('getExtensionActivityLog').then(() => {
-      Polymer.dom.flush();
-      testVisible('activity-log-history', true);
-    });
+    await proxyDelegate.whenCalled('getExtensionActivityLog');
+    Polymer.dom.flush();
+    testVisible('activity-log-history', true);
+
+    // Another activity is recorded, but should not appear in the stream as
+    // the stream is inactive.
+    proxyDelegate.getOnExtensionActivity().callListeners(activity1);
+
+    activityLog.$$('cr-tabs').selected = 1;
+    Polymer.dom.flush();
+
+    // The one activity in the stream should have persisted between tab
+    // switches.
+    expectEquals(1, getStreamItems().length);
   });
 });

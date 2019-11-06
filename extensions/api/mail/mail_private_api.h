@@ -3,6 +3,7 @@
 #ifndef EXTENSIONS_API_MAIL_MAIL_PRIVATE_API_H_
 #define EXTENSIONS_API_MAIL_MAIL_PRIVATE_API_H_
 
+#include "base/files/file_path.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "extensions/browser/api/file_system/file_system_api.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
@@ -18,13 +19,28 @@ class MailPrivateGetPathsFunction : public UIThreadExtensionFunction {
 
  protected:
   ~MailPrivateGetPathsFunction() override = default;
-  void OnFinished(const std::vector<std::string>& string_paths);
+  void OnFinished(const std::vector<base::FilePath::StringType>& string_paths);
 
   // ExtensionFunction:
   ResponseAction Run() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MailPrivateGetPathsFunction);
+};
+
+class MailPrivateSaveBufferFunction : public UIThreadExtensionFunction {
+  DECLARE_EXTENSION_FUNCTION("mailPrivate.saveBuffer", MAIL_SAVE_FILE_BUFFER)
+ public:
+  MailPrivateSaveBufferFunction() = default;
+
+ protected:
+  ~MailPrivateSaveBufferFunction() override = default;
+  void OnFinished(bool result);
+  // ExtensionFunction:
+  ResponseAction Run() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MailPrivateSaveBufferFunction);
 };
 
 class MailPrivateSaveFunction : public UIThreadExtensionFunction {
@@ -77,6 +93,21 @@ class MailPrivateReadFunction : public UIThreadExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(MailPrivateReadFunction);
 };
 
+class MailPrivateReadBufferFunction : public UIThreadExtensionFunction {
+  DECLARE_EXTENSION_FUNCTION("mailPrivate.readBuffer", MAIL_READ_FILE_BUFFER)
+ public:
+  MailPrivateReadBufferFunction() = default;
+
+ protected:
+  ~MailPrivateReadBufferFunction() override = default;
+  void OnFinished(ReadFileResult result);
+  // ExtensionFunction:
+  ResponseAction Run() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MailPrivateReadBufferFunction);
+};
+
 class MailPrivateReadFileFunction : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("mailPrivate.readFile", MAIL_READ_FILE)
  public:
@@ -94,7 +125,7 @@ class MailPrivateReadFileFunction : public UIThreadExtensionFunction {
 
 struct GetDataDirectoryResult {
   bool success;
-  std::string path;
+  base::FilePath::StringType path;
 };
 
 class MailPrivateGetDataDirectoryFunction : public UIThreadExtensionFunction {
@@ -128,6 +159,21 @@ class MailPrivateCreateDataDirectoryFunction
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MailPrivateCreateDataDirectoryFunction);
+};
+
+class MailPrivateRenameFunction : public UIThreadExtensionFunction {
+  DECLARE_EXTENSION_FUNCTION("mailPrivate.rename", MAIL_RENAME)
+ public:
+  MailPrivateRenameFunction() = default;
+
+ protected:
+  ~MailPrivateRenameFunction() override = default;
+  void OnFinished(bool result);
+  // ExtensionFunction:
+  ResponseAction Run() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MailPrivateRenameFunction);
 };
 
 }  // namespace extensions

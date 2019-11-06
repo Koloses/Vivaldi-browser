@@ -51,8 +51,6 @@ class TestBlinkWebUnitTestSupport : public BlinkPlatformImpl {
 
   std::unique_ptr<blink::WebURLLoaderFactory> CreateDefaultURLLoaderFactory()
       override;
-  std::unique_ptr<blink::WebDataConsumerHandle> CreateDataConsumerHandle(
-      mojo::ScopedDataPipeConsumerHandle handle) override;
   blink::WebString UserAgent() override;
   blink::WebString QueryLocalizedString(
       blink::WebLocalizedString::Name name) override;
@@ -94,7 +92,7 @@ class TestBlinkWebUnitTestSupport : public BlinkPlatformImpl {
   std::unique_ptr<blink::scheduler::WebThreadScheduler> main_thread_scheduler_;
   bool threaded_animation_ = true;
 
-  base::WeakPtrFactory<TestBlinkWebUnitTestSupport> weak_factory_;
+  base::WeakPtrFactory<TestBlinkWebUnitTestSupport> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TestBlinkWebUnitTestSupport);
 };

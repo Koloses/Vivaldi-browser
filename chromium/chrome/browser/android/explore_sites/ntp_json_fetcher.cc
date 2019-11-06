@@ -15,7 +15,7 @@
 #include "chrome/browser/android/explore_sites/url_util_experimental.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "net/base/load_flags.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
@@ -98,23 +98,20 @@ void NTPJsonFetcher::OnSimpleLoaderComplete(
 
   // The parser will call us back via one of the callbacks.
   data_decoder::SafeJsonParser::Parse(
-      content::ServiceManagerConnection::GetForProcess()->GetConnector(),
-      *response_body,
-      base::BindRepeating(&NTPJsonFetcher::OnJsonParseSuccess,
-                          weak_factory_.GetWeakPtr()),
-      base::BindRepeating(&NTPJsonFetcher::OnJsonParseError,
-                          weak_factory_.GetWeakPtr()));
+      content::GetSystemConnector(), *response_body,
+      base::BindOnce(&NTPJsonFetcher::OnJsonParseSuccess,
+                     weak_factory_.GetWeakPtr()),
+      base::BindOnce(&NTPJsonFetcher::OnJsonParseError,
+                     weak_factory_.GetWeakPtr()));
 }
 
-void NTPJsonFetcher::OnJsonParseSuccess(
-    std::unique_ptr<base::Value> parsed_json) {
-  if (!parsed_json || !parsed_json->is_dict()) {
+void NTPJsonFetcher::OnJsonParseSuccess(base::Value parsed_json) {
+  if (!parsed_json.is_dict()) {
     OnJsonParseError("Parsed JSON is not a dictionary.");
     return;
   }
 
-  auto catalog = NTPCatalog::create(
-      static_cast<base::DictionaryValue*>(parsed_json.get()));
+  auto catalog = NTPCatalog::create(parsed_json);
   std::move(callback_).Run(std::move(catalog));
 }
 

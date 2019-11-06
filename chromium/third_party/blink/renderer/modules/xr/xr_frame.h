@@ -9,7 +9,6 @@
 
 #include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -17,27 +16,25 @@
 namespace blink {
 
 class ExceptionState;
-class XRInputPose;
 class XRInputSource;
 class XRPose;
 class XRReferenceSpace;
 class XRSession;
 class XRSpace;
 class XRViewerPose;
+class XRWorldInformation;
 
 class XRFrame final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  explicit XRFrame(XRSession*);
+  explicit XRFrame(XRSession* session, XRWorldInformation* world_information);
 
   XRSession* session() const { return session_; }
 
   XRViewerPose* getViewerPose(XRReferenceSpace*, ExceptionState&) const;
-  XRInputPose* getInputPose(XRInputSource*,
-                            XRReferenceSpace*,
-                            ExceptionState&) const;
   XRPose* getPose(XRSpace*, XRSpace*, ExceptionState&);
+  XRWorldInformation* worldInformation() const { return world_information_; }
 
   void SetBasePoseMatrix(const TransformationMatrix&);
 
@@ -45,15 +42,32 @@ class XRFrame final : public ScriptWrappable {
 
   void Deactivate();
 
+  void SetAnimationFrame(bool is_animation_frame) {
+    is_animation_frame_ = is_animation_frame;
+  }
+
  private:
+  std::unique_ptr<TransformationMatrix> GetAdjustedPoseMatrix(XRSpace*) const;
+  XRPose* GetTargetRayPose(XRInputSource*, XRSpace*) const;
+  XRPose* GetGripPose(XRInputSource*, XRSpace*) const;
+
+  Member<XRWorldInformation> world_information_;
+
   const Member<XRSession> session_;
 
   // Maps from mojo space to headset space.
   std::unique_ptr<TransformationMatrix> base_pose_matrix_;
 
-  bool active_ = true;
+  // Frames are only active during callbacks. getPose and getViewerPose should
+  // only be called from JS on active frames.
+  bool is_active_ = true;
+
+  // Only frames created by XRSession.requestAnimationFrame callbacks are
+  // animation frames. getViewerPose should only be called from JS on active
+  // animation frames.
+  bool is_animation_frame_ = false;
 };
 
 }  // namespace blink
 
-#endif  // XRWebGLLayer_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_FRAME_H_

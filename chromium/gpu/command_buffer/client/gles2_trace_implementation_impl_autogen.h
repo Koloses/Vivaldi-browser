@@ -1843,6 +1843,11 @@ void GLES2TraceImplementation::DispatchCompute(GLuint num_groups_x,
   gl_->DispatchCompute(num_groups_x, num_groups_y, num_groups_z);
 }
 
+void GLES2TraceImplementation::DispatchComputeIndirect(GLintptr offset) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::DispatchComputeIndirect");
+  gl_->DispatchComputeIndirect(offset);
+}
+
 void GLES2TraceImplementation::GetProgramInterfaceiv(GLuint program,
                                                      GLenum program_interface,
                                                      GLenum pname,
@@ -2210,29 +2215,6 @@ void GLES2TraceImplementation::LoseContextCHROMIUM(GLenum current,
   gl_->LoseContextCHROMIUM(current, other);
 }
 
-void GLES2TraceImplementation::GenSyncTokenCHROMIUM(GLbyte* sync_token) {
-  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::GenSyncTokenCHROMIUM");
-  gl_->GenSyncTokenCHROMIUM(sync_token);
-}
-
-void GLES2TraceImplementation::GenUnverifiedSyncTokenCHROMIUM(
-    GLbyte* sync_token) {
-  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
-                                "GLES2Trace::GenUnverifiedSyncTokenCHROMIUM");
-  gl_->GenUnverifiedSyncTokenCHROMIUM(sync_token);
-}
-
-void GLES2TraceImplementation::VerifySyncTokensCHROMIUM(GLbyte** sync_tokens,
-                                                        GLsizei count) {
-  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::VerifySyncTokensCHROMIUM");
-  gl_->VerifySyncTokensCHROMIUM(sync_tokens, count);
-}
-
-void GLES2TraceImplementation::WaitSyncTokenCHROMIUM(const GLbyte* sync_token) {
-  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::WaitSyncTokenCHROMIUM");
-  gl_->WaitSyncTokenCHROMIUM(sync_token);
-}
-
 void GLES2TraceImplementation::UnpremultiplyAndDitherCopyCHROMIUM(
     GLuint source_id,
     GLuint dest_id,
@@ -2283,11 +2265,13 @@ void GLES2TraceImplementation::ScheduleCALayerSharedStateCHROMIUM(
     GLfloat opacity,
     GLboolean is_clipped,
     const GLfloat* clip_rect,
+    const GLfloat* rounded_corner_bounds,
     GLint sorting_context_id,
     const GLfloat* transform) {
   TRACE_EVENT_BINARY_EFFICIENT0(
       "gpu", "GLES2Trace::ScheduleCALayerSharedStateCHROMIUM");
   gl_->ScheduleCALayerSharedStateCHROMIUM(opacity, is_clipped, clip_rect,
+                                          rounded_corner_bounds,
                                           sorting_context_id, transform);
 }
 
@@ -2754,17 +2738,17 @@ void GLES2TraceImplementation::InvalidateReadbackBufferShadowDataCHROMIUM(
   gl_->InvalidateReadbackBufferShadowDataCHROMIUM(buffer_id);
 }
 
-void GLES2TraceImplementation::FramebufferTextureMultiviewLayeredANGLE(
+void GLES2TraceImplementation::FramebufferTextureMultiviewOVR(
     GLenum target,
     GLenum attachment,
     GLuint texture,
     GLint level,
     GLint baseViewIndex,
     GLsizei numViews) {
-  TRACE_EVENT_BINARY_EFFICIENT0(
-      "gpu", "GLES2Trace::FramebufferTextureMultiviewLayeredANGLE");
-  gl_->FramebufferTextureMultiviewLayeredANGLE(target, attachment, texture,
-                                               level, baseViewIndex, numViews);
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "GLES2Trace::FramebufferTextureMultiviewOVR");
+  gl_->FramebufferTextureMultiviewOVR(target, attachment, texture, level,
+                                      baseViewIndex, numViews);
 }
 
 void GLES2TraceImplementation::MaxShaderCompilerThreadsKHR(GLuint count) {

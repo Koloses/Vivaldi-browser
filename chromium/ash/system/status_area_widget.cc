@@ -4,13 +4,12 @@
 
 #include "ash/system/status_area_widget.h"
 
-#include "ash/session/session_controller.h"
+#include "ash/keyboard/ui/keyboard_ui_controller.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
-#include "ash/system/accessibility/autoclick_tray.h"
 #include "ash/system/accessibility/dictation_button_tray.h"
 #include "ash/system/accessibility/select_to_speak_tray.h"
-#include "ash/system/flag_warning/flag_warning_tray.h"
 #include "ash/system/ime_menu/ime_menu_tray.h"
 #include "ash/system/overview/overview_button_tray.h"
 #include "ash/system/palette/palette_tray.h"
@@ -18,10 +17,7 @@
 #include "ash/system/status_area_widget_delegate.h"
 #include "ash/system/unified/unified_system_tray.h"
 #include "ash/system/virtual_keyboard/virtual_keyboard_tray.h"
-#include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
-#include "ui/accessibility/accessibility_switches.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/display/display.h"
 #include "ui/native_theme/native_theme_dark_aura.h"
 
@@ -47,22 +43,11 @@ StatusAreaWidget::StatusAreaWidget(aura::Window* status_container, Shelf* shelf)
 void StatusAreaWidget::Initialize() {
   // Create the child views, left to right.
 
-  if (::features::IsMultiProcessMash()) {
-    flag_warning_tray_ = std::make_unique<FlagWarningTray>(shelf_);
-    status_area_widget_delegate_->AddChildView(flag_warning_tray_.get());
-  }
-
   logout_button_tray_ = std::make_unique<LogoutButtonTray>(shelf_);
   status_area_widget_delegate_->AddChildView(logout_button_tray_.get());
 
   dictation_button_tray_ = std::make_unique<DictationButtonTray>(shelf_);
   status_area_widget_delegate_->AddChildView(dictation_button_tray_.get());
-
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalAccessibilityAutoclick)) {
-    autoclick_tray_ = std::make_unique<AutoclickTray>(shelf_);
-    status_area_widget_delegate_->AddChildView(autoclick_tray_.get());
-  }
 
   select_to_speak_tray_ = std::make_unique<SelectToSpeakTray>(shelf_);
   status_area_widget_delegate_->AddChildView(select_to_speak_tray_.get());
@@ -92,8 +77,6 @@ void StatusAreaWidget::Initialize() {
   virtual_keyboard_tray_->Initialize();
   ime_menu_tray_->Initialize();
   select_to_speak_tray_->Initialize();
-  if (autoclick_tray_)
-    autoclick_tray_->Initialize();
   if (dictation_button_tray_)
     dictation_button_tray_->Initialize();
   overview_button_tray_->Initialize();
@@ -109,16 +92,14 @@ StatusAreaWidget::~StatusAreaWidget() {
   unified_system_tray_.reset();
   ime_menu_tray_.reset();
   select_to_speak_tray_.reset();
-  autoclick_tray_.reset();
   dictation_button_tray_.reset();
   virtual_keyboard_tray_.reset();
   palette_tray_.reset();
   logout_button_tray_.reset();
   overview_button_tray_.reset();
-  flag_warning_tray_.reset();
 
   // All child tray views have been removed.
-  DCHECK_EQ(0, GetContentsView()->child_count());
+  DCHECK(GetContentsView()->children().empty());
 }
 
 void StatusAreaWidget::UpdateAfterShelfAlignmentChange() {
@@ -131,8 +112,6 @@ void StatusAreaWidget::UpdateAfterShelfAlignmentChange() {
     dictation_button_tray_->UpdateAfterShelfAlignmentChange();
   palette_tray_->UpdateAfterShelfAlignmentChange();
   overview_button_tray_->UpdateAfterShelfAlignmentChange();
-  if (flag_warning_tray_)
-    flag_warning_tray_->UpdateAfterShelfAlignmentChange();
   status_area_widget_delegate_->UpdateLayout();
 }
 
@@ -198,8 +177,6 @@ void StatusAreaWidget::SchedulePaint() {
     dictation_button_tray_->SchedulePaint();
   palette_tray_->SchedulePaint();
   overview_button_tray_->SchedulePaint();
-  if (flag_warning_tray_)
-    flag_warning_tray_->SchedulePaint();
 }
 
 const ui::NativeTheme* StatusAreaWidget::GetNativeTheme() const {
@@ -221,7 +198,7 @@ void StatusAreaWidget::OnMouseEvent(ui::MouseEvent* event) {
   views::View::ConvertPointFromWidget(virtual_keyboard_tray_.get(), &location);
   if (event->type() == ui::ET_MOUSE_PRESSED &&
       !virtual_keyboard_tray_->HitTestPoint(location)) {
-    keyboard::KeyboardController::Get()->HideKeyboardImplicitlyByUser();
+    keyboard::KeyboardUIController::Get()->HideKeyboardImplicitlyByUser();
   }
   views::Widget::OnMouseEvent(event);
 }
@@ -233,7 +210,7 @@ void StatusAreaWidget::OnGestureEvent(ui::GestureEvent* event) {
   views::View::ConvertPointFromWidget(virtual_keyboard_tray_.get(), &location);
   if (event->type() == ui::ET_GESTURE_TAP_DOWN &&
       !virtual_keyboard_tray_->HitTestPoint(location)) {
-    keyboard::KeyboardController::Get()->HideKeyboardImplicitlyByUser();
+    keyboard::KeyboardUIController::Get()->HideKeyboardImplicitlyByUser();
   }
   views::Widget::OnGestureEvent(event);
 }

@@ -9,6 +9,12 @@
 namespace ash {
 namespace switches {
 
+// Indicates the current color mode of ash.
+const char kAshColorMode[] = "ash-color-mode";
+const char kAshColorModeDark[] = "dark";
+const char kAshColorModeDefault[] = "default";
+const char kAshColorModeLight[] = "light";
+
 // Force the pointer (cursor) position to be kept inside root windows.
 const char kAshConstrainPointerToRoot[] = "ash-constrain-pointer-to-root";
 
@@ -17,9 +23,6 @@ const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 
 // Enable keyboard shortcuts used by developers only.
 const char kAshDeveloperShortcuts[] = "ash-dev-shortcuts";
-
-// Disables the split view on tablet mode.
-const char kAshDisableTabletSplitView[] = "disable-tablet-splitview";
 
 // Disable the Touch Exploration Mode. Touch Exploration Mode will no longer be
 // turned on automatically when spoken feedback is enabled when this flag is
@@ -72,7 +75,6 @@ const char kAshPowerButtonPosition[] = "ash-power-button-position";
 const char kAshUiMode[] = "force-tablet-mode";
 
 // Values for the kAshUiMode flag.
-const char kAshUiModeAuto[] = "auto";
 const char kAshUiModeClamshell[] = "clamshell";
 const char kAshUiModeTablet[] = "touch_view";
 
@@ -81,22 +83,14 @@ const char kAshUiModeTablet[] = "touch_view";
 const char kAshHideNotificationsForFactory[] =
     "ash-hide-notifications-for-factory";
 
-// Enables the shelf color to be derived from the wallpaper.
-const char kAshShelfColor[] = "ash-shelf-color";
-const char kAshShelfColorEnabled[] = "enabled";
-const char kAshShelfColorDisabled[] = "disabled";
-
-// The color scheme to be used when the |kAshShelfColor| feature is enabled.
-const char kAshShelfColorScheme[] = "ash-shelf-color-scheme";
-const char kAshShelfColorSchemeLightMuted[] = "light_muted";
-const char kAshShelfColorSchemeLightVibrant[] = "light_vibrant";
-const char kAshShelfColorSchemeNormalMuted[] = "normal_muted";
-const char kAshShelfColorSchemeNormalVibrant[] = "normal_vibrant";
-const char kAshShelfColorSchemeDarkMuted[] = "dark_muted";
-const char kAshShelfColorSchemeDarkVibrant[] = "dark_vibrant";
-
 // Enables the heads-up display for tracking touch points.
 const char kAshTouchHud[] = "ash-touch-hud";
+
+// The physical position info of the side volume button while in landscape
+// primary screen orientation. The value is a JSON object containing a "region"
+// property with the value "keyboard", "screen" and a "side" property with the
+// value "left", "right", "top", "bottom".
+const char kAshSideVolumeButtonPosition[] = "ash-side-volume-button-position";
 
 // (Most) Chrome OS hardware reports ACPI power button releases correctly.
 // Standard hardware reports releases immediately after presses.  If set, we

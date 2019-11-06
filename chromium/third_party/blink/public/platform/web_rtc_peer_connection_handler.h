@@ -33,7 +33,6 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "third_party/blink/public/platform/web_rtc_ice_candidate.h"
 #include "third_party/blink/public/platform/web_rtc_rtp_transceiver.h"
@@ -42,6 +41,7 @@
 #include "third_party/webrtc/api/peer_connection_interface.h"
 #include "third_party/webrtc/api/rtc_error.h"
 #include "third_party/webrtc/api/rtp_transceiver_interface.h"
+#include "third_party/webrtc/api/stats/rtc_stats.h"
 
 namespace webrtc {
 enum class RTCErrorType;
@@ -64,6 +64,17 @@ struct WebRTCDataChannelInit;
 
 class WebRTCPeerConnectionHandler {
  public:
+  enum class IceConnectionStateVersion {
+    // Only applicable in Unified Plan when the JavaScript-exposed
+    // iceConnectionState is calculated in blink. In this case, kLegacy is used
+    // to report the webrtc::PeerConnectionInterface implementation which is not
+    // visible in JavaScript, but still useful to track for debugging purposes.
+    kLegacy,
+    // The JavaScript-visible iceConnectionState. In Plan B, this is the same as
+    // the webrtc::PeerConnectionInterface implementation.
+    kDefault,
+  };
+
   virtual ~WebRTCPeerConnectionHandler() = default;
 
   virtual bool Initialize(
@@ -75,10 +86,10 @@ class WebRTCPeerConnectionHandler {
   // create new transceivers or update the direction of existing transceivers.
   // https://w3c.github.io/webrtc-pc/#legacy-configuration-extensions
   // Plan B: Returns an empty list.
-  virtual std::vector<std::unique_ptr<WebRTCRtpTransceiver>> CreateOffer(
+  virtual WebVector<std::unique_ptr<WebRTCRtpTransceiver>> CreateOffer(
       const WebRTCSessionDescriptionRequest&,
       const WebMediaConstraints&) = 0;
-  virtual std::vector<std::unique_ptr<WebRTCRtpTransceiver>> CreateOffer(
+  virtual WebVector<std::unique_ptr<WebRTCRtpTransceiver>> CreateOffer(
       const WebRTCSessionDescriptionRequest&,
       const WebRTCOfferOptions&) = 0;
   virtual void CreateAnswer(const WebRTCSessionDescriptionRequest&,
@@ -109,12 +120,13 @@ class WebRTCPeerConnectionHandler {
                                scoped_refptr<WebRTCICECandidate>) {
     return false;
   }
+  virtual void RestartIce() = 0;
   virtual void GetStats(const WebRTCStatsRequest&) = 0;
   // Gets stats using the new stats collection API, see
   // third_party/webrtc/api/stats/.  These will replace the old stats collection
   // API when the new API has matured enough.
-  virtual void GetStats(std::unique_ptr<WebRTCStatsReportCallback>,
-                        RTCStatsFilter) = 0;
+  virtual void GetStats(WebRTCStatsReportCallback,
+                        const WebVector<webrtc::NonStandardGroupId>&) = 0;
   virtual scoped_refptr<webrtc::DataChannelInterface> CreateDataChannel(
       const WebString& label,
       const WebRTCDataChannelInit&) = 0;
@@ -148,6 +160,11 @@ class WebRTCPeerConnectionHandler {
   virtual void RunSynchronousRepeatingClosureOnSignalingThread(
       const base::RepeatingClosure& closure,
       const char* trace_event_name) = 0;
+
+  // Inform chrome://webrtc-internals/ that the iceConnectionState has changed.
+  virtual void TrackIceConnectionStateChange(
+      IceConnectionStateVersion version,
+      webrtc::PeerConnectionInterface::IceConnectionState state) = 0;
 };
 
 }  // namespace blink

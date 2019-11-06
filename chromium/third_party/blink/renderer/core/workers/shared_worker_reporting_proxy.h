@@ -31,11 +31,11 @@ class SharedWorkerReportingProxy final
   void ReportException(const WTF::String&,
                        std::unique_ptr<SourceLocation>,
                        int exception_id) override;
-  void ReportConsoleMessage(MessageSource,
+  void ReportConsoleMessage(mojom::ConsoleMessageSource,
                             mojom::ConsoleMessageLevel,
                             const String& message,
                             SourceLocation*) override;
-  void DidFetchScript() override;
+  void DidFetchScript(int64_t app_cache_id) override;
   void DidFailToFetchClassicScript() override;
   void DidFailToFetchModuleScript() override;
   void DidEvaluateClassicScript(bool success) override;

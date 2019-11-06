@@ -7,18 +7,18 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_tree_linker.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_tree_linker_registry.h"
-#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/script/dynamic_module_resolver.h"
 #include "third_party/blink/renderer/core/script/import_map.h"
+#include "third_party/blink/renderer/core/script/js_module_script.h"
 #include "third_party/blink/renderer/core/script/module_map.h"
-#include "third_party/blink/renderer/core/script/module_script.h"
+#include "third_party/blink/renderer/core/script/module_record_resolver_impl.h"
 #include "third_party/blink/renderer/core/script/parsed_specifier.h"
-#include "third_party/blink/renderer/core/script/script_module_resolver_impl.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -30,12 +30,13 @@ ModulatorImplBase::ModulatorImplBase(ScriptState* script_state)
     : script_state_(script_state),
       task_runner_(ExecutionContext::From(script_state_)
                        ->GetTaskRunner(TaskType::kNetworking)),
-      map_(ModuleMap::Create(this)),
-      tree_linker_registry_(ModuleTreeLinkerRegistry::Create()),
-      script_module_resolver_(ScriptModuleResolverImpl::Create(
+      map_(MakeGarbageCollected<ModuleMap>(this)),
+      tree_linker_registry_(MakeGarbageCollected<ModuleTreeLinkerRegistry>()),
+      module_record_resolver_(MakeGarbageCollected<ModuleRecordResolverImpl>(
           this,
           ExecutionContext::From(script_state_))),
-      dynamic_module_resolver_(DynamicModuleResolver::Create(this)) {
+      dynamic_module_resolver_(
+          MakeGarbageCollected<DynamicModuleResolver>(this)) {
   DCHECK(script_state_);
   DCHECK(task_runner_);
 }
@@ -47,36 +48,53 @@ bool ModulatorImplBase::IsScriptingDisabled() const {
 }
 
 bool ModulatorImplBase::BuiltInModuleInfraEnabled() const {
-  return origin_trials::BuiltInModuleInfraEnabled(GetExecutionContext());
+  return RuntimeEnabledFeatures::BuiltInModuleInfraEnabled(
+      GetExecutionContext());
 }
 
-bool ModulatorImplBase::BuiltInModuleEnabled(
-    blink::layered_api::Module module) const {
+bool ModulatorImplBase::BuiltInModuleEnabled(layered_api::Module module) const {
   DCHECK(BuiltInModuleInfraEnabled());
+  if (RuntimeEnabledFeatures::BuiltInModuleAllEnabled())
+    return true;
   switch (module) {
-    case blink::layered_api::Module::kBlank:
+    case layered_api::Module::kBlank:
       return true;
-    case blink::layered_api::Module::kVirtualScroller:
+    case layered_api::Module::kKvStorage:
+      return RuntimeEnabledFeatures::BuiltInModuleKvStorageEnabled(
+          GetExecutionContext());
+    case layered_api::Module::kElementsInternal:
+      // Union of conditions of KElementsSwitch and kElementsToast.
+      return RuntimeEnabledFeatures::BuiltInModuleSwitchElementEnabled();
+    case layered_api::Module::kElementsSwitch:
+      return RuntimeEnabledFeatures::BuiltInModuleSwitchElementEnabled();
+    case layered_api::Module::kElementsToast:
       return RuntimeEnabledFeatures::BuiltInModuleAllEnabled();
-    case blink::layered_api::Module::kKvStorage:
-      return RuntimeEnabledFeatures::BuiltInModuleAllEnabled() ||
-             origin_trials::BuiltInModuleKvStorageEnabled(
-                 GetExecutionContext());
+    case layered_api::Module::kElementsVirtualScroller:
+      return false;
   }
 }
 
 void ModulatorImplBase::BuiltInModuleUseCount(
-    blink::layered_api::Module module) const {
+    layered_api::Module module) const {
   DCHECK(BuiltInModuleInfraEnabled());
   DCHECK(BuiltInModuleEnabled(module));
   switch (module) {
-    case blink::layered_api::Module::kBlank:
+    case layered_api::Module::kBlank:
       break;
-    case blink::layered_api::Module::kVirtualScroller:
+    case layered_api::Module::kElementsInternal:
+      break;
+    case layered_api::Module::kElementsSwitch:
+      UseCounter::Count(GetExecutionContext(),
+                        WebFeature::kBuiltInModuleSwitchImported);
+      break;
+    case layered_api::Module::kElementsToast:
+      UseCounter::Count(GetExecutionContext(), WebFeature::kBuiltInModuleToast);
+      break;
+    case layered_api::Module::kElementsVirtualScroller:
       UseCounter::Count(GetExecutionContext(),
                         WebFeature::kBuiltInModuleVirtualScroller);
       break;
-    case blink::layered_api::Module::kKvStorage:
+    case layered_api::Module::kKvStorage:
       UseCounter::Count(GetExecutionContext(),
                         WebFeature::kBuiltInModuleKvStorage);
       break;
@@ -94,32 +112,9 @@ void ModulatorImplBase::FetchTree(
     const ScriptFetchOptions& options,
     ModuleScriptCustomFetchType custom_fetch_type,
     ModuleTreeClient* client) {
-  // <spec label="fetch-a-module-script-tree" step="2">Perform the internal
-  // module script graph fetching procedure given url, settings object,
-  // destination, options, settings object, visited set, "client", and with the
-  // top-level module fetch flag set. If the caller of this algorithm specified
-  // custom perform the fetch steps, pass those along as well.</spec>
-
-  // <spec label="fetch-a-module-worker-script-tree" step="3">Perform the
-  // internal module script graph fetching procedure given url, fetch client
-  // settings object, destination, options, module map settings object, visited
-  // set, "client", and with the top-level module fetch flag set. If the caller
-  // of this algorithm specified custom perform the fetch steps, pass those
-  // along as well.</spec>
-
   ModuleTreeLinker::Fetch(url, fetch_client_settings_object_fetcher,
                           destination, options, this, custom_fetch_type,
                           tree_linker_registry_, client);
-
-  // <spec label="fetch-a-module-script-tree" step="3">When the internal module
-  // script graph fetching procedure asynchronously completes with result,
-  // asynchronously complete this algorithm with result.</spec>
-
-  // <spec label="fetch-a-module-worker-script-tree" step="4">When the internal
-  // module script graph fetching procedure asynchronously completes with
-  // result, asynchronously complete this algorithm with result.</spec>
-
-  // Note: We delegate to ModuleTreeLinker to notify ModuleTreeClient.
 }
 
 void ModulatorImplBase::FetchDescendantsForInlineScript(
@@ -222,15 +217,15 @@ void ModulatorImplBase::RegisterImportMap(const ImportMap* import_map) {
   if (import_map_) {
     // Only one import map is allowed.
     // TODO(crbug.com/927119): Implement merging.
-    GetExecutionContext()->AddErrorMessage(
-        ConsoleLogger::Source::kOther,
+    GetExecutionContext()->AddConsoleMessage(
+        mojom::ConsoleMessageSource::kOther, mojom::ConsoleMessageLevel::kError,
         "Multiple import maps are not yet supported. https://crbug.com/927119");
     return;
   }
 
   if (!BuiltInModuleInfraEnabled()) {
-    GetExecutionContext()->AddErrorMessage(
-        ConsoleLogger::Source::kOther,
+    GetExecutionContext()->AddConsoleMessage(
+        mojom::ConsoleMessageSource::kOther, mojom::ConsoleMessageLevel::kError,
         "Import maps are disabled when Layered API Infra is disabled.");
     return;
   }
@@ -260,35 +255,35 @@ void ModulatorImplBase::ResolveDynamically(
 
 // <specdef href="https://html.spec.whatwg.org/C/#hostgetimportmetaproperties">
 ModuleImportMeta ModulatorImplBase::HostGetImportMetaProperties(
-    ScriptModule record) const {
+    ModuleRecord record) const {
   // <spec step="1">Let module script be moduleRecord.[[HostDefined]].</spec>
   const ModuleScript* module_script =
-      script_module_resolver_->GetHostDefined(record);
+      module_record_resolver_->GetModuleScriptFromModuleRecord(record);
   DCHECK(module_script);
 
-  // <spec step="2">Let urlString be module script's base URL,
+  // <spec step="3">Let urlString be module script's base URL,
   // serialized.</spec>
   String url_string = module_script->BaseURL().GetString();
 
-  // <spec step="3">Return « Record { [[Key]]: "url", [[Value]]: urlString }
+  // <spec step="4">Return « Record { [[Key]]: "url", [[Value]]: urlString }
   // ».</spec>
   return ModuleImportMeta(url_string);
 }
 
-ScriptValue ModulatorImplBase::InstantiateModule(ScriptModule script_module) {
+ScriptValue ModulatorImplBase::InstantiateModule(ModuleRecord module_record) {
   UseCounter::Count(GetExecutionContext(),
                     WebFeature::kInstantiateModuleScript);
 
   ScriptState::Scope scope(script_state_);
-  return script_module.Instantiate(script_state_);
+  return module_record.Instantiate(script_state_);
 }
 
 Vector<Modulator::ModuleRequest>
-ModulatorImplBase::ModuleRequestsFromScriptModule(ScriptModule script_module) {
+ModulatorImplBase::ModuleRequestsFromModuleRecord(ModuleRecord module_record) {
   ScriptState::Scope scope(script_state_);
-  Vector<String> specifiers = script_module.ModuleRequests(script_state_);
+  Vector<String> specifiers = module_record.ModuleRequests(script_state_);
   Vector<TextPosition> positions =
-      script_module.ModuleRequestPositions(script_state_);
+      module_record.ModuleRequestPositions(script_state_);
   DCHECK_EQ(specifiers.size(), positions.size());
   Vector<ModuleRequest> requests;
   requests.ReserveInitialCapacity(specifiers.size());
@@ -316,13 +311,13 @@ void ModulatorImplBase::ProduceCacheModuleTree(
 
   discovered_set->insert(module_script);
 
-  ScriptModule record = module_script->Record();
+  ModuleRecord record = module_script->Record();
   DCHECK(!record.IsNull());
 
   module_script->ProduceCache();
 
   Vector<Modulator::ModuleRequest> child_specifiers =
-      ModuleRequestsFromScriptModule(record);
+      ModuleRequestsFromModuleRecord(record);
 
   for (const auto& module_request : child_specifiers) {
     KURL child_url =
@@ -359,7 +354,7 @@ ScriptValue ModulatorImplBase::ExecuteModule(
 
   // <spec step="4">Prepare to run script given settings.</spec>
   //
-  // This is placed here to also cover ScriptModule::ReportException().
+  // This is placed here to also cover ModuleRecord::ReportException().
   ScriptState::Scope scope(script_state_);
 
   // <spec step="5">Let evaluationStatus be null.</spec>
@@ -376,7 +371,7 @@ ScriptValue ModulatorImplBase::ExecuteModule(
     // <spec step="7">Otherwise:</spec>
 
     // <spec step="7.1">Let record be script's record.</spec>
-    const ScriptModule& record = module_script->Record();
+    const ModuleRecord& record = module_script->Record();
     CHECK(!record.IsNull());
 
     // <spec step="7.2">Set evaluationStatus to record.Evaluate(). ...</spec>
@@ -405,7 +400,7 @@ ScriptValue ModulatorImplBase::ExecuteModule(
 
     // <spec step="8.2">Otherwise, report the exception given by
     // evaluationStatus.[[Value]] for script.</spec>
-    ScriptModule::ReportException(script_state_, error.V8Value());
+    ModuleRecord::ReportException(script_state_, error.V8Value());
   }
 
   // <spec step="9">Clean up after running script with settings.</spec>
@@ -414,11 +409,11 @@ ScriptValue ModulatorImplBase::ExecuteModule(
   return ScriptValue();
 }
 
-void ModulatorImplBase::Trace(blink::Visitor* visitor) {
+void ModulatorImplBase::Trace(Visitor* visitor) {
   visitor->Trace(script_state_);
   visitor->Trace(map_);
   visitor->Trace(tree_linker_registry_);
-  visitor->Trace(script_module_resolver_);
+  visitor->Trace(module_record_resolver_);
   visitor->Trace(dynamic_module_resolver_);
   visitor->Trace(import_map_);
 

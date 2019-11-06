@@ -30,7 +30,6 @@
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/media_stream_audio_source_options.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/wtf/locker.h"
 
 namespace blink {
 
@@ -143,10 +142,16 @@ MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
     return nullptr;
   }
 
-  // Use the first audio track in the media stream.
+  // Find the first track, which is the track whose id comes first given a
+  // lexicographic ordering of the code units of the track id.
   MediaStreamTrack* audio_track = audio_tracks[0];
+  for (auto track : audio_tracks) {
+    if (CodeUnitCompareLessThan(track->id(), audio_track->id())) {
+      audio_track = track;
+    }
+  }
   std::unique_ptr<AudioSourceProvider> provider =
-      audio_track->CreateWebAudioSource();
+      audio_track->CreateWebAudioSource(context.sampleRate());
 
   MediaStreamAudioSourceNode* node =
       MakeGarbageCollected<MediaStreamAudioSourceNode>(

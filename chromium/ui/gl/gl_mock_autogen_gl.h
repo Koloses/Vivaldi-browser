@@ -97,6 +97,14 @@ MOCK_METHOD4(ClearColor,
 MOCK_METHOD1(ClearDepth, void(GLclampd depth));
 MOCK_METHOD1(ClearDepthf, void(GLclampf depth));
 MOCK_METHOD1(ClearStencil, void(GLint s));
+MOCK_METHOD5(ClearTexImage,
+             void(GLuint texture,
+                  GLint level,
+                  GLenum format,
+                  GLenum type,
+                  const GLvoid* data));
+// TODO(zmo): crbug.com/456340
+// glClearTexSubImage cannot be mocked because it has 11 args.
 MOCK_METHOD3(ClientWaitSync,
              GLenum(GLsync sync, GLbitfield flags, GLuint64 timeout));
 MOCK_METHOD4(
@@ -353,7 +361,7 @@ MOCK_METHOD5(FramebufferTextureLayer,
                   GLuint texture,
                   GLint level,
                   GLint layer));
-MOCK_METHOD6(FramebufferTextureMultiviewLayeredANGLE,
+MOCK_METHOD6(FramebufferTextureMultiviewOVR,
              void(GLenum target,
                   GLenum attachment,
                   GLuint texture,
@@ -858,6 +866,7 @@ MOCK_METHOD7(InvalidateSubFramebuffer,
                   GLint y,
                   GLint width,
                   GLint height));
+MOCK_METHOD1(InvalidateTextureANGLE, void(GLenum target));
 MOCK_METHOD1(IsBuffer, GLboolean(GLuint buffer));
 MOCK_METHOD1(IsEnabled, GLboolean(GLenum cap));
 MOCK_METHOD1(IsFenceAPPLE, GLboolean(GLuint fence));
@@ -1239,6 +1248,15 @@ MOCK_METHOD9(TexImage2D,
                   GLenum format,
                   GLenum type,
                   const void* pixels));
+MOCK_METHOD8(TexImage2DExternalANGLE,
+             void(GLenum target,
+                  GLint level,
+                  GLint internalformat,
+                  GLsizei width,
+                  GLsizei height,
+                  GLint border,
+                  GLenum format,
+                  GLenum type));
 MOCK_METHOD10(TexImage2DRobustANGLE,
               void(GLenum target,
                    GLint level,

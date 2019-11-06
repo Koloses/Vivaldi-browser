@@ -28,7 +28,6 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.DisabledTest;
@@ -36,8 +35,8 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.signin.AccountSigninActivity;
 import org.chromium.chrome.browser.signin.SigninAccessPoint;
+import org.chromium.chrome.browser.signin.SigninActivity;
 import org.chromium.chrome.browser.signin.SigninPromoController;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -45,6 +44,7 @@ import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.ProfileDataSource;
 import org.chromium.components.signin.test.util.AccountHolder;
 import org.chromium.components.signin.test.util.FakeAccountManagerDelegate;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.ui.test.util.UiDisableIf;
 
 import java.io.Closeable;
@@ -115,9 +115,9 @@ public class BookmarkPersonalizedSigninPromoTest {
 
         assertEquals("Choosing to sign in with the default account should fire an intent!", 1,
                 startedIntents.size());
-        Intent expectedIntent = AccountSigninActivity.createIntentForConfirmationOnlySigninFlow(
-                mActivityTestRule.getActivity(), SigninAccessPoint.BOOKMARK_MANAGER,
-                TEST_ACCOUNT_NAME, true, true);
+        Intent expectedIntent =
+                SigninActivity.createIntentForPromoDefaultFlow(mActivityTestRule.getActivity(),
+                        SigninAccessPoint.BOOKMARK_MANAGER, TEST_ACCOUNT_NAME);
         assertTrue(expectedIntent.filterEquals(startedIntents.get(0)));
     }
 
@@ -137,8 +137,8 @@ public class BookmarkPersonalizedSigninPromoTest {
 
         assertEquals("Choosing to sign in with another account should fire an intent!", 1,
                 startedIntents.size());
-        Intent expectedIntent = AccountSigninActivity.createIntentForDefaultSigninFlow(
-                mActivityTestRule.getActivity(), SigninAccessPoint.BOOKMARK_MANAGER, true);
+        Intent expectedIntent = SigninActivity.createIntent(
+                mActivityTestRule.getActivity(), SigninAccessPoint.BOOKMARK_MANAGER);
         assertTrue(expectedIntent.filterEquals(startedIntents.get(0)));
     }
 
@@ -157,15 +157,15 @@ public class BookmarkPersonalizedSigninPromoTest {
 
         assertFalse(
                 "Adding a new account should fire at least one intent!", startedIntents.isEmpty());
-        Intent expectedIntent = AccountSigninActivity.createIntentForAddAccountSigninFlow(
-                mActivityTestRule.getActivity(), SigninAccessPoint.BOOKMARK_MANAGER, true);
-        // Comparing only the first intent as AccountSigninActivity will fire an intent after
+        Intent expectedIntent = SigninActivity.createIntentForPromoAddAccountFlow(
+                mActivityTestRule.getActivity(), SigninAccessPoint.BOOKMARK_MANAGER);
+        // Comparing only the first intent as SigninActivity will fire an intent after
         // starting the flow to add an account.
         assertTrue(expectedIntent.filterEquals(startedIntents.get(0)));
     }
 
     private void openBookmarkManager() throws InterruptedException {
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 () -> BookmarkUtils.showBookmarkManager(mActivityTestRule.getActivity()));
     }
 
@@ -175,7 +175,7 @@ public class BookmarkPersonalizedSigninPromoTest {
         mAccountManagerDelegate.addAccountHolderBlocking(accountHolder.build());
         ProfileDataSource.ProfileData profileData =
                 new ProfileDataSource.ProfileData(TEST_ACCOUNT_NAME, null, TEST_FULL_NAME, null);
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 () -> mAccountManagerDelegate.setProfileData(TEST_ACCOUNT_NAME, profileData));
     }
 

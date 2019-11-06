@@ -32,17 +32,20 @@
 #include "net/base/hex_utils.h"
 #include "net/base/ip_address.h"
 #include "net/base/load_timing_info.h"
+#include "net/base/proxy_server.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_source_type.h"
+#include "net/socket/connect_job.h"
 #include "net/socket/socket.h"
 #include "net/socket/stream_socket.h"
 #include "net/socket/websocket_endpoint_lock_manager.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/ssl/ssl_info.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -156,6 +159,12 @@ MockConnect::MockConnect(IoMode io_mode, int r, IPEndPoint addr) :
 
 MockConnect::~MockConnect() = default;
 
+MockConfirm::MockConfirm() : mode(SYNCHRONOUS), result(OK) {}
+
+MockConfirm::MockConfirm(IoMode io_mode, int r) : mode(io_mode), result(r) {}
+
+MockConfirm::~MockConfirm() = default;
+
 bool SocketDataProvider::IsIdle() const {
   return true;
 }
@@ -211,7 +220,8 @@ void StaticSocketDataHelper::Reset() {
   write_index_ = 0;
 }
 
-bool StaticSocketDataHelper::VerifyWriteData(const std::string& data) {
+bool StaticSocketDataHelper::VerifyWriteData(const std::string& data,
+                                             SocketDataPrinter* printer) {
   CHECK(!AllWriteDataConsumed());
   // Check that the actual data matches the expectations, skipping over any
   // pause events.
@@ -231,6 +241,12 @@ bool StaticSocketDataHelper::VerifyWriteData(const std::string& data) {
   EXPECT_TRUE(actual_data == expected_data)
       << "Actual write data:\n" << HexDump(data)
       << "Expected write data:\n" << HexDump(expected_data);
+  if (printer) {
+    EXPECT_TRUE(actual_data == expected_data)
+        << "Actual write data:\n"
+        << printer->PrintWrite(data) << "Expected write data:\n"
+        << printer->PrintWrite(expected_data);
+  }
   return expected_data == actual_data;
 }
 
@@ -286,7 +302,7 @@ MockWriteResult StaticSocketDataProvider::OnWrite(const std::string& data) {
 
   // Check that what we are writing matches the expectation.
   // Then give the mocked return value.
-  if (!helper_.VerifyWriteData(data))
+  if (!helper_.VerifyWriteData(data, printer_))
     return MockWriteResult(SYNCHRONOUS, ERR_UNEXPECTED);
 
   const MockWrite& next_write = helper_.AdvanceWrite();
@@ -321,8 +337,7 @@ ProxyClientSocketDataProvider::~ProxyClientSocketDataProvider() = default;
 SSLSocketDataProvider::SSLSocketDataProvider(IoMode mode, int result)
     : connect(mode, result),
       next_proto(kProtoUnknown),
-      cert_request_info(NULL),
-      channel_id_service(NULL),
+      cert_request_info(nullptr),
       expected_ssl_version_min(kDefaultSSLVersionMin),
       expected_ssl_version_max(kDefaultSSLVersionMax) {
   SSLConnectionStatusSetVersion(SSL_CONNECTION_VERSION_TLS1_3,
@@ -346,8 +361,7 @@ SequencedSocketData::SequencedSocketData(base::span<const MockRead> reads,
       sequence_number_(0),
       read_state_(IDLE),
       write_state_(IDLE),
-      busy_before_sync_reads_(false),
-      weak_factory_(this) {
+      busy_before_sync_reads_(false) {
   // Check that reads and writes have a contiguous set of sequence numbers
   // starting from 0 and working their way up, with no repeats and skipping
   // no values.
@@ -427,7 +441,8 @@ SequencedSocketData::SequencedSocketData(const MockConnect& connect,
 
 MockRead SequencedSocketData::OnRead() {
   CHECK_EQ(IDLE, read_state_);
-  CHECK(!helper_.AllReadDataConsumed());
+  CHECK(!helper_.AllReadDataConsumed())
+      << "Application tried to read but there is no read data left";
 
   NET_TRACE(1, " *** ") << "sequence_number: " << sequence_number_;
   const MockRead& next_read = helper_.PeekRead();
@@ -479,7 +494,7 @@ MockWriteResult SequencedSocketData::OnWrite(const std::string& data) {
   NET_TRACE(1, " *** ") << "next_write: " << next_write.sequence_number;
   CHECK_GE(next_write.sequence_number, sequence_number_);
 
-  if (!helper_.VerifyWriteData(data))
+  if (!helper_.VerifyWriteData(data, printer_))
     return MockWriteResult(SYNCHRONOUS, ERR_UNEXPECTED);
 
   if (next_write.sequence_number <= sequence_number_) {
@@ -777,10 +792,10 @@ MockClientSocketFactory::CreateTransportClientSocket(
 }
 
 std::unique_ptr<SSLClientSocket> MockClientSocketFactory::CreateSSLClientSocket(
+    SSLClientContext* context,
     std::unique_ptr<StreamSocket> stream_socket,
     const HostPortPair& host_and_port,
-    const SSLConfig& ssl_config,
-    const SSLClientSocketContext& context) {
+    const SSLConfig& ssl_config) {
   SSLSocketDataProvider* next_ssl_data = mock_ssl_data_.GetNext();
   if (next_ssl_data->next_protos_expected_in_ssl_config.has_value()) {
     EXPECT_EQ(next_ssl_data->next_protos_expected_in_ssl_config.value().size(),
@@ -804,6 +819,13 @@ std::unique_ptr<SSLClientSocket> MockClientSocketFactory::CreateSSLClientSocket(
       EXPECT_FALSE(ssl_config.client_cert);
     }
   }
+  if (next_ssl_data->expected_host_and_port) {
+    EXPECT_EQ(*next_ssl_data->expected_host_and_port, host_and_port);
+  }
+  if (next_ssl_data->expected_network_isolation_key) {
+    EXPECT_EQ(*next_ssl_data->expected_network_isolation_key,
+              ssl_config.network_isolation_key);
+  }
   return std::unique_ptr<SSLClientSocket>(new MockSSLClientSocket(
       std::move(stream_socket), host_and_port, ssl_config, next_ssl_data));
 }
@@ -819,7 +841,6 @@ MockClientSocketFactory::CreateProxyClientSocket(
     bool using_spdy,
     NextProto negotiated_protocol,
     ProxyDelegate* proxy_delegate,
-    bool is_https_proxy,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
   if (use_mock_proxy_client_sockets_) {
     ProxyClientSocketDataProvider* next_proxy_data = mock_proxy_data_.GetNext();
@@ -829,12 +850,12 @@ MockClientSocketFactory::CreateProxyClientSocket(
     return GetDefaultFactory()->CreateProxyClientSocket(
         std::move(stream_socket), user_agent, endpoint, proxy_server,
         http_auth_controller, tunnel, using_spdy, negotiated_protocol,
-        proxy_delegate, is_https_proxy, traffic_annotation);
+        proxy_delegate, traffic_annotation);
   }
 }
 
 MockClientSocket::MockClientSocket(const NetLogWithSource& net_log)
-    : connected_(false), net_log_(net_log), weak_factory_(this) {
+    : connected_(false), net_log_(net_log) {
   local_addr_ = IPEndPoint(IPAddress(192, 0, 2, 33), 123);
   peer_addr_ = IPEndPoint(IPAddress(192, 0, 2, 33), 0);
 }
@@ -925,7 +946,7 @@ MockTCPClientSocket::MockTCPClientSocket(const AddressList& addresses,
       read_data_(SYNCHRONOUS, ERR_UNEXPECTED),
       need_read_data_(true),
       peer_closed_connection_(false),
-      pending_read_buf_(NULL),
+      pending_read_buf_(nullptr),
       pending_read_buf_len_(0),
       was_used_to_convey_data_(false),
       enable_read_if_ready_(false) {
@@ -1279,8 +1300,7 @@ MockProxyClientSocket::MockProxyClientSocket(
     : net_log_(socket->NetLog()),
       socket_(std::move(socket)),
       data_(data),
-      auth_controller_(auth_controller),
-      weak_factory_(this) {
+      auth_controller_(auth_controller) {
   DCHECK(data_);
 }
 
@@ -1446,8 +1466,7 @@ MockSSLClientSocket::MockSSLClientSocket(
     SSLSocketDataProvider* data)
     : net_log_(stream_socket->NetLog()),
       stream_socket_(std::move(stream_socket)),
-      data_(data),
-      weak_factory_(this) {
+      data_(data) {
   DCHECK(data_);
   peer_addr_ = data->connect.peer_addr;
 }
@@ -1473,6 +1492,8 @@ int MockSSLClientSocket::Write(
     int buf_len,
     CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
+  if (!data_->is_confirm_data_consumed)
+    data_->write_called_before_confirm = true;
   return stream_socket_->Write(buf, buf_len, std::move(callback),
                                traffic_annotation);
 }
@@ -1494,8 +1515,30 @@ int MockSSLClientSocket::Connect(CompletionOnceCallback callback) {
 }
 
 void MockSSLClientSocket::Disconnect() {
-  if (stream_socket_ != NULL)
+  if (stream_socket_ != nullptr)
     stream_socket_->Disconnect();
+}
+
+void MockSSLClientSocket::RunConfirmHandshakeCallback(
+    CompletionOnceCallback callback,
+    int result) {
+  data_->is_confirm_data_consumed = true;
+  std::move(callback).Run(result);
+}
+
+int MockSSLClientSocket::ConfirmHandshake(CompletionOnceCallback callback) {
+  DCHECK(stream_socket_->IsConnected());
+  if (data_->is_confirm_data_consumed)
+    return data_->confirm.result;
+  if (data_->confirm.mode == ASYNC) {
+    RunCallbackAsync(
+        base::BindOnce(&MockSSLClientSocket::RunConfirmHandshakeCallback,
+                       base::Unretained(this), std::move(callback)),
+        data_->confirm.result);
+    return ERR_IO_PENDING;
+  }
+  data_->is_confirm_data_consumed = true;
+  return data_->confirm.result;
 }
 
 bool MockSSLClientSocket::IsConnected() const {
@@ -1579,10 +1622,6 @@ void MockSSLClientSocket::GetSSLCertRequestInfo(
   }
 }
 
-ChannelIDService* MockSSLClientSocket::GetChannelIDService() const {
-  return data_->channel_id_service;
-}
-
 int MockSSLClientSocket::ExportKeyingMaterial(const base::StringPiece& label,
                                               bool has_context,
                                               const base::StringPiece& context,
@@ -1590,11 +1629,6 @@ int MockSSLClientSocket::ExportKeyingMaterial(const base::StringPiece& label,
                                               unsigned int outlen) {
   memset(out, 'A', outlen);
   return OK;
-}
-
-crypto::ECPrivateKey* MockSSLClientSocket::GetChannelIDKey() const {
-  NOTREACHED();
-  return NULL;
 }
 
 void MockSSLClientSocket::RunCallbackAsync(CompletionOnceCallback callback,
@@ -1631,10 +1665,9 @@ MockUDPClientSocket::MockUDPClientSocket(SocketDataProvider* data,
       need_read_data_(true),
       source_port_(123),
       network_(NetworkChangeNotifier::kInvalidNetworkHandle),
-      pending_read_buf_(NULL),
+      pending_read_buf_(nullptr),
       pending_read_buf_len_(0),
-      net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::NONE)),
-      weak_factory_(this) {
+      net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::NONE)) {
   DCHECK(data_);
   data_->Initialize(this);
   peer_addr_ = data->connect_data().peer_addr;
@@ -1915,7 +1948,7 @@ int MockUDPClientSocket::CompleteRead() {
   scoped_refptr<IOBuffer> buf = pending_read_buf_;
   int buf_len = pending_read_buf_len_;
   CompletionOnceCallback callback = std::move(pending_read_callback_);
-  pending_read_buf_ = NULL;
+  pending_read_buf_ = nullptr;
   pending_read_buf_len_ = 0;
 
   int result = read_data_.result;
@@ -2043,7 +2076,7 @@ bool MockTransportClientSocketPool::MockConnectJob::CancelHandle(
   if (handle != handle_)
     return false;
   socket_.reset();
-  handle_ = NULL;
+  handle_ = nullptr;
   user_callback_.Reset();
   return true;
 }
@@ -2072,7 +2105,7 @@ void MockTransportClientSocketPool::MockConnectJob::OnConnect(int rv) {
     handle_->set_connection_attempts(attempts);
   }
 
-  handle_ = NULL;
+  handle_ = nullptr;
 
   if (!user_callback_.is_null()) {
     std::move(user_callback_).Run(rv);
@@ -2082,26 +2115,16 @@ void MockTransportClientSocketPool::MockConnectJob::OnConnect(int rv) {
 MockTransportClientSocketPool::MockTransportClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
-    ClientSocketFactory* socket_factory)
+    const CommonConnectJobParams* common_connect_job_params)
     : TransportClientSocketPool(
           max_sockets,
           max_sockets_per_group,
           base::TimeDelta::FromSeconds(10) /* unused_idle_socket_timeout */,
-          socket_factory,
-          nullptr /* host_resolver */,
-          nullptr /* proxy_delegate */,
-          nullptr /* cert_verifier */,
-          nullptr /* channel_id_server */,
-          nullptr /* transport_security_state */,
-          nullptr /* cert_transparency_verifier */,
-          nullptr /* ct_policy_enforcer */,
-          nullptr /* ssl_client_session_cache */,
-          nullptr /* ssl_client_session_cache_privacy_mode */,
-          nullptr /* ssl_config_service */,
-          nullptr /* socket_performance_watcher_factory */,
-          nullptr /* network_quality_estimator */,
-          nullptr /* netlog */),
-      client_socket_factory_(socket_factory),
+          ProxyServer::Direct(),
+          false /* is_for_websockets */,
+          common_connect_job_params,
+          nullptr /* ssl_config_service */),
+      client_socket_factory_(common_connect_job_params->client_socket_factory),
       last_request_priority_(DEFAULT_PRIORITY),
       release_count_(0),
       cancel_count_(0) {}
@@ -2109,8 +2132,9 @@ MockTransportClientSocketPool::MockTransportClientSocketPool(
 MockTransportClientSocketPool::~MockTransportClientSocketPool() = default;
 
 int MockTransportClientSocketPool::RequestSocket(
-    const std::string& group_name,
-    const void* socket_params,
+    const ClientSocketPool::GroupId& group_id,
+    scoped_refptr<ClientSocketPool::SocketParams> socket_params,
+    const base::Optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
     RequestPriority priority,
     const SocketTag& socket_tag,
     RespectLimits respect_limits,
@@ -2121,17 +2145,18 @@ int MockTransportClientSocketPool::RequestSocket(
   last_request_priority_ = priority;
   std::unique_ptr<StreamSocket> socket =
       client_socket_factory_->CreateTransportClientSocket(
-          AddressList(), NULL, net_log.net_log(), NetLogSource());
+          AddressList(), nullptr, net_log.net_log(), NetLogSource());
   MockConnectJob* job = new MockConnectJob(
       std::move(socket), handle, socket_tag, std::move(callback), priority);
   job_list_.push_back(base::WrapUnique(job));
-  handle->set_pool_id(1);
+  handle->set_group_generation(1);
   return job->Connect();
 }
 
-void MockTransportClientSocketPool::SetPriority(const std::string& group_name,
-                                                ClientSocketHandle* handle,
-                                                RequestPriority priority) {
+void MockTransportClientSocketPool::SetPriority(
+    const ClientSocketPool::GroupId& group_id,
+    ClientSocketHandle* handle,
+    RequestPriority priority) {
   for (auto& job : job_list_) {
     if (job->handle() == handle) {
       job->set_priority(priority);
@@ -2141,8 +2166,10 @@ void MockTransportClientSocketPool::SetPriority(const std::string& group_name,
   NOTREACHED();
 }
 
-void MockTransportClientSocketPool::CancelRequest(const std::string& group_name,
-                                                  ClientSocketHandle* handle) {
+void MockTransportClientSocketPool::CancelRequest(
+    const ClientSocketPool::GroupId& group_id,
+    ClientSocketHandle* handle,
+    bool cancel_connect_job) {
   for (std::unique_ptr<MockConnectJob>& it : job_list_) {
     if (it->CancelHandle(handle)) {
       cancel_count_++;
@@ -2152,10 +2179,10 @@ void MockTransportClientSocketPool::CancelRequest(const std::string& group_name,
 }
 
 void MockTransportClientSocketPool::ReleaseSocket(
-    const std::string& group_name,
+    const ClientSocketPool::GroupId& group_id,
     std::unique_ptr<StreamSocket> socket,
-    int id) {
-  EXPECT_EQ(1, id);
+    int64_t generation) {
+  EXPECT_EQ(1, generation);
   release_count_++;
 }
 

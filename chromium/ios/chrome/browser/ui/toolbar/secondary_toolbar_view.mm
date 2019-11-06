@@ -14,6 +14,7 @@
 #import "ios/chrome/browser/ui/toolbar_container/toolbar_collapsing.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#include "ui/gfx/ios/uikit_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -30,8 +31,8 @@ const CGFloat kToolsMenuOffset = -7;
 // Redefined as readwrite
 @property(nonatomic, strong, readwrite) NSArray<ToolbarButton*>* allButtons;
 
-// The blur visual effect view, redefined as readwrite.
-@property(nonatomic, strong, readwrite) UIView* blur;
+// Separator above the toolbar, redefined as readwrite.
+@property(nonatomic, strong, readwrite) UIView* separator;
 
 // The stack view containing the buttons.
 @property(nonatomic, strong) UIStackView* stackView;
@@ -45,7 +46,7 @@ const CGFloat kToolsMenuOffset = -7;
 // Button to display the tab grid, redefined as readwrite.
 @property(nonatomic, strong, readwrite) ToolbarTabGridButton* tabGridButton;
 // Button to focus the omnibox, redefined as readwrite.
-@property(nonatomic, strong, readwrite) ToolbarButton* omniboxButton;
+@property(nonatomic, strong, readwrite) ToolbarButton* searchButton;
 
 @end
 
@@ -57,9 +58,8 @@ const CGFloat kToolsMenuOffset = -7;
 @synthesize backButton = _backButton;
 @synthesize forwardButton = _forwardButton;
 @synthesize toolsMenuButton = _toolsMenuButton;
-@synthesize omniboxButton = _omniboxButton;
+@synthesize searchButton = _searchButton;
 @synthesize tabGridButton = _tabGridButton;
-@synthesize blur = _blur;
 
 #pragma mark - Public
 
@@ -102,34 +102,14 @@ const CGFloat kToolsMenuOffset = -7;
 
   self.translatesAutoresizingMaskIntoConstraints = NO;
 
-  UIBlurEffect* blurEffect = self.buttonFactory.toolbarConfiguration.blurEffect;
-  if (blurEffect) {
-    self.blur = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
-  } else {
-    self.blur = [[UIView alloc] init];
-  }
-  self.blur.backgroundColor =
-      self.buttonFactory.toolbarConfiguration.blurBackgroundColor;
-  [self addSubview:self.blur];
-  self.blur.translatesAutoresizingMaskIntoConstraints = NO;
-  AddSameConstraints(self.blur, self);
+  self.backgroundColor =
+      self.buttonFactory.toolbarConfiguration.backgroundColor;
 
   UIView* contentView = self;
-  UIVisualEffect* vibrancy = [self.buttonFactory.toolbarConfiguration
-      vibrancyEffectForBlurEffect:blurEffect];
-  if (vibrancy && IconForSearchButton() != ToolbarSearchButtonIconColorful) {
-    // Add vibrancy only if we have a vibrancy effect.
-    UIVisualEffectView* vibrancyView =
-        [[UIVisualEffectView alloc] initWithEffect:vibrancy];
-    [self addSubview:vibrancyView];
-    vibrancyView.translatesAutoresizingMaskIntoConstraints = NO;
-    AddSameConstraints(self, vibrancyView);
-    contentView = vibrancyView.contentView;
-  }
 
   self.backButton = [self.buttonFactory backButton];
   self.forwardButton = [self.buttonFactory forwardButton];
-  self.omniboxButton = [self.buttonFactory omniboxButton];
+  self.searchButton = [self.buttonFactory searchButton];
   self.tabGridButton = [self.buttonFactory tabGridButton];
   self.toolsMenuButton = [self.buttonFactory toolsMenuButton];
 
@@ -140,9 +120,15 @@ const CGFloat kToolsMenuOffset = -7;
       CGAffineTransformMakeTranslation(textDirection * kToolsMenuOffset, 0);
 
   self.allButtons = @[
-    self.backButton, self.forwardButton, self.omniboxButton, self.tabGridButton,
+    self.backButton, self.forwardButton, self.searchButton, self.tabGridButton,
     self.toolsMenuButton
   ];
+
+  self.separator = [[UIView alloc] init];
+  self.separator.backgroundColor =
+      [UIColor colorNamed:@"tab_toolbar_shadow_color"];
+  self.separator.translatesAutoresizingMaskIntoConstraints = NO;
+  [self addSubview:self.separator];
 
   self.stackView =
       [[UIStackView alloc] initWithArrangedSubviews:self.allButtons];
@@ -162,6 +148,13 @@ const CGFloat kToolsMenuOffset = -7;
     [self.stackView.topAnchor
         constraintEqualToAnchor:self.topAnchor
                        constant:kBottomButtonsBottomMargin],
+
+    [self.separator.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+    [self.separator.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+    [self.separator.bottomAnchor constraintEqualToAnchor:self.topAnchor],
+    [self.separator.heightAnchor
+        constraintEqualToConstant:ui::AlignValueToUpperPixel(
+                                      kToolbarSeparatorHeight)],
   ]];
 }
 

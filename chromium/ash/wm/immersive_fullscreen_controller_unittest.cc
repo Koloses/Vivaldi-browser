@@ -237,8 +237,7 @@ class ImmersiveFullscreenControllerTest : public AshTestBase {
 
   // Enable or disable tablet mode based on |enable|.
   void EnableTabletMode(bool enable) {
-    Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(
-        enable);
+    Shell::Get()->tablet_mode_controller()->SetEnabledForTest(enable);
   }
 
  private:
@@ -566,7 +565,7 @@ TEST_F(ImmersiveFullscreenControllerTest, MouseEventsVerticalDisplayLayout) {
   event_generator->MoveMouseTo(x, y_top_edge + 1);
   EXPECT_TRUE(top_edge_hover_timer_running());
   EXPECT_EQ(y_top_edge + 1,
-            Shell::Get()->aura_env()->last_mouse_location().y());
+            aura::Env::GetInstance()->last_mouse_location().y());
 
   // The timer should continue running if the user moves the mouse to the top
   // edge even though the mouse is warped to the secondary display.
@@ -730,8 +729,8 @@ TEST_F(ImmersiveFullscreenControllerTest, WindowsInTabletMode) {
   // mode either.
   Shell::Get()->split_view_controller()->SnapWindow(window(),
                                                     SplitViewController::LEFT);
-  EXPECT_TRUE(wm::GetWindowState(window())->IsSnapped());
-  EXPECT_TRUE(Shell::Get()->split_view_controller()->IsSplitViewModeActive());
+  EXPECT_TRUE(WindowState::Get(window())->IsSnapped());
+  EXPECT_TRUE(Shell::Get()->split_view_controller()->InSplitViewMode());
   AttemptReveal(MODALITY_GESTURE_SCROLL);
   EXPECT_FALSE(controller()->IsRevealed());
 }
@@ -781,7 +780,7 @@ TEST_F(ImmersiveFullscreenControllerTest, RevealViaGestureChildConsumesEvents) {
           &child_delegate, aura::client::WINDOW_TYPE_CONTROL, 1234,
           gfx::Rect()));
   content_view()->Attach(child.get());
-  child->Show();
+  content_view()->Layout();
 
   ConsumeEventHandler handler;
   child->AddPreTargetHandler(&handler);
@@ -835,7 +834,7 @@ TEST_F(ImmersiveFullscreenControllerTest, EventsDoNotLeakToWindowUnderneath) {
 
 // Check that the window state gets properly marked for immersive fullscreen.
 TEST_F(ImmersiveFullscreenControllerTest, WindowStateImmersiveFullscreen) {
-  ash::wm::WindowState* window_state = ash::wm::GetWindowState(window());
+  ash::WindowState* window_state = ash::WindowState::Get(window());
   SetWindowShowState(ui::SHOW_STATE_NORMAL);
 
   EXPECT_FALSE(window_state->IsInImmersiveFullscreen());

@@ -20,13 +20,14 @@ jumbo_static_library("apis") {
     "//content/public/browser",
 
     #"//content/public/common",
-    "//extensions/browser:browser",
+    "//extensions/browser",
     "//skia:skia",
     "//third_party/cacheinvalidation",
     "//third_party/blink/public:blink_headers",
     "//vivaldi/app/resources",
     "//vivaldi/extensions/schema",
     "//vivaldi/prefs:prefs_files_generator",
+    "//vivaldi/ui:skia_utils",
   ]
   sources = [
     "access_keys/access_keys_api.cc",
@@ -63,6 +64,10 @@ jumbo_static_library("apis") {
     "infobars/infobars_api.h",
     "mail/mail_private_api.cc",
     "mail/mail_private_api.h",
+    "menubar/menubar_api.cc",
+    "menubar/menubar_api.h",
+    "menubar_menu/menubar_menu_api.cc",
+    "menubar_menu/menubar_menu_api.h",
     "notes/notes_api.cc",
     "notes/notes_api.h",
     "prefs/prefs_api.cc",

@@ -18,7 +18,6 @@
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/common/user_agent.h"
 #include "extensions/browser/api/extensions_api_client.h"
-#include "extensions/browser/component_extension_resource_manager.h"
 #include "extensions/browser/core_extensions_browser_api_provider.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/mojo/interface_registration.h"
@@ -121,21 +120,11 @@ bool ShellExtensionsBrowserClient::CanExtensionCrossIncognito(
   return false;
 }
 
-net::URLRequestJob*
-ShellExtensionsBrowserClient::MaybeCreateResourceBundleRequestJob(
-    net::URLRequest* request,
-    net::NetworkDelegate* network_delegate,
-    const base::FilePath& directory_path,
-    const std::string& content_security_policy,
-    bool send_cors_header) {
-  return NULL;
-}
-
 base::FilePath ShellExtensionsBrowserClient::GetBundleResourcePath(
     const network::ResourceRequest& request,
     const base::FilePath& extension_resources_path,
-    ComponentExtensionResourceInfo* resource_info) const {
-  *resource_info = {};
+    int* resource_id) const {
+  *resource_id = 0;
   return base::FilePath();
 }
 
@@ -143,7 +132,7 @@ void ShellExtensionsBrowserClient::LoadResourceFromResourceBundle(
     const network::ResourceRequest& request,
     network::mojom::URLLoaderRequest loader,
     const base::FilePath& resource_relative_path,
-    const ComponentExtensionResourceInfo& resource_info,
+    int resource_id,
     const std::string& content_security_policy,
     network::mojom::URLLoaderClientPtr client,
     bool send_cors_header) {
@@ -178,8 +167,7 @@ PrefService* ShellExtensionsBrowserClient::GetPrefServiceForContext(
 
 void ShellExtensionsBrowserClient::GetEarlyExtensionPrefsObservers(
     content::BrowserContext* context,
-    std::vector<ExtensionPrefsObserver*>* observers) const {
-}
+    std::vector<EarlyExtensionPrefsObserver*>* observers) const {}
 
 ProcessManagerDelegate*
 ShellExtensionsBrowserClient::GetProcessManagerDelegate() const {
@@ -263,10 +251,6 @@ void ShellExtensionsBrowserClient::BroadcastEventToRenderers(
   EventRouter::Get(browser_context_)->BroadcastEvent(std::move(event));
 }
 
-net::NetLog* ShellExtensionsBrowserClient::GetNetLog() {
-  return NULL;
-}
-
 ExtensionCache* ShellExtensionsBrowserClient::GetExtensionCache() {
   return extension_cache_.get();
 }
@@ -289,20 +273,6 @@ ExtensionWebContentsObserver*
 ShellExtensionsBrowserClient::GetExtensionWebContentsObserver(
     content::WebContents* web_contents) {
   return ShellExtensionWebContentsObserver::FromWebContents(web_contents);
-}
-
-ExtensionNavigationUIData*
-ShellExtensionsBrowserClient::GetExtensionNavigationUIData(
-    net::URLRequest* request) {
-  content::ResourceRequestInfo* info =
-      content::ResourceRequestInfo::ForRequest(request);
-  if (!info)
-    return nullptr;
-  ShellNavigationUIData* navigation_data =
-      static_cast<ShellNavigationUIData*>(info->GetNavigationUIData());
-  if (!navigation_data)
-    return nullptr;
-  return navigation_data->GetExtensionNavigationUIData();
 }
 
 KioskDelegate* ShellExtensionsBrowserClient::GetKioskDelegate() {

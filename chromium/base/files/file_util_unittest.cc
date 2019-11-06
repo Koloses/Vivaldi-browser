@@ -153,6 +153,23 @@ bool DeleteReparsePoint(HANDLE source) {
   return true;
 }
 
+// Method that wraps the win32 GetShortPathName API. Returns an empty path on
+// error.
+FilePath MakeShortFilePath(const FilePath& input) {
+  DWORD path_short_len = ::GetShortPathName(input.value().c_str(), nullptr, 0);
+  if (path_short_len == 0UL)
+    return FilePath();
+
+  base::string16 path_short_str;
+  path_short_len = ::GetShortPathName(
+      input.value().c_str(), base::WriteInto(&path_short_str, path_short_len),
+      path_short_len);
+  if (path_short_len == 0UL)
+    return FilePath();
+
+  return base::FilePath(path_short_str);
+}
+
 // Manages a reparse point for a test.
 class ReparsePoint {
  public:
@@ -393,7 +410,7 @@ TEST_F(FileUtilTest, NormalizeFilePathBasic) {
   ASSERT_TRUE(PathExists(file_b_path));
   ASSERT_TRUE(NormalizeFilePath(file_b_path, &normalized_file_b_path));
 
-  // Beacuse this test created |dir_path|, we know it is not a link
+  // Because this test created |dir_path|, we know it is not a link
   // or junction.  So, the real path of the directory holding file a
   // must be the parent of the path holding file b.
   ASSERT_TRUE(normalized_file_a_path.DirName()
@@ -401,6 +418,36 @@ TEST_F(FileUtilTest, NormalizeFilePathBasic) {
 }
 
 #if defined(OS_WIN)
+
+TEST_F(FileUtilTest, NormalizeFileEmptyFile) {
+  // Create a directory under the test dir.  Because we create it,
+  // we know it is not a link.
+  const wchar_t empty_content[] = L"";
+
+  FilePath file_a_path = temp_dir_.GetPath().Append(FPL("file_empty_a"));
+  FilePath dir_path = temp_dir_.GetPath().Append(FPL("dir"));
+  FilePath file_b_path = dir_path.Append(FPL("file_empty_b"));
+  ASSERT_TRUE(CreateDirectory(dir_path));
+
+  FilePath normalized_file_a_path, normalized_file_b_path;
+  ASSERT_FALSE(PathExists(file_a_path));
+  EXPECT_FALSE(NormalizeFilePath(file_a_path, &normalized_file_a_path))
+      << "NormalizeFilePath() should fail on nonexistent paths.";
+
+  CreateTextFile(file_a_path, empty_content);
+  ASSERT_TRUE(PathExists(file_a_path));
+  EXPECT_TRUE(NormalizeFilePath(file_a_path, &normalized_file_a_path));
+
+  CreateTextFile(file_b_path, empty_content);
+  ASSERT_TRUE(PathExists(file_b_path));
+  EXPECT_TRUE(NormalizeFilePath(file_b_path, &normalized_file_b_path));
+
+  // Because this test created |dir_path|, we know it is not a link
+  // or junction.  So, the real path of the directory holding file a
+  // must be the parent of the path holding file b.
+  EXPECT_TRUE(normalized_file_a_path.DirName().IsParent(
+      normalized_file_b_path.DirName()));
+}
 
 TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
   // Build the following directory structure:
@@ -426,6 +473,10 @@ TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
   base_a = FilePath(temp_base_a);
 #endif
   ASSERT_TRUE(CreateDirectory(base_a));
+#if defined(OS_WIN)
+  // TEMP might be a short name which is not normalized.
+  base_a = MakeLongFilePath(base_a);
+#endif
 
   FilePath sub_a = base_a.Append(FPL("sub_a"));
   ASSERT_TRUE(CreateDirectory(sub_a));
@@ -462,6 +513,10 @@ TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
 
   FilePath base_b = temp_dir_.GetPath().Append(FPL("base_b"));
   ASSERT_TRUE(CreateDirectory(base_b));
+#if defined(OS_WIN)
+  // TEMP might be a short name which is not normalized.
+  base_b = MakeLongFilePath(base_b);
+#endif
 
   FilePath to_sub_a = base_b.Append(FPL("to_sub_a"));
   ASSERT_TRUE(CreateDirectory(to_sub_a));
@@ -607,15 +662,10 @@ TEST_F(FileUtilTest, CreateTemporaryFileInDirLongPathTest) {
   FilePath long_test_dir = temp_dir_.GetPath().Append(kLongDirName);
   ASSERT_TRUE(CreateDirectory(long_test_dir));
 
-  // kLongDirName is not a 8.3 component. So GetShortName() should give us a
-  // different short name.
-  char16 path_buffer[MAX_PATH];
-  DWORD path_buffer_length =
-      GetShortPathName(as_wcstr(long_test_dir.value()),
-                       as_writable_wcstr(path_buffer), MAX_PATH);
-  ASSERT_LT(path_buffer_length, DWORD(MAX_PATH));
-  ASSERT_NE(DWORD(0), path_buffer_length);
-  FilePath short_test_dir(path_buffer);
+  // kLongDirName is not a 8.3 component. So ::GetShortPathName() should give us
+  // a different short name.
+  FilePath short_test_dir = MakeShortFilePath(long_test_dir);
+  ASSERT_FALSE(short_test_dir.empty());
   ASSERT_NE(kLongDirName, short_test_dir.BaseName().value());
 
   FilePath temp_file;
@@ -642,9 +692,53 @@ TEST_F(FileUtilTest, CreateTemporaryFileInDirLongPathTest) {
   EXPECT_TRUE(short_test_dir.IsParent(temp_file.DirName()));
 
   // Check that the long path can't be determined for |temp_file|.
-  path_buffer_length = GetLongPathName(
-      as_wcstr(temp_file.value()), as_writable_wcstr(path_buffer), MAX_PATH);
-  EXPECT_EQ(DWORD(0), path_buffer_length);
+  // Helper method base::MakeLongFilePath returns an empty path on error.
+  FilePath temp_file_long = MakeLongFilePath(temp_file);
+  ASSERT_TRUE(temp_file_long.empty());
+}
+
+TEST_F(FileUtilTest, MakeLongFilePathTest) {
+  // Tests helper function base::MakeLongFilePath
+
+  // If a username isn't a valid 8.3 short file name (even just a
+  // lengthy name like "user with long name"), Windows will set the TMP and TEMP
+  // environment variables to be 8.3 paths. ::GetTempPath (called in
+  // base::GetTempDir) just uses the value specified by TMP or TEMP, and so can
+  // return a short path. So from the start need to use MakeLongFilePath
+  // to normalize the path for such test environments.
+  FilePath temp_dir_long = MakeLongFilePath(temp_dir_.GetPath());
+  ASSERT_FALSE(temp_dir_long.empty());
+
+  FilePath long_test_dir = temp_dir_long.Append(FPL("A long directory name"));
+  ASSERT_TRUE(CreateDirectory(long_test_dir));
+
+  // Directory name is not a 8.3 component. So ::GetShortPathName() should give
+  // us a different short name.
+  FilePath short_test_dir = MakeShortFilePath(long_test_dir);
+  ASSERT_FALSE(short_test_dir.empty());
+
+  EXPECT_NE(long_test_dir, short_test_dir);
+  EXPECT_EQ(long_test_dir, MakeLongFilePath(short_test_dir));
+
+  FilePath long_test_file = long_test_dir.Append(FPL("A long file name.1234"));
+  CreateTextFile(long_test_file, bogus_content);
+  ASSERT_TRUE(PathExists(long_test_file));
+
+  // File name is not a 8.3 component. So ::GetShortPathName() should give us
+  // a different short name.
+  FilePath short_test_file = MakeShortFilePath(long_test_file);
+  ASSERT_FALSE(short_test_file.empty());
+
+  EXPECT_NE(long_test_file, short_test_file);
+  EXPECT_EQ(long_test_file, MakeLongFilePath(short_test_file));
+
+  // MakeLongFilePath should return empty path if file does not exist.
+  EXPECT_TRUE(DeleteFile(short_test_file, false));
+  EXPECT_TRUE(MakeLongFilePath(short_test_file).empty());
+
+  // MakeLongFilePath should return empty path if directory does not exist.
+  EXPECT_TRUE(DeleteFile(short_test_dir, false));
+  EXPECT_TRUE(MakeLongFilePath(short_test_dir).empty());
 }
 
 #endif  // defined(OS_WIN)
@@ -1330,6 +1424,33 @@ TEST_F(FileUtilTest, DeleteFile) {
   EXPECT_TRUE(DeleteFile(file_name, true));
   EXPECT_FALSE(PathExists(file_name));
 }
+
+#if defined(OS_ANDROID)
+TEST_F(FileUtilTest, DeleteContentUri) {
+  // Get the path to the test file.
+  FilePath data_dir;
+  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &data_dir));
+  data_dir = data_dir.Append(FPL("file_util"));
+  ASSERT_TRUE(PathExists(data_dir));
+  FilePath image_file = data_dir.Append(FPL("red.png"));
+  ASSERT_TRUE(PathExists(image_file));
+
+  // Make a copy (we don't want to delete the original red.png when deleting the
+  // content URI).
+  FilePath image_copy = data_dir.Append(FPL("redcopy.png"));
+  ASSERT_TRUE(CopyFile(image_file, image_copy));
+
+  // Insert the image into MediaStore and get a content URI.
+  FilePath uri_path = InsertImageIntoMediaStore(image_copy);
+  ASSERT_TRUE(uri_path.IsContentUri());
+  ASSERT_TRUE(PathExists(uri_path));
+
+  // Try deleting the content URI.
+  EXPECT_TRUE(DeleteFile(uri_path, false));
+  EXPECT_FALSE(PathExists(image_copy));
+  EXPECT_FALSE(PathExists(uri_path));
+}
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)
 // Tests that the Delete function works for wild cards, especially
@@ -2392,7 +2513,7 @@ TEST_F(FileUtilTest, OpenFileNoInheritance) {
     FILE* file = OpenFile(file_path, mode);
     ASSERT_NE(nullptr, file);
     {
-      ScopedClosureRunner file_closer(Bind(IgnoreResult(&CloseFile), file));
+      ScopedClosureRunner file_closer(BindOnce(IgnoreResult(&CloseFile), file));
       bool is_inheritable = true;
       ASSERT_NO_FATAL_FAILURE(GetIsInheritable(file, &is_inheritable));
       EXPECT_FALSE(is_inheritable);
@@ -2477,14 +2598,7 @@ TEST_F(FileUtilTest, GetUniquePathTest) {
   }
 }
 
-#if defined(OS_FUCHSIA)
-// TODO(crbug.com/851747): Re-enable when the Fuchsia-side fix for fdopen has
-// been rolled into Chromium.
-#define MAYBE_FileToFILE DISABLED_FileToFILE
-#else
-#define MAYBE_FileToFILE FileToFILE
-#endif
-TEST_F(FileUtilTest, MAYBE_FileToFILE) {
+TEST_F(FileUtilTest, FileToFILE) {
   File file;
   FILE* stream = FileToFILE(std::move(file), "w");
   EXPECT_FALSE(stream);
@@ -2521,6 +2635,75 @@ TEST_F(FileUtilTest, GetShmemTempDirTest) {
   FilePath dir;
   EXPECT_TRUE(GetShmemTempDir(false, &dir));
   EXPECT_TRUE(DirectoryExists(dir));
+}
+
+TEST_F(FileUtilTest, AllocateFileRegionTest_ZeroOffset) {
+  const int kTestFileLength = 9;
+  char test_data[] = "test_data";
+  FilePath file_path = temp_dir_.GetPath().Append(
+      FILE_PATH_LITERAL("allocate_file_region_test_zero_offset"));
+  WriteFile(file_path, test_data, kTestFileLength);
+
+  File file(file_path, base::File::FLAG_OPEN | base::File::FLAG_READ |
+                           base::File::FLAG_WRITE);
+  ASSERT_TRUE(file.IsValid());
+  ASSERT_EQ(file.GetLength(), kTestFileLength);
+
+  const int kExtendedFileLength = 23;
+  ASSERT_TRUE(AllocateFileRegion(&file, 0, kExtendedFileLength));
+  EXPECT_EQ(file.GetLength(), kExtendedFileLength);
+
+  char data_read[32];
+  int bytes_read = file.Read(0, data_read, kExtendedFileLength);
+  EXPECT_EQ(bytes_read, kExtendedFileLength);
+  for (int i = 0; i < kTestFileLength; ++i)
+    EXPECT_EQ(test_data[i], data_read[i]);
+  for (int i = kTestFileLength; i < kExtendedFileLength; ++i)
+    EXPECT_EQ(0, data_read[i]);
+}
+
+TEST_F(FileUtilTest, AllocateFileRegionTest_NonZeroOffset) {
+  const int kTestFileLength = 9;
+  char test_data[] = "test_data";
+  FilePath file_path = temp_dir_.GetPath().Append(
+      FILE_PATH_LITERAL("allocate_file_region_test_non_zero_offset"));
+  WriteFile(file_path, test_data, kTestFileLength);
+
+  File file(file_path, base::File::FLAG_OPEN | base::File::FLAG_READ |
+                           base::File::FLAG_WRITE);
+  ASSERT_TRUE(file.IsValid());
+  ASSERT_EQ(file.GetLength(), kTestFileLength);
+
+  const int kExtensionOffset = 5;
+  const int kExtensionSize = 10;
+  ASSERT_TRUE(AllocateFileRegion(&file, kExtensionOffset, kExtensionSize));
+  const int kExtendedFileLength = kExtensionOffset + kExtensionSize;
+  EXPECT_EQ(file.GetLength(), kExtendedFileLength);
+
+  char data_read[32];
+  int bytes_read = file.Read(0, data_read, kExtendedFileLength);
+  EXPECT_EQ(bytes_read, kExtendedFileLength);
+  for (int i = 0; i < kTestFileLength; ++i)
+    EXPECT_EQ(test_data[i], data_read[i]);
+  for (int i = kTestFileLength; i < kExtendedFileLength; ++i)
+    EXPECT_EQ(0, data_read[i]);
+}
+
+TEST_F(FileUtilTest, AllocateFileRegionTest_DontTruncate) {
+  const int kTestFileLength = 9;
+  char test_data[] = "test_data";
+  FilePath file_path = temp_dir_.GetPath().Append(
+      FILE_PATH_LITERAL("allocate_file_region_test_dont_truncate"));
+  WriteFile(file_path, test_data, kTestFileLength);
+
+  File file(file_path, base::File::FLAG_OPEN | base::File::FLAG_READ |
+                           base::File::FLAG_WRITE);
+  ASSERT_TRUE(file.IsValid());
+  ASSERT_EQ(file.GetLength(), kTestFileLength);
+
+  const int kTruncatedFileLength = 4;
+  ASSERT_TRUE(AllocateFileRegion(&file, 0, kTruncatedFileLength));
+  EXPECT_EQ(file.GetLength(), kTestFileLength);
 }
 #endif
 
@@ -3122,7 +3305,7 @@ TEST_F(FileUtilTest, ReadFileToStringWithNamedPipe) {
   CommandLine child_command_line(GetMultiProcessTestChildBaseCommandLine());
   child_command_line.AppendSwitchPath("pipe-path", pipe_path);
   child_command_line.AppendSwitchASCII(
-      "sync_event", UintToString(win::HandleToUint32(sync_event.Get())));
+      "sync_event", NumberToString(win::HandleToUint32(sync_event.Get())));
 
   LaunchOptions options;
   options.handles_to_inherit.push_back(sync_event.Get());

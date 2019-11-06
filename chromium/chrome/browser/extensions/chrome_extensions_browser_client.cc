@@ -13,6 +13,7 @@
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/chrome_extensions_api_client.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_service.h"
@@ -47,7 +48,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "components/net_log/chrome_net_log.h"
 #include "components/update_client/update_client.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
@@ -115,12 +115,7 @@ bool ChromeExtensionsBrowserClient::AreExtensionsDisabled(
 
 bool ChromeExtensionsBrowserClient::IsValidContext(
     content::BrowserContext* context) {
-  // TODO(https://crbug.com/870838): Remove after investigating the bug.
-  if (!context) {
-    LOG(ERROR) << "Unexpected null context";
-    NOTREACHED();
-    return false;
-  }
+  DCHECK(context);
   if (!g_browser_process) {
     LOG(ERROR) << "Unexpected null g_browser_process";
     NOTREACHED();
@@ -188,39 +183,24 @@ bool ChromeExtensionsBrowserClient::CanExtensionCrossIncognito(
       || util::CanCrossIncognito(extension, context);
 }
 
-net::URLRequestJob*
-ChromeExtensionsBrowserClient::MaybeCreateResourceBundleRequestJob(
-    net::URLRequest* request,
-    net::NetworkDelegate* network_delegate,
-    const base::FilePath& directory_path,
-    const std::string& content_security_policy,
-    bool send_cors_header) {
-  return chrome_url_request_util::MaybeCreateURLRequestResourceBundleJob(
-      request,
-      network_delegate,
-      directory_path,
-      content_security_policy,
-      send_cors_header);
-}
-
 base::FilePath ChromeExtensionsBrowserClient::GetBundleResourcePath(
     const network::ResourceRequest& request,
     const base::FilePath& extension_resources_path,
-    ComponentExtensionResourceInfo* resource_info) const {
+    int* resource_id) const {
   return chrome_url_request_util::GetBundleResourcePath(
-      request, extension_resources_path, resource_info);
+      request, extension_resources_path, resource_id);
 }
 
 void ChromeExtensionsBrowserClient::LoadResourceFromResourceBundle(
     const network::ResourceRequest& request,
     network::mojom::URLLoaderRequest loader,
     const base::FilePath& resource_relative_path,
-    const ComponentExtensionResourceInfo& resource_info,
+    int resource_id,
     const std::string& content_security_policy,
     network::mojom::URLLoaderClientPtr client,
     bool send_cors_header) {
   chrome_url_request_util::LoadResourceFromResourceBundle(
-      request, std::move(loader), resource_relative_path, resource_info,
+      request, std::move(loader), resource_relative_path, resource_id,
       content_security_policy, std::move(client), send_cors_header);
 }
 
@@ -251,7 +231,7 @@ PrefService* ChromeExtensionsBrowserClient::GetPrefServiceForContext(
 
 void ChromeExtensionsBrowserClient::GetEarlyExtensionPrefsObservers(
     content::BrowserContext* context,
-    std::vector<ExtensionPrefsObserver*>* observers) const {
+    std::vector<EarlyExtensionPrefsObserver*>* observers) const {
   observers->push_back(ContentSettingsService::Get(context));
 }
 
@@ -379,15 +359,16 @@ void ChromeExtensionsBrowserClient::BroadcastEventToRenderers(
                                   GURL());
 }
 
-net::NetLog* ChromeExtensionsBrowserClient::GetNetLog() {
-  return g_browser_process->net_log();
-}
-
 ExtensionCache* ChromeExtensionsBrowserClient::GetExtensionCache() {
   if (!extension_cache_.get()) {
 #if defined(OS_CHROMEOS)
+    base::TaskPriority task_priority =
+        chromeos::ProfileHelper::IsSigninProfileInitialized() &&
+                chromeos::ProfileHelper::SigninProfileHasLoginScreenExtensions()
+            ? base::TaskPriority::USER_VISIBLE
+            : base::TaskPriority::BEST_EFFORT;
     extension_cache_.reset(new ExtensionCacheImpl(
-        std::make_unique<ChromeOSExtensionCacheDelegate>()));
+        std::make_unique<ChromeOSExtensionCacheDelegate>(), task_priority));
 #else
     extension_cache_.reset(new NullExtensionCache());
 #endif
@@ -488,20 +469,6 @@ bool ChromeExtensionsBrowserClient::IsActivityLoggingEnabled(
     content::BrowserContext* context) {
   ActivityLog* activity_log = ActivityLog::GetInstance(context);
   return activity_log && activity_log->is_active();
-}
-
-ExtensionNavigationUIData*
-ChromeExtensionsBrowserClient::GetExtensionNavigationUIData(
-    net::URLRequest* request) {
-  content::ResourceRequestInfo* info =
-      content::ResourceRequestInfo::ForRequest(request);
-  if (!info)
-    return nullptr;
-  ChromeNavigationUIData* navigation_data =
-      static_cast<ChromeNavigationUIData*>(info->GetNavigationUIData());
-  if (!navigation_data)
-    return nullptr;
-  return navigation_data->GetExtensionNavigationUIData();
 }
 
 void ChromeExtensionsBrowserClient::GetTabAndWindowIdForWebContents(

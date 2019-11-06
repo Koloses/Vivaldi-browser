@@ -7,6 +7,8 @@
 #include <windows.h>
 
 #include <memory>
+#include <tuple>
+#include <utility>
 
 #include "base/file_version_info_win.h"
 #include "base/files/file_path.h"
@@ -21,45 +23,45 @@
 #error VS 2017 Update 3.2 or higher is required
 #endif
 
-#if !defined(NTDDI_WIN10_RS2)
-// Windows 10 April 2018 SDK is required to build Chrome.
-#error April 2018 SDK (10.0.17134.0) or higher required.
+#if !defined(NTDDI_WIN10_19H1)
+#error Windows 10.0.18362.0 SDK or higher required.
 #endif
-
-namespace {
-typedef BOOL (WINAPI *GetProductInfoPtr)(DWORD, DWORD, DWORD, DWORD, PDWORD);
-}  // namespace
 
 namespace base {
 namespace win {
 
 namespace {
 
-// Returns the the "UBR" value from the registry. Introduced in Windows 10,
-// this undocumented value appears to be similar to a patch number.
-// Returns 0 if the value does not exist or it could not be read.
-int GetUBR() {
-  // The values under the CurrentVersion registry hive are mirrored under
-  // the corresponding Wow6432 hive.
-  static constexpr char16 kRegKeyWindowsNTCurrentVersion[] =
-      STRING16_LITERAL("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
+// The values under the CurrentVersion registry hive are mirrored under
+// the corresponding Wow6432 hive.
+constexpr char16 kRegKeyWindowsNTCurrentVersion[] =
+    STRING16_LITERAL("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
 
+// Returns the "UBR" (Windows 10 patch number) and "ReleaseId" (Windows 10
+// release number) from the registry. "UBR" is an undocumented value and will be
+// 0 if the value was not found. "ReleaseId" will be an empty string if the
+// value is not found.
+std::pair<int, std::string> GetVersionData() {
+  DWORD ubr = 0;
+  string16 release_id;
   RegKey key;
+
   if (key.Open(HKEY_LOCAL_MACHINE, kRegKeyWindowsNTCurrentVersion,
-               KEY_QUERY_VALUE) != ERROR_SUCCESS) {
-    return 0;
+               KEY_QUERY_VALUE) == ERROR_SUCCESS) {
+    key.ReadValueDW(STRING16_LITERAL("UBR"), &ubr);
+    key.ReadValue(STRING16_LITERAL("ReleaseId"), &release_id);
   }
 
-  DWORD ubr = 0;
-  key.ReadValueDW(STRING16_LITERAL("UBR"), &ubr);
-
-  return static_cast<int>(ubr);
+  return std::make_pair(static_cast<int>(ubr), UTF16ToUTF8(release_id));
 }
 
 const _SYSTEM_INFO& GetSystemInfoStorage() {
-  static _SYSTEM_INFO system_info = {};
-  ::GetNativeSystemInfo(&system_info);
-  return system_info;
+  static const NoDestructor<_SYSTEM_INFO> system_info([] {
+    _SYSTEM_INFO info = {};
+    ::GetNativeSystemInfo(&info);
+    return info;
+  }());
+  return *system_info;
 }
 
 }  // namespace
@@ -73,14 +75,8 @@ OSInfo** OSInfo::GetInstanceStorage() {
     ::GetVersionEx(reinterpret_cast<_OSVERSIONINFOW*>(&version_info));
 
     DWORD os_type = 0;
-    if (version_info.dwMajorVersion == 6 || version_info.dwMajorVersion == 10) {
-      // Only present on Vista+.
-      GetProductInfoPtr get_product_info =
-          reinterpret_cast<GetProductInfoPtr>(::GetProcAddress(
-              ::GetModuleHandle(L"kernel32.dll"), "GetProductInfo"));
-      get_product_info(version_info.dwMajorVersion, version_info.dwMinorVersion,
-                       0, 0, &os_type);
-    }
+    ::GetProductInfo(version_info.dwMajorVersion, version_info.dwMinorVersion,
+                     0, 0, &os_type);
 
     return new OSInfo(version_info, GetSystemInfoStorage(), os_type);
   }();
@@ -112,12 +108,12 @@ OSInfo::WindowsArchitecture OSInfo::GetArchitecture() {
 OSInfo::OSInfo(const _OSVERSIONINFOEXW& version_info,
                const _SYSTEM_INFO& system_info,
                int os_type)
-    : version_(VERSION_PRE_XP),
+    : version_(Version::PRE_XP),
       wow64_status_(GetWOW64StatusForProcess(GetCurrentProcess())) {
   version_number_.major = version_info.dwMajorVersion;
   version_number_.minor = version_info.dwMinorVersion;
   version_number_.build = version_info.dwBuildNumber;
-  version_number_.patch = GetUBR();
+  std::tie(version_number_.patch, release_id_) = GetVersionData();
   version_ = MajorMinorBuildToVersion(
       version_number_.major, version_number_.minor, version_number_.build);
   service_pack_.major = version_info.wServicePackMajor;
@@ -193,8 +189,7 @@ OSInfo::OSInfo(const _OSVERSIONINFOEXW& version_info,
   }
 }
 
-OSInfo::~OSInfo() {
-}
+OSInfo::~OSInfo() {}
 
 Version OSInfo::Kernel32Version() const {
   static const Version kernel32_version =
@@ -247,13 +242,8 @@ std::string OSInfo::processor_model_name() {
 
 // static
 OSInfo::WOW64Status OSInfo::GetWOW64StatusForProcess(HANDLE process_handle) {
-  typedef BOOL (WINAPI* IsWow64ProcessFunc)(HANDLE, PBOOL);
-  IsWow64ProcessFunc is_wow64_process = reinterpret_cast<IsWow64ProcessFunc>(
-      GetProcAddress(GetModuleHandle(L"kernel32.dll"), "IsWow64Process"));
-  if (!is_wow64_process)
-    return WOW64_DISABLED;
   BOOL is_wow64 = FALSE;
-  if (!(*is_wow64_process)(process_handle, &is_wow64))
+  if (!::IsWow64Process(process_handle, &is_wow64))
     return WOW64_UNKNOWN;
   return is_wow64 ? WOW64_ENABLED : WOW64_DISABLED;
 }
@@ -263,48 +253,50 @@ OSInfo::WOW64Status OSInfo::GetWOW64StatusForProcess(HANDLE process_handle) {
 // static
 Version OSInfo::MajorMinorBuildToVersion(int major, int minor, int build) {
   if (major == 10) {
+    if (build >= 18362)
+      return Version::WIN10_19H1;
     if (build >= 17763)
-      return VERSION_WIN10_RS5;
+      return Version::WIN10_RS5;
     if (build >= 17134)
-      return VERSION_WIN10_RS4;
+      return Version::WIN10_RS4;
     if (build >= 16299)
-      return VERSION_WIN10_RS3;
+      return Version::WIN10_RS3;
     if (build >= 15063)
-      return VERSION_WIN10_RS2;
+      return Version::WIN10_RS2;
     if (build >= 14393)
-      return VERSION_WIN10_RS1;
+      return Version::WIN10_RS1;
     if (build >= 10586)
-      return VERSION_WIN10_TH2;
-    return VERSION_WIN10;
+      return Version::WIN10_TH2;
+    return Version::WIN10;
   }
 
   if (major > 6) {
     // Hitting this likely means that it's time for a >10 block above.
     NOTREACHED() << major << "." << minor << "." << build;
-    return VERSION_WIN_LAST;
+    return Version::WIN_LAST;
   }
 
   if (major == 6) {
     switch (minor) {
       case 0:
-        return VERSION_VISTA;
+        return Version::VISTA;
       case 1:
-        return VERSION_WIN7;
+        return Version::WIN7;
       case 2:
-        return VERSION_WIN8;
+        return Version::WIN8;
       default:
         DCHECK_EQ(minor, 3);
-        return VERSION_WIN8_1;
+        return Version::WIN8_1;
     }
   }
 
   if (major == 5 && minor != 0) {
     // Treat XP Pro x64, Home Server, and Server 2003 R2 as Server 2003.
-    return minor == 1 ? VERSION_XP : VERSION_SERVER_2003;
+    return minor == 1 ? Version::XP : Version::SERVER_2003;
   }
 
   // Win 2000 or older.
-  return VERSION_PRE_XP;
+  return Version::PRE_XP;
 }
 
 Version GetVersion() {

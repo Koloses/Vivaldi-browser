@@ -12,7 +12,7 @@
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#import "content/browser/renderer_host/render_widget_host_view_cocoa.h"
+#import "content/app_shim_remote_cocoa/render_widget_host_view_cocoa.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
 #include "content/browser/renderer_host/webmenurunner_mac.h"
 #import "ui/base/cocoa/base_view.h"
@@ -78,7 +78,7 @@ void PopupMenuHelper::ShowPopupMenu(
     cocoa_view.reset(static_cast<RenderWidgetHostViewCocoa*>(
         [rwhvg->GetNativeView().GetNativeNSView() retain]));
   } else {
-    cocoa_view.reset([rwhvm->cocoa_view() retain]);
+    cocoa_view.reset([rwhvm->GetInProcessNSView() retain]);
   }
 
   // Display the menu.

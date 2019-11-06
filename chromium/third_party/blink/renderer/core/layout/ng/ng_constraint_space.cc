@@ -19,7 +19,7 @@ namespace blink {
 namespace {
 
 struct SameSizeAsNGConstraintSpace {
-  NGLogicalSize available_size;
+  LogicalSize available_size;
   union {
     NGBfcOffset bfc_offset;
     void* rare_data;
@@ -44,9 +44,9 @@ NGConstraintSpace NGConstraintSpace::CreateFromLayoutObject(
       LayoutBoxUtils::AvailableLogicalWidth(block, cb);
   LayoutUnit available_logical_height =
       LayoutBoxUtils::AvailableLogicalHeight(block, cb);
-  NGLogicalSize percentage_size = {available_logical_width,
-                                   available_logical_height};
-  NGLogicalSize available_size = percentage_size;
+  LogicalSize percentage_size = {available_logical_width,
+                                 available_logical_height};
+  LogicalSize available_size = percentage_size;
 
   bool fixed_inline = false, fixed_block = false;
   bool fixed_block_is_definite = true;
@@ -94,33 +94,20 @@ NGConstraintSpace NGConstraintSpace::CreateFromLayoutObject(
       .SetIsFixedSizeBlock(fixed_block)
       .SetFixedSizeBlockIsDefinite(fixed_block_is_definite)
       .SetIsShrinkToFit(
+          style.LogicalWidth().IsAuto() &&
           block.SizesLogicalWidthToFitContent(style.LogicalWidth()))
       .SetTextDirection(style.Direction())
       .ToConstraintSpace();
 }
 
-bool NGConstraintSpace::operator==(const NGConstraintSpace& other) const {
-  if (!AreSizesEqual(other))
-    return false;
-
-  if (!MaySkipLayout(other))
-    return false;
-
-  if (!HasRareData() && !other.HasRareData() &&
-      bfc_offset_.block_offset != other.bfc_offset_.block_offset)
-    return false;
-
-  return true;
-}
-
 String NGConstraintSpace::ToString() const {
   return String::Format("Offset: %s,%s Size: %sx%s Clearance: %s",
-                        bfc_offset_.line_offset.ToString().Ascii().data(),
-                        bfc_offset_.block_offset.ToString().Ascii().data(),
-                        AvailableSize().inline_size.ToString().Ascii().data(),
-                        AvailableSize().block_size.ToString().Ascii().data(),
+                        bfc_offset_.line_offset.ToString().Ascii().c_str(),
+                        bfc_offset_.block_offset.ToString().Ascii().c_str(),
+                        AvailableSize().inline_size.ToString().Ascii().c_str(),
+                        AvailableSize().block_size.ToString().Ascii().c_str(),
                         HasClearanceOffset()
-                            ? ClearanceOffset().ToString().Ascii().data()
+                            ? ClearanceOffset().ToString().Ascii().c_str()
                             : "none");
 }
 

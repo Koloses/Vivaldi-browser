@@ -67,7 +67,10 @@ bool BookmarkTabHelper::ShouldShowBookmarkBar() const {
       !prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar))
     return false;
 
-  return IsNTP(web_contents());
+  // The bookmark bar is only shown on the NTP if the user
+  // has added something to it.
+  return IsNTP(web_contents()) && bookmark_model_ &&
+         bookmark_model_->HasBookmarks();
 }
 
 void BookmarkTabHelper::AddObserver(BookmarkTabHelperObserver* observer) {
@@ -115,14 +118,14 @@ void BookmarkTabHelper::BookmarkModelLoaded(BookmarkModel* model,
 
 void BookmarkTabHelper::BookmarkNodeAdded(BookmarkModel* model,
                                           const BookmarkNode* parent,
-                                          int index) {
+                                          size_t index) {
   UpdateStarredStateForCurrentURL();
 }
 
 void BookmarkTabHelper::BookmarkNodeRemoved(
     BookmarkModel* model,
     const BookmarkNode* parent,
-    int old_index,
+    size_t old_index,
     const BookmarkNode* node,
     const std::set<GURL>& removed_urls) {
   UpdateStarredStateForCurrentURL();

@@ -45,6 +45,7 @@
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/frame_host/render_widget_host_view_guest.h"
 #include "content/browser/renderer_host/input/synthetic_touchscreen_pinch_gesture.h"
+#include "content/browser/renderer_host/render_frame_metadata_provider_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
@@ -82,14 +83,16 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/common/use_zoom_for_dsf_policy.h"
+#include "content/public/test/accessibility_notification_waiter.h"
+#include "content/public/test/no_renderer_crashes_assertion.h"
 #include "content/public/test/simple_url_loader_test_helper.h"
 #include "content/public/test/test_fileapi_operation_waiter.h"
 #include "content/public/test/test_launcher.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
-#include "content/test/accessibility_browser_test_utils.h"
 #include "content/test/did_commit_navigation_interceptor.h"
 #include "ipc/ipc_security_test_util.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/filename_util.h"
 #include "net/base/io_buffer.h"
 #include "net/cookies/canonical_cookie.h"
@@ -110,6 +113,7 @@
 #include "services/network/public/mojom/network_service_test.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "storage/browser/fileapi/file_system_context.h"
+#include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/filesystem/file_system.mojom.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -123,6 +127,14 @@
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/latency/latency_info.h"
 #include "ui/resources/grit/webui_resources.h"
+
+#if defined(OS_WIN)
+#include <uiautomation.h>
+#include <wrl/client.h>
+#include "base/win/atl.h"
+#include "base/win/scoped_safearray.h"
+#include "base/win/scoped_variant.h"
+#endif
 
 #if defined(USE_AURA)
 #include "content/browser/renderer_host/overscroll_controller.h"
@@ -179,21 +191,20 @@ bool ExecuteScriptHelper(RenderFrameHost* render_frame_host,
                          int world_id,
                          std::unique_ptr<base::Value>* result) {
   // TODO(lukasza): Only get messages from the specific |render_frame_host|.
-  DOMMessageQueue dom_message_queue(
-      WebContents::FromRenderFrameHost(render_frame_host));
+  DOMMessageQueue dom_message_queue(render_frame_host);
+
   base::string16 script16 = base::UTF8ToUTF16(script);
-  if (world_id == ISOLATED_WORLD_ID_GLOBAL) {
-    if (user_gesture)
-      render_frame_host->ExecuteJavaScriptWithUserGestureForTests(script16);
-    else
-      render_frame_host->ExecuteJavaScriptForTests(script16);
+  if (world_id == ISOLATED_WORLD_ID_GLOBAL && user_gesture) {
+    render_frame_host->ExecuteJavaScriptWithUserGestureForTests(script16,
+                                                                world_id);
   } else {
-    // Note that |user_gesture| here is ignored. We allow a value of |true|
-    // because it's the default, but in blink, the execution will occur with
-    // no user gesture.
-    render_frame_host->ExecuteJavaScriptInIsolatedWorld(
-        script16, RenderFrameHost::JavaScriptResultCallback(), world_id);
+    // Note that |user_gesture| here is ignored when the world is not main. We
+    // allow a value of |true| because it's the default, but in blink, the
+    // execution will occur with no user gesture.
+    render_frame_host->ExecuteJavaScriptForTests(script16, base::NullCallback(),
+                                                 world_id);
   }
+
   std::string json;
   if (!dom_message_queue.WaitForMessage(&json)) {
     DLOG(ERROR) << "Cannot communicate with DOMMessageQueue.";
@@ -503,9 +514,9 @@ void AppendGzippedResource(const base::RefCountedMemory& encoded,
       std::move(source_stream), net::SourceStream::TYPE_GZIP);
   scoped_refptr<net::IOBufferWithSize> dest_buffer =
       base::MakeRefCounted<net::IOBufferWithSize>(4096);
-  net::CompletionCallback callback;
   while (true) {
-    int rv = filter->Read(dest_buffer.get(), dest_buffer->size(), callback);
+    int rv = filter->Read(dest_buffer.get(), dest_buffer->size(),
+                          net::CompletionOnceCallback());
     ASSERT_LE(0, rv);
     if (rv <= 0)
       break;
@@ -675,6 +686,13 @@ void MaybeSendSyntheticTapGesture(WebContents* guest_web_contents) {
   DCHECK(rwhv);
   rwhv->MaybeSendSyntheticTapGestureForTest(blink::WebFloatPoint(1, 1),
                                             blink::WebFloatPoint(1, 1));
+}
+
+void RunUntilInputProcessed(RenderWidgetHost* host) {
+  base::RunLoop run_loop;
+  RenderWidgetHostImpl::From(host)->WaitForInputProcessed(
+      run_loop.QuitClosure());
+  run_loop.Run();
 }
 
 void WaitForLoadStopWithoutSuccessCheck(WebContents* web_contents) {
@@ -970,20 +988,20 @@ void SimulateGesturePinchSequence(WebContents* web_contents,
   pinch_begin.SetPositionInWidget(gfx::PointF(point));
   pinch_begin.SetPositionInScreen(gfx::PointF(point));
   pinch_begin.SetNeedsWheelEvent(source_device ==
-                                 blink::kWebGestureDeviceTouchpad);
+                                 blink::WebGestureDevice::kTouchpad);
   widget_host->ForwardGestureEvent(pinch_begin);
 
   blink::WebGestureEvent pinch_update(pinch_begin);
   pinch_update.SetType(blink::WebInputEvent::kGesturePinchUpdate);
   pinch_update.data.pinch_update.scale = scale;
   pinch_update.SetNeedsWheelEvent(source_device ==
-                                  blink::kWebGestureDeviceTouchpad);
+                                  blink::WebGestureDevice::kTouchpad);
   widget_host->ForwardGestureEvent(pinch_update);
 
   blink::WebGestureEvent pinch_end(pinch_begin);
   pinch_end.SetType(blink::WebInputEvent::kGesturePinchEnd);
   pinch_end.SetNeedsWheelEvent(source_device ==
-                               blink::kWebGestureDeviceTouchpad);
+                               blink::WebGestureDevice::kTouchpad);
   widget_host->ForwardGestureEvent(pinch_end);
 }
 
@@ -996,7 +1014,7 @@ void SimulateGestureScrollSequence(WebContents* web_contents,
   blink::WebGestureEvent scroll_begin(
       blink::WebGestureEvent::kGestureScrollBegin,
       blink::WebInputEvent::kNoModifiers, ui::EventTimeForNow(),
-      blink::kWebGestureDeviceTouchpad);
+      blink::WebGestureDevice::kTouchpad);
   scroll_begin.SetPositionInWidget(gfx::PointF(point));
   scroll_begin.data.scroll_begin.delta_x_hint = delta.x();
   scroll_begin.data.scroll_begin.delta_y_hint = delta.y();
@@ -1005,7 +1023,7 @@ void SimulateGestureScrollSequence(WebContents* web_contents,
   blink::WebGestureEvent scroll_update(
       blink::WebGestureEvent::kGestureScrollUpdate,
       blink::WebInputEvent::kNoModifiers, ui::EventTimeForNow(),
-      blink::kWebGestureDeviceTouchpad);
+      blink::WebGestureDevice::kTouchpad);
   scroll_update.SetPositionInWidget(gfx::PointF(point));
   scroll_update.data.scroll_update.delta_x = delta.x();
   scroll_update.data.scroll_update.delta_y = delta.y();
@@ -1016,7 +1034,7 @@ void SimulateGestureScrollSequence(WebContents* web_contents,
   blink::WebGestureEvent scroll_end(blink::WebGestureEvent::kGestureScrollEnd,
                                     blink::WebInputEvent::kNoModifiers,
                                     ui::EventTimeForNow(),
-                                    blink::kWebGestureDeviceTouchpad);
+                                    blink::WebGestureDevice::kTouchpad);
   scroll_end.SetPositionInWidget(gfx::PointF(point));
   widget_host->ForwardGestureEvent(scroll_end);
 }
@@ -1030,21 +1048,21 @@ void SimulateGestureFlingSequence(WebContents* web_contents,
   blink::WebGestureEvent scroll_begin(
       blink::WebGestureEvent::kGestureScrollBegin,
       blink::WebInputEvent::kNoModifiers, ui::EventTimeForNow(),
-      blink::kWebGestureDeviceTouchpad);
+      blink::WebGestureDevice::kTouchpad);
   scroll_begin.SetPositionInWidget(gfx::PointF(point));
   widget_host->ForwardGestureEvent(scroll_begin);
 
   blink::WebGestureEvent scroll_end(blink::WebGestureEvent::kGestureScrollEnd,
                                     blink::WebInputEvent::kNoModifiers,
                                     ui::EventTimeForNow(),
-                                    blink::kWebGestureDeviceTouchpad);
+                                    blink::WebGestureDevice::kTouchpad);
   scroll_end.SetPositionInWidget(gfx::PointF(point));
   widget_host->ForwardGestureEvent(scroll_end);
 
   blink::WebGestureEvent fling_start(blink::WebGestureEvent::kGestureFlingStart,
                                      blink::WebInputEvent::kNoModifiers,
                                      ui::EventTimeForNow(),
-                                     blink::kWebGestureDeviceTouchpad);
+                                     blink::WebGestureDevice::kTouchpad);
   fling_start.SetPositionInWidget(gfx::PointF(point));
   fling_start.data.fling_start.target_viewport = false;
   fling_start.data.fling_start.velocity_x = velocity.x();
@@ -1064,7 +1082,7 @@ void SimulateTouchGestureAt(WebContents* web_contents,
                             const gfx::Point& point,
                             blink::WebInputEvent::Type type) {
   blink::WebGestureEvent gesture(type, 0, ui::EventTimeForNow(),
-                                 blink::kWebGestureDeviceTouchscreen);
+                                 blink::WebGestureDevice::kTouchscreen);
   gesture.SetPositionInWidget(gfx::PointF(point));
   RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
       web_contents->GetRenderViewHost()->GetWidget());
@@ -1086,7 +1104,7 @@ void SimulateTapWithModifiersAt(WebContents* web_contents,
                                 const gfx::Point& point) {
   blink::WebGestureEvent tap(blink::WebGestureEvent::kGestureTap, modifiers,
                              ui::EventTimeForNow(),
-                             blink::kWebGestureDeviceTouchpad);
+                             blink::WebGestureDevice::kTouchpad);
   tap.SetPositionInWidget(gfx::PointF(point));
   RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
       web_contents->GetRenderViewHost()->GetWidget());
@@ -1749,7 +1767,8 @@ std::string GetCookies(BrowserContext* browser_context, const GURL& url) {
       url, net::CookieOptions(),
       base::BindOnce(
           [](std::string* cookies_out, base::RunLoop* run_loop,
-             const std::vector<net::CanonicalCookie>& cookies) {
+             const std::vector<net::CanonicalCookie>& cookies,
+             const net::CookieStatusList& excluded_cookies) {
             *cookies_out = net::CanonicalCookie::BuildCookieLine(cookies);
             run_loop->Quit();
           },
@@ -1772,7 +1791,8 @@ std::vector<net::CanonicalCookie> GetCanonicalCookies(
       base::BindOnce(
           [](base::RunLoop* run_loop,
              std::vector<net::CanonicalCookie>* cookies_out,
-             const std::vector<net::CanonicalCookie>& cookies) {
+             const std::vector<net::CanonicalCookie>& cookies,
+             const net::CookieStatusList& excluded_cookies) {
             *cookies_out = cookies;
             run_loop->Quit();
           },
@@ -1790,15 +1810,21 @@ bool SetCookie(BrowserContext* browser_context,
   BrowserContext::GetDefaultStoragePartition(browser_context)
       ->GetNetworkContext()
       ->GetCookieManager(mojo::MakeRequest(&cookie_manager));
-  std::unique_ptr<net::CanonicalCookie> cc(net::CanonicalCookie::Create(
-      url, value, base::Time::Now(), net::CookieOptions()));
+  net::CookieOptions options;
+  options.set_include_httponly();
+  options.set_same_site_cookie_context(
+      net::CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT);
+  std::unique_ptr<net::CanonicalCookie> cc(
+      net::CanonicalCookie::Create(url, value, base::Time::Now(), options));
   DCHECK(cc.get());
 
   cookie_manager->SetCanonicalCookie(
-      *cc.get(), url.scheme(), true /* modify_http_only */,
+      *cc.get(), url.scheme(), options,
       base::BindOnce(
-          [](bool* result, base::RunLoop* run_loop, bool success) {
-            *result = success;
+          [](bool* result, base::RunLoop* run_loop,
+             net::CanonicalCookie::CookieInclusionStatus success) {
+            *result = (success ==
+                       net::CanonicalCookie::CookieInclusionStatus::INCLUDE);
             run_loop->Quit();
           },
           &result, &run_loop));
@@ -1827,7 +1853,7 @@ void SetupCrossSiteRedirector(net::EmbeddedTestServer* embedded_test_server) {
 void WaitForInterstitialAttach(content::WebContents* web_contents) {
   if (web_contents->ShowingInterstitialPage())
     return;
-  base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
+  base::RunLoop run_loop{base::RunLoop::Type::kNestableTasksAllowed};
   InterstitialObserver observer(web_contents, run_loop.QuitClosure(),
                                 base::OnceClosure());
   run_loop.Run();
@@ -1901,7 +1927,11 @@ ui::AXNodeData GetFocusedAccessibilityNodeInfo(WebContents* web_contents) {
 
 bool AccessibilityTreeContainsNodeWithName(BrowserAccessibility* node,
                                            const std::string& name) {
-  if (node->GetStringAttribute(ax::mojom::StringAttribute::kName) == name)
+  // If an image annotation is set, it plays the same role as a name, so it
+  // makes sense to check both in the same test helper.
+  if (node->GetStringAttribute(ax::mojom::StringAttribute::kName) == name ||
+      node->GetStringAttribute(ax::mojom::StringAttribute::kImageAnnotation) ==
+          name)
     return true;
   for (unsigned i = 0; i < node->PlatformChildCount(); i++) {
     if (AccessibilityTreeContainsNodeWithName(node->PlatformGetChild(i), name))
@@ -1910,12 +1940,10 @@ bool AccessibilityTreeContainsNodeWithName(BrowserAccessibility* node,
   return false;
 }
 
-bool ListenToGuestWebContents(
-    AccessibilityNotificationWaiter* accessibility_waiter,
-    WebContents* web_contents) {
-  accessibility_waiter->ListenToAdditionalFrame(
-      static_cast<RenderFrameHostImpl*>(web_contents->GetMainFrame()));
-  return true;
+void WaitForAccessibilityTreeToChange(WebContents* web_contents) {
+  AccessibilityNotificationWaiter accessibility_waiter(
+      web_contents, ui::AXMode(), ax::mojom::Event::kNone);
+  accessibility_waiter.WaitForNotification();
 }
 
 void WaitForAccessibilityTreeToContainNodeWithName(WebContents* web_contents,
@@ -1926,25 +1954,9 @@ void WaitForAccessibilityTreeToContainNodeWithName(WebContents* web_contents,
       web_contents_impl->GetMainFrame());
   BrowserAccessibilityManager* main_frame_manager =
       main_frame->browser_accessibility_manager();
-  FrameTree* frame_tree = web_contents_impl->GetFrameTree();
   while (!main_frame_manager || !AccessibilityTreeContainsNodeWithName(
              main_frame_manager->GetRoot(), name)) {
-    AccessibilityNotificationWaiter accessibility_waiter(
-        main_frame, ax::mojom::Event::kNone);
-    for (FrameTreeNode* node : frame_tree->Nodes()) {
-      accessibility_waiter.ListenToAdditionalFrame(
-          node->current_frame_host());
-    }
-
-    content::BrowserPluginGuestManager* guest_manager =
-        web_contents_impl->GetBrowserContext()->GetGuestManager();
-    if (guest_manager) {
-      guest_manager->ForEachGuest(web_contents_impl,
-                                  base::BindRepeating(&ListenToGuestWebContents,
-                                                      &accessibility_waiter));
-    }
-
-    accessibility_waiter.WaitForNotification();
+    WaitForAccessibilityTreeToChange(web_contents);
     main_frame_manager = main_frame->browser_accessibility_manager();
   }
 }
@@ -1958,6 +1970,103 @@ ui::AXTreeUpdate GetAccessibilityTreeSnapshot(WebContents* web_contents) {
     return ui::AXTreeUpdate();
   return manager->SnapshotAXTreeForTesting();
 }
+
+BrowserAccessibility* GetRootAccessibilityNode(WebContents* web_contents) {
+  WebContentsImpl* web_contents_impl =
+      static_cast<WebContentsImpl*>(web_contents);
+  BrowserAccessibilityManager* manager =
+      web_contents_impl->GetRootBrowserAccessibilityManager();
+  return manager ? manager->GetRoot() : nullptr;
+}
+
+FindAccessibilityNodeCriteria::FindAccessibilityNodeCriteria() = default;
+
+FindAccessibilityNodeCriteria::~FindAccessibilityNodeCriteria() = default;
+
+BrowserAccessibility* FindAccessibilityNode(
+    WebContents* web_contents,
+    const FindAccessibilityNodeCriteria& criteria) {
+  BrowserAccessibility* root = GetRootAccessibilityNode(web_contents);
+  CHECK(root);
+  return FindAccessibilityNodeInSubtree(root, criteria);
+}
+
+BrowserAccessibility* FindAccessibilityNodeInSubtree(
+    BrowserAccessibility* node,
+    const FindAccessibilityNodeCriteria& criteria) {
+  if ((!criteria.name ||
+       node->GetStringAttribute(ax::mojom::StringAttribute::kName) ==
+           criteria.name.value()) &&
+      (!criteria.role || node->GetRole() == criteria.role.value())) {
+    return node;
+  }
+
+  for (unsigned int i = 0; i < node->PlatformChildCount(); ++i) {
+    BrowserAccessibility* result =
+        FindAccessibilityNodeInSubtree(node->PlatformGetChild(i), criteria);
+    if (result)
+      return result;
+  }
+  return nullptr;
+}
+
+#if defined(OS_WIN)
+template <typename T>
+Microsoft::WRL::ComPtr<T> QueryInterfaceFromNode(
+    BrowserAccessibility* browser_accessibility) {
+  Microsoft::WRL::ComPtr<T> result;
+  EXPECT_HRESULT_SUCCEEDED(
+      browser_accessibility->GetNativeViewAccessible()->QueryInterface(
+          __uuidof(T), &result));
+  return result;
+}
+
+void UiaGetPropertyValueVtArrayVtUnknownValidate(
+    PROPERTYID property_id,
+    BrowserAccessibility* target_browser_accessibility,
+    const std::vector<std::string>& expected_names) {
+  ASSERT_NE(nullptr, target_browser_accessibility);
+
+  base::win::ScopedVariant result_variant;
+  Microsoft::WRL::ComPtr<IRawElementProviderSimple> node_provider =
+      QueryInterfaceFromNode<IRawElementProviderSimple>(
+          target_browser_accessibility);
+
+  node_provider->GetPropertyValue(property_id, result_variant.Receive());
+  ASSERT_EQ(VT_ARRAY | VT_UNKNOWN, result_variant.type());
+  ASSERT_EQ(1u, SafeArrayGetDim(V_ARRAY(result_variant.ptr())));
+
+  LONG lower_bound, upper_bound, size;
+  ASSERT_HRESULT_SUCCEEDED(
+      SafeArrayGetLBound(V_ARRAY(result_variant.ptr()), 1, &lower_bound));
+  ASSERT_HRESULT_SUCCEEDED(
+      SafeArrayGetUBound(V_ARRAY(result_variant.ptr()), 1, &upper_bound));
+  size = upper_bound - lower_bound + 1;
+  ASSERT_EQ(static_cast<LONG>(expected_names.size()), size);
+
+  std::vector<std::string> names;
+  for (LONG i = 0; i < size; ++i) {
+    CComPtr<IUnknown> unknown_element = nullptr;
+    ASSERT_HRESULT_SUCCEEDED(SafeArrayGetElement(V_ARRAY(result_variant.ptr()),
+                                                 &i, &unknown_element));
+    ASSERT_NE(nullptr, unknown_element);
+
+    CComPtr<IRawElementProviderSimple> raw_element_provider_simple = nullptr;
+    ASSERT_HRESULT_SUCCEEDED(
+        unknown_element->QueryInterface(&raw_element_provider_simple));
+    ASSERT_NE(nullptr, raw_element_provider_simple);
+
+    base::win::ScopedVariant name;
+    ASSERT_HRESULT_SUCCEEDED(raw_element_provider_simple->GetPropertyValue(
+        UIA_NamePropertyId, name.Receive()));
+    ASSERT_EQ(VT_BSTR, name.type());
+    names.push_back(base::UTF16ToUTF8(
+        base::string16(V_BSTR(name.ptr()), SysStringLen(V_BSTR(name.ptr())))));
+  }
+
+  ASSERT_THAT(names, testing::UnorderedElementsAreArray(expected_names));
+}
+#endif
 
 bool IsWebContentsBrowserPluginFocused(content::WebContents* web_contents) {
   WebContentsImpl* web_contents_impl =
@@ -2096,7 +2205,7 @@ void SendRoutedGestureTapSequence(content::WebContents* web_contents,
 
 namespace {
 
-RenderFrameMetadataProvider* RenderFrameMetadataProviderFromFrameTreeNode(
+RenderFrameMetadataProviderImpl* RenderFrameMetadataProviderFromFrameTreeNode(
     FrameTreeNode* node) {
   DCHECK(node);
   DCHECK(node->current_frame_host());
@@ -2106,7 +2215,7 @@ RenderFrameMetadataProvider* RenderFrameMetadataProviderFromFrameTreeNode(
       ->render_frame_metadata_provider();
 }
 
-RenderFrameMetadataProvider* RenderFrameMetadataProviderFromWebContents(
+RenderFrameMetadataProviderImpl* RenderFrameMetadataProviderFromWebContents(
     WebContents* web_contents) {
   DCHECK(web_contents);
   DCHECK(web_contents->GetRenderViewHost());
@@ -2153,7 +2262,7 @@ void TitleWatcher::TitleWasSet(NavigationEntry* entry) {
 
 void TitleWatcher::TestTitle() {
   const base::string16& current_title = web_contents()->GetTitle();
-  if (base::ContainsValue(expected_titles_, current_title)) {
+  if (base::Contains(expected_titles_, current_title)) {
     observed_title_ = current_title;
     run_loop_.Quit();
   }
@@ -2165,6 +2274,8 @@ RenderProcessHostWatcher::RenderProcessHostWatcher(
     : render_process_host_(render_process_host),
       type_(type),
       did_exit_normally_(true),
+      allow_renderer_crashes_(
+          std::make_unique<ScopedAllowRendererCrashes>(render_process_host)),
       quit_closure_(run_loop_.QuitClosure()) {
   render_process_host_->AddObserver(this);
 }
@@ -2210,6 +2321,11 @@ DOMMessageQueue::DOMMessageQueue(WebContents* web_contents)
                  Source<WebContents>(web_contents));
 }
 
+DOMMessageQueue::DOMMessageQueue(RenderFrameHost* render_frame_host)
+    : DOMMessageQueue(WebContents::FromRenderFrameHost(render_frame_host)) {
+  render_frame_host_ = render_frame_host;
+}
+
 DOMMessageQueue::~DOMMessageQueue() {}
 
 void DOMMessageQueue::Observe(int type,
@@ -2235,6 +2351,15 @@ void DOMMessageQueue::RenderProcessGone(base::TerminationStatus status) {
   }
 }
 
+void DOMMessageQueue::RenderFrameDeleted(RenderFrameHost* render_frame_host) {
+  if (!render_frame_host_)
+    return;
+  if (render_frame_host_ != render_frame_host)
+    return;
+  if (quit_closure_)
+    std::move(quit_closure_).Run();
+}
+
 void DOMMessageQueue::ClearQueue() {
   message_queue_ = base::queue<std::string>();
 }
@@ -2243,7 +2368,7 @@ bool DOMMessageQueue::WaitForMessage(std::string* message) {
   DCHECK(message);
   if (!renderer_crashed_ && message_queue_.empty()) {
     // This will be quit when a new message comes in.
-    base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
+    base::RunLoop run_loop{base::RunLoop::Type::kNestableTasksAllowed};
     quit_closure_ = run_loop.QuitClosure();
     run_loop.Run();
   }
@@ -2342,7 +2467,7 @@ bool RequestFrame(WebContents* web_contents) {
 }
 
 RenderFrameSubmissionObserver::RenderFrameSubmissionObserver(
-    RenderFrameMetadataProvider* render_frame_metadata_provider)
+    RenderFrameMetadataProviderImpl* render_frame_metadata_provider)
     : render_frame_metadata_provider_(render_frame_metadata_provider) {
   render_frame_metadata_provider_->AddObserver(this);
   render_frame_metadata_provider_->ReportAllFrameSubmissionsForTesting(true);
@@ -2420,7 +2545,7 @@ void RenderFrameSubmissionObserver::Quit() {
 }
 
 void RenderFrameSubmissionObserver::Wait() {
-  base::RunLoop run_loop;
+  base::RunLoop run_loop{base::RunLoop::Type::kNestableTasksAllowed};
   quit_closure_ = run_loop.QuitClosure();
   run_loop.Run();
 }
@@ -2586,18 +2711,18 @@ BrowserTestClipboardScope::~BrowserTestClipboardScope() {
 }
 
 void BrowserTestClipboardScope::SetRtf(const std::string& rtf) {
-  ui::ScopedClipboardWriter clipboard_writer(ui::CLIPBOARD_TYPE_COPY_PASTE);
+  ui::ScopedClipboardWriter clipboard_writer(ui::ClipboardType::kCopyPaste);
   clipboard_writer.WriteRTF(rtf);
 }
 
 void BrowserTestClipboardScope::SetText(const std::string& text) {
-  ui::ScopedClipboardWriter clipboard_writer(ui::CLIPBOARD_TYPE_COPY_PASTE);
+  ui::ScopedClipboardWriter clipboard_writer(ui::ClipboardType::kCopyPaste);
   clipboard_writer.WriteText(base::ASCIIToUTF16(text));
 }
 
 void BrowserTestClipboardScope::GetText(std::string* result) {
   ui::Clipboard::GetForCurrentThread()->ReadAsciiText(
-      ui::CLIPBOARD_TYPE_COPY_PASTE, result);
+      ui::ClipboardType::kCopyPaste, result);
 }
 
 class FrameFocusedObserver::FrameTreeNodeObserverImpl
@@ -2668,8 +2793,7 @@ TestNavigationManager::TestNavigationManager(WebContents* web_contents,
       handle_(nullptr),
       navigation_paused_(false),
       current_state_(NavigationState::INITIAL),
-      desired_state_(NavigationState::STARTED),
-      weak_factory_(this) {}
+      desired_state_(NavigationState::STARTED) {}
 
 TestNavigationManager::~TestNavigationManager() {
   if (navigation_paused_)
@@ -2758,7 +2882,7 @@ bool TestNavigationManager::WaitForDesiredState() {
   // Wait for the desired state if needed.
   if (current_state_ < desired_state_) {
     DCHECK(!quit_closure_);
-    base::RunLoop run_loop;
+    base::RunLoop run_loop(message_loop_type_);
     quit_closure_ = run_loop.QuitClosure();
     run_loop.Run();
   }
@@ -2788,6 +2912,10 @@ bool TestNavigationManager::ShouldMonitorNavigation(NavigationHandle* handle) {
   if (current_state_ != NavigationState::INITIAL)
     return false;
   return true;
+}
+
+void TestNavigationManager::AllowNestableTasks() {
+  message_loop_type_ = base::RunLoop::Type::kNestableTasksAllowed;
 }
 
 NavigationHandleCommitObserver::NavigationHandleCommitObserver(
@@ -2820,7 +2948,7 @@ void ConsoleObserverDelegate::Wait() {
 
 bool ConsoleObserverDelegate::DidAddMessageToConsole(
     WebContents* source,
-    int32_t level,
+    blink::mojom::ConsoleMessageLevel log_level,
     const base::string16& message,
     int32_t line_no,
     const base::string16& source_id) {
@@ -2828,10 +2956,16 @@ bool ConsoleObserverDelegate::DidAddMessageToConsole(
 
   std::string ascii_message = base::UTF16ToASCII(message);
   if (base::MatchPattern(ascii_message, filter_)) {
-    message_ = ascii_message;
+    messages_.push_back(ascii_message);
     run_loop_.Quit();
   }
   return false;
+}
+
+std::string ConsoleObserverDelegate::message() {
+  if (messages_.empty())
+    return std::string();
+  return messages_.back();
 }
 
 // static
@@ -3055,8 +3189,8 @@ bool TestChildOrGuestAutoresize(bool is_guest,
   RenderWidgetHostImpl* guest_rwh_impl =
       static_cast<RenderWidgetHostImpl*>(guest_rwh);
 
-  scoped_refptr<SynchronizeVisualPropertiesMessageFilter> filter(
-      new SynchronizeVisualPropertiesMessageFilter());
+  auto filter =
+      base::MakeRefCounted<SynchronizeVisualPropertiesMessageFilter>();
 
   // Register the message filter for the guest or child. For guest, we must use
   // a special hook, as there are already message filters installed which will
@@ -3116,7 +3250,10 @@ SynchronizeVisualPropertiesMessageFilter::
     : content::BrowserMessageFilter(kMessageClassesToFilter,
                                     base::size(kMessageClassesToFilter)),
       screen_space_rect_run_loop_(std::make_unique<base::RunLoop>()),
-      screen_space_rect_received_(false) {}
+      screen_space_rect_received_(false),
+      pinch_gesture_active_set_(false),
+      pinch_gesture_active_cleared_(false),
+      last_pinch_gesture_active_(false) {}
 
 void SynchronizeVisualPropertiesMessageFilter::WaitForRect() {
   screen_space_rect_run_loop_->Run();
@@ -3161,6 +3298,20 @@ void SynchronizeVisualPropertiesMessageFilter::
 void SynchronizeVisualPropertiesMessageFilter::OnSynchronizeVisualProperties(
     const viz::FrameSinkId& frame_sink_id,
     const FrameVisualProperties& visual_properties) {
+  // Monitor |is_pinch_gesture_active| to determine when pinch gestures begin
+  // and end.
+  if (visual_properties.is_pinch_gesture_active &&
+      !last_pinch_gesture_active_) {
+    pinch_gesture_active_set_ = true;
+  }
+  if (!visual_properties.is_pinch_gesture_active &&
+      last_pinch_gesture_active_) {
+    pinch_gesture_active_cleared_ = true;
+    if (pinch_end_run_loop_)
+      pinch_end_run_loop_->Quit();
+  }
+  last_pinch_gesture_active_ = visual_properties.is_pinch_gesture_active;
+
   gfx::Rect screen_space_rect_in_dip = visual_properties.screen_space_rect;
   if (IsUseZoomForDSFEnabled()) {
     screen_space_rect_in_dip =
@@ -3242,6 +3393,14 @@ bool SynchronizeVisualPropertiesMessageFilter::OnMessageReceived(
   return false;
 }
 
+void SynchronizeVisualPropertiesMessageFilter::WaitForPinchGestureEnd() {
+  if (pinch_gesture_active_cleared_)
+    return;
+  DCHECK(!pinch_end_run_loop_);
+  pinch_end_run_loop_ = std::make_unique<base::RunLoop>();
+  pinch_end_run_loop_->Run();
+}
+
 RenderWidgetHostMouseEventMonitor::RenderWidgetHostMouseEventMonitor(
     RenderWidgetHost* host)
     : host_(host), event_received_(false) {
@@ -3253,6 +3412,23 @@ RenderWidgetHostMouseEventMonitor::RenderWidgetHostMouseEventMonitor(
 
 RenderWidgetHostMouseEventMonitor::~RenderWidgetHostMouseEventMonitor() {
   host_->RemoveMouseEventCallback(mouse_callback_);
+}
+
+DidStartNavigationObserver::DidStartNavigationObserver(WebContents* contents)
+    : WebContentsObserver(contents) {}
+DidStartNavigationObserver::~DidStartNavigationObserver() = default;
+
+void DidStartNavigationObserver::DidStartNavigation(NavigationHandle* handle) {
+  if (observed_)
+    return;
+  observed_ = true;
+  navigation_handle_ = handle;
+  run_loop_.Quit();
+}
+
+void DidStartNavigationObserver::DidFinishNavigation(NavigationHandle* handle) {
+  if (navigation_handle_ == handle)
+    navigation_handle_ = nullptr;
 }
 
 }  // namespace content

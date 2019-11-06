@@ -11,8 +11,8 @@
 #include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/power_manager_client.h"
-#include "chromeos/dbus/shill_service_client.h"
+#include "chromeos/dbus/power/power_manager_client.h"
+#include "chromeos/dbus/shill/shill_service_client.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -113,7 +113,7 @@ TEST(NetworkChangeManagerClientTest,
   content::TestBrowserThreadBundle thread_bundle_;
   std::unique_ptr<net::NetworkChangeNotifierPosix> network_change_notifier(
       static_cast<net::NetworkChangeNotifierPosix*>(
-          net::NetworkChangeNotifier::Create()));
+          net::NetworkChangeNotifier::Create().release()));
   network_change_notifier->OnConnectionChanged(
       net::NetworkChangeNotifier::CONNECTION_UNKNOWN);
   EXPECT_EQ(net::NetworkChangeNotifier::CONNECTION_UNKNOWN,
@@ -121,7 +121,7 @@ TEST(NetworkChangeManagerClientTest,
 
   // Initialize DBus and clear services so NetworkHandler thinks we're offline.
   DBusThreadManager::Initialize();
-  PowerManagerClient::Initialize();
+  PowerManagerClient::InitializeFake();
   NetworkHandler::Initialize();
   DBusThreadManager::Get()
       ->GetShillServiceClient()
@@ -150,9 +150,9 @@ class NetworkChangeManagerClientUpdateTest : public testing::Test {
   ~NetworkChangeManagerClientUpdateTest() override = default;
 
   void SetUp() override {
-    network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
+    network_change_notifier_ = net::NetworkChangeNotifier::Create();
     DBusThreadManager::Initialize();
-    PowerManagerClient::Initialize();
+    PowerManagerClient::InitializeFake();
     NetworkHandler::Initialize();
     proxy_ = std::make_unique<NetworkChangeManagerClient>(
         static_cast<net::NetworkChangeNotifierPosix*>(

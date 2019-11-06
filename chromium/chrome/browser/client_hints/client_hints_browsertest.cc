@@ -12,6 +12,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/mock_entropy_provider.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
@@ -136,7 +137,8 @@ class ClientHintsBrowserTest : public InProcessBrowserTest,
                                public testing::WithParamInterface<bool> {
  public:
   ClientHintsBrowserTest()
-      : http_server_(net::EmbeddedTestServer::TYPE_HTTP),
+      : field_trial_list_(std::make_unique<base::MockEntropyProvider>()),
+        http_server_(net::EmbeddedTestServer::TYPE_HTTP),
         https_server_(net::EmbeddedTestServer::TYPE_HTTPS),
         https_cross_origin_server_(net::EmbeddedTestServer::TYPE_HTTPS),
         expect_client_hints_on_main_frame_(false),
@@ -182,8 +184,8 @@ class ClientHintsBrowserTest : public InProcessBrowserTest,
 
     accept_ch_with_lifetime_url_ =
         https_server_.GetURL("/accept_ch_with_lifetime.html");
-    EXPECT_TRUE(accept_ch_with_lifetime_url_.SchemeIsHTTPOrHTTPS());
-    EXPECT_TRUE(accept_ch_with_lifetime_url_.SchemeIsCryptographic());
+    accept_ch_with_short_lifetime_url_ =
+        https_server_.GetURL("/accept_ch_with_short_lifetime.html");
 
     accept_ch_without_lifetime_url_ =
         https_server_.GetURL("/accept_ch_without_lifetime.html");
@@ -307,6 +309,12 @@ class ClientHintsBrowserTest : public InProcessBrowserTest,
     return http_equiv_accept_ch_with_lifetime_;
   }
 
+  // A URL whose response headers include Accept-CH and Accept-CH-Lifetime
+  // headers. The Accept-CH-Lifetime duration is set very short to 1 second.
+  const GURL& accept_ch_with_short_lifetime() const {
+    return accept_ch_with_short_lifetime_url_;
+  }
+
   // A URL whose response headers include only Accept-CH header.
   const GURL& accept_ch_without_lifetime_url() const {
     return accept_ch_without_lifetime_url_;
@@ -404,6 +412,7 @@ class ClientHintsBrowserTest : public InProcessBrowserTest,
     return main_frame_ua_observed_;
   }
 
+  base::FieldTrialList field_trial_list_;
   base::test::ScopedFeatureList scoped_feature_list_;
 
   std::string intercept_iframe_resource_;
@@ -561,8 +570,8 @@ class ClientHintsBrowserTest : public InProcessBrowserTest,
     }
 
     for (size_t i = 0; i < blink::kClientHintsMappingsCount; ++i) {
-      if (base::ContainsKey(request.headers,
-                            blink::kClientHintsHeaderMapping[i])) {
+      if (base::Contains(request.headers,
+                         blink::kClientHintsHeaderMapping[i])) {
         // The user agent hint is special:
         if (std::string(blink::kClientHintsHeaderMapping[i]) == "sec-ch-ua") {
           count_user_agent_hint_headers_seen_++;
@@ -588,9 +597,9 @@ class ClientHintsBrowserTest : public InProcessBrowserTest,
         continue;
       }
 
-      EXPECT_EQ(expect_client_hints,
-                base::ContainsKey(request.headers,
-                                  blink::kClientHintsHeaderMapping[i]));
+      EXPECT_EQ(
+          expect_client_hints,
+          base::Contains(request.headers, blink::kClientHintsHeaderMapping[i]));
     }
   }
 
@@ -627,8 +636,7 @@ class ClientHintsBrowserTest : public InProcessBrowserTest,
     // are not set to the correct value on subresources.
     bool is_main_frame_navigation =
         request.GetURL().spec().find(".html") != std::string::npos;
-    if (!base::FeatureList::IsEnabled(network::features::kNetworkService) ||
-        is_main_frame_navigation) {
+    if (is_main_frame_navigation) {
       // Effective connection type is forced to 2G using command line in these
       // tests. RTT is expected to be 1800 msec but leave some gap to account
       // for added noise and randomization.
@@ -662,6 +670,7 @@ class ClientHintsBrowserTest : public InProcessBrowserTest,
   GURL accept_ch_with_lifetime_http_local_url_;
   GURL http_equiv_accept_ch_with_lifetime_http_local_url_;
   GURL accept_ch_with_lifetime_url_;
+  GURL accept_ch_with_short_lifetime_url_;
   GURL accept_ch_without_lifetime_url_;
   GURL http_equiv_accept_ch_without_lifetime_url_;
   GURL without_accept_ch_without_lifetime_url_;
@@ -1163,6 +1172,59 @@ IN_PROC_BROWSER_TEST_P(ClientHintsBrowserTest,
   EXPECT_EQ(20u, count_client_hints_headers_seen());
 }
 
+// Verify that expired persistent client hint preferences are not used.
+// Verifies this by setting Accept-CH-Lifetime value to 1 second,
+// and loading a page after 1 second to verify that client hints are not
+// attached.
+IN_PROC_BROWSER_TEST_F(ClientHintsBrowserTest,
+                       ShortLifetimeFollowedByNoClientHint) {
+  const GURL gurl = accept_ch_with_short_lifetime();
+
+  base::HistogramTester histogram_tester;
+  ContentSettingsForOneType host_settings;
+
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
+      ->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+                              &host_settings);
+  EXPECT_EQ(0u, host_settings.size());
+
+  // Fetching |gurl| should persist the request for client hints.
+  ui_test_utils::NavigateToURL(browser(), gurl);
+
+  histogram_tester.ExpectUniqueSample("ClientHints.UpdateEventCount", 1, 1);
+
+  content::FetchHistogramsFromChildProcesses();
+  SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
+
+  histogram_tester.ExpectUniqueSample("ClientHints.UpdateSize", 11u, 1);
+  // |gurl| sets client hints persist duration to 1 second.
+  histogram_tester.ExpectUniqueSample("ClientHints.PersistDuration", 1 * 1000,
+                                      1);
+  base::RunLoop().RunUntilIdle();
+
+  // Clients hints preferences for one origin should be persisted.
+  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
+      ->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+                              &host_settings);
+  EXPECT_EQ(1u, host_settings.size());
+
+  // Sleep for a duration longer than 1 second (duration of persisted client
+  // hints).
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1001));
+
+  SetClientHintExpectationsOnMainFrame(false);
+  SetClientHintExpectationsOnSubresources(false);
+  ui_test_utils::NavigateToURL(browser(),
+                               without_accept_ch_without_lifetime_url());
+
+  // The user agent hint is attached to all three requests:
+  EXPECT_EQ(3u, count_user_agent_hint_headers_seen());
+
+  // No client hints are attached to the requests since the persisted hints must
+  // be expired.
+  EXPECT_EQ(0u, count_client_hints_headers_seen());
+}
+
 // The test first fetches a page that sets Accept-CH-Lifetime. Next, it fetches
 // a URL from a different origin. However, that URL response redirects to the
 // same origin from where the first page was fetched. The test verifies that
@@ -1412,6 +1474,39 @@ IN_PROC_BROWSER_TEST_P(ClientHintsBrowserTest,
       ->ClearSettingsForOneType(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
 }
 
+// Test that if the content settings are malformed, then the browser does not
+// crash.
+IN_PROC_BROWSER_TEST_P(ClientHintsBrowserTest,
+                       ClientHintsMalformedContentSettings) {
+  ContentSettingsForOneType client_hints_settings;
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(browser()->profile());
+
+  // Add setting for the host.
+  std::unique_ptr<base::ListValue> expiration_times_list =
+      std::make_unique<base::ListValue>();
+  expiration_times_list->AppendInteger(42 /* client hint value */);
+  auto expiration_times_dictionary = std::make_unique<base::DictionaryValue>();
+  expiration_times_dictionary->SetList("client_hints",
+                                       std::move(expiration_times_list));
+  // Do not set |expiration_time| in the dictionary.
+  host_content_settings_map->SetWebsiteSettingDefaultScope(
+      without_accept_ch_without_lifetime_url(), GURL(),
+      CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+      std::make_unique<base::Value>(expiration_times_dictionary->Clone()));
+
+  // Reading the settings should now return one setting.
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_CLIENT_HINTS, std::string(),
+      &client_hints_settings);
+  EXPECT_EQ(1U, client_hints_settings.size());
+
+  SetClientHintExpectationsOnMainFrame(false);
+  SetClientHintExpectationsOnSubresources(false);
+  ui_test_utils::NavigateToURL(browser(),
+                               without_accept_ch_without_lifetime_url());
+}
+
 // Ensure that when the JavaScript is blocked, client hints requested using
 // Accept-CH are not attached to the request headers for subresources.
 IN_PROC_BROWSER_TEST_P(ClientHintsBrowserTest,
@@ -1620,8 +1715,6 @@ class ClientHintsWebHoldbackBrowserTest : public ClientHintsBrowserTest {
 
   const net::EffectiveConnectionType web_effective_connection_type_override_ =
       net::EFFECTIVE_CONNECTION_TYPE_3G;
-
-  base::test::ScopedFeatureList scoped_feature_list_override_;
 };
 
 // Make sure that when NetInfo holdback experiment is enabled, the NetInfo APIs

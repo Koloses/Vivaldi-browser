@@ -26,6 +26,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "third_party/blink/public/platform/web_text_autosizer_page_info.h"
 #include "third_party/blink/public/web/web_window_features.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
@@ -105,7 +106,8 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
     DISALLOW_COPY_AND_ASSIGN(PageClients);
   };
 
-  static Page* Create(PageClients& page_clients);
+  // Any pages not owned by a web view should be created using this method.
+  static Page* CreateNonOrdinary(PageClients& pages_clients);
 
   // An "ordinary" page is a fully-featured page owned by a web view.
   static Page* CreateOrdinary(PageClients&, Page* opener);
@@ -303,9 +305,11 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   PageScheduler* GetPageScheduler() const;
 
   // PageScheduler::Delegate implementation.
+  bool IsOrdinary() const override;
   void ReportIntervention(const String& message) override;
   bool RequestBeginMainFrameNotExpected(bool new_state) override;
   void SetLifecycleState(PageLifecycleState) override;
+  bool LocalMainFrameNetworkIsAlmostIdle() const override;
 
   void AddAutoplayFlags(int32_t flags);
   void ClearAutoplayFlags();
@@ -314,6 +318,13 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
 
   void SetInsidePortal(bool inside_portal);
   bool InsidePortal() const;
+
+  void SetTextAutosizePageInfo(const WebTextAutosizerPageInfo& page_info) {
+    web_text_autosizer_page_info_ = page_info;
+  }
+  const WebTextAutosizerPageInfo& TextAutosizerPageInfo() const {
+    return web_text_autosizer_page_info_;
+  }
 
  private:
   friend class ScopedPagePauser;
@@ -327,6 +338,8 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   void NotifyPluginsChanged() const;
 
   void SetPageScheduler(std::unique_ptr<PageScheduler>);
+
+  void UpdateHasRelatedPages();
 
   // Typically, the main frame and Page should both be owned by the embedder,
   // which must call Page::willBeDestroyed() prior to destroying Page. This
@@ -384,6 +397,8 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
 
   bool is_hidden_;
 
+  bool is_ordinary_;
+
   PageLifecycleState page_lifecycle_state_;
 
   bool is_cursor_visible_;
@@ -401,12 +416,18 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   Member<Page> next_related_page_;
   Member<Page> prev_related_page_;
 
+  // A handle to notify the scheduler whether this page has other related
+  // pages or not.
+  FrameScheduler::SchedulingAffectingFeatureHandle has_related_pages_;
+
   std::unique_ptr<PageScheduler> page_scheduler_;
 
   int32_t autoplay_flags_;
 
   // Accessed by frames to determine whether to expose the PortalHost object.
   bool inside_portal_ = false;
+
+  WebTextAutosizerPageInfo web_text_autosizer_page_info_;
 
   DISALLOW_COPY_AND_ASSIGN(Page);
 };

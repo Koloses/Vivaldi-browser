@@ -14,9 +14,9 @@ import org.chromium.chrome.browser.ntp.IncognitoNewTabPage;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.suggestions.SiteSuggestion;
-import org.chromium.chrome.browser.suggestions.TileSectionType;
-import org.chromium.chrome.browser.suggestions.TileSource;
-import org.chromium.chrome.browser.suggestions.TileTitleSource;
+import org.chromium.chrome.browser.suggestions.tile.TileSectionType;
+import org.chromium.chrome.browser.suggestions.tile.TileSource;
+import org.chromium.chrome.browser.suggestions.tile.TileTitleSource;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.touchless.TouchlessDelegate;
 import org.chromium.chrome.browser.util.FeatureUtilities;
@@ -103,7 +103,7 @@ public class NewTabPageTestUtils {
         AccountManagerFacade.overrideAccountManagerFacadeForTests(fakeAccountManager);
         Account account = AccountManagerFacade.createAccountFromName("test@gmail.com");
         fakeAccountManager.addAccountHolderExplicitly(new AccountHolder.Builder(account).build());
-        assertFalse(AccountManagerFacade.get().isUpdatePending());
+        assertFalse(AccountManagerFacade.get().isUpdatePending().get());
         assertFalse(ChromePreferenceManager.getInstance().readBoolean(
                 ChromePreferenceManager.NTP_SIGNIN_PROMO_DISMISSED, false));
     }

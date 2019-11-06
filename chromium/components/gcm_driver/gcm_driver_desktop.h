@@ -122,7 +122,7 @@ class GCMDriverDesktop : public GCMDriver,
                 const std::string& authorized_entity,
                 const std::string& scope,
                 const std::map<std::string, std::string>& options,
-                const GetTokenCallback& callback) override;
+                GetTokenCallback callback) override;
   void ValidateToken(const std::string& app_id,
                      const std::string& authorized_entity,
                      const std::string& scope,
@@ -131,7 +131,7 @@ class GCMDriverDesktop : public GCMDriver,
   void DeleteToken(const std::string& app_id,
                    const std::string& authorized_entity,
                    const std::string& scope,
-                   const DeleteTokenCallback& callback) override;
+                   DeleteTokenCallback callback) override;
   void AddInstanceIDData(const std::string& app_id,
                          const std::string& instance_id,
                          const std::string& extra_data) override;
@@ -257,7 +257,7 @@ class GCMDriverDesktop : public GCMDriver,
       delete_token_callbacks_;
 
   // Used to pass a weak pointer to the IO worker.
-  base::WeakPtrFactory<GCMDriverDesktop> weak_ptr_factory_;
+  base::WeakPtrFactory<GCMDriverDesktop> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(GCMDriverDesktop);
 };

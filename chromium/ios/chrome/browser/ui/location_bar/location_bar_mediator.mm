@@ -8,12 +8,9 @@
 #include "base/strings/sys_string_conversions.h"
 #include "components/omnibox/browser/location_bar_model.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
-#include "ios/chrome/browser/infobars/infobar_badge_tab_helper.h"
-#include "ios/chrome/browser/infobars/infobar_badge_tab_helper_delegate.h"
 #import "ios/chrome/browser/search_engines/search_engine_observer_bridge.h"
 #import "ios/chrome/browser/search_engines/search_engines_util.h"
 #include "ios/chrome/browser/ssl/ios_security_state_tab_helper.h"
-#import "ios/chrome/browser/ui/infobars/infobar_feature.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_consumer.h"
 #import "ios/chrome/browser/ui/ntp/ntp_util.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_util.h"
@@ -21,9 +18,9 @@
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
-#include "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
-#include "ios/web/public/ssl_status.h"
+#include "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#include "ios/web/public/security/ssl_status.h"
 #import "ios/web/public/web_client.h"
 #import "ios/web/public/web_state/web_state.h"
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
@@ -34,7 +31,6 @@
 #endif
 
 @interface LocationBarMediator () <CRWWebStateObserver,
-                                   InfobarBadgeTabHelperDelegate,
                                    SearchEngineObserving,
                                    WebStateListObserving>
 
@@ -158,13 +154,6 @@
       search_engines::SupportsSearchByImage(self.templateURLService);
 }
 
-#pragma mark - InfobarBadgeTabHelper
-
-- (void)displayBadge:(BOOL)display {
-  DCHECK(IsInfobarUIRebootEnabled());
-  [self.consumer displayInfobarBadge:display];
-}
-
 #pragma mark - Setters
 
 - (void)setWebState:(web::WebState*)webState {
@@ -176,19 +165,6 @@
 
   if (_webState) {
     _webState->AddObserver(_webStateObserver.get());
-
-    if (IsInfobarUIRebootEnabled()) {
-      InfobarBadgeTabHelper* infobarBadgeTabHelper =
-          InfobarBadgeTabHelper::FromWebState(_webState);
-      DCHECK(infobarBadgeTabHelper);
-      infobarBadgeTabHelper->SetDelegate(self);
-      if (self.consumer) {
-        // Whenever the WebState changes ask the corresponding
-        // InfobarBadgeTabHelper if a badge should be displayed.
-        [self.consumer displayInfobarBadge:infobarBadgeTabHelper
-                                               ->IsInfobarBadgeDisplaying()];
-      }
-    }
 
     if (self.consumer) {
       [self notifyConsumerOfChangedLocation];
@@ -239,7 +215,8 @@
 #pragma mark - private
 
 - (void)notifyConsumerOfChangedLocation {
-  [self.consumer updateLocationText:[self currentLocationString]];
+  [self.consumer updateLocationText:[self currentLocationString]
+                           clipTail:[self locationShouldClipTail]];
   GURL URL = self.webState->GetVisibleURL();
   BOOL isNTP = IsURLNewTabPage(URL);
   if (isNTP) {
@@ -262,6 +239,13 @@
   return base::SysUTF16ToNSString(string);
 }
 
+// Some URLs (data://) should have their tail clipped when presented; while for
+// others (http://) it would be more appropriate to clip the head.
+- (BOOL)locationShouldClipTail {
+  GURL url = self.locationBarModel->GetURL();
+  return url.SchemeIs(url::kDataScheme);
+}
+
 #pragma mark Security status icon helpers
 
 - (UIImage*)currentLocationIcon {
@@ -274,7 +258,7 @@
   }
 
   return GetLocationBarSecurityIconForSecurityState(
-      self.locationBarModel->GetSecurityLevel(true));
+      self.locationBarModel->GetSecurityLevel());
 }
 
 // Returns a location icon for offline pages.

@@ -29,7 +29,7 @@
 #include <memory>
 #include <utility>
 
-#include "third_party/blink/public/mojom/devtools/console_message.mojom-shared.h"
+#include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
 #include "third_party/blink/public/platform/web_content_security_policy_struct.h"
 #include "third_party/blink/public/platform/web_insecure_request_policy.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
@@ -73,7 +73,7 @@ class SecurityPolicyViolationEventInit;
 class SourceLocation;
 enum class ResourceType : uint8_t;
 
-typedef int SandboxFlags;
+using SandboxFlags = WebSandboxFlags;
 typedef HeapVector<Member<CSPDirectiveList>> CSPDirectiveListVector;
 typedef HeapVector<Member<ConsoleMessage>> ConsoleMessageVector;
 typedef std::pair<String, ContentSecurityPolicyHeaderType> CSPHeaderAndType;
@@ -145,12 +145,16 @@ class CORE_EXPORT ContentSecurityPolicy
     kTrustedTypesViolation
   };
 
+  // The |type| argument given to inline checks, e.g.:
+  // https://w3c.github.io/webappsec-csp/#should-block-inline
+  // Its possible values are listed in:
+  // https://w3c.github.io/webappsec-csp/#effective-directive-for-inline-check
   enum class InlineType {
-    kJavaScriptURL,
-    kInlineEventHandler,
-    kInlineScriptElement,
-    kInlineStyleAttribute,
-    kInlineStyleElement
+    kNavigation,
+    kScript,
+    kScriptAttribute,
+    kStyle,
+    kStyleAttribute
   };
 
   enum class DirectiveType {
@@ -203,14 +207,11 @@ class CORE_EXPORT ContentSecurityPolicy
 
   static const size_t kMaxSampleLength = 40;
 
-  static ContentSecurityPolicy* Create() {
-    return MakeGarbageCollected<ContentSecurityPolicy>();
-  }
-
   ContentSecurityPolicy();
   ~ContentSecurityPolicy();
   void Trace(blink::Visitor*);
 
+  bool IsBound();
   void BindToDelegate(ContentSecurityPolicyDelegate&);
   void SetupSelf(const SecurityOrigin&);
   void SetupSelf(const ContentSecurityPolicy&);
@@ -339,7 +340,8 @@ class CORE_EXPORT ContentSecurityPolicy
 
   // Determine whether to enforce the assignment failure. Also handle reporting.
   // Returns whether enforcing Trusted Types CSP directives are present.
-  bool AllowTrustedTypeAssignmentFailure(const String& message) const;
+  bool AllowTrustedTypeAssignmentFailure(const String& message,
+                                         const String& sample = String()) const;
 
   void UsesScriptHashAlgorithms(uint8_t content_security_policy_hash_algorithm);
   void UsesStyleHashAlgorithms(uint8_t content_security_policy_hash_algorithm);

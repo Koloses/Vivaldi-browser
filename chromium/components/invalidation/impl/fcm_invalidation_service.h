@@ -8,6 +8,8 @@
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "components/gcm_driver/instance_id/instance_id.h"
+#include "components/invalidation/impl/fcm_invalidation_listener.h"
+#include "components/invalidation/impl/invalidation_listener.h"
 #include "components/invalidation/impl/invalidation_logger.h"
 #include "components/invalidation/impl/invalidator_registrar_with_memory.h"
 #include "components/invalidation/public/identity_provider.h"
@@ -22,10 +24,7 @@ class GCMDriver;
 }
 
 class PrefService;
-
-namespace syncer {
-class Invalidator;
-}
+class PrefRegistrySimple;
 
 namespace instance_id {
 class InstanceIDDriver;
@@ -35,19 +34,23 @@ namespace invalidation {
 
 // This InvalidationService wraps the C++ Invalidation Client (FCM) library.
 // It provides invalidations for desktop platforms (Win, Mac, Linux).
-class FCMInvalidationService : public InvalidationService,
-                               public IdentityProvider::Observer,
-                               public syncer::InvalidationHandler {
+class FCMInvalidationService
+    : public InvalidationService,
+      public IdentityProvider::Observer,
+      public syncer::FCMInvalidationListener::Delegate {
  public:
   FCMInvalidationService(IdentityProvider* identity_provider,
                          gcm::GCMDriver* gcm_driver,
                          instance_id::InstanceIDDriver* client_id_driver,
                          PrefService* pref_service,
                          const syncer::ParseJSONCallback& parse_json,
-                         network::mojom::URLLoaderFactory* loader_factory);
+                         network::mojom::URLLoaderFactory* loader_factory,
+                         const std::string& sender_id = {});
   ~FCMInvalidationService() override;
 
   void Init();
+
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // InvalidationService implementation.
   // It is an error to have registered handlers when the service is destroyed.
@@ -69,17 +72,17 @@ class FCMInvalidationService : public InvalidationService,
   void OnActiveAccountLogin() override;
   void OnActiveAccountLogout() override;
 
-  // syncer::InvalidationHandler implementation.
+  // syncer::FCMInvalidationListener::Delegate implementation.
+  void OnInvalidate(
+      const syncer::TopicInvalidationMap& invalidation_map) override;
   void OnInvalidatorStateChange(syncer::InvalidatorState state) override;
-  void OnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map) override;
-  std::string GetOwnerName() const override;
 
  protected:
   friend class FCMInvalidationServiceTestDelegate;
 
   // Initializes with an injected invalidator.
-  void InitForTest(syncer::Invalidator* invalidator);
+  void InitForTest(
+      std::unique_ptr<syncer::FCMInvalidationListener> invalidation_listener);
 
  private:
   struct Diagnostics {
@@ -113,8 +116,11 @@ class FCMInvalidationService : public InvalidationService,
 
   void DoUpdateRegisteredIdsIfNeeded();
 
+  const std::string GetApplicationName();
+
+  const std::string sender_id_;
+
   syncer::InvalidatorRegistrarWithMemory invalidator_registrar_;
-  std::unique_ptr<syncer::Invalidator> invalidator_;
 
   // The invalidation logger object we use to record state changes
   // and invalidations.
@@ -130,6 +136,9 @@ class FCMInvalidationService : public InvalidationService,
   network::mojom::URLLoaderFactory* loader_factory_;
   bool update_was_requested_ = false;
   Diagnostics diagnostic_info_;
+
+  // The invalidation listener.
+  std::unique_ptr<syncer::FCMInvalidationListener> invalidation_listener_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

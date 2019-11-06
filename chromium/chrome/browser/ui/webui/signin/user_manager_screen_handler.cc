@@ -51,7 +51,6 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/account_id/account_id.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/account_consistency_method.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
@@ -274,7 +273,7 @@ class UserManagerScreenHandler::ProfileUpdateObserver
 
 // UserManagerScreenHandler ---------------------------------------------------
 
-UserManagerScreenHandler::UserManagerScreenHandler() : weak_ptr_factory_(this) {
+UserManagerScreenHandler::UserManagerScreenHandler() {
   profile_attributes_storage_observer_.reset(
       new UserManagerScreenHandler::ProfileUpdateObserver(
           g_browser_process->profile_manager(), this));
@@ -631,8 +630,6 @@ void UserManagerScreenHandler::GetLocalizedValues(
   localized_strings->SetString("cancel", l10n_util::GetStringUTF16(IDS_CANCEL));
   localized_strings->SetString(
       "browseAsGuest", l10n_util::GetStringUTF16(IDS_BROWSE_AS_GUEST_BUTTON));
-  localized_strings->SetString("signOutUser",
-      l10n_util::GetStringUTF16(IDS_SCREEN_LOCK_SIGN_OUT));
   localized_strings->SetString("addSupervisedUser",
       l10n_util::GetStringUTF16(IDS_CREATE_LEGACY_SUPERVISED_USER_MENU_LABEL));
 
@@ -733,7 +730,6 @@ void UserManagerScreenHandler::GetLocalizedValues(
   localized_strings->SetString("publicSessionSelectLanguage", "");
   localized_strings->SetString("publicSessionSelectKeyboard", "");
   localized_strings->SetString("signinBannerText", "");
-  localized_strings->SetString("launchAppButton", "");
   localized_strings->SetString("multiProfilesRestrictedPolicyTitle", "");
   localized_strings->SetString("multiProfilesNotAllowedPolicyMsg", "");
   localized_strings->SetString("multiProfilesPrimaryOnlyPolicyMsg", "");

@@ -8,19 +8,21 @@
 
 #include "base/bind.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
+#include "ios/web/common/features.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #import "ios/web/navigation/wk_based_navigation_manager_impl.h"
 #import "ios/web/navigation/wk_navigation_util.h"
-#import "ios/web/public/crw_navigation_item_storage.h"
-#import "ios/web/public/crw_session_storage.h"
-#include "ios/web/public/features.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
+#include "ios/web/public/js_messaging/web_frame.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/session/crw_navigation_item_storage.h"
+#import "ios/web/public/session/crw_session_storage.h"
 #import "ios/web/public/test/fakes/test_web_client.h"
 #import "ios/web/public/test/fakes/test_web_state_delegate.h"
 #import "ios/web/public/test/web_test_with_web_state.h"
@@ -44,6 +46,9 @@ using base::test::ios::kWaitForPageLoadTimeout;
 
 namespace web {
 namespace {
+
+// Error when loading an app specific page.
+const char kUnsupportedUrlErrorPage[] = "NSURLErrorDomain error -1002.";
 
 // A text string from the test HTML page in the session storage returned  by
 // GetTestSessionStorage().
@@ -83,7 +88,8 @@ enum NavigationManagerChoice {
 
 // Test fixture for web::WebTest class.
 class WebStateTest
-    : public WebTestWithWebState,
+    : public TestWebClient,
+      public WebTestWithWebState,
       public ::testing::WithParamInterface<NavigationManagerChoice> {
  protected:
   WebStateTest() {
@@ -159,14 +165,12 @@ TEST_P(WebStateTest, LoadingProgress) {
 TEST_P(WebStateTest, OverridingWebKitObject) {
   // Add a script command handler.
   __block bool message_received = false;
-  const web::WebState::ScriptCommandCallback callback =
-      base::BindRepeating(^bool(const base::DictionaryValue&, const GURL&,
-                                /*interacted*/ bool, /*is_main_frame*/ bool,
-                                /*sender_frame*/ web::WebFrame*) {
+  const web::WebState::ScriptCommandCallback callback = base::BindRepeating(
+      ^(const base::DictionaryValue&, const GURL&,
+        /*interacted*/ bool, /*is_main_frame*/ web::WebFrame*) {
         message_received = true;
-        return true;
       });
-  web_state()->AddScriptCommandCallback(callback, "test");
+  auto subscription = web_state()->AddScriptCommandCallback(callback, "test");
 
   // Load the page which overrides window.webkit object and wait until the
   // test message is received.
@@ -179,7 +183,6 @@ TEST_P(WebStateTest, OverridingWebKitObject) {
   WaitForCondition(^{
     return message_received;
   });
-  web_state()->RemoveScriptCommandCallback("test");
 }
 
 // Tests that reload with web::ReloadType::NORMAL is no-op when navigation
@@ -227,24 +230,22 @@ TEST_P(WebStateTest, Snapshot) {
   CGRect rect = [web_state()->GetView() bounds];
   base::test::ios::SpinRunLoopWithMinDelay(base::TimeDelta::FromSecondsD(0.2));
   web_state()->TakeSnapshot(
-      gfx::RectF(rect), base::BindOnce(^(const gfx::Image& snapshot) {
-        if (@available(iOS 11, *)) {
-          ASSERT_FALSE(snapshot.IsEmpty());
-          EXPECT_GT(snapshot.Width(), 0);
-          EXPECT_GT(snapshot.Height(), 0);
-          int red_pixel_x = (snapshot.Width() / 2) - 10;
-          int white_pixel_x = (snapshot.Width() / 2) + 10;
-          // Test a pixel on the left (red) side.
-          gfx::test::CheckColors(
-              gfx::test::GetPlatformImageColor(
-                  gfx::test::ToPlatformType(snapshot), red_pixel_x, 50),
-              SK_ColorRED);
-          // Test a pixel on the right (white) side.
-          gfx::test::CheckColors(
-              gfx::test::GetPlatformImageColor(
-                  gfx::test::ToPlatformType(snapshot), white_pixel_x, 50),
-              SK_ColorWHITE);
-        }
+      gfx::RectF(rect), base::BindRepeating(^(const gfx::Image& snapshot) {
+        ASSERT_FALSE(snapshot.IsEmpty());
+        EXPECT_GT(snapshot.Width(), 0);
+        EXPECT_GT(snapshot.Height(), 0);
+        int red_pixel_x = (snapshot.Width() / 2) - 10;
+        int white_pixel_x = (snapshot.Width() / 2) + 10;
+        // Test a pixel on the left (red) side.
+        gfx::test::CheckColors(
+            gfx::test::GetPlatformImageColor(
+                gfx::test::ToPlatformType(snapshot), red_pixel_x, 50),
+            SK_ColorRED);
+        // Test a pixel on the right (white) side.
+        gfx::test::CheckColors(
+            gfx::test::GetPlatformImageColor(
+                gfx::test::ToPlatformType(snapshot), white_pixel_x, 50),
+            SK_ColorWHITE);
         snapshot_complete = true;
       }));
   WaitForCondition(^{
@@ -259,15 +260,14 @@ TEST_P(WebStateTest, MessageFromMainFrame) {
   __block bool message_received = false;
   __block bool message_from_main_frame = false;
   __block base::Value message_value;
-  const web::WebState::ScriptCommandCallback callback = base::BindRepeating(
-      ^bool(const base::DictionaryValue& value, const GURL&,
-            bool user_interacted, bool is_main_frame, WebFrame* sender_frame) {
+  const web::WebState::ScriptCommandCallback callback =
+      base::BindRepeating(^(const base::DictionaryValue& value, const GURL&,
+                            bool user_interacted, WebFrame* sender_frame) {
         message_received = true;
-        message_from_main_frame = is_main_frame;
+        message_from_main_frame = sender_frame->IsMainFrame();
         message_value = value.Clone();
-        return true;
       });
-  web_state()->AddScriptCommandCallback(callback, "test");
+  auto subscription = web_state()->AddScriptCommandCallback(callback, "test");
 
   ASSERT_TRUE(LoadHtml(
       "<script>"
@@ -277,7 +277,6 @@ TEST_P(WebStateTest, MessageFromMainFrame) {
   WaitForCondition(^{
     return message_received;
   });
-  web_state()->RemoveScriptCommandCallback("test");
   EXPECT_TRUE(message_from_main_frame);
   EXPECT_TRUE(message_value.is_dict());
   EXPECT_EQ(message_value.DictSize(), size_t(1));
@@ -294,15 +293,14 @@ TEST_P(WebStateTest, MessageFromIFrame) {
   __block bool message_received = false;
   __block bool message_from_main_frame = false;
   __block base::Value message_value;
-  const web::WebState::ScriptCommandCallback callback = base::BindRepeating(
-      ^bool(const base::DictionaryValue& value, const GURL&,
-            bool user_interacted, bool is_main_frame, WebFrame* sender_frame) {
+  const web::WebState::ScriptCommandCallback callback =
+      base::BindRepeating(^(const base::DictionaryValue& value, const GURL&,
+                            bool user_interacted, WebFrame* sender_frame) {
         message_received = true;
-        message_from_main_frame = is_main_frame;
+        message_from_main_frame = sender_frame->IsMainFrame();
         message_value = value.Clone();
-        return true;
       });
-  web_state()->AddScriptCommandCallback(callback, "test");
+  auto subscription = web_state()->AddScriptCommandCallback(callback, "test");
 
   ASSERT_TRUE(LoadHtml(
       "<iframe srcdoc='"
@@ -314,7 +312,6 @@ TEST_P(WebStateTest, MessageFromIFrame) {
   WaitForCondition(^{
     return message_received;
   });
-  web_state()->RemoveScriptCommandCallback("test");
   EXPECT_FALSE(message_from_main_frame);
   EXPECT_TRUE(message_value.is_dict());
   EXPECT_EQ(message_value.DictSize(), size_t(1));
@@ -350,6 +347,7 @@ TEST_P(WebStateTest, RestoreLargeSession) {
   CRWSessionStorage* session_storage = [[CRWSessionStorage alloc] init];
   session_storage.itemStorages = item_storages;
   auto web_state = WebState::CreateWithStorageSession(params, session_storage);
+  web_state->SetKeepRenderProcessAlive(true);
   WebState* web_state_ptr = web_state.get();
   NavigationManager* navigation_manager = web_state->GetNavigationManager();
   // TODO(crbug.com/873729): The session will not be restored until
@@ -448,6 +446,7 @@ TEST_P(WebStateTest, CallStopDuringSessionRestore) {
   CRWSessionStorage* session_storage = [[CRWSessionStorage alloc] init];
   session_storage.itemStorages = item_storages;
   auto web_state = WebState::CreateWithStorageSession(params, session_storage);
+  web_state->SetKeepRenderProcessAlive(true);
   WebState* web_state_ptr = web_state.get();
   NavigationManager* navigation_manager = web_state->GetNavigationManager();
   // TODO(crbug.com/873729): The session will not be restored until
@@ -491,6 +490,7 @@ TEST_P(WebStateTest, CallLoadURLWithParamsDuringSessionRestore) {
   CRWSessionStorage* session_storage = [[CRWSessionStorage alloc] init];
   session_storage.itemStorages = item_storages;
   auto web_state = WebState::CreateWithStorageSession(params, session_storage);
+  web_state->SetKeepRenderProcessAlive(true);
   WebState* web_state_ptr = web_state.get();
   NavigationManager* navigation_manager = web_state->GetNavigationManager();
   // TODO(crbug.com/873729): The session will not be restored until
@@ -541,6 +541,7 @@ TEST_P(WebStateTest, CallReloadDuringSessionRestore) {
   CRWSessionStorage* session_storage = [[CRWSessionStorage alloc] init];
   session_storage.itemStorages = item_storages;
   auto web_state = WebState::CreateWithStorageSession(params, session_storage);
+  web_state->SetKeepRenderProcessAlive(true);
   WebState* web_state_ptr = web_state.get();
   NavigationManager* navigation_manager = web_state->GetNavigationManager();
   // TODO(crbug.com/873729): The session will not be restored until
@@ -646,8 +647,8 @@ TEST_P(WebStateTest, LoadChromeThenHTML) {
     return !web_state()->IsLoading();
   }));
   // Wait for the error loading.
-  EXPECT_TRUE(
-      test::WaitForWebViewContainingText(web_state(), "unsupported URL"));
+  EXPECT_TRUE(test::WaitForWebViewContainingText(web_state(),
+                                                 kUnsupportedUrlErrorPage));
   NSString* data_html = @(kTestPageHTML);
   web_state()->LoadData([data_html dataUsingEncoding:NSUTF8StringEncoding],
                         @"text/html", GURL("https://www.chromium.org"));
@@ -670,8 +671,8 @@ TEST_P(WebStateTest, LoadChromeThenWaitThenHTMLThenReload) {
   EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, ^{
     return !web_state()->IsLoading();
   }));
-  EXPECT_TRUE(
-      test::WaitForWebViewContainingText(web_state(), "unsupported URL"));
+  EXPECT_TRUE(test::WaitForWebViewContainingText(web_state(),
+                                                 kUnsupportedUrlErrorPage));
   NSString* data_html = @(kTestPageHTML);
   web_state()->LoadData([data_html dataUsingEncoding:NSUTF8StringEncoding],
                         @"text/html", echo_url);

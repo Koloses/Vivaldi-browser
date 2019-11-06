@@ -153,7 +153,7 @@ class CONTENT_EXPORT VideoCaptureManager
   // |stream_type|, |device_id| pair is not found. Returns in-use format of the
   // device otherwise.
   base::Optional<media::VideoCaptureFormat> GetDeviceFormatInUse(
-      blink::MediaStreamType stream_type,
+      blink::mojom::MediaStreamType stream_type,
       const std::string& device_id);
 
   // Sets the platform-dependent window ID for the desktop capture notification
@@ -189,13 +189,6 @@ class CONTENT_EXPORT VideoCaptureManager
   void OnDeviceLaunchAborted() override;
   void OnDeviceConnectionLost(VideoCaptureController* controller) override;
 
-  // Retrieves camera calibration information for a particular device. Returns
-  // nullopt_t if the |device_id| is not found or camera calibration information
-  // is not available for the device.  Camera calibration is cached during
-  // device(s) enumeration.
-  base::Optional<blink::CameraCalibration> GetCameraCalibration(
-      const std::string& device_id);
-
  private:
   class CaptureDeviceStartRequest;
 
@@ -213,9 +206,9 @@ class CONTENT_EXPORT VideoCaptureManager
       const std::vector<media::VideoCaptureDeviceInfo>& device_infos);
 
   // Helpers to report an event to our Listener.
-  void OnOpened(blink::MediaStreamType type,
+  void OnOpened(blink::mojom::MediaStreamType type,
                 media::VideoCaptureSessionId capture_session_id);
-  void OnClosed(blink::MediaStreamType type,
+  void OnClosed(blink::mojom::MediaStreamType type,
                 media::VideoCaptureSessionId capture_session_id);
 
   // Checks to see if |controller| has no clients left. If so, remove it from
@@ -228,7 +221,7 @@ class CONTENT_EXPORT VideoCaptureManager
   // its |serial_id|. In all cases, if not found, nullptr is returned.
   VideoCaptureController* LookupControllerBySessionId(int session_id);
   VideoCaptureController* LookupControllerByMediaTypeAndDeviceId(
-      blink::MediaStreamType type,
+      blink::mojom::MediaStreamType type,
       const std::string& device_id) const;
   bool IsControllerPointerValid(const VideoCaptureController* controller) const;
   scoped_refptr<VideoCaptureController> GetControllerSharedRef(

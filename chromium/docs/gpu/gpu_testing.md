@@ -364,6 +364,10 @@ Email kbr@ if you try this and find it doesn't work.
 
 See the [Swarming documentation] for instructions on how to upload your binaries to the isolate server and trigger execution on Swarming.
 
+Be sure to use the correct swarming dimensions for your desired GPU e.g. "1002:6613" instead of "AMD Radeon R7 240 (1002:6613)" which is how it appears on swarming task page.  You can query bots in the Chrome-GPU pool to find the correct dimensions:
+
+*   `python tools\swarming_client\swarming.py bots -S chromium-swarm.appspot.com -d pool Chrome-GPU`
+
 [Swarming documentation]: https://www.chromium.org/developers/testing/isolated-testing/for-swes#TOC-Run-a-test-built-locally-on-Swarming
 
 ## Moving Test Binaries from Machine to Machine
@@ -563,7 +567,7 @@ The [GPU rasterization test] is a good example of a recently added test which
 performs such spot checks.
 
 [pixel test]: https://chromium.googlesource.com/chromium/src/+/master/content/test/gpu/gpu_tests/pixel_test_pages.py
-[test expectations]: https://chromium.googlesource.com/chromium/src/+/master/content/test/gpu/gpu_tests/pixel_expectations.py
+[test expectations]: https://chromium.googlesource.com/chromium/src/+/master/content/test/gpu/gpu_tests/test_expectations/pixel_expectations.txt
 [test pages]: https://chromium.googlesource.com/chromium/src/+/master/content/test/gpu/gpu_tests/pixel_test_pages.py
 [cloud storage bucket]: https://console.developers.google.com/storage/chromium-gpu-archive/reference-images
 <!-- XXX: old link -->

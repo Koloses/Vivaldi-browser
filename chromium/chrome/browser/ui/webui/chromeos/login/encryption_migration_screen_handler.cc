@@ -22,6 +22,7 @@
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/arc/arc_migration_constants.h"
+#include "chrome/browser/chromeos/login/screens/encryption_migration_screen.h"
 #include "chrome/browser/chromeos/login/ui/login_feedback.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
@@ -30,15 +31,15 @@
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
 #include "chromeos/cryptohome/homedir_methods.h"
-#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/cryptohome/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/power/power_manager_client.h"
+#include "chromeos/dbus/power/power_policy_controller.h"
 #include "chromeos/dbus/power_manager/power_supply_properties.pb.h"
-#include "chromeos/dbus/power_manager_client.h"
-#include "chromeos/dbus/power_policy_controller.h"
 #include "components/login/localized_values_builder.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "services/device/public/mojom/constants.mojom.h"
 #include "services/device/public/mojom/wake_lock_provider.mojom.h"
@@ -48,8 +49,6 @@
 #include "ui/chromeos/devicetype_utils.h"
 
 namespace {
-
-constexpr char kJsScreenPath[] = "login.EncryptionMigrationScreen";
 
 // Path to the mount point to check the available space.
 constexpr char kCheckStoragePath[] = "/home";
@@ -254,18 +253,19 @@ FirstScreen GetFirstScreenForMode(chromeos::EncryptionMigrationMode mode) {
 
 namespace chromeos {
 
+constexpr StaticOobeScreenId EncryptionMigrationScreenView::kScreenId;
+
 EncryptionMigrationScreenHandler::EncryptionMigrationScreenHandler(
     JSCallsContainer* js_calls_container)
     : BaseScreenHandler(kScreenId, js_calls_container),
       tick_clock_(base::DefaultTickClock::GetInstance()),
       weak_ptr_factory_(this) {
-  set_call_js_prefix(kJsScreenPath);
   free_disk_space_fetcher_ = base::Bind(&base::SysInfo::AmountOfFreeDiskSpace,
                                         base::FilePath(kCheckStoragePath));
 }
 
 EncryptionMigrationScreenHandler::~EncryptionMigrationScreenHandler() {
-  DBusThreadManager::Get()->GetCryptohomeClient()->RemoveObserver(this);
+  CryptohomeClient::Get()->RemoveObserver(this);
   PowerManagerClient::Get()->RemoveObserver(this);
   if (delegate_)
     delegate_->OnViewDestroyed(this);
@@ -283,7 +283,8 @@ void EncryptionMigrationScreenHandler::Hide() {
   show_on_init_ = false;
 }
 
-void EncryptionMigrationScreenHandler::SetDelegate(Delegate* delegate) {
+void EncryptionMigrationScreenHandler::SetDelegate(
+    EncryptionMigrationScreen* delegate) {
   delegate_ = delegate;
   if (page_is_ready())
     Initialize();
@@ -578,7 +579,7 @@ void EncryptionMigrationScreenHandler::StartMigration() {
   } else {
     auth_request = CreateAuthorizationRequest();
   }
-  DBusThreadManager::Get()->GetCryptohomeClient()->MountEx(
+  CryptohomeClient::Get()->MountEx(
       cryptohome::CreateAccountIdentifierFromAccountId(
           user_context_.GetAccountId()),
       auth_request, mount,
@@ -605,8 +606,8 @@ void EncryptionMigrationScreenHandler::OnMountExistingVault(
 
   cryptohome::MigrateToDircryptoRequest request;
   request.set_minimal_migration(IsMinimalMigration());
-  DBusThreadManager::Get()->GetCryptohomeClient()->AddObserver(this);
-  DBusThreadManager::Get()->GetCryptohomeClient()->MigrateToDircrypto(
+  CryptohomeClient::Get()->AddObserver(this);
+  CryptohomeClient::Get()->MigrateToDircrypto(
       cryptohome::CreateAccountIdentifierFromAccountId(
           user_context_.GetAccountId()),
       request,
@@ -623,17 +624,14 @@ device::mojom::WakeLock* EncryptionMigrationScreenHandler::GetWakeLock() {
 
   // Service manager connection might be not initialized in some testing
   // contexts.
-  if (!content::ServiceManagerConnection::GetForProcess())
+  if (!content::GetSystemConnector())
     return wake_lock_.get();
 
-  service_manager::Connector* connector =
-      content::ServiceManagerConnection::GetForProcess()->GetConnector();
-  DCHECK(connector);
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   device::mojom::WakeLockProviderPtr wake_lock_provider;
-  connector->BindInterface(device::mojom::kServiceName,
-                           mojo::MakeRequest(&wake_lock_provider));
+  content::GetSystemConnector()->BindInterface(
+      device::mojom::kServiceName, mojo::MakeRequest(&wake_lock_provider));
   wake_lock_provider->GetWakeLockWithoutContext(
       device::mojom::WakeLockType::kPreventAppSuspension,
       device::mojom::WakeLockReason::kOther,
@@ -653,7 +651,7 @@ void EncryptionMigrationScreenHandler::RemoveCryptohome() {
   cryptohome::AccountIdentifier account_id_proto;
   account_id_proto.set_account_id(cryptohome_id.id());
 
-  DBusThreadManager::Get()->GetCryptohomeClient()->RemoveEx(
+  CryptohomeClient::Get()->RemoveEx(
       account_id_proto,
       base::BindOnce(&EncryptionMigrationScreenHandler::OnRemoveCryptohome,
                      weak_ptr_factory_.GetWeakPtr()));
@@ -714,7 +712,7 @@ void EncryptionMigrationScreenHandler::DircryptoMigrationProgress(
       RecordMigrationResultSuccess(IsResumingIncompleteMigration(),
                                    IsArcKiosk());
       // Stop listening to the progress updates.
-      DBusThreadManager::Get()->GetCryptohomeClient()->RemoveObserver(this);
+      CryptohomeClient::Get()->RemoveObserver(this);
       // If the battery level decreased during migration, record the consumed
       // battery level.
       if (current_battery_percent_ &&
@@ -751,7 +749,7 @@ void EncryptionMigrationScreenHandler::DircryptoMigrationProgress(
       RecordMigrationResultGeneralFailure(IsResumingIncompleteMigration(),
                                           IsArcKiosk());
       // Stop listening to the progress updates.
-      DBusThreadManager::Get()->GetCryptohomeClient()->RemoveObserver(this);
+      CryptohomeClient::Get()->RemoveObserver(this);
       // Shows error screen after removing user directory is completed.
       RemoveCryptohome();
       break;

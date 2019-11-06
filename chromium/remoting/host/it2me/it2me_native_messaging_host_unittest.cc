@@ -35,6 +35,7 @@
 #include "remoting/host/setup/test_util.h"
 #include "remoting/protocol/errors.h"
 #include "remoting/protocol/ice_config.h"
+#include "remoting/signaling/log_to_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace remoting {
@@ -118,6 +119,8 @@ class MockIt2MeHost : public It2MeHost {
   void Connect(std::unique_ptr<ChromotingHostContext> context,
                std::unique_ptr<base::DictionaryValue> policies,
                std::unique_ptr<It2MeConfirmationDialogFactory> dialog_factory,
+               std::unique_ptr<RegisterSupportHostRequest> register_request,
+               std::unique_ptr<LogToServer> log_to_server,
                base::WeakPtr<It2MeHost::Observer> observer,
                std::unique_ptr<SignalStrategy> signal_strategy,
                const std::string& username,
@@ -137,6 +140,8 @@ void MockIt2MeHost::Connect(
     std::unique_ptr<ChromotingHostContext> context,
     std::unique_ptr<base::DictionaryValue> policies,
     std::unique_ptr<It2MeConfirmationDialogFactory> dialog_factory,
+    std::unique_ptr<RegisterSupportHostRequest> register_request,
+    std::unique_ptr<LogToServer> log_to_server,
     base::WeakPtr<It2MeHost::Observer> observer,
     std::unique_ptr<SignalStrategy> signal_strategy,
     const std::string& username,
@@ -152,6 +157,7 @@ void MockIt2MeHost::Connect(
   host_context_ = std::move(context);
   observer_ = std::move(observer);
   signal_strategy_ = std::move(signal_strategy);
+  register_request_ = std::move(register_request);
 
   OnPolicyUpdate(std::move(policies));
 
@@ -564,8 +570,7 @@ void It2MeNativeMessagingHostTest::StartHost() {
   pipe_->Start(std::move(it2me_host), std::move(channel));
 
   // Notify the test that the host has finished starting up.
-  test_message_loop_->task_runner()->PostTask(
-      FROM_HERE, test_run_loop_->QuitClosure());
+  test_run_loop_->Quit();
 }
 
 void It2MeNativeMessagingHostTest::ExitTest() {
@@ -640,7 +645,7 @@ TEST_F(It2MeNativeMessagingHostTest,
   connect_message.SetBoolean("noDialogs", true);
   WriteMessageToInputPipe(connect_message);
   VerifyConnectResponses(next_id);
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || !defined(NDEBUG)
   EXPECT_FALSE(factory_raw_ptr_->host->enable_dialogs());
 #else
   EXPECT_TRUE(factory_raw_ptr_->host->enable_dialogs());

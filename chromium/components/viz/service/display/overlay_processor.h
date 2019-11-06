@@ -15,18 +15,27 @@
 #include "components/viz/service/display/dc_layer_overlay.h"
 #include "components/viz/service/display/overlay_candidate.h"
 #include "components/viz/service/viz_service_export.h"
+#include "gpu/ipc/common/surface_handle.h"
 
 namespace cc {
 class DisplayResourceProvider;
 }
 
 namespace viz {
-class OutputSurface;
+class OverlayCandidateValidator;
+class RendererSettings;
+class ContextProvider;
 
 class VIZ_SERVICE_EXPORT OverlayProcessor {
  public:
   using FilterOperationsMap =
       base::flat_map<RenderPassId, cc::FilterOperations*>;
+
+  static void RecordOverlayDamageRectHistograms(
+      bool is_overlay,
+      bool has_occluding_surface_damage,
+      bool zero_damage_rect,
+      bool occluding_damage_equal_to_damage_rect);
 
   class VIZ_SERVICE_EXPORT Strategy {
    public:
@@ -48,12 +57,23 @@ class VIZ_SERVICE_EXPORT OverlayProcessor {
   };
   using StrategyList = std::vector<std::unique_ptr<Strategy>>;
 
-  explicit OverlayProcessor(OutputSurface* surface);
+  static std::unique_ptr<OverlayProcessor> CreateOverlayProcessor(
+      const ContextProvider* context_provider,
+      gpu::SurfaceHandle surface_handle,
+      const RendererSettings& renderer_settings);
+
   virtual ~OverlayProcessor();
-  // Virtual to allow testing different strategies.
-  virtual void Initialize();
 
   gfx::Rect GetAndResetOverlayDamage();
+  void SetSoftwareMirrorMode(bool software_mirror_mode);
+
+  const OverlayCandidateValidator* GetOverlayCandidateValidator() const {
+    return overlay_validator_.get();
+  }
+
+  bool NeedsSurfaceOccludingDamageRect() const;
+  void SetDisplayTransformHint(gfx::OverlayTransform transform);
+  void SetValidatorViewportSize(const gfx::Size& size);
 
   // Attempt to replace quads from the specified root render pass with overlays
   // or CALayers. This must be called every frame.
@@ -70,12 +90,16 @@ class VIZ_SERVICE_EXPORT OverlayProcessor {
       std::vector<gfx::Rect>* content_bounds);
 
   void SetDCHasHwOverlaySupportForTesting() {
-    dc_processor_.SetHasHwOverlaySupport();
+    dc_processor_->SetHasHwOverlaySupport();
   }
 
  protected:
+  explicit OverlayProcessor(const ContextProvider* context_provider);
+  void SetOverlayCandidateValidator(
+      std::unique_ptr<OverlayCandidateValidator> overlay_validator);
+
   StrategyList strategies_;
-  OutputSurface* surface_;
+  std::unique_ptr<OverlayCandidateValidator> overlay_validator_;
   gfx::Rect overlay_damage_rect_;
   gfx::Rect previous_frame_underlay_rect_;
   bool previous_frame_underlay_was_unoccluded_ = false;
@@ -104,7 +128,7 @@ class VIZ_SERVICE_EXPORT OverlayProcessor {
                         const QuadList* quad_list,
                         gfx::Rect* damage_rect);
 
-  DCLayerOverlayProcessor dc_processor_;
+  std::unique_ptr<DCLayerOverlayProcessor> dc_processor_;
 
   DISALLOW_COPY_AND_ASSIGN(OverlayProcessor);
 };

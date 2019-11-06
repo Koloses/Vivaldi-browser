@@ -18,15 +18,17 @@ TEST(CaptionStyleWinTest, TestWinCaptionStyle) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(features::kSystemCaptionStyle);
 
-  if (base::win::GetVersion() >= base::win::VERSION_WIN10) {
+  if (base::win::GetVersion() >= base::win::Version::WIN10) {
     base::win::ScopedCOMInitializer com_initializer;
     ASSERT_TRUE(com_initializer.Succeeded());
 
-    ui::CaptionStyle caption_style = ui::CaptionStyle::FromSystemSettings();
+    base::Optional<ui::CaptionStyle> caption_style =
+        ui::CaptionStyle::FromSystemSettings();
     // Other caption style properties can be empty and shouldn't be checked.
-    EXPECT_TRUE(!caption_style.background_color.empty());
-    EXPECT_TRUE(!caption_style.text_color.empty());
-    EXPECT_TRUE(!caption_style.font_variant.empty());
+    ASSERT_TRUE(caption_style.has_value());
+    EXPECT_TRUE(!caption_style->background_color.empty());
+    EXPECT_TRUE(!caption_style->text_color.empty());
+    EXPECT_TRUE(!caption_style->font_variant.empty());
   }
 }
 

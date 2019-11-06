@@ -4,12 +4,8 @@
 
 package org.chromium.chrome.browser.suggestions;
 
-import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.bookmarks.BookmarkUtils;
-import org.chromium.chrome.browser.download.DownloadMetrics;
-import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.native_page.NativePageHost;
 import org.chromium.chrome.browser.native_page.NativePageNavigationDelegateImpl;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
@@ -38,18 +34,6 @@ public class SuggestionsNavigationDelegate extends NativePageNavigationDelegateI
         super(activity, profile, host, tabModelSelector);
     }
 
-    /** Opens the bookmarks page in the current tab.  */
-    public void navigateToBookmarks() {
-        RecordUserAction.record("MobileNTPSwitchToBookmarks");
-        BookmarkUtils.showBookmarkManager(mActivity);
-    }
-
-    /** Opens the Download Manager UI in the current tab. */
-    public void navigateToDownloadManager() {
-        RecordUserAction.record("MobileNTPSwitchToDownloadManager");
-        DownloadUtils.showDownloadManager(mActivity, mHost.getActiveTab());
-    }
-
     @Override
     public void navigateToHelpPage() {
         NewTabPageUma.recordAction(NewTabPageUma.ACTION_CLICKED_LEARN_MORE);
@@ -76,41 +60,29 @@ public class SuggestionsNavigationDelegate extends NativePageNavigationDelegateI
      * @param article The content suggestion to open.
      */
     public void openSnippet(final int windowOpenDisposition, final SnippetArticle article) {
-        if (!article.isContextual()) {
-            NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_SNIPPET);
-        }
+        NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_SNIPPET);
 
-        if (article.isAssetDownload()) {
-            assert windowOpenDisposition == WindowOpenDisposition.CURRENT_TAB
-                    || windowOpenDisposition == WindowOpenDisposition.NEW_WINDOW
-                    || windowOpenDisposition == WindowOpenDisposition.NEW_BACKGROUND_TAB;
-            DownloadUtils.openFile(article.getAssetDownloadFile().getPath(),
-                    article.getAssetDownloadMimeType(), article.getAssetDownloadGuid(), false, null,
-                    null, DownloadMetrics.DownloadOpenSource.NEW_TAP_PAGE);
-            return;
-        }
+        if (OfflinePageUtils.isEnabled()) {
+            // We explicitly open an offline page only for prefetched offline pages when Data
+            // Reduction Proxy is enabled. For all other sections the URL is opened and it is up to
+            // Offline Pages whether to open its offline page (e.g. when offline).
+            if (DataReductionProxySettings.getInstance().isDataReductionProxyEnabled()
+                    && article.isPrefetched()) {
+                assert article.getOfflinePageOfflineId() != null;
+                assert windowOpenDisposition == WindowOpenDisposition.CURRENT_TAB
+                        || windowOpenDisposition == WindowOpenDisposition.NEW_WINDOW
+                        || windowOpenDisposition == WindowOpenDisposition.NEW_BACKGROUND_TAB;
+                OfflinePageUtils.getLoadUrlParamsForOpeningOfflineVersion(article.mUrl,
+                        article.getOfflinePageOfflineId(), LaunchLocation.SUGGESTION,
+                        (loadUrlParams) -> {
+                            if (loadUrlParams == null) return;
+                            // Extra headers are not read in loadUrl, but verbatim headers are.
+                            loadUrlParams.setVerbatimHeaders(loadUrlParams.getExtraHeadersString());
+                            openDownloadSuggestion(windowOpenDisposition, article, loadUrlParams);
+                        });
 
-        // We explicitly open an offline page only for offline page downloads or for prefetched
-        // offline pages when Data Reduction Proxy is enabled. For all other
-        // sections the URL is opened and it is up to Offline Pages whether to open its offline
-        // page (e.g. when offline).
-        if ((article.isDownload() && !article.isAssetDownload())
-                || (DataReductionProxySettings.getInstance().isDataReductionProxyEnabled()
-                           && article.isPrefetched())) {
-            assert article.getOfflinePageOfflineId() != null;
-            assert windowOpenDisposition == WindowOpenDisposition.CURRENT_TAB
-                    || windowOpenDisposition == WindowOpenDisposition.NEW_WINDOW
-                    || windowOpenDisposition == WindowOpenDisposition.NEW_BACKGROUND_TAB;
-            OfflinePageUtils.getLoadUrlParamsForOpeningOfflineVersion(article.mUrl,
-                    article.getOfflinePageOfflineId(), LaunchLocation.SUGGESTION,
-                    (loadUrlParams) -> {
-                        if (loadUrlParams == null) return;
-                        // Extra headers are not read in loadUrl, but verbatim headers are.
-                        loadUrlParams.setVerbatimHeaders(loadUrlParams.getExtraHeadersString());
-                        openDownloadSuggestion(windowOpenDisposition, article, loadUrlParams);
-                    });
-
-            return;
+                return;
+            }
         }
 
         LoadUrlParams loadUrlParams = new LoadUrlParams(article.mUrl, PageTransition.AUTO_BOOKMARK);
@@ -124,17 +96,8 @@ public class SuggestionsNavigationDelegate extends NativePageNavigationDelegateI
                     ReferrerPolicy.ALWAYS));
         }
 
-        // Set appropriate referrer for contextual suggestions to distinguish them from navigation
-        // from a page.
-        if (article.mCategory == KnownCategories.CONTEXTUAL) {
-            loadUrlParams.setReferrer(
-                    new Referrer(SuggestionsConfig.getReferrerUrl(
-                                         ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_BUTTON),
-                            ReferrerPolicy.ALWAYS));
-        }
-
         Tab loadingTab = openUrl(windowOpenDisposition, loadUrlParams);
-        if (loadingTab != null && !article.isContextual()) {
+        if (loadingTab != null) {
             SuggestionsMetrics.recordVisit(loadingTab, article);
         }
     }

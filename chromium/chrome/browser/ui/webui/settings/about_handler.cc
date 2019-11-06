@@ -16,6 +16,8 @@
 #include "base/i18n/message_formatter.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -60,11 +62,13 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/tpm_firmware_update.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/chromeos/image_source.h"
 #include "chrome/browser/ui/webui/help/help_utils_chromeos.h"
 #include "chrome/browser/ui/webui/help/version_updater_chromeos.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/constants/chromeos_switches.h"
-#include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/power/power_manager_client.h"
 #include "chromeos/dbus/util/version_loader.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
@@ -96,11 +100,19 @@ struct RegulatoryLabel {
   const std::string image_url;
 };
 
-bool ShouldShowSafetyInfo() {
+// Returns the link to the safety info for the device (if it exists).
+std::string GetSafetyInfoLink() {
   const std::vector<std::string> board =
       base::SplitString(base::SysInfo::GetLsbReleaseBoard(), "-",
                         base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-  return board[0] == "nocturne";
+  if (board[0] == "nocturne") {
+    return chrome::kChromeUISafetyPixelSlateURL;
+  }
+  if (board[0] == "eve" || board[0] == "atlas") {
+    return chrome::kChromeUISafetyPixelbookURL;
+  }
+
+  return std::string();
 }
 
 // Returns message that informs user that for update it's better to
@@ -134,28 +146,20 @@ bool IsEnterpriseManaged() {
 
 // Returns true if current user can change channel, false otherwise.
 bool CanChangeChannel(Profile* profile) {
-  // On a managed machine we delegate this setting to the users of the same
-  // domain only if the policy value is "domain".
   if (IsEnterpriseManaged()) {
     bool value = false;
+    // On a managed machine we delegate this setting to the affiliated users
+    // only if the policy value is true.
     chromeos::CrosSettings::Get()->GetBoolean(
         chromeos::kReleaseChannelDelegated, &value);
     if (!value)
       return false;
 
-    // Get the currently logged-in user and strip the domain part only.
-    std::string domain = "";
+    // Get the currently logged-in user and check if it is affiliated.
     const user_manager::User* user =
         profile ? chromeos::ProfileHelper::Get()->GetUserByProfile(profile)
                 : nullptr;
-    std::string email =
-        user ? user->GetAccountId().GetUserEmail() : std::string();
-    size_t at_pos = email.find('@');
-    if (at_pos != std::string::npos && at_pos + 1 < email.length())
-      domain = email.substr(email.find('@') + 1);
-    policy::BrowserPolicyConnectorChromeOS* connector =
-        g_browser_process->platform_part()->browser_policy_connector_chromeos();
-    return domain == connector->GetEnterpriseEnrollmentDomain();
+    return user && user->IsAffiliated();
   }
 
   // On non-managed machines, only the local owner can change the channel.
@@ -277,8 +281,7 @@ std::string UpdateStatusToString(VersionUpdater::Status status) {
 
 namespace settings {
 
-AboutHandler::AboutHandler()
-    : apply_changes_from_upgrade_observer_(false), weak_factory_(this) {
+AboutHandler::AboutHandler() : apply_changes_from_upgrade_observer_(false) {
   UpgradeDetector::GetInstance()->AddObserver(this);
 }
 
@@ -329,13 +332,14 @@ AboutHandler* AboutHandler::Create(content::WebUIDataSource* html_source,
 #endif
 
 #if defined(OS_CHROMEOS)
-  html_source->AddBoolean("shouldShowSafetyInfo", ShouldShowSafetyInfo());
+  std::string safetyInfoLink = GetSafetyInfoLink();
+  html_source->AddBoolean("shouldShowSafetyInfo", !safetyInfoLink.empty());
 #if defined(GOOGLE_CHROME_BUILD)
   html_source->AddString(
       "aboutProductSafety",
       l10n_util::GetStringUTF16(IDS_ABOUT_SAFETY_INFORMATION));
   html_source->AddString("aboutProductSafetyURL",
-                         base::UTF8ToUTF16(chrome::kChromeUISafetyURL));
+                         base::UTF8ToUTF16(safetyInfoLink));
 #endif
 
   base::string16 os_license = l10n_util::GetStringFUTF16(
@@ -360,8 +364,9 @@ AboutHandler* AboutHandler::Create(content::WebUIDataSource* html_source,
 
   html_source->AddString("aboutUserAgent", GetUserAgent());
   html_source->AddString("aboutJsEngineVersion", V8_VERSION_STRING);
-  html_source->AddString("endOfLifeMessage",
-                         l10n_util::GetStringUTF16(IDS_EOL_NOTIFICATION_EOL));
+  html_source->AddString("endOfLifeMessage", l10n_util::GetStringFUTF16(
+                                                 IDS_EOL_NOTIFICATION_EOL,
+                                                 ui::GetChromeOSDeviceName()));
   html_source->AddString("endOfLifeLearnMoreURL",
                          base::ASCIIToUTF16(chrome::kEolNotificationURL));
 #endif
@@ -385,6 +390,9 @@ void AboutHandler::RegisterMessages() {
       "openHelpPage", base::BindRepeating(&AboutHandler::HandleOpenHelpPage,
                                           base::Unretained(this)));
 #if defined(OS_CHROMEOS)
+  web_ui()->RegisterMessageCallback(
+      "openOsHelpPage", base::BindRepeating(&AboutHandler::HandleOpenOsHelpPage,
+                                            base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "setChannel", base::BindRepeating(&AboutHandler::HandleSetChannel,
                                         base::Unretained(this)));
@@ -412,6 +420,18 @@ void AboutHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "getHasEndOfLife",
       base::BindRepeating(&AboutHandler::HandleGetHasEndOfLife,
+                          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "getEnabledReleaseNotes",
+      base::BindRepeating(&AboutHandler::HandleGetEnabledReleaseNotes,
+                          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "launchReleaseNotes",
+      base::BindRepeating(&AboutHandler::HandleLaunchReleaseNotes,
+                          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "checkInternetConnection",
+      base::BindRepeating(&AboutHandler::HandleCheckInternetConnection,
                           base::Unretained(this)));
 #endif
 #if defined(OS_MACOSX)
@@ -511,6 +531,47 @@ void AboutHandler::HandleOpenHelpPage(const base::ListValue* args) {
 }
 
 #if defined(OS_CHROMEOS)
+void AboutHandler::HandleGetEnabledReleaseNotes(const base::ListValue* args) {
+  CHECK_EQ(1U, args->GetSize());
+  std::string callback_id;
+  CHECK(args->GetString(0, &callback_id));
+  ResolveJavascriptCallback(base::Value(callback_id),
+                            base::Value(base::FeatureList::IsEnabled(
+                                chromeos::features::kReleaseNotes)));
+}
+
+void AboutHandler::HandleCheckInternetConnection(const base::ListValue* args) {
+  CHECK_EQ(1U, args->GetSize());
+  std::string callback_id;
+  CHECK(args->GetString(0, &callback_id));
+
+  chromeos::NetworkStateHandler* network_state_handler =
+      chromeos::NetworkHandler::Get()->network_state_handler();
+  const chromeos::NetworkState* network =
+      network_state_handler->DefaultNetwork();
+  ResolveJavascriptCallback(base::Value(callback_id),
+                            base::Value(network && network->IsOnline()));
+}
+
+void AboutHandler::HandleLaunchReleaseNotes(const base::ListValue* args) {
+  DCHECK(args->empty());
+  chromeos::NetworkStateHandler* network_state_handler =
+      chromeos::NetworkHandler::Get()->network_state_handler();
+  const chromeos::NetworkState* network =
+      network_state_handler->DefaultNetwork();
+  if (network && network->IsOnline()) {
+    base::RecordAction(
+        base::UserMetricsAction("ReleaseNotes.LaunchedAboutPage"));
+    chrome::LaunchReleaseNotes(Profile::FromWebUI(web_ui()));
+  }
+}
+
+void AboutHandler::HandleOpenOsHelpPage(const base::ListValue* args) {
+  DCHECK(args->empty());
+  Browser* browser =
+      chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
+  chrome::ShowHelp(browser, chrome::HELP_SOURCE_WEBUI_CHROME_OS);
+}
 
 void AboutHandler::HandleSetChannel(const base::ListValue* args) {
   DCHECK(args->GetSize() == 2);

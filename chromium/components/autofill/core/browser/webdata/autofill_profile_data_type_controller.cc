@@ -14,7 +14,6 @@
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/prefs/pref_service.h"
-#include "components/sync/base/experiments.h"
 #include "components/sync/driver/sync_client.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/model/sync_error.h"
@@ -23,7 +22,7 @@
 namespace browser_sync {
 
 AutofillProfileDataTypeController::AutofillProfileDataTypeController(
-    scoped_refptr<base::SingleThreadTaskRunner> db_thread,
+    scoped_refptr<base::SequencedTaskRunner> db_thread,
     const base::Closure& dump_stack,
     syncer::SyncService* sync_service,
     syncer::SyncClient* sync_client,
@@ -76,22 +75,10 @@ bool AutofillProfileDataTypeController::StartModels() {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(state(), MODEL_STARTING);
 
-  if (!IsEnabled()) {
-    DisableForPolicy();
+  if (!IsEnabled())
     return false;
-  }
-  autofill::PersonalDataManager* personal_data = pdm_provider_.Run();
 
-  // Make sure PDM has the sync service. This is needed because in the account
-  // wallet data mode, PDM uses the service to determine whether to use the
-  // account or local database for server cards, and the association depends on
-  // the data in PDM being loaded (see next comment).
-  // TODO(crbug.com/913947): Merge this call and the one in autofill_manager to
-  // one single call in a more general place.
-  if (base::FeatureList::IsEnabled(
-          autofill::features::kAutofillEnableAccountWalletStorage)) {
-    personal_data->OnSyncServiceInitialized(sync_service());
-  }
+  autofill::PersonalDataManager* personal_data = pdm_provider_.Run();
 
   // Waiting for the personal data is subtle:  we do this as the PDM resets
   // its cache of unique IDs once it gets loaded. If we were to proceed with
@@ -135,13 +122,7 @@ void AutofillProfileDataTypeController::OnUserPrefChanged() {
     return;  // No change to sync state.
   currently_enabled_ = new_enabled;
 
-  if (currently_enabled_) {
-    // The preference was just enabled. Trigger a reconfiguration. This will do
-    // nothing if the type isn't preferred.
-    sync_service()->ReenableDatatype(type());
-  } else {
-    DisableForPolicy();
-  }
+  sync_service()->ReadyForStartChanged(type());
 }
 
 bool AutofillProfileDataTypeController::IsEnabled() {
@@ -150,14 +131,6 @@ bool AutofillProfileDataTypeController::IsEnabled() {
   // Require the user-visible pref to be enabled to sync Autofill Profile data.
   return autofill::prefs::IsProfileAutofillEnabled(
       sync_client()->GetPrefService());
-}
-
-void AutofillProfileDataTypeController::DisableForPolicy() {
-  if (state() != NOT_RUNNING && state() != STOPPING) {
-    CreateErrorHandler()->OnUnrecoverableError(
-        syncer::SyncError(FROM_HERE, syncer::SyncError::DATATYPE_POLICY_ERROR,
-                          "Profile syncing is disabled by policy.", type()));
-  }
 }
 
 }  // namespace browser_sync

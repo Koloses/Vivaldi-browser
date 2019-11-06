@@ -11,7 +11,7 @@ import android.view.View;
 import android.widget.TextView;
 
 import org.chromium.chrome.autofill_assistant.R;
-import org.chromium.chrome.browser.cached_image_fetcher.CachedImageFetcher;
+import org.chromium.chrome.browser.image_fetcher.ImageFetcher;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
@@ -35,9 +35,20 @@ class AssistantInfoBoxViewBinder
     }
 
     private final Context mContext;
+    private ImageFetcher mImageFetcher;
 
-    AssistantInfoBoxViewBinder(Context context) {
+    /** Allows to inject an image fetcher for testing. */
+    AssistantInfoBoxViewBinder(Context context, ImageFetcher imageFetcher) {
         mContext = context;
+        mImageFetcher = imageFetcher;
+    }
+
+    /**
+     * Explicitly clean up.
+     */
+    public void destroy() {
+        mImageFetcher.destroy();
+        mImageFetcher = null;
     }
 
     @Override
@@ -58,11 +69,10 @@ class AssistantInfoBoxViewBinder
     private void setInfoBox(AssistantInfoBox infoBox, ViewHolder viewHolder) {
         viewHolder.mExplanationView.setText(infoBox.getExplanation());
         if (infoBox.getImagePath().isEmpty()) {
-            viewHolder.mExplanationView.setCompoundDrawablesWithIntrinsicBounds(
-                    0, R.drawable.ic_check_circle_outline_48dp, 0, 0);
+            viewHolder.mExplanationView.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
         } else {
-            CachedImageFetcher.getInstance().fetchImage(infoBox.getImagePath(),
-                    CachedImageFetcher.ASSISTANT_INFO_BOX_UMA_CLIENT_NAME, image -> {
+            mImageFetcher.fetchImage(infoBox.getImagePath(),
+                    ImageFetcher.ASSISTANT_INFO_BOX_UMA_CLIENT_NAME, image -> {
                         if (image != null) {
                             Drawable d = new BitmapDrawable(mContext.getResources(), image);
                             viewHolder.mExplanationView.setCompoundDrawablesWithIntrinsicBounds(

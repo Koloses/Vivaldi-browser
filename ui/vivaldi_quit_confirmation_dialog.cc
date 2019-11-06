@@ -72,12 +72,13 @@ VivaldiQuitConfirmationDialog::VivaldiQuitConfirmationDialog(
 VivaldiQuitConfirmationDialog::~VivaldiQuitConfirmationDialog() {
 }
 
-views::View* VivaldiQuitConfirmationDialog::CreateExtraView() {
-  checkbox_ = new views::Checkbox(
+std::unique_ptr<views::View> VivaldiQuitConfirmationDialog::CreateExtraView() {
+  auto checkbox = std::make_unique<views::Checkbox>(
       l10n_util::GetStringUTF16(IDS_EXIT_CONFIRMATION_DONOTSHOW));
-  checkbox_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  checkbox->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
-  return checkbox_;
+  checkbox_ = checkbox.get();
+  return checkbox;
 }
 
 bool VivaldiQuitConfirmationDialog::Accept() {
@@ -115,7 +116,7 @@ bool VivaldiQuitConfirmationDialog::ShouldShowCloseButton() const {
 }
 
 bool VivaldiQuitConfirmationDialog::IsChecked() {
-  return checkbox_ && checkbox_->checked();
+  return checkbox_ && checkbox_->GetChecked();
 }
 
 

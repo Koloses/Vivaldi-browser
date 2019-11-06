@@ -66,10 +66,9 @@ static bool HasListDescendant(const content::BrowserAccessibility* current,
       return true;
   }
 
-  int num_children = current->InternalChildCount();
-
-  for (int i = 0; i < num_children; ++i) {
-    if (HasListDescendant(current->InternalGetChild(i), root))
+  for (auto it = current->InternalChildrenBegin();
+       it != current->InternalChildrenEnd(); ++it) {
+    if (HasListDescendant(it.get(), root))
       return true;
   }
   return false;
@@ -164,8 +163,8 @@ base::string16 BrowserAccessibilityAndroid::GetValue() const {
   return value;
 }
 
-bool BrowserAccessibilityAndroid::PlatformIsLeaf() const {
-  if (BrowserAccessibility::PlatformIsLeaf())
+bool BrowserAccessibilityAndroid::PlatformIsLeafIncludingIgnored() const {
+  if (BrowserAccessibility::PlatformIsLeafIncludingIgnored())
     return true;
 
   // Iframes are always allowed to contain children.
@@ -192,7 +191,7 @@ bool BrowserAccessibilityAndroid::PlatformIsLeaf() const {
       static_cast<BrowserAccessibilityManagerAndroid*>(manager());
   if (manager_android->prune_tree_for_screen_reader()) {
     // Headings with text can drop their children.
-    base::string16 name = GetText();
+    base::string16 name = GetInnerText();
     if (GetRole() == ax::mojom::Role::kHeading && !name.empty())
       return true;
 
@@ -367,7 +366,7 @@ bool BrowserAccessibilityAndroid::IsVisibleToUser() const {
 bool BrowserAccessibilityAndroid::IsInterestingOnAndroid() const {
   // The root is not interesting if it doesn't have a title, even
   // though it's focusable.
-  if (GetRole() == ax::mojom::Role::kRootWebArea && GetText().empty())
+  if (GetRole() == ax::mojom::Role::kRootWebArea && GetInnerText().empty())
     return false;
 
   // Mark as uninteresting if it's hidden, even if it is focusable.
@@ -394,7 +393,7 @@ bool BrowserAccessibilityAndroid::IsInterestingOnAndroid() const {
 
   // Otherwise, the interesting nodes are leaf nodes with non-whitespace text.
   return PlatformIsLeaf() &&
-         !base::ContainsOnlyChars(GetText(), base::kWhitespaceUTF16);
+         !base::ContainsOnlyChars(GetInnerText(), base::kWhitespaceUTF16);
 }
 
 const BrowserAccessibilityAndroid*
@@ -403,9 +402,10 @@ BrowserAccessibilityAndroid::GetSoleInterestingNodeFromSubtree() const {
     return this;
 
   const BrowserAccessibilityAndroid* sole_interesting_node = nullptr;
-  for (uint32_t i = 0; i < PlatformChildCount(); ++i) {
+  for (PlatformChildIterator it = PlatformChildrenBegin();
+       it != PlatformChildrenEnd(); ++it) {
     const BrowserAccessibilityAndroid* interesting_node =
-        static_cast<const BrowserAccessibilityAndroid*>(PlatformGetChild(i))
+        static_cast<const BrowserAccessibilityAndroid*>(it.get())
             ->GetSoleInterestingNodeFromSubtree();
     if (interesting_node && sole_interesting_node) {
       // If there are two interesting nodes, return nullptr.
@@ -423,9 +423,9 @@ bool BrowserAccessibilityAndroid::AreInlineTextBoxesLoaded() const {
     return InternalChildCount() > 0;
 
   // Return false if any descendant needs to load inline text boxes.
-  for (uint32_t i = 0; i < InternalChildCount(); ++i) {
+  for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
     BrowserAccessibilityAndroid* child =
-        static_cast<BrowserAccessibilityAndroid*>(InternalGetChild(i));
+        static_cast<BrowserAccessibilityAndroid*>(it.get());
     if (!child->AreInlineTextBoxesLoaded())
       return false;
   }
@@ -450,7 +450,7 @@ const char* BrowserAccessibilityAndroid::GetClassName() const {
   return ui::AXRoleToAndroidClassName(role, PlatformGetParent() != nullptr);
 }
 
-base::string16 BrowserAccessibilityAndroid::GetText() const {
+base::string16 BrowserAccessibilityAndroid::GetInnerText() const {
   if (IsIframe() || GetRole() == ax::mojom::Role::kWebArea) {
     return base::string16();
   }
@@ -488,9 +488,9 @@ base::string16 BrowserAccessibilityAndroid::GetText() const {
   // from within this!
   if (text.empty() && (HasOnlyTextChildren() ||
                        (IsFocusable() && HasOnlyTextAndImageChildren()))) {
-    for (uint32_t i = 0; i < InternalChildCount(); i++) {
-      BrowserAccessibility* child = InternalGetChild(i);
-      text += static_cast<BrowserAccessibilityAndroid*>(child)->GetText();
+    for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
+      text +=
+          static_cast<BrowserAccessibilityAndroid*>(it.get())->GetInnerText();
     }
   }
 
@@ -515,9 +515,7 @@ base::string16 BrowserAccessibilityAndroid::GetHint() const {
       strings.push_back(name);
   }
 
-  if (GetData().GetNameFrom() != ax::mojom::NameFrom::kPlaceholder &&
-      GetData().GetIntAttribute(ax::mojom::IntAttribute::kDescriptionFrom) !=
-          static_cast<int32_t>(ax::mojom::DescriptionFrom::kPlaceholder)) {
+  if (GetData().GetNameFrom() != ax::mojom::NameFrom::kPlaceholder) {
     base::string16 placeholder =
         GetString16Attribute(ax::mojom::StringAttribute::kPlaceholder);
     if (!placeholder.empty())
@@ -1097,15 +1095,9 @@ int BrowserAccessibilityAndroid::GetItemIndex() const {
     if (max > min && value >= min && value <= max)
       index = static_cast<int>(((value - min)) * 100 / (max - min));
   } else {
-    switch (GetRole()) {
-      case ax::mojom::Role::kListItem:
-      case ax::mojom::Role::kListBoxOption:
-      case ax::mojom::Role::kTreeItem:
-        index = node()->GetPosInSet() - 1;
-        break;
-      default:
-        break;
-    }
+    base::Optional<int> pos_in_set = node()->GetPosInSet();
+    if (pos_in_set && *pos_in_set > 0)
+      index = *pos_in_set - 1;
   }
   return index;
 }
@@ -1118,15 +1110,8 @@ int BrowserAccessibilityAndroid::GetItemCount() const {
     // in RangeMin and RangeMax.
     count = 100;
   } else {
-    switch (GetRole()) {
-      case ax::mojom::Role::kList:
-      case ax::mojom::Role::kListBox:
-      case ax::mojom::Role::kDescriptionList:
-        count = node()->GetSetSize();
-        break;
-      default:
-        break;
-    }
+    if (IsCollection() && node()->GetSetSize())
+      count = *node()->GetSetSize();
   }
   return count;
 }
@@ -1217,18 +1202,18 @@ bool BrowserAccessibilityAndroid::Scroll(int direction) const {
     // If this is a web area inside of an iframe, try to use the bounds of
     // the containing element.
     BrowserAccessibility* parent = PlatformGetParent();
-    while (parent && (parent->GetPageBoundsRect().width() == 0 ||
-                      parent->GetPageBoundsRect().height() == 0)) {
+    while (parent && (parent->GetClippedRootFrameBoundsRect().width() == 0 ||
+                      parent->GetClippedRootFrameBoundsRect().height() == 0)) {
       parent = parent->PlatformGetParent();
     }
     if (parent)
-      bounds = parent->GetPageBoundsRect();
+      bounds = parent->GetClippedRootFrameBoundsRect();
     else
-      bounds = GetPageBoundsRect();
+      bounds = GetClippedRootFrameBoundsRect();
   } else {
     // Otherwise this is something like a scrollable div, just use the
     // bounds of this object itself.
-    bounds = GetPageBoundsRect();
+    bounds = GetClippedRootFrameBoundsRect();
   }
 
   // Scroll by 80% of one page.
@@ -1344,16 +1329,16 @@ int BrowserAccessibilityAndroid::GetSelectionStart() const {
       GetIntAttribute(ax::mojom::IntAttribute::kTextSelStart, &sel_start)) {
     return sel_start;
   }
-
-  int32_t anchor_id = manager()->GetTreeData().sel_anchor_object_id;
+  ui::AXTree::Selection unignored_selection =
+      manager()->ax_tree()->GetUnignoredSelection();
+  int32_t anchor_id = unignored_selection.anchor_object_id;
   BrowserAccessibility* anchor_object = manager()->GetFromID(anchor_id);
   if (!anchor_object) {
     return 0;
   }
 
   auto position = anchor_object->CreatePositionAt(
-      manager()->GetTreeData().sel_anchor_offset,
-      manager()->GetTreeData().sel_anchor_affinity);
+      unignored_selection.anchor_offset, unignored_selection.anchor_affinity);
   while (position->GetAnchor() && position->GetAnchor() != this)
     position = position->CreateParentPosition();
 
@@ -1367,14 +1352,15 @@ int BrowserAccessibilityAndroid::GetSelectionEnd() const {
     return sel_end;
   }
 
-  int32_t focus_id = manager()->GetTreeData().sel_focus_object_id;
+  ui::AXTree::Selection unignored_selection =
+      manager()->ax_tree()->GetUnignoredSelection();
+  int32_t focus_id = unignored_selection.focus_object_id;
   BrowserAccessibility* focus_object = manager()->GetFromID(focus_id);
   if (!focus_object)
     return 0;
 
   auto position = focus_object->CreatePositionAt(
-      manager()->GetTreeData().sel_focus_offset,
-      manager()->GetTreeData().sel_focus_affinity);
+      unignored_selection.focus_offset, unignored_selection.focus_affinity);
   while (position->GetAnchor() && position->GetAnchor() != this)
     position = position->CreateParentPosition();
 
@@ -1437,46 +1423,38 @@ int BrowserAccessibilityAndroid::AndroidRangeType() const {
 }
 
 int BrowserAccessibilityAndroid::RowCount() const {
-  if (ui::IsTableLike(GetRole()))
-    return node()->GetTableRowCount();
+  if (!IsCollection())
+    return 0;
 
-  if (GetRole() == ax::mojom::Role::kList ||
-      GetRole() == ax::mojom::Role::kListBox ||
-      GetRole() == ax::mojom::Role::kDescriptionList ||
-      GetRole() == ax::mojom::Role::kTree) {
-    return node()->GetSetSize();
-  }
+  if (node()->GetSetSize())
+    return *node()->GetSetSize();
 
-  return 0;
+  return node()->GetTableRowCount().value_or(0);
 }
 
 int BrowserAccessibilityAndroid::ColumnCount() const {
-  if (ui::IsTableLike(GetRole()))
-    return node()->GetTableColCount();
-
+  if (IsCollection())
+    return node()->GetTableColCount().value_or(0);
   return 0;
 }
 
 int BrowserAccessibilityAndroid::RowIndex() const {
-  if (GetRole() == ax::mojom::Role::kListItem ||
-      GetRole() == ax::mojom::Role::kListBoxOption ||
-      GetRole() == ax::mojom::Role::kTreeItem) {
-    return node()->GetPosInSet() - 1;
-  }
-
-  return node()->GetTableCellRowIndex();
+  base::Optional<int> pos_in_set = node()->GetPosInSet();
+  if (pos_in_set && pos_in_set > 0)
+    return *pos_in_set - 1;
+  return node()->GetTableCellRowIndex().value_or(0);
 }
 
 int BrowserAccessibilityAndroid::RowSpan() const {
-  return node()->GetTableCellRowSpan();
+  return node()->GetTableCellRowSpan().value_or(0);
 }
 
 int BrowserAccessibilityAndroid::ColumnIndex() const {
-  return node()->GetTableCellColIndex();
+  return node()->GetTableCellColIndex().value_or(0);
 }
 
 int BrowserAccessibilityAndroid::ColumnSpan() const {
-  return node()->GetTableCellColSpan();
+  return node()->GetTableCellColSpan().value_or(0);
 }
 
 float BrowserAccessibilityAndroid::RangeMin() const {
@@ -1513,29 +1491,31 @@ void BrowserAccessibilityAndroid::GetLineBoundaries(
     std::vector<int32_t>* line_ends,
     int offset) {
   // If this node has no children, treat it as all one line.
-  if (GetText().size() > 0 && !InternalChildCount()) {
+  if (GetInnerText().size() > 0 && !InternalChildCount()) {
     line_starts->push_back(offset);
-    line_ends->push_back(offset + GetText().size());
+    line_ends->push_back(offset + GetInnerText().size());
   }
 
   // If this is a static text node, get the line boundaries from the
   // inline text boxes if possible.
   if (GetRole() == ax::mojom::Role::kStaticText) {
     int last_y = 0;
-    for (uint32_t i = 0; i < InternalChildCount(); i++) {
+    bool is_first = true;
+    for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
       BrowserAccessibilityAndroid* child =
-          static_cast<BrowserAccessibilityAndroid*>(InternalGetChild(i));
+          static_cast<BrowserAccessibilityAndroid*>(it.get());
       CHECK_EQ(ax::mojom::Role::kInlineTextBox, child->GetRole());
       // TODO(dmazzoni): replace this with a proper API to determine
       // if two inline text boxes are on the same line. http://crbug.com/421771
-      int y = child->GetPageBoundsRect().y();
-      if (i == 0) {
+      int y = child->GetClippedRootFrameBoundsRect().y();
+      if (is_first) {
+        is_first = false;
         line_starts->push_back(offset);
       } else if (y != last_y) {
         line_ends->push_back(offset);
         line_starts->push_back(offset);
       }
-      offset += child->GetText().size();
+      offset += child->GetInnerText().size();
       last_y = y;
     }
     line_ends->push_back(offset);
@@ -1543,11 +1523,11 @@ void BrowserAccessibilityAndroid::GetLineBoundaries(
   }
 
   // Otherwise, call GetLineBoundaries recursively on the children.
-  for (uint32_t i = 0; i < InternalChildCount(); i++) {
+  for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
     BrowserAccessibilityAndroid* child =
-        static_cast<BrowserAccessibilityAndroid*>(InternalGetChild(i));
+        static_cast<BrowserAccessibilityAndroid*>(it.get());
     child->GetLineBoundaries(line_starts, line_ends, offset);
-    offset += child->GetText().size();
+    offset += child->GetInnerText().size();
   }
 }
 
@@ -1568,22 +1548,22 @@ void BrowserAccessibilityAndroid::GetWordBoundaries(
   }
 
   base::string16 concatenated_text;
-  for (uint32_t i = 0; i < InternalChildCount(); i++) {
+  for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
     BrowserAccessibilityAndroid* child =
-        static_cast<BrowserAccessibilityAndroid*>(InternalGetChild(i));
-    base::string16 child_text = child->GetText();
-    concatenated_text += child->GetText();
+        static_cast<BrowserAccessibilityAndroid*>(it.get());
+    base::string16 child_text = child->GetInnerText();
+    concatenated_text += child->GetInnerText();
   }
 
-  base::string16 text = GetText();
+  base::string16 text = GetInnerText();
   if (text.empty() || concatenated_text == text) {
     // Great - this node is just the concatenation of its children, so
     // we can get the word boundaries recursively.
-    for (uint32_t i = 0; i < InternalChildCount(); i++) {
+    for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
       BrowserAccessibilityAndroid* child =
-          static_cast<BrowserAccessibilityAndroid*>(InternalGetChild(i));
+          static_cast<BrowserAccessibilityAndroid*>(it.get());
       child->GetWordBoundaries(word_starts, word_ends, offset);
-      offset += child->GetText().size();
+      offset += child->GetInnerText().size();
     }
   } else {
     // This node has its own accessible text that doesn't match its
@@ -1604,8 +1584,8 @@ void BrowserAccessibilityAndroid::GetWordBoundaries(
 bool BrowserAccessibilityAndroid::HasFocusableNonOptionChild() const {
   // This is called from PlatformIsLeaf, so don't call PlatformChildCount
   // from within this!
-  for (uint32_t i = 0; i < InternalChildCount(); i++) {
-    BrowserAccessibility* child = InternalGetChild(i);
+  for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
+    BrowserAccessibility* child = it.get();
     if (child->HasState(ax::mojom::State::kFocusable) &&
         child->GetRole() != ax::mojom::Role::kMenuListOption)
       return true;
@@ -1624,9 +1604,8 @@ bool BrowserAccessibilityAndroid::HasCharacterLocations() const {
   if (GetRole() == ax::mojom::Role::kStaticText)
     return true;
 
-  for (uint32_t i = 0; i < InternalChildCount(); i++) {
-    BrowserAccessibility* child = InternalGetChild(i);
-    if (static_cast<BrowserAccessibilityAndroid*>(child)
+  for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
+    if (static_cast<BrowserAccessibilityAndroid*>(it.get())
             ->HasCharacterLocations())
       return true;
   }
@@ -1637,9 +1616,8 @@ bool BrowserAccessibilityAndroid::HasImage() const {
   if (ui::IsImage(GetRole()))
     return true;
 
-  for (uint32_t i = 0; i < InternalChildCount(); i++) {
-    BrowserAccessibility* child = InternalGetChild(i);
-    if (static_cast<BrowserAccessibilityAndroid*>(child)->HasImage())
+  for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
+    if (static_cast<BrowserAccessibilityAndroid*>(it.get())->HasImage())
       return true;
   }
   return false;
@@ -1648,9 +1626,8 @@ bool BrowserAccessibilityAndroid::HasImage() const {
 bool BrowserAccessibilityAndroid::HasOnlyTextChildren() const {
   // This is called from PlatformIsLeaf, so don't call PlatformChildCount
   // from within this!
-  for (uint32_t i = 0; i < InternalChildCount(); i++) {
-    BrowserAccessibility* child = InternalGetChild(i);
-    if (!child->IsTextOnlyObject())
+  for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
+    if (!it->IsTextOnlyObject())
       return false;
   }
   return true;
@@ -1659,8 +1636,8 @@ bool BrowserAccessibilityAndroid::HasOnlyTextChildren() const {
 bool BrowserAccessibilityAndroid::HasOnlyTextAndImageChildren() const {
   // This is called from PlatformIsLeaf, so don't call PlatformChildCount
   // from within this!
-  for (uint32_t i = 0; i < InternalChildCount(); i++) {
-    BrowserAccessibility* child = InternalGetChild(i);
+  for (auto it = InternalChildrenBegin(); it != InternalChildrenEnd(); ++it) {
+    BrowserAccessibility* child = it.get();
     if (child->GetRole() != ax::mojom::Role::kStaticText &&
         !ui::IsImage(child->GetRole())) {
       return false;
@@ -1711,8 +1688,9 @@ void BrowserAccessibilityAndroid::OnDataChanged() {
 int BrowserAccessibilityAndroid::CountChildrenWithRole(
     ax::mojom::Role role) const {
   int count = 0;
-  for (uint32_t i = 0; i < PlatformChildCount(); i++) {
-    if (PlatformGetChild(i)->GetRole() == role)
+  for (PlatformChildIterator it = PlatformChildrenBegin();
+       it != PlatformChildrenEnd(); ++it) {
+    if (it->GetRole() == role)
       count++;
   }
   return count;
@@ -1733,16 +1711,17 @@ base::string16 BrowserAccessibilityAndroid::GetContentInvalidErrorMessage()
       break;
 
     case ax::mojom::InvalidState::kTrue:
-    case ax::mojom::InvalidState::kOther:
       message_id = CONTENT_INVALID_TRUE;
       break;
-
-    case ax::mojom::InvalidState::kSpelling:
-      message_id = CONTENT_INVALID_SPELLING;
-      break;
-
-    case ax::mojom::InvalidState::kGrammar:
-      message_id = CONTENT_INVALID_GRAMMAR;
+    case ax::mojom::InvalidState::kOther:
+      std::string ariaInvalid = GetData().GetStringAttribute(
+          ax::mojom::StringAttribute::kAriaInvalidValue);
+      if (ariaInvalid == "spelling")
+        message_id = CONTENT_INVALID_SPELLING;
+      else if (ariaInvalid == "grammar")
+        message_id = CONTENT_INVALID_GRAMMAR;
+      else
+        message_id = CONTENT_INVALID_TRUE;
       break;
   }
 

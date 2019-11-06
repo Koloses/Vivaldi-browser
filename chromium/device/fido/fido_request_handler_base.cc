@@ -14,24 +14,15 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "device/fido/ble_adapter_manager.h"
+#include "device/fido/fido_authenticator.h"
 #include "device/fido/fido_discovery_factory.h"
 #include "services/service_manager/public/cpp/connector.h"
 
+#if defined(OS_WIN)
+#include "device/fido/win/authenticator.h"
+#endif
+
 namespace device {
-
-// PlatformAuthenticatorInfo --------------------------
-
-PlatformAuthenticatorInfo::PlatformAuthenticatorInfo(
-    std::unique_ptr<FidoAuthenticator> authenticator_,
-    bool has_recognized_mac_touch_id_credential_)
-    : authenticator(std::move(authenticator_)),
-      has_recognized_mac_touch_id_credential(
-          has_recognized_mac_touch_id_credential_) {}
-PlatformAuthenticatorInfo::PlatformAuthenticatorInfo(
-    PlatformAuthenticatorInfo&&) = default;
-PlatformAuthenticatorInfo& PlatformAuthenticatorInfo::operator=(
-    PlatformAuthenticatorInfo&&) = default;
-PlatformAuthenticatorInfo::~PlatformAuthenticatorInfo() = default;
 
 // FidoRequestHandlerBase::TransportAvailabilityInfo --------------------------
 
@@ -56,8 +47,11 @@ FidoRequestHandlerBase::Observer::~Observer() = default;
 
 FidoRequestHandlerBase::FidoRequestHandlerBase(
     service_manager::Connector* connector,
+    FidoDiscoveryFactory* fido_discovery_factory,
     const base::flat_set<FidoTransportProtocol>& available_transports)
-    : connector_(connector), weak_factory_(this) {
+    : fido_discovery_factory_(fido_discovery_factory),
+      connector_(connector),
+      weak_factory_(this) {
 #if defined(OS_WIN)
   InitDiscoveriesWin(available_transports);
 #else
@@ -69,36 +63,42 @@ void FidoRequestHandlerBase::InitDiscoveries(
     const base::flat_set<FidoTransportProtocol>& available_transports) {
   // The number of times |notify_observer_callback_| needs to be invoked before
   // Observer::OnTransportAvailabilityEnumerated is dispatched. Essentially this
-  // is used to wait until all the parts of |transport_availability_info_| are
+  // is used to wait until the parts |transport_availability_info_| are
   // filled out; the |notify_observer_callback_| is invoked once for each part
   // once that part is ready, namely:
   //
-  //   1) Once the platform authenticator related fields are filled out.
-  //   2) [Optionally, if BLE or caBLE enabled] if Bluetooth adapter is present.
+  // 1) [If the platform authenticator is enabled] once the platform
+  //    authenticator is ready.
+  // 2) [If BLE or caBLE are enabled] if Bluetooth adapter is present.
   //
   // On top of that, we wait for (3) an invocation that happens when the
   // |observer_| is set, so that OnTransportAvailabilityEnumerated is never
   // called before the observer is set.
-  size_t transport_info_callback_count = 1u + 0u + 1u;
+  size_t transport_info_callback_count = 1u;
 
 #if defined(OS_WIN)
   if (transport_availability_info_.has_win_native_api_authenticator)
-    transport_info_callback_count++;
+    ++transport_info_callback_count;
 #endif  // defined(OS_WIN)
 
+  transport_availability_info_.available_transports = available_transports;
   for (const auto transport : available_transports) {
     // Construction of CaBleDiscovery is handled by the implementing class as it
     // requires an extension passed on from the relying party.
     if (transport == FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy)
       continue;
 
+    std::unique_ptr<FidoDiscoveryBase> discovery =
+        fido_discovery_factory_->Create(transport, connector_);
     if (transport == FidoTransportProtocol::kInternal) {
-      // Platform authenticator availability is always indicated by
-      // |AuthenticatorImpl|.
-      continue;
+      if (discovery) {
+        ++transport_info_callback_count;
+      } else {
+        // The platform authenticator is not configured for this request.
+        transport_availability_info_.available_transports.erase(
+            FidoTransportProtocol::kInternal);
+      }
     }
-
-    auto discovery = FidoDiscoveryFactory::Create(transport, connector_);
     if (discovery == nullptr) {
       // This can occur in tests when a ScopedVirtualU2fDevice is in effect and
       // HID transports are not configured.
@@ -109,11 +109,10 @@ void FidoRequestHandlerBase::InitDiscoveries(
     discoveries_.push_back(std::move(discovery));
   }
 
-  if (base::ContainsKey(
-          available_transports,
-          FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy) ||
-      base::ContainsKey(available_transports,
-                        FidoTransportProtocol::kBluetoothLowEnergy)) {
+  if (base::Contains(available_transports,
+                     FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy) ||
+      base::Contains(available_transports,
+                     FidoTransportProtocol::kBluetoothLowEnergy)) {
     ++transport_info_callback_count;
     base::SequencedTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
@@ -121,7 +120,6 @@ void FidoRequestHandlerBase::InitDiscoveries(
                        weak_factory_.GetWeakPtr()));
   }
 
-  transport_availability_info_.available_transports = available_transports;
   notify_observer_callback_ = base::BarrierClosure(
       transport_info_callback_count,
       base::BindOnce(
@@ -135,7 +133,8 @@ void FidoRequestHandlerBase::InitDiscoveriesWin(
   // Try to instantiate the discovery for proxying requests to the native
   // Windows WebAuthn API; or fall back to using the regular device transport
   // discoveries if the API is unavailable.
-  auto discovery = FidoDiscoveryFactory::MaybeCreateWinWebAuthnApiDiscovery();
+  auto discovery =
+      fido_discovery_factory_->MaybeCreateWinWebAuthnApiDiscovery();
   if (!discovery) {
     InitDiscoveries(available_transports);
     return;
@@ -159,9 +158,8 @@ void FidoRequestHandlerBase::InitDiscoveriesWin(
   // device communication block (only GetAssertionRequestHandler uses
   // caBLE). Otherwise, do not instantiate any other transports.
   base::flat_set<FidoTransportProtocol> other_transports = {};
-  if (base::ContainsKey(
-          available_transports,
-          FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy))
+  if (base::Contains(available_transports,
+                     FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy))
     other_transports = {
         FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy};
 
@@ -169,7 +167,9 @@ void FidoRequestHandlerBase::InitDiscoveriesWin(
 }
 #endif  // defined(OS_WIN)
 
-FidoRequestHandlerBase::~FidoRequestHandlerBase() = default;
+FidoRequestHandlerBase::~FidoRequestHandlerBase() {
+  CancelActiveAuthenticators();
+}
 
 void FidoRequestHandlerBase::StartAuthenticatorRequest(
     const std::string& authenticator_id) {
@@ -232,7 +232,7 @@ void FidoRequestHandlerBase::PowerOnBluetoothAdapter() {
 
 void FidoRequestHandlerBase::InitiatePairingWithDevice(
     std::string authenticator_id,
-    std::string pin_code,
+    base::Optional<std::string> pin_code,
     base::OnceClosure success_callback,
     base::OnceClosure error_callback) {
   if (!bluetooth_adapter_manager_)
@@ -241,11 +241,6 @@ void FidoRequestHandlerBase::InitiatePairingWithDevice(
   bluetooth_adapter_manager_->InitiatePairing(
       std::move(authenticator_id), std::move(pin_code),
       std::move(success_callback), std::move(error_callback));
-}
-
-void FidoRequestHandlerBase::ProvidePIN(const std::string& old_pin,
-                                        const std::string& pin) {
-  NOTREACHED();
 }
 
 base::WeakPtr<FidoRequestHandlerBase> FidoRequestHandlerBase::GetWeakPtr() {
@@ -260,7 +255,7 @@ void FidoRequestHandlerBase::Start() {
 void FidoRequestHandlerBase::AuthenticatorAdded(
     FidoDiscoveryBase* discovery,
     FidoAuthenticator* authenticator) {
-  DCHECK(!base::ContainsKey(active_authenticators(), authenticator->GetId()));
+  DCHECK(!base::Contains(active_authenticators(), authenticator->GetId()));
   AddAuthenticator(authenticator);
 }
 
@@ -304,15 +299,16 @@ void FidoRequestHandlerBase::AuthenticatorPairingModeChanged(
   if (it == active_authenticators_.end())
     return;
 
-  if (observer_)
-    observer_->FidoAuthenticatorPairingModeChanged(device_id,
-                                                   is_in_pairing_mode);
+  if (observer_) {
+    observer_->FidoAuthenticatorPairingModeChanged(
+        device_id, is_in_pairing_mode, it->second->GetDisplayName());
+  }
 }
 
 void FidoRequestHandlerBase::AddAuthenticator(
     FidoAuthenticator* authenticator) {
   DCHECK(authenticator &&
-         !base::ContainsKey(active_authenticators(), authenticator->GetId()));
+         !base::Contains(active_authenticators(), authenticator->GetId()));
   active_authenticators_.emplace(authenticator->GetId(), authenticator);
 
   // If |observer_| exists, dispatching request to |authenticator| is
@@ -345,40 +341,25 @@ void FidoRequestHandlerBase::AddAuthenticator(
     DCHECK(transport_availability_info_.has_win_native_api_authenticator);
     transport_availability_info_.win_native_api_authenticator_id =
         authenticator->GetId();
+    transport_availability_info_
+        .win_native_ui_shows_resident_credential_notice =
+        static_cast<WinWebAuthnApiAuthenticator*>(authenticator)
+            ->ShowsPrivacyNotice();
     DCHECK(notify_observer_callback_);
     notify_observer_callback_.Run();
   }
 #endif  // defined(OS_WIN)
-}
 
-void FidoRequestHandlerBase::SetPlatformAuthenticatorOrMarkUnavailable(
-    base::Optional<PlatformAuthenticatorInfo> platform_authenticator_info) {
-  DCHECK(!platform_authenticator_);
-  if (platform_authenticator_info &&
-      base::ContainsKey(transport_availability_info_.available_transports,
-                        FidoTransportProtocol::kInternal)) {
-    DCHECK(platform_authenticator_info->authenticator);
-    DCHECK(
-        platform_authenticator_info->authenticator->AuthenticatorTransport() &&
-        *platform_authenticator_info->authenticator->AuthenticatorTransport() ==
-            FidoTransportProtocol::kInternal);
-    transport_availability_info_.has_recognized_mac_touch_id_credential =
-        platform_authenticator_info->has_recognized_mac_touch_id_credential;
-    platform_authenticator_ =
-        std::move(platform_authenticator_info->authenticator);
-    AddAuthenticator(platform_authenticator_.get());
-  } else {
-    transport_availability_info_.available_transports.erase(
-        FidoTransportProtocol::kInternal);
+  if (authenticator->AuthenticatorTransport() ==
+      FidoTransportProtocol::kInternal) {
+    DCHECK(notify_observer_callback_);
+    notify_observer_callback_.Run();
   }
-
-  DCHECK(notify_observer_callback_);
-  notify_observer_callback_.Run();
 }
 
 bool FidoRequestHandlerBase::HasAuthenticator(
     const std::string& authenticator_id) const {
-  return base::ContainsKey(active_authenticators_, authenticator_id);
+  return base::Contains(active_authenticators_, authenticator_id);
 }
 
 void FidoRequestHandlerBase::NotifyObserverTransportAvailability() {

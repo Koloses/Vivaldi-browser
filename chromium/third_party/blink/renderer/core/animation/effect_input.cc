@@ -51,8 +51,9 @@
 #include "third_party/blink/renderer/core/frame/frame_console.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
-#include "third_party/blink/renderer/platform/wtf/ascii_ctype.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "v8/include/v8.h"
 
@@ -90,19 +91,20 @@ void SetKeyframeValue(Element* element,
   StyleSheetContents* style_sheet_contents = document.ElementSheet().Contents();
   CSSPropertyID css_property =
       AnimationInputHelpers::KeyframeAttributeToCSSProperty(property, document);
-  if (css_property != CSSPropertyInvalid) {
+  if (css_property != CSSPropertyID::kInvalid) {
     MutableCSSPropertyValueSet::SetResult set_result =
-        css_property == CSSPropertyVariable
-            ? keyframe.SetCSSPropertyValue(
-                  AtomicString(property), document.GetPropertyRegistry(), value,
-                  document.GetSecureContextMode(), style_sheet_contents)
+        css_property == CSSPropertyID::kVariable
+            ? keyframe.SetCSSPropertyValue(AtomicString(property), value,
+                                           document.GetSecureContextMode(),
+                                           style_sheet_contents)
             : keyframe.SetCSSPropertyValue(css_property, value,
                                            document.GetSecureContextMode(),
                                            style_sheet_contents);
     if (!set_result.did_parse && execution_context) {
       if (document.GetFrame()) {
         document.GetFrame()->Console().AddMessage(ConsoleMessage::Create(
-            kJSMessageSource, mojom::ConsoleMessageLevel::kWarning,
+            mojom::ConsoleMessageSource::kJavaScript,
+            mojom::ConsoleMessageLevel::kWarning,
             "Invalid keyframe value for property " + property + ": " + value));
       }
     }
@@ -111,7 +113,7 @@ void SetKeyframeValue(Element* element,
   css_property =
       AnimationInputHelpers::KeyframeAttributeToPresentationAttribute(property,
                                                                       element);
-  if (css_property != CSSPropertyInvalid) {
+  if (css_property != CSSPropertyID::kInvalid) {
     keyframe.SetPresentationAttributeValue(
         CSSProperty::Get(css_property), value, document.GetSecureContextMode(),
         style_sheet_contents);
@@ -190,7 +192,7 @@ bool IsAnimatableKeyframeAttribute(const String& property,
                                    const Document& document) {
   CSSPropertyID css_property =
       AnimationInputHelpers::KeyframeAttributeToCSSProperty(property, document);
-  if (css_property != CSSPropertyInvalid) {
+  if (css_property != CSSPropertyID::kInvalid) {
     return !CSSAnimations::IsAnimationAffectingProperty(
         CSSProperty::Get(css_property));
   }
@@ -198,7 +200,7 @@ bool IsAnimatableKeyframeAttribute(const String& property,
   css_property =
       AnimationInputHelpers::KeyframeAttributeToPresentationAttribute(property,
                                                                       element);
-  if (css_property != CSSPropertyInvalid)
+  if (css_property != CSSPropertyID::kInvalid)
     return true;
 
   return !!AnimationInputHelpers::KeyframeAttributeToSVGAttribute(property,
@@ -220,7 +222,7 @@ void AddPropertyValuePairsForKeyframe(
   // By spec, we must sort the properties in "ascending order by the Unicode
   // codepoints that define each property name."
   std::sort(keyframe_properties.begin(), keyframe_properties.end(),
-            WTF::CodePointCompareLessThan);
+            WTF::CodeUnitCompareLessThan);
 
   v8::TryCatch try_catch(isolate);
   for (const auto& property : keyframe_properties) {
@@ -344,7 +346,7 @@ StringKeyframeVector ConvertArrayForm(Element* element,
     // offset and composite values; conceptually these were actually added in
     // step 5 above but we didn't have a keyframe object then.
     const BaseKeyframe* base_keyframe = processed_base_keyframes[i];
-    StringKeyframe* keyframe = StringKeyframe::Create();
+    auto* keyframe = MakeGarbageCollected<StringKeyframe>();
     if (base_keyframe->hasOffset()) {
       keyframe->SetOffset(base_keyframe->offset());
     }
@@ -483,7 +485,7 @@ StringKeyframeVector ConvertObjectForm(Element* element,
   // By spec, we must sort the properties in "ascending order by the Unicode
   // codepoints that define each property name."
   std::sort(keyframe_properties.begin(), keyframe_properties.end(),
-            WTF::CodePointCompareLessThan);
+            WTF::CodeUnitCompareLessThan);
 
   for (const auto& property : keyframe_properties) {
     if (property == "offset" || property == "composite" ||
@@ -517,7 +519,7 @@ StringKeyframeVector ConvertObjectForm(Element* element,
 
       auto result = keyframes.insert(computed_offset, nullptr);
       if (result.is_new_entry)
-        result.stored_value->value = StringKeyframe::Create();
+        result.stored_value->value = MakeGarbageCollected<StringKeyframe>();
 
       SetKeyframeValue(element, document, *result.stored_value->value, property,
                        values[i], execution_context);
@@ -661,9 +663,8 @@ KeyframeEffectModelBase* EffectInput::Convert(
 
   composite = ResolveCompositeOperation(composite, parsed_keyframes);
 
-  StringKeyframeEffectModel* keyframe_effect_model =
-      StringKeyframeEffectModel::Create(parsed_keyframes, composite,
-                                        LinearTimingFunction::Shared());
+  auto* keyframe_effect_model = MakeGarbageCollected<StringKeyframeEffectModel>(
+      parsed_keyframes, composite, LinearTimingFunction::Shared());
 
   if (!RuntimeEnabledFeatures::CSSAdditiveAnimationsEnabled()) {
     // This should be enforced by the parsing code.

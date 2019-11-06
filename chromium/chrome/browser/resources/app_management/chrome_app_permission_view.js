@@ -35,7 +35,6 @@ Polymer({
     const {messages: messages} =
         await app_management.BrowserProxy.getInstance()
             .handler.getExtensionAppPermissionMessages(this.app_.id);
-    // TODO(ceciliani) Remove this after app service can fetch description.
     this.$['app-description'].hidden = this.app_.description.length === 0;
     this.messages_ = messages;
   },
@@ -76,5 +75,5 @@ Polymer({
    */
   hasPermissions_: function(messages) {
     return messages.length > 0;
-  }
+  },
 });

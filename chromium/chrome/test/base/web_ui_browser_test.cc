@@ -268,7 +268,19 @@ void BaseWebUIBrowserTest::BrowsePreload(const GURL& browse_to) {
   WebUIJsInjectionReadyObserver injection_observer(
       web_contents, this, preload_test_fixture_, preload_test_name_);
   content::TestNavigationObserver navigation_observer(web_contents);
-  NavigateParams params(browser(), GURL(browse_to), ui::PAGE_TRANSITION_TYPED);
+
+  GURL browse_to_final(browse_to);
+  std::string path = browse_to.path();
+  if (!loader_file_.empty() && path.length() > 1) {
+    GURL::Replacements replace_url;
+    replace_url.SetPathStr(loader_file_);
+    // Remove the leading '/', and use file=<rest of the path> as the query.
+    std::string query = "file=" + path.substr(1);
+    replace_url.SetQueryStr(query);
+    browse_to_final = browse_to_final.ReplaceComponents(replace_url);
+  }
+
+  NavigateParams params(browser(), browse_to_final, ui::PAGE_TRANSITION_TYPED);
   params.disposition = WindowOpenDisposition::CURRENT_TAB;
 
   Navigate(&params);
@@ -343,7 +355,8 @@ void BaseWebUIBrowserTest::BrowsePrintPreload(const GURL& browse_to) {
 #endif
 }
 
-const char BaseWebUIBrowserTest::kDummyURL[] = "chrome://DummyURL";
+const std::string BaseWebUIBrowserTest::kDummyURL =
+    content::GetWebUIURLString("DummyURL");
 
 BaseWebUIBrowserTest::BaseWebUIBrowserTest()
     : libraries_preloaded_(false), override_selected_web_ui_(nullptr) {}
@@ -358,6 +371,14 @@ void BaseWebUIBrowserTest::set_preload_test_name(
   preload_test_name_ = preload_test_name;
 }
 
+void BaseWebUIBrowserTest::set_loader_file(const std::string& loader_file) {
+  loader_file_ = loader_file;
+}
+
+void BaseWebUIBrowserTest::set_webui_host(const std::string& webui_host) {
+  test_factory_->set_webui_host(webui_host);
+}
+
 namespace {
 
 // DataSource for the dummy URL.  If no data source is provided then an error
@@ -370,7 +391,7 @@ class MockWebUIDataSource : public content::URLDataSource {
   ~MockWebUIDataSource() override {}
 
  private:
-  std::string GetSource() const override { return "dummyurl"; }
+  std::string GetSource() override { return "dummyurl"; }
 
   void StartDataRequest(
       const std::string& path,
@@ -382,14 +403,14 @@ class MockWebUIDataSource : public content::URLDataSource {
     callback.Run(response.get());
   }
 
-  std::string GetMimeType(const std::string& path) const override {
+  std::string GetMimeType(const std::string& path) override {
     return "text/html";
   }
 
   // Append 'unsave-eval' to the default script-src CSP policy, since it is
   // needed by some tests using chrome://dummyurl (because they depend on
   // Mock4JS, see crbug.com/844820).
-  std::string GetContentSecurityPolicyScriptSrc() const override {
+  std::string GetContentSecurityPolicyScriptSrc() override {
     return "script-src chrome://resources 'self' 'unsafe-eval';";
   }
 

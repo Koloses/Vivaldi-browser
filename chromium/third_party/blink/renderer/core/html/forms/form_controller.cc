@@ -48,12 +48,12 @@ inline HTMLFormElement* OwnerFormForState(const ListedElement& control) {
   // Assume controls with form attribute have no owners because we restore
   // state during parsing and form owners of such controls might be
   // indeterminate.
-  return ToHTMLElement(control).FastHasAttribute(kFormAttr) ? nullptr
-                                                            : control.Form();
+  return control.ToHTMLElement().FastHasAttribute(kFormAttr) ? nullptr
+                                                             : control.Form();
 }
 
 const AtomicString& ControlType(const ListedElement& control) {
-  if (auto* control_element = ToHTMLFormControlElementOrNull(control))
+  if (auto* control_element = DynamicTo<HTMLFormControlElement>(control))
     return control_element->type();
   return To<ElementInternals>(control).Target().localName();
 }
@@ -197,7 +197,8 @@ class SavedFormState {
   USING_FAST_MALLOC(SavedFormState);
 
  public:
-  static std::unique_ptr<SavedFormState> Create();
+  SavedFormState() : control_state_count_(0) {}
+
   static std::unique_ptr<SavedFormState> Deserialize(const Vector<String>&,
                                                      wtf_size_t& index);
   void SerializeTo(Vector<String>&) const;
@@ -211,8 +212,6 @@ class SavedFormState {
   Vector<String> GetReferencedFilePaths() const;
 
  private:
-  SavedFormState() : control_state_count_(0) {}
-
   using FormElementStateMap = HashMap<FormElementKey,
                                       Deque<FormControlState>,
                                       FormElementKeyHash,
@@ -222,10 +221,6 @@ class SavedFormState {
 
   DISALLOW_COPY_AND_ASSIGN(SavedFormState);
 };
-
-std::unique_ptr<SavedFormState> SavedFormState::Create() {
-  return base::WrapUnique(new SavedFormState);
-}
 
 static bool IsNotFormControlTypeCharacter(UChar ch) {
   return ch != '-' && (ch > 'z' || ch < 'a');
@@ -325,10 +320,6 @@ class FormKeyGenerator final
     : public GarbageCollectedFinalized<FormKeyGenerator> {
 
  public:
-  static FormKeyGenerator* Create() {
-    return MakeGarbageCollected<FormKeyGenerator>();
-  }
-
   FormKeyGenerator() = default;
 
   void Trace(Visitor* visitor) { visitor->Trace(form_to_key_map_); }
@@ -356,6 +347,12 @@ static inline void RecordFormStructure(const HTMLFormElement& form,
     ListedElement& control = *controls[i];
     if (!control.ClassSupportsStateRestore())
       continue;
+    // The resultant string will be fragile if it contains a name of a
+    // form-associated custom element. It's associated to the |form| only if its
+    // custom element definition is available.  It's not associated if the
+    // definition is unavailable though the element structure is identical.
+    if (control.IsElementInternals())
+      continue;
     if (!OwnerFormForState(control))
       continue;
     AtomicString name = control.GetName();
@@ -368,7 +365,7 @@ static inline void RecordFormStructure(const HTMLFormElement& form,
   builder.Append(']');
 }
 
-static inline String FormSignature(const HTMLFormElement& form) {
+String FormSignature(const HTMLFormElement& form) {
   KURL action_url = form.GetURLAttribute(kActionAttr);
   // Remove the query part because it might contain volatile parameters such
   // as a session key.
@@ -449,17 +446,17 @@ Vector<String> DocumentState::ToStateVector() {
     }
     form_controls_dirty_ = false;
   }
-  FormKeyGenerator* key_generator = FormKeyGenerator::Create();
+  auto* key_generator = MakeGarbageCollected<FormKeyGenerator>();
   std::unique_ptr<SavedFormStateMap> state_map =
       base::WrapUnique(new SavedFormStateMap);
   for (auto& control : form_controls_) {
-    DCHECK(ToHTMLElement(control)->isConnected());
+    DCHECK(control->ToHTMLElement().isConnected());
     if (!control->ShouldSaveAndRestoreFormControlState())
       continue;
     SavedFormStateMap::AddResult result =
         state_map->insert(key_generator->FormKey(*control), nullptr);
     if (result.is_new_entry)
-      result.stored_value->value = SavedFormState::Create();
+      result.stored_value->value = std::make_unique<SavedFormState>();
     result.stored_value->value->AppendControlState(
         control->GetName(), ControlType(*control),
         control->SaveFormControlState());
@@ -508,7 +505,7 @@ FormControlState FormController::TakeStateForFormElement(
   if (saved_form_state_map_.IsEmpty())
     return FormControlState();
   if (!form_key_generator_)
-    form_key_generator_ = FormKeyGenerator::Create();
+    form_key_generator_ = MakeGarbageCollected<FormKeyGenerator>();
   SavedFormStateMap::iterator it =
       saved_form_state_map_.find(form_key_generator_->FormKey(control));
   if (it == saved_form_state_map_.end())

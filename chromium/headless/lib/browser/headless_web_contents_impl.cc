@@ -77,13 +77,15 @@ class HeadlessWebContentsImpl::Delegate : public content::WebContentsDelegate {
       content::WebContents* web_contents,
       content::SecurityStyleExplanations* security_style_explanations)
       override {
-    security_state::SecurityInfo security_info;
-    security_state::GetSecurityInfo(
-        security_state::GetVisibleSecurityState(web_contents),
-        false /* used_policy_installed_certificate */,
-        base::Bind(&content::IsOriginSecure), &security_info);
-    return security_state::GetSecurityStyle(security_info,
-                                            security_style_explanations);
+    std::unique_ptr<security_state::VisibleSecurityState>
+        visible_security_state =
+            security_state::GetVisibleSecurityState(web_contents);
+    return security_state::GetSecurityStyle(
+        security_state::GetSecurityLevel(
+            *visible_security_state.get(),
+            false /* used_policy_installed_certificate */,
+            base::BindRepeating(&content::IsOriginSecure)),
+        *visible_security_state.get(), security_style_explanations);
   }
 #endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
 
@@ -304,6 +306,8 @@ HeadlessWebContentsImpl::HeadlessWebContentsImpl(
 }
 
 HeadlessWebContentsImpl::~HeadlessWebContentsImpl() {
+  for (auto& observer : observers_)
+    observer.HeadlessWebContentsDestroyed();
   agent_host_->RemoveObserver(this);
   if (render_process_host_)
     render_process_host_->RemoveObserver(this);

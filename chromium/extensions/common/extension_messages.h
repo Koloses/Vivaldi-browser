@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/shared_memory.h"
+#include "base/memory/read_only_shared_memory_region.h"
 #include "base/values.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/socket_permission_request.h"
@@ -118,11 +118,12 @@ IPC_STRUCT_BEGIN(ExtensionHostMsg_Request_Params)
   IPC_STRUCT_MEMBER(bool, user_gesture)
 
   // If this API call is for a service worker, then this is the worker thread
-  // id. Otherwise, this is -1.
+  // id. Otherwise, this is kMainThreadId.
   IPC_STRUCT_MEMBER(int, worker_thread_id)
 
   // If this API call is for a service worker, then this is the service
-  // worker version id. Otherwise, this is -1.
+  // worker version id. Otherwise, this is set to
+  // blink::mojom::kInvalidServiceWorkerVersionId.
   IPC_STRUCT_MEMBER(int64_t, service_worker_version_id)
 IPC_STRUCT_END()
 
@@ -578,8 +579,8 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_ExecuteCode,
                     ExtensionMsg_ExecuteCode_Params)
 
 // Notification that the user scripts have been updated. It has one
-// SharedMemoryHandle argument consisting of the pickled script data. This
-// handle is valid in the context of the renderer.
+// ReadOnlySharedMemoryRegion argument consisting of the pickled script data.
+// This memory region is valid in the context of the renderer.
 // If |owner| is not empty, then the shared memory handle refers to |owner|'s
 // programmatically-defined scripts. Otherwise, the handle refers to all
 // hosts' statically defined scripts. So far, only extension-hosts support
@@ -592,7 +593,7 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_ExecuteCode,
 // If |whitelisted_only| is true, this process should only run whitelisted
 // scripts and not all user scripts.
 IPC_MESSAGE_CONTROL4(ExtensionMsg_UpdateUserScripts,
-                     base::SharedMemoryHandle,
+                     base::ReadOnlySharedMemoryRegion,
                      HostID /* owner */,
                      std::set<HostID> /* changed hosts */,
                      bool /* whitelisted_only */)
@@ -741,6 +742,14 @@ IPC_MESSAGE_ROUTED1(ExtensionHostMsg_Request,
 // request. The browser will always respond with a ExtensionMsg_Response.
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_RequestForIOThread,
                      int /* routing_id */,
+                     ExtensionHostMsg_Request_Params)
+
+// A service worker thread sends this message when an extension service worker
+// starts an API request. The browser will always respond with a
+// ExtensionMsg_ResponseWorker. This message is for API requests that run on
+// the IO thread. It is defined here so it's handled by the same message
+// filter as ExtensionHostMsg_RequestForIOThread.
+IPC_MESSAGE_CONTROL1(ExtensionHostMsg_RequestWorkerForIOThread,
                      ExtensionHostMsg_Request_Params)
 
 // Notify the browser that the given extension added a listener to an event.
@@ -1106,6 +1115,7 @@ IPC_STRUCT_TRAITS_BEGIN(ui::AXTreeData)
   IPC_STRUCT_TRAITS_MEMBER(loaded)
   IPC_STRUCT_TRAITS_MEMBER(loading_progress)
   IPC_STRUCT_TRAITS_MEMBER(focus_id)
+  IPC_STRUCT_TRAITS_MEMBER(sel_is_backward)
   IPC_STRUCT_TRAITS_MEMBER(sel_anchor_object_id)
   IPC_STRUCT_TRAITS_MEMBER(sel_anchor_offset)
   IPC_STRUCT_TRAITS_MEMBER(sel_anchor_affinity)

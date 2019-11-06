@@ -15,12 +15,17 @@
 #include "ui/base/mpris/buildflags/buildflags.h"
 
 #if BUILDFLAG(USE_MPRIS)
+#include "content/browser/media/mpris_notifier.h"
 #include "ui/base/mpris/mpris_service.h"  // nogncheck
 #endif
 
 #if defined(OS_MACOSX)
 #include "content/browser/media/now_playing_info_center_notifier.h"
 #include "ui/base/now_playing/now_playing_info_center_delegate.h"
+#endif
+
+#if defined(OS_WIN)
+#include "content/browser/media/system_media_controls_notifier.h"
 #endif
 
 namespace content {
@@ -125,7 +130,7 @@ void MediaKeysListenerManagerImpl::OnMediaKeysAccelerator(
   // We should never receive an accelerator that was never registered.
   DCHECK(delegate_map_.contains(accelerator.key_code()));
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_MACOSX)
   // For privacy, we don't want to handle media keys when the system is locked.
   // On Windows and Mac OS X, this will happen unless we explicitly prevent it.
   // TODO(steimel): Consider adding an idle monitor instead and disabling the
@@ -150,12 +155,25 @@ void MediaKeysListenerManagerImpl::OnMediaKeysAccelerator(
     delegate.OnMediaKeysAccelerator(accelerator);
 }
 
+void MediaKeysListenerManagerImpl::SetIsMediaPlaying(bool is_playing) {
+  if (is_media_playing_ == is_playing)
+    return;
+
+  is_media_playing_ = is_playing;
+
+  if (media_keys_listener_)
+    media_keys_listener_->SetIsMediaPlaying(is_media_playing_);
+}
+
 void MediaKeysListenerManagerImpl::EnsureAuxiliaryServices() {
   if (auxiliary_services_started_)
     return;
 
 #if BUILDFLAG(USE_MPRIS)
   mpris::MprisService::GetInstance()->StartService();
+
+  mpris_notifier_ = std::make_unique<MprisNotifier>(connector_);
+  mpris_notifier_->Initialize();
 #endif
 
 #if defined(OS_MACOSX)
@@ -174,6 +192,12 @@ void MediaKeysListenerManagerImpl::EnsureAuxiliaryServices() {
   }
 #endif
 
+#if defined(OS_WIN)
+  system_media_controls_notifier_ =
+      std::make_unique<SystemMediaControlsNotifier>(connector_);
+  system_media_controls_notifier_->Initialize();
+#endif  // defined(OS_WIN)
+
   auxiliary_services_started_ = true;
 }
 
@@ -186,6 +210,8 @@ void MediaKeysListenerManagerImpl::EnsureMediaKeysListener() {
   media_keys_listener_ = ui::MediaKeysListener::Create(
       this, ui::MediaKeysListener::Scope::kGlobal);
   DCHECK(media_keys_listener_);
+
+  media_keys_listener_->SetIsMediaPlaying(is_media_playing_);
 }
 
 MediaKeysListenerManagerImpl::ListeningData*

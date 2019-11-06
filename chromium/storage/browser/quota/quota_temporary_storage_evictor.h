@@ -36,19 +36,16 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaTemporaryStorageEvictor {
  public:
   struct Statistics {
     Statistics()
-        : num_errors_on_evicting_origin(0),
-          num_errors_on_getting_usage_and_quota(0),
+        : num_errors_on_getting_usage_and_quota(0),
           num_evicted_origins(0),
           num_eviction_rounds(0),
           num_skipped_eviction_rounds(0) {}
-    int64_t num_errors_on_evicting_origin;
     int64_t num_errors_on_getting_usage_and_quota;
     int64_t num_evicted_origins;
     int64_t num_eviction_rounds;
     int64_t num_skipped_eviction_rounds;
 
     void subtract_assign(const Statistics& rhs) {
-      num_errors_on_evicting_origin -= rhs.num_errors_on_evicting_origin;
       num_errors_on_getting_usage_and_quota -=
           rhs.num_errors_on_getting_usage_and_quota;
       num_evicted_origins -= rhs.num_evicted_origins;
@@ -83,7 +80,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaTemporaryStorageEvictor {
  private:
   friend class content::QuotaTemporaryStorageEvictorTest;
 
-  void StartEvictionTimerWithDelay(int delay_ms);
+  void StartEvictionTimerWithDelay(int64_t delay_ms);
   void ConsiderEviction();
   void OnGotEvictionRoundInfo(blink::mojom::QuotaStatusCode status,
                               const QuotaSettings& settings,
@@ -105,7 +102,6 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaTemporaryStorageEvictor {
   EvictionRoundStatistics round_statistics_;
   base::Time time_of_end_of_last_nonskipped_round_;
   base::Time time_of_end_of_last_round_;
-  std::set<url::Origin> in_progress_eviction_origins_;
 
   int64_t interval_ms_;
   bool timer_disabled_for_testing_;

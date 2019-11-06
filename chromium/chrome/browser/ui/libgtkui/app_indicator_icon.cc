@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/environment.h"
 #include "base/files/file_util.h"
-#include "base/md5.h"
+#include "base/hash/md5.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -152,17 +152,13 @@ namespace libgtkui {
 AppIndicatorIcon::AppIndicatorIcon(std::string id,
                                    const gfx::ImageSkia& image,
                                    const base::string16& tool_tip)
-    : id_(id),
-      icon_(nullptr),
-      menu_model_(nullptr),
-      icon_change_count_(0),
-      weak_factory_(this) {
+    : id_(id), icon_(nullptr), menu_model_(nullptr), icon_change_count_(0) {
   std::unique_ptr<base::Environment> env(base::Environment::Create());
   desktop_env_ = base::nix::GetDesktopEnvironment(env.get());
 
   EnsureLibAppIndicatorLoaded();
   tool_tip_ = base::UTF16ToUTF8(tool_tip);
-  SetImage(image);
+  SetIcon(image);
 }
 AppIndicatorIcon::~AppIndicatorIcon() {
   if (icon_) {
@@ -180,7 +176,7 @@ bool AppIndicatorIcon::CouldOpen() {
   return g_opened;
 }
 
-void AppIndicatorIcon::SetImage(const gfx::ImageSkia& image) {
+void AppIndicatorIcon::SetIcon(const gfx::ImageSkia& image) {
   if (!g_opened)
     return;
 

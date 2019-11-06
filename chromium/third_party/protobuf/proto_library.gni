@@ -209,6 +209,7 @@ template("proto_library") {
 
   protos = rebase_path(invoker.sources, proto_in_dir)
   protogens = []
+  protogens_cc = []
 
   # List output files.
   foreach(proto, protos) {
@@ -217,7 +218,7 @@ template("proto_library") {
     proto_path = proto_dir + "/" + proto_name
 
     if (generate_cc) {
-      protogens += [
+      protogens_cc += [
         "$cc_out_dir/$proto_path.pb.h",
         "$cc_out_dir/$proto_path.pb.cc",
       ]
@@ -227,7 +228,7 @@ template("proto_library") {
     }
     if (generate_with_plugin) {
       foreach(suffix, generator_plugin_suffixes) {
-        protogens += [ "$cc_out_dir/${proto_path}${suffix}" ]
+        protogens_cc += [ "$cc_out_dir/${proto_path}${suffix}" ]
       }
     }
   }
@@ -240,7 +241,7 @@ template("proto_library") {
     visibility = [ ":$source_set_name" ]
     script = "//tools/protoc_wrapper/protoc_wrapper.py"
     sources = proto_sources
-    outputs = get_path_info(protogens, "abspath")
+    outputs = get_path_info(protogens + protogens_cc, "abspath")
     args = protos
 
     protoc_label = "//third_party/protobuf:protoc($host_toolchain)"
@@ -366,7 +367,7 @@ template("proto_library") {
                              "visibility",
                            ])
 
-    sources = get_target_outputs(":$action_name")
+    sources = get_path_info(protogens_cc, "abspath")
 
     if (defined(invoker.remove_configs)) {
       configs -= invoker.remove_configs
@@ -427,5 +428,75 @@ template("proto_library") {
     if (defined(invoker.link_deps)) {
       deps += invoker.link_deps
     }
+  }
+}
+
+# Convert a protocol buffer between text and binary formats.
+# This can be used to run protoc with the --encode or --decode options.
+# Parameters:
+#
+#   sources: list of string
+#       The sources to loop over and run protoc on
+#
+#   inputs: list of string
+#       The file dependencies for the action. This should be the list of .proto
+#       files involved in the conversion operation.
+#
+#   output_pattern: string
+#       A path pattern with source expansion variables (like source_name_part)
+#       for where the result of conversion should be placed.
+#
+#   deps: (optional) list of label
+#       Additional dependencies for the target.
+#
+#   args: list of string
+#       Arguments to pass to the protoc tool. This could include -I for include
+#       paths, as well as the name of the proto file.
+#
+#
+# Example to convert a .textproto to a .binarybp:
+#   protoc_convert("convert_foo") {
+#     sources = [
+#       "test/data/example1.textproto",
+#       "test/data/example2.textproto",
+#     ]
+#     inputs = [
+#       "//component/core/foo.proto",
+#     ]
+#     output_pattern = "$target_gen_dir/foo_data/{{source_name_part}}.binarypb"
+#     args = [
+#       "--encode=foo.FooMessage",
+#       "-I",
+#       rebase_path("//component/core"),
+#       "foo.proto",
+#     ]
+#   }
+template("protoc_convert") {
+  action_foreach(target_name) {
+    script = "//tools/protoc_wrapper/protoc_convert.py"
+
+    sources = invoker.sources
+
+    inputs = invoker.inputs
+
+    deps = [
+      "//third_party/protobuf:protoc",
+    ]
+    if (defined(invoker.deps)) {
+      deps += invoker.deps
+    }
+
+    outputs = [
+      invoker.output_pattern,
+    ]
+
+    args = [
+             "--protoc",
+             rebase_path("$root_out_dir/protoc"),
+             "--infile",
+             "{{source}}",
+             "--outfile",
+             rebase_path(invoker.output_pattern),
+           ] + invoker.args
   }
 }

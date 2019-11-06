@@ -10,9 +10,9 @@
 namespace performance_manager {
 
 GraphTestHarness::GraphTestHarness()
-    : task_env_(base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME,
-                base::test::ScopedTaskEnvironment::ExecutionMode::QUEUED),
-      provider_(&coordination_unit_graph_) {}
+    : task_env_(
+          base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME,
+          base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::QUEUED) {}
 
 GraphTestHarness::~GraphTestHarness() = default;
 

@@ -4,6 +4,9 @@
 
 #include "ash/assistant/ui/base/assistant_scroll_view.h"
 
+#include <memory>
+#include <utility>
+
 #include "ui/views/controls/scrollbar/overlay_scroll_bar.h"
 
 namespace ash {
@@ -77,12 +80,12 @@ void AssistantScrollView::OnViewPreferredSizeChanged(views::View* view) {
 
 void AssistantScrollView::InitLayout() {
   SetBackgroundColor(SK_ColorTRANSPARENT);
-  set_draw_overflow_indicator(false);
+  SetDrawOverflowIndicator(false);
 
   // Content view.
-  content_view_ = new ContentView();
-  content_view_->AddObserver(this);
-  SetContents(content_view_);
+  auto content_view = std::make_unique<ContentView>();
+  content_view->AddObserver(this);
+  content_view_ = SetContents(std::move(content_view));
 
   // Scroll bars.
   horizontal_scroll_bar_ = new InvisibleScrollBar(/*horizontal=*/true);

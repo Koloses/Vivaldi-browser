@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/callback_helpers.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/interstitials/chrome_metrics_helper.h"
 #include "chrome/browser/interstitials/enterprise_util.h"
@@ -104,8 +103,7 @@ bool BadClockBlockingPage::ShouldCreateNewNavigation() const {
   return true;
 }
 
-InterstitialPageDelegate::TypeID BadClockBlockingPage::GetTypeForTesting()
-    const {
+InterstitialPageDelegate::TypeID BadClockBlockingPage::GetTypeForTesting() {
   return BadClockBlockingPage::kTypeForTesting;
 }
 
@@ -160,6 +158,5 @@ void BadClockBlockingPage::NotifyDenyCertificate() {
   if (callback_.is_null())
     return;
 
-  base::ResetAndReturn(&callback_)
-      .Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_CANCEL);
+  std::move(callback_).Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_CANCEL);
 }

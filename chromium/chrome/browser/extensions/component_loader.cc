@@ -7,6 +7,7 @@
 #include <string>
 
 #include "ash/public/cpp/ash_features.h"
+#include "ash/public/cpp/ash_pref_names.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
@@ -42,11 +43,13 @@
 #include "extensions/common/manifest_constants.h"
 #include "pdf/buildflags.h"
 #include "printing/buildflags/buildflags.h"
+#include "storage/browser/fileapi/file_system_features.h"
 #include "ui/accessibility/accessibility_switches.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/keyboard/ui/grit/keyboard_resources.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/site_instance.h"
@@ -55,7 +58,6 @@
 #include "storage/browser/fileapi/file_system_context.h"
 #include "ui/chromeos/devicetype_utils.h"
 #include "ui/file_manager/grit/file_manager_resources.h"
-#include "ui/keyboard/grit/keyboard_resources.h"
 #endif
 
 #if BUILDFLAG(ENABLE_PDF)
@@ -152,15 +154,10 @@ ComponentLoader::ComponentExtensionInfo::operator=(
 ComponentLoader::ComponentExtensionInfo::~ComponentExtensionInfo() {}
 
 ComponentLoader::ComponentLoader(ExtensionServiceInterface* extension_service,
-                                 PrefService* profile_prefs,
-                                 PrefService* local_state,
                                  Profile* profile)
-    : profile_prefs_(profile_prefs),
-      local_state_(local_state),
-      profile_(profile),
+    : profile_(profile),
       extension_service_(extension_service),
-      ignore_whitelist_for_testing_(false),
-      weak_factory_(this) {}
+      ignore_whitelist_for_testing_(false) {}
 
 ComponentLoader::~ComponentLoader() {
 }
@@ -543,6 +540,17 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 #endif
 
   if (!skip_session_components) {
+#if BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
+    AddHangoutServicesExtension();
+#endif  // BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
+
+    bool install_feedback = enable_background_extensions_during_testing;
+#if defined(GOOGLE_CHROME_BUILD)
+    install_feedback = true;
+#endif  // defined(GOOGLE_CHROME_BUILD)
+    if (install_feedback)
+      Add(IDR_FEEDBACK_MANIFEST, base::FilePath(FILE_PATH_LITERAL("feedback")));
+
 #if defined(OS_CHROMEOS)
     AddChromeCameraApp();
     AddVideoPlayerExtension();
@@ -554,33 +562,12 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 #if BUILDFLAG(ENABLE_NACL)
     AddZipArchiverExtension();
 #endif  // BUILDFLAG(ENABLE_NACL)
-#endif  // defined(OS_CHROMEOS)
 
-#if BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
-    AddHangoutServicesExtension();
-#endif  // BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
-    bool install_feedback = enable_background_extensions_during_testing;
 #if defined(GOOGLE_CHROME_BUILD)
-    install_feedback = true;
-#endif  // defined(GOOGLE_CHROME_BUILD)
-    if (install_feedback)
-      Add(IDR_FEEDBACK_MANIFEST, base::FilePath(FILE_PATH_LITERAL("feedback")));
-  }
-
-#if defined(OS_CHROMEOS)
-  if (!skip_session_components) {
-#if defined(GOOGLE_CHROME_BUILD)
-    if (!command_line->HasSwitch(
-            chromeos::switches::kDisableOfficeEditingComponentApp)) {
-      std::string id = Add(IDR_QUICKOFFICE_MANIFEST, base::FilePath(
-          FILE_PATH_LITERAL("/usr/share/chromeos-assets/quickoffice")));
-      EnableFileSystemInGuestMode(id);
-    }
-
-    if (base::FeatureList::IsEnabled(ash::features::kKioskNextShell)) {
-      Add(IDR_KIOSK_NEXT_HOME_MANIFEST,
-          base::FilePath(FILE_PATH_LITERAL("chromeos/kiosk_next_home")));
-    }
+    std::string id = Add(IDR_QUICKOFFICE_MANIFEST,
+                         base::FilePath(FILE_PATH_LITERAL(
+                             "/usr/share/chromeos-assets/quickoffice")));
+    EnableFileSystemInGuestMode(id);
 #endif  // defined(GOOGLE_CHROME_BUILD)
 
     Add(IDR_ECHO_MANIFEST,
@@ -601,8 +588,8 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 
     Add(IDR_ARC_SUPPORT_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("chromeos/arc_support")));
-  }
 #endif  // defined(OS_CHROMEOS)
+  }
 
 #if defined(GOOGLE_CHROME_BUILD)
 #if !defined(OS_CHROMEOS)  // http://crbug.com/314799
@@ -679,14 +666,16 @@ void ComponentLoader::AddChromeOsSpeechSynthesisExtensions() {
   AddComponentFromDir(
       base::FilePath(extension_misc::kGoogleSpeechSynthesisExtensionPath),
       extension_misc::kGoogleSpeechSynthesisExtensionId,
-      base::BindRepeating(&ComponentLoader::EnableFileSystemInGuestMode,
+      base::BindRepeating(&ComponentLoader::FinishLoadSpeechSynthesisExtension,
                           weak_factory_.GetWeakPtr(),
                           extension_misc::kGoogleSpeechSynthesisExtensionId));
 
   AddComponentFromDir(
       base::FilePath(extension_misc::kEspeakSpeechSynthesisExtensionPath),
       extension_misc::kEspeakSpeechSynthesisExtensionId,
-      base::RepeatingClosure());
+      base::BindRepeating(&ComponentLoader::FinishLoadSpeechSynthesisExtension,
+                          weak_factory_.GetWeakPtr(),
+                          extension_misc::kEspeakSpeechSynthesisExtensionId));
 }
 
 void ComponentLoader::EnableFileSystemInGuestMode(const std::string& id) {
@@ -703,7 +692,12 @@ void ComponentLoader::EnableFileSystemInGuestMode(const std::string& id) {
         content::BrowserContext::GetStoragePartitionForSite(
             off_the_record_context, site)
             ->GetFileSystemContext();
-    file_system_context->EnableTemporaryFileSystemInIncognito();
+    // Incognito file system is enabled by default. This function can be removed
+    // when the feature flag is removed.
+    if (!base::FeatureList::IsEnabled(
+            storage::features::kEnableFilesystemInIncognito)) {
+      file_system_context->EnableTemporaryFileSystemInIncognito();
+    }
   }
 }
 
@@ -731,6 +725,16 @@ void ComponentLoader::FinishAddComponentFromDir(
   CHECK_EQ(extension_id, actual_extension_id);
   if (!done_cb.is_null())
     done_cb.Run();
+}
+
+void ComponentLoader::FinishLoadSpeechSynthesisExtension(
+    const char* extension_id) {
+  EnableFileSystemInGuestMode(extension_id);
+
+  // TODO(https://crbug.com/947305): mitigation for extension not awake after
+  // load.
+  extensions::ProcessManager::Get(profile_)->WakeEventPage(extension_id,
+                                                           base::DoNothing());
 }
 #endif
 

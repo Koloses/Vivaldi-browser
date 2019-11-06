@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/metrics/field_trial.h"
 #include "third_party/icu/source/common/unicode/locid.h"
 
@@ -36,24 +37,24 @@ const base::Feature kInstantTetheringBackgroundAdvertisementSupport{
 }  // namespace
 
 // Controls whether to enable Chrome OS Account Manager.
+// Rollout controlled by Finch.
 const base::Feature kAccountManager{"ChromeOSAccountManager",
                                     base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Controls whether to enable the Parental Controls section of settings.
+const base::Feature kParentalControlsSettings{
+    "ChromeOSParentalControlsSettings", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Controls whether to enable Google Assistant feature.
 const base::Feature kAssistantFeature{"ChromeOSAssistant",
-                                      base::FEATURE_DISABLED_BY_DEFAULT};
+                                      base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kShowLanguageToggleInDemoMode{
-    "ShowLanguageToggleInDemoMode", base::FEATURE_ENABLED_BY_DEFAULT};
+// Controls whether to enable Ambient mode feature.
+const base::Feature kAmbientModeFeature{"ChromeOSAmbientMode",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kShowPlayInDemoMode{"ShowPlayInDemoMode",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kShowSplashScreenInDemoMode{
-    "ShowSplashScreenInDemoMode", base::FEATURE_ENABLED_BY_DEFAULT};
-
-const base::Feature kSupportCountryCustomizationInDemoMode{
-    "SupportCountryCustomizationInDemoMode", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Please keep the order of these switches synchronized with the header file
 // (i.e. in alphabetical order).
@@ -106,7 +107,9 @@ const char kArcDisableAppSync[] = "arc-disable-app-sync";
 
 // Flag that disables ARC locale sync with Android container. Used in autotest
 // to prevent conditions when certain apps, including Play Store may get
-// restarted. Restarting Play Store may case random test failures.
+// restarted. Restarting Play Store may cause random test failures. Enabling
+// this flag would also forces ARC container to use 'en-US' as a locale and
+// 'en-US,en' as preferred languages.
 const char kArcDisableLocaleSync[] = "arc-disable-locale-sync";
 
 // Flag that disables ARC Play Auto Install flow that installs set of predefined
@@ -143,9 +146,6 @@ const char kArcStartMode[] = "arc-start-mode";
 const char kArcTransitionMigrationRequired[] =
     "arc-transition-migration-required";
 
-// Screenshot testing: specifies the directoru where artifacts will be stored.
-const char kArtifactsDir[] = "artifacts-dir";
-
 // If this flag is set, it indicates that this device is a "Cellular First"
 // device. Cellular First devices use cellular telephone data networks as
 // their primary means of connecting to the internet.
@@ -164,9 +164,6 @@ const char kChildWallpaperLarge[] = "child-wallpaper-large";
 const char kChildWallpaperSmall[] = "child-wallpaper-small";
 
 const char kConservativeThreshold[] = "conservative";
-
-// Forces use of Chrome OS Gaia API v1.
-const char kCrosGaiaApiV1[] = "cros-gaia-api-v1";
 
 // Forces CrOS region value.
 const char kCrosRegion[] = "cros-region";
@@ -205,13 +202,6 @@ const char kDisableArcDataWipe[] = "disable-arc-data-wipe";
 // Disables ARC Opt-in verification process and ARC is enabled by default.
 const char kDisableArcOptInVerification[] = "disable-arc-opt-in-verification";
 
-// Disables bypass proxy for captive portal authorization.
-const char kDisableCaptivePortalBypassProxy[] =
-    "disable-captive-portal-bypass-proxy";
-
-// Disables cloud backup feature.
-const char kDisableCloudImport[] = "disable-cloud-import";
-
 // Disables the Chrome OS demo.
 const char kDisableDemoMode[] = "disable-demo-mode";
 
@@ -220,9 +210,6 @@ const char kDisableDeviceDisabling[] = "disable-device-disabling";
 
 // Disable encryption migration for user's cryptohome to run latest Arc.
 const char kDisableEncryptionMigration[] = "disable-encryption-migration";
-
-// Disables notification when device is in end of life status.
-const char kDisableEolNotification[] = "disable-eol-notification";
 
 // Disables fine grained time zone detection.
 const char kDisableFineGrainedTimeZoneDetection[] =
@@ -241,24 +228,11 @@ const char kDisableLoginAnimations[] = "disable-login-animations";
 // Disables requests for an enterprise machine certificate during attestation.
 const char kDisableMachineCertRequest[] = "disable-machine-cert-request";
 
-// Disables mtp write support.
-const char kDisableMtpWriteSupport[] = "disable-mtp-write-support";
-
 // Disables the multiple display layout UI.
 const char kDisableMultiDisplayLayout[] = "disable-multi-display-layout";
 
-// Disables Office Editing for Docs, Sheets & Slides component app so handlers
-// won't be registered, making it possible to install another version for
-// testing.
-const char kDisableOfficeEditingComponentApp[] =
-    "disable-office-editing-component-extension";
-
 // Disables per-user timezone.
 const char kDisablePerUserTimezone[] = "disable-per-user-timezone";
-
-// Disables suggestions while typing on a physical keyboard.
-const char kDisablePhysicalKeyboardAutocorrect[] =
-    "disable-physical-keyboard-autocorrect";
 
 // Disables rollback option on reset screen.
 const char kDisableRollbackOption[] = "disable-rollback-option";
@@ -278,10 +252,6 @@ const char kDisableSigninFrameClientCerts[] =
 // certificates on the sign-in frame.
 const char kDisableSigninFrameClientCertUserSelection[] =
     "disable-signin-frame-client-cert-user-selection";
-
-// Disables SystemTimezoneAutomaticDetection policy.
-const char kDisableSystemTimezoneAutomaticDetectionPolicy[] =
-    "disable-system-timezone-automatic-detection";
 
 // Disables volume adjust sound.
 const char kDisableVolumeAdjustSound[] = "disable-volume-adjust-sound";
@@ -312,21 +282,14 @@ const char kEnableEncryptionMigration[] = "enable-encryption-migration";
 const char kEnableExtensionAssetsSharing[] = "enable-extension-assets-sharing";
 
 // Enables animated transitions during first-run tutorial.
+// TODO(https://crbug.com/945966): Remove this.
 const char kEnableFirstRunUITransitions[] = "enable-first-run-ui-transitions";
 
 // Enables the marketing opt-in screen in OOBE.
 const char kEnableMarketingOptInScreen[] = "enable-market-opt-in";
 
-// Enables suggestions while typing on a physical keyboard.
-const char kEnablePhysicalKeyboardAutocorrect[] =
-    "enable-physical-keyboard-autocorrect";
-
 // Enables request of tablet site (via user agent override).
 const char kEnableRequestTabletSite[] = "enable-request-tablet-site";
-
-// Enables using screenshots in tests and seets mode.
-const char kEnableScreenshotTestingWithMode[] =
-    "enable-screenshot-testing-with-mode";
 
 // Enables the touch calibration option in MD settings UI for valid touch
 // displays.
@@ -336,10 +299,6 @@ const char kEnableTouchCalibrationSetting[] =
 // Enables touchpad three-finger-click as middle button.
 const char kEnableTouchpadThreeFingerClick[] =
     "enable-touchpad-three-finger-click";
-
-// Enables the chromecast support for video player app.
-const char kEnableVideoPlayerChromecastSupport[] =
-    "enable-video-player-chromecast-support";
 
 // Disables ARC for managed accounts.
 const char kEnterpriseDisableArc[] = "enterprise-disable-arc";
@@ -386,6 +345,11 @@ const char kFakeDriveFsLauncherChrootPath[] =
 const char kFakeDriveFsLauncherSocketPath[] =
     "fake-drivefs-launcher-socket-path";
 
+// Forces Chrome to use CertVerifyProcBuiltin for verification of server
+// certificates, ignoring the status of
+// net::features::kCertVerifierBuiltinFeature.
+const char kForceCertVerifierBuiltin[] = "force-cert-verifier-builtin";
+
 // Passed to Chrome the first time that it's run after the system boots.
 // Not passed on restart after sign out.
 const char kFirstExecAfterBoot[] = "first-exec-after-boot";
@@ -409,9 +373,8 @@ const char kForceLoginManagerInTests[] = "force-login-manager-in-tests";
 // Force system compositor mode when set.
 const char kForceSystemCompositorMode[] = "force-system-compositor-mode";
 
-// Screenshot testing: specifies the directory where the golden screenshots are
-// stored.
-const char kGoldenScreenshotsDir[] = "golden-screenshots-dir";
+// Forces to use chrome camera app when camera icon is clicked.
+const char kForceUseChromeCamera[] = "force-use-chrome-camera";
 
 // Indicates that the browser is in "browse without sign-in" (Guest session)
 // mode. Should completely disable extensions, sync and bookmarks.
@@ -442,6 +405,11 @@ const char kHomedir[] = "homedir";
 const char kIgnoreUserProfileMappingForTests[] =
     "ignore-user-profile-mapping-for-tests";
 
+// If set, the Chrome settings will not expose the option to enable crostini
+// unless the enable-experimental-kernel-vm-support flag is set in
+// chrome://flags
+const char kKernelnextRestrictVMs[] = "kernelnext-restrict-vms";
+
 // Enables Chrome-as-a-login-manager behavior.
 const char kLoginManager[] = "login-manager";
 
@@ -454,10 +422,6 @@ const char kLoginProfile[] = "login-profile";
 
 // Specifies the user which is already logged in.
 const char kLoginUser[] = "login-user";
-
-// The memory pressure threshold selection which is used to decide whether and
-// when a memory pressure event needs to get fired.
-const char kMemoryPressureThresholds[] = "memory-pressure-thresholds";
 
 // Enables natural scroll by default.
 const char kNaturalScrollDefault[] = "enable-natural-scroll-default";
@@ -493,11 +457,27 @@ const char kOobeTimerInterval[] = "oobe-timer-interval";
 // must succeed, otherwise session restart should fail).
 const char kProfileRequiresPolicy[] = "profile-requires-policy";
 
+// Redirects libassistant logging to /var/log/chrome/.
+const char kRedirectLibassistantLogging[] = "redirect-libassistant-logging";
+
 // The rlz ping delay (in seconds) that overwrites the default value.
 const char kRlzPingDelay[] = "rlz-ping-delay";
 
+// Password change url for SAML users. Remove when https://crbug.com/941489 is
+// fixed.
+const char kSamlPasswordChangeUrl[] = "saml-password-change-url";
+
+// Smaller, denser shelf in clamshell mode.
+const char kShelfDenseClamshell[] = "shelf-dense-clamshell";
+
+// New modular design for the shelf with apps separated into a hotseat UI.
+const char kShelfHotseat[] = "shelf-hotseat";
+
 // App window previews when hovering over the shelf.
 const char kShelfHoverPreviews[] = "shelf-hover-previews";
+
+// Scrollable list of apps on the shelf.
+const char kShelfScrollable[] = "shelf-scrollable";
 
 // If true, files in Android internal storage will be shown in Files app.
 const char kShowAndroidFilesInFilesApp[] = "show-android-files-in-files-app";
@@ -544,6 +524,11 @@ const char kWaitForInitialPolicyFetchForTest[] =
 // of network packets from whitelisted sources.
 const char kWakeOnWifiPacket[] = "wake-on-wifi-packet";
 
+// Prevents any CPU restrictions being set on the ARC container. Only meant to
+// be used by tests as some tests may time out if the ARC container is
+// throttled.
+const char kDisableArcCpuRestriction[] = "disable-arc-cpu-restriction";
+
 bool WakeOnWifiEnabled() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableWakeOnWifi);
 }
@@ -554,40 +539,6 @@ bool MemoryPressureHandlingEnabled() {
     return false;
   }
   return true;
-}
-
-base::chromeos::MemoryPressureMonitor::MemoryPressureThresholds
-GetMemoryPressureThresholds() {
-  using MemoryPressureMonitor = base::chromeos::MemoryPressureMonitor;
-
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          kMemoryPressureThresholds)) {
-    const std::string group_name =
-        base::FieldTrialList::FindFullName(kMemoryPressureExperimentName);
-    if (group_name == kConservativeThreshold)
-      return MemoryPressureMonitor::THRESHOLD_CONSERVATIVE;
-    if (group_name == kAggressiveCacheDiscardThreshold)
-      return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE_CACHE_DISCARD;
-    if (group_name == kAggressiveTabDiscardThreshold)
-      return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE_TAB_DISCARD;
-    if (group_name == kAggressiveThreshold)
-      return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE;
-    return MemoryPressureMonitor::THRESHOLD_DEFAULT;
-  }
-
-  const std::string option =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          kMemoryPressureThresholds);
-  if (option == kConservativeThreshold)
-    return MemoryPressureMonitor::THRESHOLD_CONSERVATIVE;
-  if (option == kAggressiveCacheDiscardThreshold)
-    return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE_CACHE_DISCARD;
-  if (option == kAggressiveTabDiscardThreshold)
-    return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE_TAB_DISCARD;
-  if (option == kAggressiveThreshold)
-    return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE;
-
-  return MemoryPressureMonitor::THRESHOLD_DEFAULT;
 }
 
 bool IsGaiaIdMigrationStarted() {
@@ -607,12 +558,20 @@ bool IsAccountManagerEnabled() {
   return base::FeatureList::IsEnabled(kAccountManager);
 }
 
+bool IsParentalControlsSettingsEnabled() {
+  return base::FeatureList::IsEnabled(kParentalControlsSettings);
+}
+
 bool IsAssistantFlagsEnabled() {
   return base::FeatureList::IsEnabled(kAssistantFeature);
 }
 
 bool IsAssistantEnabled() {
   return IsAssistantFlagsEnabled();
+}
+
+bool IsAmbientModeEnabled() {
+  return base::FeatureList::IsEnabled(kAmbientModeFeature);
 }
 
 bool IsSigninFrameClientCertsEnabled() {
@@ -625,8 +584,21 @@ bool IsSigninFrameClientCertUserSelectionEnabled() {
       kDisableSigninFrameClientCertUserSelection);
 }
 
+bool ShouldShowShelfDenseClamshell() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kShelfDenseClamshell);
+}
+
+bool ShouldShowShelfHotseat() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(kShelfHotseat);
+}
+
 bool ShouldShowShelfHoverPreviews() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(kShelfHoverPreviews);
+}
+
+bool ShouldShowScrollableShelf() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(kShelfScrollable);
 }
 
 bool IsInstantTetheringBackgroundAdvertisingSupported() {
@@ -650,6 +622,11 @@ bool ShouldSkipOobePostLogin() {
 bool IsGaiaServicesDisabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       kDisableGaiaServices);
+}
+
+bool IsArcCpuRestrictionDisabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kDisableArcCpuRestriction);
 }
 
 }  // namespace switches

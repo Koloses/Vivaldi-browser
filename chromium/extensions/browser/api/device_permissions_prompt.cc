@@ -15,12 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/service_manager_connection.h"
-#include "device/usb/public/cpp/usb_utils.h"
-#include "device/usb/public/mojom/device_enumeration_options.mojom.h"
-#include "device/usb/usb_device.h"
-#include "device/usb/usb_ids.h"
-#include "device/usb/usb_service.h"
+#include "content/public/browser/system_connector.h"
 #include "extensions/browser/api/device_permissions_manager.h"
 #include "extensions/browser/api/usb/usb_device_manager.h"
 #include "extensions/common/extension.h"
@@ -28,13 +23,14 @@
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "services/device/public/cpp/hid/hid_device_filter.h"
 #include "services/device/public/cpp/hid/hid_usage_and_page.h"
+#include "services/device/public/cpp/usb/usb_utils.h"
 #include "services/device/public/mojom/constants.mojom.h"
+#include "services/device/public/mojom/usb_enumeration_options.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/permission_broker_client.h"
+#include "chromeos/dbus/permission_broker/permission_broker_client.h"
 #endif  // defined(OS_CHROMEOS)
 
 using device::HidDeviceFilter;
@@ -218,10 +214,8 @@ class HidDevicePermissionsPrompt : public DevicePermissionsPrompt::Prompt,
     }
 
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    DCHECK(content::ServiceManagerConnection::GetForProcess());
-
-    service_manager::Connector* connector =
-        content::ServiceManagerConnection::GetForProcess()->GetConnector();
+    service_manager::Connector* connector = content::GetSystemConnector();
+    DCHECK(connector);
     connector->BindInterface(device::mojom::kServiceName,
                              mojo::MakeRequest(&hid_manager_));
 
@@ -261,13 +255,10 @@ class HidDevicePermissionsPrompt : public DevicePermissionsPrompt::Prompt,
         (filters_.empty() || HidDeviceFilter::MatchesAny(*device, filters_))) {
       auto device_info = std::make_unique<HidDeviceInfo>(std::move(device));
 #if defined(OS_CHROMEOS)
-      chromeos::PermissionBrokerClient* client =
-          chromeos::DBusThreadManager::Get()->GetPermissionBrokerClient();
-      DCHECK(client) << "Could not get permission broker client.";
-      client->CheckPathAccess(
+      chromeos::PermissionBrokerClient::Get()->CheckPathAccess(
           device_info.get()->device()->device_node,
-          base::Bind(&HidDevicePermissionsPrompt::AddCheckedDevice, this,
-                     base::Passed(&device_info)));
+          base::BindOnce(&HidDevicePermissionsPrompt::AddCheckedDevice, this,
+                         std::move(device_info)));
 #else
       AddCheckedDevice(std::move(device_info), true);
 #endif  // defined(OS_CHROMEOS)

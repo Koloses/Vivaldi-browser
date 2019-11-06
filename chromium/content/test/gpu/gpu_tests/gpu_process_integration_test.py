@@ -6,7 +6,6 @@ import os
 import sys
 
 from gpu_tests import gpu_integration_test
-from gpu_tests import gpu_process_expectations
 from gpu_tests import path_util
 
 data_path = os.path.join(
@@ -58,10 +57,6 @@ class GpuProcessIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       # needed on Android for robustness.
       # https://github.com/catapult-project/catapult/issues/3122
       '--no-first-run'] + browser_args
-
-  @classmethod
-  def _CreateExpectations(cls):
-    return gpu_process_expectations.GpuProcessExpectations()
 
   @classmethod
   def GenerateGpuTests(cls, options):
@@ -307,19 +302,22 @@ class GpuProcessIntegrationTest(gpu_integration_test.GpuIntegrationTest):
           return
       else:
         pass
-    feature_status_for_hardware_gpu_list = self.tab.EvaluateJavaScript(
-        'browserBridge.gpuInfo.featureStatusForHardwareGpu.featureStatus')
-    for name, status in feature_status_for_hardware_gpu_list.items():
-      if name == 'webgl':
-        if status != 'unavailable_off':
-          self.fail('WebGL status for hardware GPU failed: %s' % status)
-          return
-      elif name == '2d_canvas':
-        if status != 'enabled':
-          self.fail('2D Canvas status for hardware GPU failed: %s' % status)
-          return
-      else:
-        pass
+    if not sys.platform.startswith('linux'):
+      # On Linux we relaunch GPU process to fallback to SwiftShader, therefore
+      # featureStatusForHardwareGpu isn't available.
+      feature_status_for_hardware_gpu_list = self.tab.EvaluateJavaScript(
+          'browserBridge.gpuInfo.featureStatusForHardwareGpu.featureStatus')
+      for name, status in feature_status_for_hardware_gpu_list.items():
+        if name == 'webgl':
+          if status != 'unavailable_off':
+            self.fail('WebGL status for hardware GPU failed: %s' % status)
+            return
+        elif name == '2d_canvas':
+          if status != 'enabled':
+            self.fail('2D Canvas status for hardware GPU failed: %s' % status)
+            return
+        else:
+          pass
 
   def _GpuProcess_one_extra_workaround(self, test_path):
     # Start this test by launching the browser with no command line
@@ -486,6 +484,13 @@ class GpuProcessIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       '--gpu-driver-bug-list-test-group=2',
     ])
     self._NavigateAndWait(test_path)
+
+  @classmethod
+  def ExpectationsFiles(cls):
+    return [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     'test_expectations',
+                     'gpu_process_expectations.txt')]
 
 def load_tests(loader, tests, pattern):
   del loader, tests, pattern  # Unused.

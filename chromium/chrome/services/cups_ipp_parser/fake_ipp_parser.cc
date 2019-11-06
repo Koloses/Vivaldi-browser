@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 
-namespace chrome {
+namespace cups_ipp_parser {
 
 IppParser::IppParser(
     std::unique_ptr<service_manager::ServiceContextRef> service_ref)
@@ -15,10 +15,10 @@ IppParser::IppParser(
 
 IppParser::~IppParser() = default;
 
-void IppParser::ParseIpp(const std::string& to_parse,
+void IppParser::ParseIpp(const std::vector<uint8_t>& to_parse,
                          ParseIppCallback callback) {
   DVLOG(1) << "IppParser stubbed";
-  std::move(callback).Run(mojom::IppParserResult::FAILURE, nullptr);
+  std::move(callback).Run(nullptr);
 }
 
-}  // namespace chrome
+}  // namespace cups_ipp_parser

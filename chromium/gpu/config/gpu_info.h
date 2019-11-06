@@ -80,7 +80,9 @@ enum VideoCodecProfile {
   AV1PROFILE_PROFILE_MAIN,
   AV1PROFILE_PROFILE_HIGH,
   AV1PROFILE_PROFILE_PRO,
-  VIDEO_CODEC_PROFILE_MAX = AV1PROFILE_PROFILE_PRO,
+  DOLBYVISION_PROFILE8,
+  DOLBYVISION_PROFILE9,
+  VIDEO_CODEC_PROFILE_MAX = DOLBYVISION_PROFILE9,
 };
 
 // Specification of a decoding profile supported by a hardware decoder.
@@ -114,15 +116,17 @@ using VideoEncodeAcceleratorSupportedProfiles =
     std::vector<VideoEncodeAcceleratorSupportedProfile>;
 
 enum class ImageDecodeAcceleratorType {
-  kJpeg = 0,
-  kUnknown = 1,
-  kMaxValue = kUnknown,
+  kUnknown = 0,
+  kJpeg = 1,
+  kWebP = 2,
+  kMaxValue = kWebP,
 };
 
 enum class ImageDecodeAcceleratorSubsampling {
   k420 = 0,
   k422 = 1,
-  kMaxValue = k422,
+  k444 = 2,
+  kMaxValue = k444,
 };
 
 // Specification of an image decoding profile supported by a hardware decoder.
@@ -153,19 +157,9 @@ using ImageDecodeAcceleratorSupportedProfiles =
     std::vector<ImageDecodeAcceleratorSupportedProfile>;
 
 #if defined(OS_WIN)
-// Common overlay formats that we're interested in. Must match the OverlayFormat
-// enum in //tools/metrics/histograms/enums.xml. Mapped to corresponding DXGI
-// formats in DirectCompositionSurfaceWin.
-enum class OverlayFormat { kBGRA = 0, kYUY2 = 1, kNV12 = 2, kMaxValue = kNV12 };
+enum class OverlaySupport { kNone = 0, kDirect = 1, kScaling = 2 };
 
-GPU_EXPORT const char* OverlayFormatToString(OverlayFormat format);
-
-struct GPU_EXPORT OverlayCapability {
-  OverlayFormat format;
-  bool is_scaling_supported;
-  bool operator==(const OverlayCapability& other) const;
-};
-using OverlayCapabilities = std::vector<OverlayCapability>;
+GPU_EXPORT const char* OverlaySupportToString(OverlaySupport support);
 
 struct GPU_EXPORT Dx12VulkanVersionInfo {
   bool IsEmpty() const { return !d3d12_feature_level && !vulkan_version; }
@@ -295,9 +289,12 @@ struct GPU_EXPORT GPUInfo {
 
   bool software_rendering;
 
-  // Whether the driver uses direct rendering. True on most platforms, false on
-  // X11 when using remote X.
-  bool direct_rendering;
+  // Empty means unknown. Defined on X11 as
+  // - "1" means indirect (versions can't be all zero)
+  // - "2" means some type of direct rendering, but version cannot not be
+  //    reliably determined
+  // - "2.1", "2.2", "2.3" for DRI, DRI2, DRI3 respectively
+  std::string direct_rendering_version;
 
   // Whether the gpu process is running in a sandbox.
   bool sandboxed;
@@ -319,8 +316,8 @@ struct GPU_EXPORT GPUInfo {
 
   // True if we use direct composition surface overlays on Windows.
   bool supports_overlays = false;
-
-  OverlayCapabilities overlay_capabilities;
+  OverlaySupport yuy2_overlay_support = OverlaySupport::kNone;
+  OverlaySupport nv12_overlay_support = OverlaySupport::kNone;
 
   // The information returned by the DirectX Diagnostics Tool.
   DxDiagNode dx_diagnostics;
@@ -386,9 +383,6 @@ struct GPU_EXPORT GPUInfo {
     // (according to the DevTools protocol) are being described.
     virtual void BeginAuxAttributes() = 0;
     virtual void EndAuxAttributes() = 0;
-
-    virtual void BeginOverlayCapability() = 0;
-    virtual void EndOverlayCapability() = 0;
 
     virtual void BeginDx12VulkanVersionInfo() = 0;
     virtual void EndDx12VulkanVersionInfo() = 0;

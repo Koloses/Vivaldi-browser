@@ -57,8 +57,7 @@ WebDialogView::WebDialogView(content::BrowserContext* context,
   }
 }
 
-WebDialogView::~WebDialogView() {
-}
+WebDialogView::~WebDialogView() = default;
 
 content::WebContents* WebDialogView::web_contents() {
   return web_view_->web_contents();
@@ -124,6 +123,10 @@ bool WebDialogView::CanClose() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // WebDialogView, views::WidgetDelegate implementation:
+
+bool WebDialogView::OnCloseRequested(Widget::ClosedReason close_reason) {
+  return !delegate_ || delegate_->OnDialogCloseRequested();
+}
 
 bool WebDialogView::CanResize() const {
   if (delegate_)

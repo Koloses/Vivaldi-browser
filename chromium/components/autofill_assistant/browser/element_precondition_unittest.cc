@@ -9,9 +9,9 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/test/gmock_callback_support.h"
 #include "base/test/mock_callback.h"
 #include "components/autofill_assistant/browser/batch_element_checker.h"
-#include "components/autofill_assistant/browser/mock_run_once_callback.h"
 #include "components/autofill_assistant/browser/mock_web_controller.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -20,22 +20,20 @@
 namespace autofill_assistant {
 namespace {
 
+using ::base::test::RunOnceCallback;
 using ::testing::_;
 using ::testing::Eq;
 
 class ElementPreconditionTest : public testing::Test {
  public:
   void SetUp() override {
+    ON_CALL(mock_web_controller_, OnElementCheck(Eq(Selector({"exists"})), _))
+        .WillByDefault(RunOnceCallback<1>(true));
+    ON_CALL(mock_web_controller_, OnElementCheck(Eq(Selector({"empty"})), _))
+        .WillByDefault(RunOnceCallback<1>(true));
     ON_CALL(mock_web_controller_,
-            OnElementCheck(kExistenceCheck, Eq(Selector({"exists"})), _))
-        .WillByDefault(RunOnceCallback<2>(true));
-    ON_CALL(mock_web_controller_,
-            OnElementCheck(kExistenceCheck, Eq(Selector({"empty"})), _))
-        .WillByDefault(RunOnceCallback<2>(true));
-    ON_CALL(
-        mock_web_controller_,
-        OnElementCheck(kExistenceCheck, Eq(Selector({"does_not_exist"})), _))
-        .WillByDefault(RunOnceCallback<2>(false));
+            OnElementCheck(Eq(Selector({"does_not_exist"})), _))
+        .WillByDefault(RunOnceCallback<1>(false));
 
     ON_CALL(mock_web_controller_, OnGetFieldValue(Eq(Selector({"exists"})), _))
         .WillByDefault(RunOnceCallback<1>(true, "foo"));
@@ -50,11 +48,9 @@ class ElementPreconditionTest : public testing::Test {
   // Runs a precondition given |exists_| and |value_match_|.
   void Check(base::OnceCallback<void(bool)> callback) {
     ElementPrecondition precondition(exist_, value_match_);
-    BatchElementChecker batch_checks(&mock_web_controller_);
+    BatchElementChecker batch_checks;
     precondition.Check(&batch_checks, std::move(callback));
-    batch_checks.Run(base::TimeDelta::FromSeconds(0),
-                     /* try_done=*/base::DoNothing(),
-                     /* all_done=*/base::DoNothing());
+    batch_checks.Run(&mock_web_controller_);
   }
 
   MockWebController mock_web_controller_;

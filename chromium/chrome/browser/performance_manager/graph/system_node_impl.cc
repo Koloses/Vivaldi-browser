@@ -4,32 +4,32 @@
 
 #include "chrome/browser/performance_manager/graph/system_node_impl.h"
 
-#include "chrome/browser/performance_manager/graph/frame_node_impl.h"
-#include "chrome/browser/performance_manager/graph/page_node_impl.h"
-#include "chrome/browser/performance_manager/graph/process_node_impl.h"
-
 #include <algorithm>
 #include <iterator>
 
+#include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/process/process_handle.h"
+#include "chrome/browser/performance_manager/graph/frame_node_impl.h"
+#include "chrome/browser/performance_manager/graph/graph_impl.h"
+#include "chrome/browser/performance_manager/graph/graph_impl_operations.h"
+#include "chrome/browser/performance_manager/graph/page_node_impl.h"
+#include "chrome/browser/performance_manager/graph/process_node_impl.h"
 
 namespace performance_manager {
 
-SystemNodeImpl::SystemNodeImpl(
-    const resource_coordinator::CoordinationUnitID& id,
-    Graph* graph)
-    : CoordinationUnitInterface(id, graph) {}
+ProcessResourceMeasurement::ProcessResourceMeasurement() = default;
+ProcessResourceMeasurementBatch::ProcessResourceMeasurementBatch() = default;
+ProcessResourceMeasurementBatch::~ProcessResourceMeasurementBatch() = default;
 
-SystemNodeImpl::~SystemNodeImpl() = default;
+SystemNodeImpl::SystemNodeImpl(GraphImpl* graph) : TypedNodeBase(graph) {}
 
-void SystemNodeImpl::OnProcessCPUUsageReady() {
-  SendEvent(resource_coordinator::mojom::Event::kProcessCPUUsageReady);
+SystemNodeImpl::~SystemNodeImpl() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
 void SystemNodeImpl::DistributeMeasurementBatch(
-    resource_coordinator::mojom::ProcessResourceMeasurementBatchPtr
-        measurement_batch) {
+    std::unique_ptr<ProcessResourceMeasurementBatch> measurement_batch) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::TimeDelta time_since_last_measurement;
   if (!last_measurement_end_time_.is_null()) {
@@ -55,18 +55,18 @@ void SystemNodeImpl::DistributeMeasurementBatch(
 
   // Keep track of the pages updated with CPU cost for the second pass,
   // where their memory usage is updated.
-  std::set<PageNodeImpl*> pages;
+  base::flat_set<PageNodeImpl*> pages;
   std::vector<ProcessNodeImpl*> found_processes;
   for (const auto& measurement : measurement_batch->measurements) {
-    ProcessNodeImpl* process = graph()->GetProcessNodeByPid(measurement->pid);
+    ProcessNodeImpl* process = graph()->GetProcessNodeByPid(measurement.pid);
     if (process) {
       base::TimeDelta cumulative_cpu_delta =
-          measurement->cpu_usage - process->cumulative_cpu_usage();
+          measurement.cpu_usage - process->cumulative_cpu_usage();
       DCHECK_LE(base::TimeDelta(), cumulative_cpu_delta);
 
       // Distribute the CPU delta to the pages that own the frames in this
       // process.
-      std::set<FrameNodeImpl*> frames = process->GetFrameNodes();
+      const auto& frames = process->frame_nodes();
       if (!frames.empty()) {
         // To make sure we don't systemically truncate the remainder of the
         // delta, simply subtract the remainder and "hold it back" from the
@@ -77,7 +77,7 @@ void SystemNodeImpl::DistributeMeasurementBatch(
             base::TimeDelta::FromMicroseconds(frames.size());
 
         for (FrameNodeImpl* frame : frames) {
-          PageNodeImpl* page = frame->GetPageNode();
+          PageNodeImpl* page = frame->page_node();
           if (page) {
             page->set_usage_estimate_time(last_measurement_end_time_);
             page->set_cumulative_cpu_usage_estimate(
@@ -99,7 +99,7 @@ void SystemNodeImpl::DistributeMeasurementBatch(
           time_since_last_measurement.is_zero()) {
         // Imitate the behavior of GetPlatformIndependentCPUUsage, which
         // yields zero for the initial measurement of each process.
-        process->SetCPUUsage(0.0);
+        process->SetCPUUsage(0);
       } else {
         double cpu_usage = 100.0 * cumulative_cpu_delta.InMicrosecondsF() /
                            time_since_last_measurement.InMicrosecondsF();
@@ -107,7 +107,7 @@ void SystemNodeImpl::DistributeMeasurementBatch(
       }
       process->set_cumulative_cpu_usage(process->cumulative_cpu_usage() +
                                         cumulative_cpu_delta);
-      process->set_private_footprint_kb(measurement->private_footprint_kb);
+      process->set_private_footprint_kb(measurement.private_footprint_kb);
 
       // Note the found processes.
       found_processes.push_back(process);
@@ -115,7 +115,7 @@ void SystemNodeImpl::DistributeMeasurementBatch(
   }
 
   // Grab all the processes to see if there were any we didn't get data for.
-  std::vector<ProcessNodeImpl*> processes = graph_->GetAllProcessNodes();
+  std::vector<ProcessNodeImpl*> processes = graph_->GetAllProcessNodeImpls();
 
   if (found_processes.size() != processes.size()) {
     // We didn't find them all, compute the difference and clear the data for
@@ -138,12 +138,12 @@ void SystemNodeImpl::DistributeMeasurementBatch(
   // Iterate through the pages involved to distribute the memory to them.
   for (PageNodeImpl* page : pages) {
     uint64_t private_footprint_kb_sum = 0;
-    const auto& frames = page->GetFrameNodes();
+    auto frames = GraphImplOperations::GetFrameNodes(page);
     for (FrameNodeImpl* frame : frames) {
-      ProcessNodeImpl* process = frame->GetProcessNode();
+      ProcessNodeImpl* process = frame->process_node();
       if (process) {
         private_footprint_kb_sum +=
-            process->private_footprint_kb() / process->GetFrameNodes().size();
+            process->private_footprint_kb() / process->frame_nodes().size();
       }
     }
 
@@ -152,22 +152,10 @@ void SystemNodeImpl::DistributeMeasurementBatch(
     DCHECK_EQ(last_measurement_end_time_, page->usage_estimate_time());
   }
 
-  // Fire the end update signal.
-  OnProcessCPUUsageReady();
-}
-
-void SystemNodeImpl::OnEventReceived(resource_coordinator::mojom::Event event) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   for (auto& observer : observers())
-    observer.OnSystemEventReceived(this, event);
-}
-
-void SystemNodeImpl::OnPropertyChanged(
-    resource_coordinator::mojom::PropertyType property_type,
-    int64_t value) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  for (auto& observer : observers())
-    observer.OnSystemPropertyChanged(this, property_type, value);
+    observer.OnProcessCPUUsageReady(this);
+  for (auto* observer : GetObservers())
+    observer->OnProcessCPUUsageReady(this);
 }
 
 }  // namespace performance_manager

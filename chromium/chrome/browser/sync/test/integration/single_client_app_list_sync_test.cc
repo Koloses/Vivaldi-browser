@@ -26,6 +26,16 @@ bool AllProfilesHaveSameAppList() {
   return SyncAppListHelper::GetInstance()->AllProfilesHaveSameAppList();
 }
 
+// Returns true if sync items from |service| all have non-empty names.
+bool SyncItemsHaveNames(const app_list::AppListSyncableService* service) {
+  for (const auto& it : service->sync_items()) {
+    if (it.second->item_name.empty()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Returns true if sync items from |service1| match to sync items in |service2|.
 bool SyncItemsMatch(const app_list::AppListSyncableService* service1,
                     const app_list::AppListSyncableService* service2) {
@@ -123,6 +133,9 @@ IN_PROC_BROWSER_TEST_F(SingleClientAppListSyncTest, AppListSomeApps) {
     apps_helper::InstallApp(verifier(), i);
   }
 
+  // Allow async callbacks to run, such as App Service Mojo calls.
+  base::RunLoop().RunUntilIdle();
+
   app_list::AppListSyncableService* service =
       app_list::AppListSyncableServiceFactory::GetForProfile(verifier());
 
@@ -154,9 +167,17 @@ IN_PROC_BROWSER_TEST_F(SingleClientAppListSyncTest, LocalStorage) {
   std::vector<std::string> app_ids;
   for (int i = 0; i < static_cast<int>(kNumApps); ++i) {
     app_ids.push_back(apps_helper::InstallApp(profile, i));
-    service->SetPinPosition(app_ids.back(), pin_position);
+  }
+
+  // Allow async callbacks to run, such as App Service Mojo calls.
+  base::RunLoop().RunUntilIdle();
+
+  for (const std::string& app_id : app_ids) {
+    service->SetPinPosition(app_id, pin_position);
     pin_position = pin_position.CreateAfter();
   }
+  EXPECT_TRUE(SyncItemsHaveNames(service));
+
   SyncAppListHelper::GetInstance()->MoveAppToFolder(profile, app_ids[2],
                                                     "folder1");
   SyncAppListHelper::GetInstance()->MoveAppToFolder(profile, app_ids[3],
@@ -172,8 +193,8 @@ IN_PROC_BROWSER_TEST_F(SingleClientAppListSyncTest, LocalStorage) {
   ASSERT_TRUE(UpdatedProgressMarkerChecker(GetSyncService(0)).Wait());
 
   // Disable app sync.
-  sync_service->GetUserSettings()->SetChosenDataTypes(false,
-                                                      syncer::ModelTypeSet());
+  sync_service->GetUserSettings()->SetSelectedTypes(
+      false, syncer::UserSelectableTypeSet());
 
   // Change data when sync is off.
   for (const auto& app_id : app_ids) {
@@ -188,8 +209,8 @@ IN_PROC_BROWSER_TEST_F(SingleClientAppListSyncTest, LocalStorage) {
   EXPECT_FALSE(SyncItemsMatch(service, &compare_service));
 
   // Restore sync and sync data should override local changes.
-  sync_service->GetUserSettings()->SetChosenDataTypes(true,
-                                                      syncer::ModelTypeSet());
+  sync_service->GetUserSettings()->SetSelectedTypes(
+      true, syncer::UserSelectableTypeSet());
   EXPECT_TRUE(AppListSyncUpdateWaiter(service).Wait());
   EXPECT_TRUE(SyncItemsMatch(service, &compare_service));
 }

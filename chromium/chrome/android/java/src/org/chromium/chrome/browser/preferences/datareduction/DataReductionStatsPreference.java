@@ -14,9 +14,10 @@ import static org.chromium.third_party.android.datausagechart.ChartDataUsageView
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.preference.Preference;
 import android.support.graphics.drawable.VectorDrawableCompat;
 import android.support.v7.app.AlertDialog;
+import android.support.v7.preference.Preference;
+import android.support.v7.preference.PreferenceViewHolder;
 import android.text.format.DateUtils;
 import android.util.AttributeSet;
 import android.view.Gravity;
@@ -32,6 +33,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.datareduction.DataReductionProxyUma;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.util.ConversionUtils;
 import org.chromium.chrome.browser.util.FileSizeUtil;
@@ -221,7 +223,7 @@ public class DataReductionStatsPreference extends Preference {
         long time = config.getDataReductionLastUpdateTime() - days * DateUtils.DAY_IN_MILLIS;
         for (int i = history.length - days, bucket = 0; i < history.length; i++, bucket++) {
             NetworkStats.Entry entry = new NetworkStats.Entry();
-            entry.rxBytes = history[i];
+            entry.rxBytes = Math.max(history[i], 0);
             long startTime = time + (DateUtils.DAY_IN_MILLIS * bucket);
             // Spread each day's record over the first hour of the day.
             networkStatsHistory.recordData(startTime, startTime + DateUtils.HOUR_IN_MILLIS, entry);
@@ -290,28 +292,28 @@ public class DataReductionStatsPreference extends Preference {
 
     /**
      * Sets up a data usage chart and text views containing data reduction statistics.
-     * @param view The current view.
+     * @param holder The current view holder.
      */
     @Override
-    protected void onBindView(View view) {
-        super.onBindView(view);
+    public void onBindViewHolder(PreferenceViewHolder holder) {
+        super.onBindViewHolder(holder);
 
-        initializeViewBounds(view);
+        initializeViewBounds(holder.itemView);
 
-        mInitialDataSavingsTextView = (TextView) view.findViewById(R.id.initial_data_savings);
+        mInitialDataSavingsTextView = (TextView) holder.findViewById(R.id.initial_data_savings);
         mInitialDataSavingsTextView.setCompoundDrawablesWithIntrinsicBounds(null,
                 VectorDrawableCompat.create(getContext().getResources(),
                         R.drawable.data_reduction_big, getContext().getTheme()),
                 null, null);
 
         mDataReductionStatsContainer =
-                (LinearLayout) view.findViewById(R.id.data_reduction_stats_container);
-        mDataUsageTextView = (TextView) view.findViewById(R.id.data_reduction_usage);
-        mDataSavingsTextView = (TextView) view.findViewById(R.id.data_reduction_savings);
-        mStartDateTextView = (TextView) view.findViewById(R.id.data_reduction_start_date);
-        mEndDateTextView = (TextView) view.findViewById(R.id.data_reduction_end_date);
+                (LinearLayout) holder.findViewById(R.id.data_reduction_stats_container);
+        mDataUsageTextView = (TextView) holder.findViewById(R.id.data_reduction_usage);
+        mDataSavingsTextView = (TextView) holder.findViewById(R.id.data_reduction_savings);
+        mStartDateTextView = (TextView) holder.findViewById(R.id.data_reduction_start_date);
+        mEndDateTextView = (TextView) holder.findViewById(R.id.data_reduction_end_date);
         mDataReductionBreakdownView =
-                (DataReductionSiteBreakdownView) view.findViewById(R.id.breakdown);
+                (DataReductionSiteBreakdownView) holder.findViewById(R.id.breakdown);
         forceLayoutGravityOfGraphLabels();
         if (mOriginalNetworkStatsHistory == null) {
             // This will query data usage. Only set mSiteBreakdownItems if the statistics are not
@@ -321,7 +323,7 @@ public class DataReductionStatsPreference extends Preference {
             mDataReductionBreakdownView.setAndDisplayDataUseItems(mSiteBreakdownItems);
         }
 
-        mChartDataUsageView = (ChartDataUsageView) view.findViewById(R.id.chart);
+        mChartDataUsageView = (ChartDataUsageView) holder.findViewById(R.id.chart);
         mChartDataUsageView.bindNetworkStats(
                 mOriginalNetworkStatsHistory, mReceivedNetworkStatsHistory);
         mChartDataUsageView.setVisibleRange(mVisibleStartTimeMillis, mVisibleEndTimeMillis);
@@ -331,7 +333,7 @@ public class DataReductionStatsPreference extends Preference {
             Log.w(TAG, "Data Saver proxy unreachable when user viewed Data Saver stats");
         }
 
-        mResetStatisticsButton = (Button) view.findViewById(R.id.data_reduction_reset_statistics);
+        mResetStatisticsButton = (Button) holder.findViewById(R.id.data_reduction_reset_statistics);
         if (mResetStatisticsButton != null) {
             setUpResetStatisticsButton();
         }
@@ -375,11 +377,13 @@ public class DataReductionStatsPreference extends Preference {
                     }
                 };
 
+                final int title =
+                        R.string.data_reduction_usage_reset_statistics_confirmation_title_lite_mode;
+                final int message =
+                        R.string.data_reduction_usage_reset_statistics_confirmation_dialog_lite_mode;
                 new AlertDialog.Builder(getContext(), R.style.Theme_Chromium_AlertDialog)
-                        .setTitle(DataReductionBrandingResourceProvider.getDataSaverBrandedString(
-                                R.string.data_reduction_usage_reset_statistics_confirmation_title))
-                        .setMessage(DataReductionBrandingResourceProvider.getDataSaverBrandedString(
-                                R.string.data_reduction_usage_reset_statistics_confirmation_dialog))
+                        .setTitle(title)
+                        .setMessage(message)
                         .setPositiveButton(
                                 R.string.data_reduction_usage_reset_statistics_confirmation_button,
                                 dialogListener)
@@ -396,8 +400,6 @@ public class DataReductionStatsPreference extends Preference {
      * of all data received (after compression), and the percent data reduction
      * and the range of dates over which these statistics apply.
      */
-    // TODO(crbug.com/635567): Fix this properly.
-    @SuppressLint("DefaultLocale")
     private void updateDetailData() {
         // To determine the correct day labels, adjust the network stats time values by their
         // offset from the client's current time.

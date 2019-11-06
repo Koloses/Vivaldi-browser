@@ -37,25 +37,29 @@ class PluginVmLauncherView : public views::BubbleDialogDelegateView,
   // plugin_vm::PluginVmImageDownloadObserver implementation.
   void OnDownloadStarted() override;
   void OnDownloadProgressUpdated(uint64_t bytes_downloaded,
-                                 int64_t content_length) override;
+                                 int64_t content_length,
+                                 base::TimeDelta elapsed_time) override;
   void OnDownloadCompleted() override;
   void OnDownloadCancelled() override;
   void OnDownloadFailed() override;
-  void OnUnzippingProgressUpdated(int64_t bytes_unzipped,
-                                  int64_t plugin_vm_image_size) override;
-  void OnUnzipped() override;
-  void OnUnzippingFailed() override;
+  void OnImportProgressUpdated(int percent_completed,
+                               base::TimeDelta elapsed_time) override;
+  void OnImported() override;
+  void OnImportCancelled() override;
+  void OnImportFailed() override;
 
   // Public for testing purposes.
-  base::string16 GetBigMessage();
+  base::string16 GetBigMessage() const;
+  base::string16 GetMessage() const;
 
  protected:
   enum class State {
     START_DOWNLOADING,  // PluginVm image downloading should be started.
     DOWNLOADING,        // PluginVm image downloading is in progress.
-    UNZIPPING,          // Downloaded PluginVm image unzipping is in progress.
+    IMPORTING,          // Downloaded PluginVm image importing is in progress.
     FINISHED,           // PluginVm environment setting has been finished.
     ERROR,              // Something unexpected happened.
+    NOT_ALLOWED,        // PluginVm is disallowed on the device.
   };
 
   State state_ = State::START_DOWNLOADING;
@@ -66,18 +70,27 @@ class PluginVmLauncherView : public views::BubbleDialogDelegateView,
   void AddedToWidget() override;
 
  private:
-  base::string16 GetMessage() const;
+  base::string16 GetDownloadProgressMessage(uint64_t downlaoded_bytes,
+                                            int64_t content_length) const;
+  // Updates the progress bar and shows a time left message if available.
+  void UpdateOperationProgress(double units_processed,
+                               double total_units,
+                               base::TimeDelta elapsed_time) const;
   void SetBigMessageLabel();
   void SetMessageLabel();
   void SetBigImage();
 
   void StartPluginVmImageDownload();
 
+  Profile* profile_ = nullptr;
   plugin_vm::PluginVmImageManager* plugin_vm_image_manager_ = nullptr;
   views::Label* big_message_label_ = nullptr;
   views::Label* message_label_ = nullptr;
   views::ProgressBar* progress_bar_ = nullptr;
+  views::Label* download_progress_message_label_ = nullptr;
+  views::Label* time_left_message_label_ = nullptr;
   views::ImageView* big_image_ = nullptr;
+  base::TimeTicks setup_start_tick_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginVmLauncherView);
 };

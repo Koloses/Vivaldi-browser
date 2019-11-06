@@ -16,26 +16,26 @@
 #include "content/shell/test_runner/test_runner_export.h"
 #include "v8/include/v8.h"
 
-class GURL;
 class SkBitmap;
 
 namespace blink {
 struct Manifest;
 class WebLocalFrame;
 class WebView;
+class WebURL;
 }
 
-namespace content {
-class RenderWidget;
-}  // namespace content
+namespace gfx {
+struct PresentationFeedback;
+}
 
 namespace gin {
 class Arguments;
 }
 
 namespace test_runner {
-
 class WebTestDelegate;
+class WebWidgetTestProxy;
 class WebViewTestProxy;
 
 // TestRunnerForSpecificView implements part of |testRunner| javascript bindings
@@ -84,8 +84,12 @@ class TEST_RUNNER_EXPORT TestRunnerForSpecificView {
   // with the captured snapshot as the parameters (width, height, snapshot).
   // The snapshot is in uint8_t RGBA format.
   void CapturePixelsAsyncThen(v8::Local<v8::Function> callback);
-  void CapturePixelsCallback(v8::UniquePersistent<v8::Function> callback,
-                             const SkBitmap& snapshot);
+
+  void RunJSCallbackAfterCompositorLifecycle(
+      v8::UniquePersistent<v8::Function> callback,
+      const gfx::PresentationFeedback&);
+  void RunJSCallbackWithBitmap(v8::UniquePersistent<v8::Function> callback,
+                               const SkBitmap& snapshot);
 
   // Similar to CapturePixelsAsyncThen(). Copies to the clipboard the image
   // located at a particular point in the WebView (if there is such an image),
@@ -98,7 +102,7 @@ class TEST_RUNNER_EXPORT TestRunnerForSpecificView {
 
   void GetManifestThen(v8::Local<v8::Function> callback);
   void GetManifestCallback(v8::UniquePersistent<v8::Function> callback,
-                           const GURL& manifest_url,
+                           const blink::WebURL& manifest_url,
                            const blink::Manifest& manifest);
 
   // Calls |callback| with a DOMString[] representing the events recorded since
@@ -223,13 +227,13 @@ class TEST_RUNNER_EXPORT TestRunnerForSpecificView {
   blink::WebLocalFrame* GetLocalMainFrame();
 
   // Helpers for accessing pointers exposed by |web_view_test_proxy_|.
-  content::RenderWidget* main_frame_render_widget();
+  WebWidgetTestProxy* main_frame_render_widget();
   blink::WebView* web_view();
   WebTestDelegate* delegate();
 
   WebViewTestProxy* web_view_test_proxy_;
 
-  base::WeakPtrFactory<TestRunnerForSpecificView> weak_factory_;
+  base::WeakPtrFactory<TestRunnerForSpecificView> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TestRunnerForSpecificView);
 };

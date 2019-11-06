@@ -9,20 +9,22 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
 #include "base/time/time.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/common/content_security_policy/content_security_policy.h"
 #include "content/common/content_security_policy/csp_disposition_enum.h"
 #include "content/common/frame_message_enums.h"
-#include "content/common/service_worker/service_worker_types.h"
+#include "content/common/prefetched_signed_exchange_info.h"
+#include "content/public/common/navigation_policy.h"
 #include "content/public/common/page_state.h"
 #include "content/public/common/previews_state.h"
 #include "content/public/common/referrer.h"
-#include "content/public/common/resource_intercept_policy.h"
 #include "content/public/common/was_activated_option.h"
 #include "net/url_request/redirect_info.h"
 #include "services/network/public/cpp/resource_request_body.h"
@@ -79,36 +81,6 @@ struct CONTENT_EXPORT InitiatorCSPInfo {
   base::Optional<CSPSource> initiator_self_source;
 };
 
-// This enum controls how navigations behave when they turn into downloads.
-// Disallow options are enumerated to make metrics logging possible at
-// download-discovery time.
-//
-// This enum backs a histogram. Please keep enums.xml up to date with any
-// changes, and new entries should be appended at the end. Never re-arrange /
-// re-use values.
-enum class NavigationDownloadPolicy {
-  kAllow = 0,
-  kDisallowViewSource = 1,
-  kDisallowInterstitial = 2,
-
-  // The navigation was initiated on a x-origin opener. Downloads should not be
-  // allowed.
-  kDisallowOpenerCrossOrigin = 5,
-
-  // Download should be prevented when the navigation occurs in an iframe with
-  // |kSandboxDownloads| flag set, and the runtime-enabled-feature
-  // |BlockingDownloadsInSandbox| is enabled.
-  kDisallowSandbox = 7,
-
-  kMaxValue = kDisallowSandbox
-};
-
-ResourceInterceptPolicy CONTENT_EXPORT
-GetResourceInterceptPolicy(NavigationDownloadPolicy policy);
-
-bool CONTENT_EXPORT
-IsNavigationDownloadAllowed(NavigationDownloadPolicy policy);
-
 // Used by all navigation IPCs.
 struct CONTENT_EXPORT CommonNavigationParams {
   CommonNavigationParams();
@@ -130,7 +102,9 @@ struct CONTENT_EXPORT CommonNavigationParams {
       bool started_from_context_menu,
       bool has_user_gesture,
       const InitiatorCSPInfo& initiator_csp_info,
+      const std::vector<int>& initiator_origin_trial_features,
       const std::string& href_translate,
+      bool is_history_navigation_in_new_child_frame,
       base::TimeTicks input_start = base::TimeTicks());
   CommonNavigationParams(const CommonNavigationParams& other);
   ~CommonNavigationParams();
@@ -155,10 +129,8 @@ struct CONTENT_EXPORT CommonNavigationParams {
   FrameMsg_Navigate_Type::Value navigation_type =
       FrameMsg_Navigate_Type::DIFFERENT_DOCUMENT;
 
-  // Enum which governs how downloads are handled by this navigation. By
-  // default, the navigation is allowed to become a download. Multiple values
-  // for disallowed downloads helps with metrics.
-  NavigationDownloadPolicy download_policy = NavigationDownloadPolicy::kAllow;
+  // Governs how downloads are handled by this navigation.
+  NavigationDownloadPolicy download_policy;
 
   // Informs the RenderView the pending navigation should replace the current
   // history entry when it commits. This is used for cross-process redirects so
@@ -207,13 +179,23 @@ struct CONTENT_EXPORT CommonNavigationParams {
   // We require a copy of the relevant CSP to perform navigation checks.
   InitiatorCSPInfo initiator_csp_info;
 
-  // The current origin policy for this request's origin.
-  // (Empty if none applies.)
-  std::string origin_policy;
+  // The origin trial features activated in the initiator that should be applied
+  // in the document being navigated to. The int values are blink
+  // OriginTrialFeature enum values. OriginTrialFeature enum is not visible
+  // outside of blink (and doesn't need to be) so these values are casted to int
+  // as they are passed through content across navigations.
+  std::vector<int> initiator_origin_trial_features;
 
   // The value of the hrefTranslate attribute if this navigation was initiated
   // from a link that had that attribute set.
   std::string href_translate;
+
+  // Whether this is a history navigation in a newly created child frame, in
+  // which case the browser process is instructing the renderer process to load
+  // a URL from a session history item.  Defaults to false.
+  // TODO(ahemery): Move this to BeginNavigationParams once we default to
+  // IsPerNavigationMojoInterface().
+  bool is_history_navigation_in_new_child_frame = false;
 
   // The time the input event leading to the navigation occurred. This will
   // not always be set; it depends on the creator of the CommonNavigationParams
@@ -244,7 +226,6 @@ struct CONTENT_EXPORT CommitNavigationParams {
                          bool can_load_local_resources,
                          const PageState& page_state,
                          int nav_entry_id,
-                         bool is_history_navigation_in_new_child,
                          std::map<std::string, bool> subframe_unique_names,
                          bool intended_as_new_entry,
                          int pending_history_list_offset,
@@ -296,11 +277,6 @@ struct CONTENT_EXPORT CommitNavigationParams {
   // the resulting FrameHostMsg_DidCommitProvisionalLoad_Params.
   int nav_entry_id = 0;
 
-  // Whether this is a history navigation in a newly created child frame, in
-  // which case the browser process is instructing the renderer process to load
-  // a URL from a session history item.  Defaults to false.
-  bool is_history_navigation_in_new_child = false;
-
   // If this is a history navigation, this contains a map of frame unique names
   // to |is_about_blank| for immediate children of the frame being navigated for
   // which there are history items.  The renderer process only needs to check
@@ -344,13 +320,8 @@ struct CONTENT_EXPORT CommitNavigationParams {
   // Timing of navigation events.
   NavigationTiming navigation_timing;
 
-  // ID of the ServiceWorkerProviderHost pre-created by the browser.
-  // If this navigation has nothing to do with service workers for some reason
-  // like insecure origins etc., set to kInvalidServiceWorkerProviderId.
-  int service_worker_provider_id = kInvalidServiceWorkerProviderId;
-
   // The AppCache host id to be used to identify this navigation.
-  int appcache_host_id = blink::mojom::kAppCacheNoHostId;
+  base::Optional<base::UnguessableToken> appcache_host_id;
 
   // Set to |kYes| if a navigation is following the rules of user activation
   // propagation. This is different from |has_user_gesture|
@@ -362,6 +333,16 @@ struct CONTENT_EXPORT CommitNavigationParams {
   // `user_gesture` will answer the latter.
   WasActivatedOption was_activated = WasActivatedOption::kUnknown;
 
+  // A token that should be passed to the browser process in
+  // DidCommitProvisionalLoadParams.
+  // TODO(clamy): Remove this once NavigationClient has shipped and
+  // same-document browser-initiated navigations are properly handled as well.
+  base::UnguessableToken navigation_token;
+
+  // Prefetched signed exchanges. Used when SignedExchangeSubresourcePrefetch
+  // feature is enabled.
+  std::vector<PrefetchedSignedExchangeInfo> prefetched_signed_exchanges;
+
 #if defined(OS_ANDROID)
   // The real content of the data: URL. Only used in Android WebView for
   // implementing LoadDataWithBaseUrl API method to circumvent the restriction
@@ -369,6 +350,9 @@ struct CONTENT_EXPORT CommitNavigationParams {
   // passed in the |CommonNavigationParams::url| field.
   std::string data_url_as_string;
 #endif
+
+  // Whether this navigation was browser initiated.
+  bool is_browser_initiated = false;
 };
 
 }  // namespace content

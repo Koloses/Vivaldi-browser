@@ -18,8 +18,10 @@ namespace content {
 
 class AppCacheService;
 class BackgroundSyncContext;
+class DevToolsBackgroundServicesContext;
 class DOMStorageContext;
 class IndexedDBContext;
+class NativeFileSystemEntryFactory;
 class PlatformNotificationContext;
 class ServiceWorkerContext;
 
@@ -60,6 +62,9 @@ class TestStoragePartition : public StoragePartition {
   scoped_refptr<network::SharedURLLoaderFactory>
   GetURLLoaderFactoryForBrowserProcess() override;
 
+  scoped_refptr<network::SharedURLLoaderFactory>
+  GetURLLoaderFactoryForBrowserProcessWithCORBEnabled() override;
+
   std::unique_ptr<network::SharedURLLoaderFactoryInfo>
   GetURLLoaderFactoryForBrowserProcessIOThread() override;
 
@@ -68,6 +73,13 @@ class TestStoragePartition : public StoragePartition {
     cookie_manager_for_browser_process_ = cookie_manager_for_browser_process;
   }
   network::mojom::CookieManager* GetCookieManagerForBrowserProcess() override;
+  void CreateRestrictedCookieManager(
+      network::mojom::RestrictedCookieManagerRole role,
+      const url::Origin& origin,
+      bool is_service_worker,
+      int process_id,
+      int routing_id,
+      network::mojom::RestrictedCookieManagerRequest request) override;
 
   void set_quota_manager(storage::QuotaManager* manager) {
     quota_manager_ = manager;
@@ -103,6 +115,7 @@ class TestStoragePartition : public StoragePartition {
     indexed_db_context_ = context;
   }
   IndexedDBContext* GetIndexedDBContext() override;
+  NativeFileSystemEntryFactory* GetNativeFileSystemEntryFactory() override;
 
   void set_service_worker_context(ServiceWorkerContext* context) {
     service_worker_context_ = context;
@@ -128,6 +141,18 @@ class TestStoragePartition : public StoragePartition {
     platform_notification_context_ = context;
   }
   PlatformNotificationContext* GetPlatformNotificationContext() override;
+
+  void set_devtools_background_services_context(
+      DevToolsBackgroundServicesContext* context) {
+    devtools_background_services_context_ = context;
+  }
+  DevToolsBackgroundServicesContext* GetDevToolsBackgroundServicesContext()
+      override;
+
+  void set_content_index_context(ContentIndexContext* context) {
+    content_index_context_ = context;
+  }
+  ContentIndexContext* GetContentIndexContext() override;
 
 #if !defined(OS_ANDROID)
   void set_host_zoom_map(HostZoomMap* map) { host_zoom_map_ = map; }
@@ -202,6 +227,9 @@ class TestStoragePartition : public StoragePartition {
   CacheStorageContext* cache_storage_context_ = nullptr;
   GeneratedCodeCacheContext* generated_code_cache_context_ = nullptr;
   PlatformNotificationContext* platform_notification_context_ = nullptr;
+  DevToolsBackgroundServicesContext* devtools_background_services_context_ =
+      nullptr;
+  ContentIndexContext* content_index_context_ = nullptr;
 #if !defined(OS_ANDROID)
   HostZoomMap* host_zoom_map_ = nullptr;
   HostZoomLevelContext* host_zoom_level_context_ = nullptr;

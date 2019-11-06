@@ -86,7 +86,7 @@ void SendCreated(BrowserContext* browser_context,
                  const NoteTreeNode& treenode) {
   ::vivaldi::BroadcastEvent(
       vivaldi::notes::OnCreated::kEventName,
-      vivaldi::notes::OnCreated::Create(base::Int64ToString(id), treenode),
+      vivaldi::notes::OnCreated::Create(base::NumberToString(id), treenode),
       browser_context);
 }
 
@@ -95,7 +95,7 @@ void SendChanged(BrowserContext* browser_context,
                  const vivaldi::notes::OnChanged::ChangeInfo& change_info) {
   ::vivaldi::BroadcastEvent(
       vivaldi::notes::OnChanged::kEventName,
-      vivaldi::notes::OnChanged::Create(base::Int64ToString(id), change_info),
+      vivaldi::notes::OnChanged::Create(base::NumberToString(id), change_info),
       browser_context);
 }
 
@@ -109,12 +109,12 @@ void SendMoved(BrowserContext* browser_context,
 
   move_info.index = index;
   move_info.old_index = old_index;
-  move_info.parent_id = base::Int64ToString(parent_id);
-  move_info.old_parent_id = base::Int64ToString(old_parent_id);
+  move_info.parent_id = base::NumberToString(parent_id);
+  move_info.old_parent_id = base::NumberToString(old_parent_id);
 
   ::vivaldi::BroadcastEvent(
       vivaldi::notes::OnMoved::kEventName,
-      vivaldi::notes::OnMoved::Create(base::Int64ToString(id), move_info),
+      vivaldi::notes::OnMoved::Create(base::NumberToString(id), move_info),
       browser_context);
 }
 
@@ -124,12 +124,12 @@ void SendRemoved(BrowserContext* browser_context,
                  int indexofdeleted) {
   vivaldi::notes::OnRemoved::RemoveInfo info;
 
-  info.parent_id = base::Int64ToString(parent_id);
+  info.parent_id = base::NumberToString(parent_id);
   info.index = indexofdeleted;
 
   ::vivaldi::BroadcastEvent(
       vivaldi::notes::OnRemoved::kEventName,
-      vivaldi::notes::OnRemoved::Create(base::Int64ToString(id), info),
+      vivaldi::notes::OnRemoved::Create(base::NumberToString(id), info),
       browser_context);
 }
 
@@ -154,12 +154,12 @@ std::unique_ptr<std::vector<NoteAttachment>> CreateNoteAttachments(
 NoteTreeNode MakeTreeNode(Notes_Node* node) {
   NoteTreeNode notes_tree_node;
 
-  notes_tree_node.id = base::Int64ToString(node->id());
+  notes_tree_node.id = base::NumberToString(node->id());
 
   const Notes_Node* parent = node->parent();
   if (parent) {
     notes_tree_node.parent_id.reset(
-        new std::string(base::Int64ToString(parent->id())));
+        new std::string(base::NumberToString(parent->id())));
     notes_tree_node.index.reset(new int(parent->GetIndexOf(node)));
   }
   notes_tree_node.trash.reset(new bool(node->is_trash()));
@@ -183,9 +183,8 @@ NoteTreeNode MakeTreeNode(Notes_Node* node) {
 
   if (node->is_folder()) {
     std::vector<NoteTreeNode> children;
-    for (int i = 0; i < node->child_count(); ++i) {
-      Notes_Node* child = node->GetChild(i);
-      children.push_back(MakeTreeNode(child));
+    for (auto& it: node->children()) {
+      children.push_back(MakeTreeNode(it.get()));
     }
     notes_tree_node.children.reset(
         new std::vector<NoteTreeNode>(std::move(children)));
@@ -201,9 +200,8 @@ Notes_Node* GetNodeFromId(Notes_Node* node, int64_t id) {
   if (node->id() == id) {
     return node;
   }
-  int number_of_notes = node->child_count();
-  for (int i = 0; i < number_of_notes; i++) {
-    Notes_Node* childnode = GetNodeFromId(node->GetChild(i), id);
+  for (auto& it: node->children()) {
+    Notes_Node* childnode = GetNodeFromId(it.get(), id);
     if (childnode) {
       return childnode;
     }
@@ -362,7 +360,7 @@ ExtensionFunction::ResponseAction NotesCreateFunction::Run() {
     parent = model->main_node();
   }
   if (parent == model->main_node()) {
-    int64_t maxIndex = parent->child_count();
+    int64_t maxIndex = parent->children().size();
     int64_t newIndex = maxIndex;
     if (params->note.index.get()) {
       newIndex = *params->note.index.get();
@@ -372,7 +370,7 @@ ExtensionFunction::ResponseAction NotesCreateFunction::Run() {
     }
     model->AddNode(parent, newIndex, std::move(newnode));
   } else {
-    int64_t newIndex = parent->child_count();
+    int64_t newIndex = parent->children().size();
     if (params->note.index.get()) {
       newIndex = *params->note.index.get();
     }
@@ -586,15 +584,15 @@ ExtensionFunction::ResponseAction NotesMoveFunction::Run() {
     }
   }
 
-  int index;
+  size_t index;
   if (params->destination.index.get()) {  // Optional (defaults to end).
     index = *params->destination.index;
-    if (index > parent->child_count() || index < 0) {
+    if (index > parent->children().size() || index < 0) {
        // Todo move to constant
       return RespondNow(Error("Index out of bounds."));
     }
   } else {
-    index = parent->child_count();
+    index = parent->children().size();
   }
 
   Notes_Node* old_parent = node->parent();
@@ -623,8 +621,8 @@ ExtensionFunction::ResponseAction NotesEmptyTrashFunction::Run() {
   Notes_Model* model = GetNotesModel(this);
   Notes_Node* trash_node = model->trash_node();
   if (trash_node) {
-    while (trash_node->child_count()) {
-      Notes_Node* node = trash_node->GetChild(0);
+    while (!trash_node->children().empty()) {
+      Notes_Node* node = trash_node->children()[0].get();
       int64_t removed_node_id = node->id();
       model->Remove(trash_node, 0);
       SendRemoved(browser_context(), removed_node_id, trash_node->id(), 0);

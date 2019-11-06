@@ -42,6 +42,8 @@
 
 using offline_items_collection::ContentId;
 using offline_items_collection::OfflineContentProvider;
+using GetVisualsOptions =
+    offline_items_collection::OfflineContentProvider::GetVisualsOptions;
 using offline_items_collection::OfflineItem;
 using offline_items_collection::OfflineItemFilter;
 using offline_items_collection::OfflineItemProgressUnit;
@@ -173,7 +175,10 @@ class OfflineContentProviderObserver : public OfflineContentProvider::Observer {
   }
 
   void OnItemRemoved(const ContentId& id) override {}
-  void OnItemUpdated(const OfflineItem& item) override {
+  void OnItemUpdated(
+      const OfflineItem& item,
+      const base::Optional<offline_items_collection::UpdateDelta>& update_delta)
+      override {
     if (item.state != offline_items_collection::OfflineItemState::IN_PROGRESS &&
         item.state != offline_items_collection::OfflineItemState::PENDING &&
         item.state != offline_items_collection::OfflineItemState::PAUSED &&
@@ -233,20 +238,20 @@ class BackgroundFetchBrowserTest : public InProcessBrowserTest {
         net::EmbeddedTestServer::TYPE_HTTPS);
     https_server_->RegisterRequestHandler(base::BindRepeating(
         &BackgroundFetchBrowserTest::HandleRequest, base::Unretained(this)));
-    https_server_->AddDefaultHandlers(
-        base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+    https_server_->AddDefaultHandlers(GetChromeTestDataDir());
     ASSERT_TRUE(https_server_->Start());
 
     Profile* profile = browser()->profile();
 
     download_observer_ = std::make_unique<WaitableDownloadLoggerObserver>();
 
-    download_service_ = DownloadServiceFactory::GetForBrowserContext(profile);
+    download_service_ =
+        DownloadServiceFactory::GetForKey(profile->GetProfileKey());
     download_service_->GetLogger()->AddObserver(download_observer_.get());
 
     // Register our observer for the offline items collection.
     OfflineContentAggregatorFactory::GetInstance()
-        ->GetForBrowserContext(profile)
+        ->GetForKey(profile->GetProfileKey())
         ->AddObserver(offline_content_provider_observer_.get());
 
     SetUpBrowser(browser());
@@ -276,7 +281,7 @@ class BackgroundFetchBrowserTest : public InProcessBrowserTest {
 
   void TearDownOnMainThread() override {
     OfflineContentAggregatorFactory::GetInstance()
-        ->GetForBrowserContext(active_browser_->profile())
+        ->GetForKey(active_browser_->profile()->GetProfileKey())
         ->RemoveObserver(offline_content_provider_observer_.get());
 
     download_service_->GetLogger()->RemoveObserver(download_observer_.get());
@@ -319,9 +324,10 @@ class BackgroundFetchBrowserTest : public InProcessBrowserTest {
     base::RunLoop run_loop;
 
     delegate_->GetVisualsForItem(
-        offline_item_id, base::Bind(&BackgroundFetchBrowserTest::DidGetVisuals,
-                                    base::Unretained(this),
-                                    run_loop.QuitClosure(), out_visuals));
+        offline_item_id, GetVisualsOptions::IconOnly(),
+        base::BindOnce(&BackgroundFetchBrowserTest::DidGetVisuals,
+                       base::Unretained(this), run_loop.QuitClosure(),
+                       out_visuals));
     run_loop.Run();
   }
 
@@ -410,9 +416,10 @@ class BackgroundFetchBrowserTest : public InProcessBrowserTest {
         browser()->tab_strip_model()->GetActiveWebContents();
     DownloadRequestLimiter::TabDownloadState* tab_download_state =
         g_browser_process->download_request_limiter()->GetDownloadState(
-            web_contents, web_contents, true /* create */);
+            web_contents, true /* create */);
     tab_download_state->set_download_seen();
     tab_download_state->SetDownloadStatusAndNotify(
+        web_contents->GetVisibleURL().GetOrigin(),
         DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED);
   }
 

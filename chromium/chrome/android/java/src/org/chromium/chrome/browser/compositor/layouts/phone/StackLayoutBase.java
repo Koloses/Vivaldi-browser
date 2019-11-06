@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.compositor.layouts.phone;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -41,11 +43,9 @@ import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabList;
-import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
-import org.chromium.chrome.browser.tasks.tab_groups.LayoutTabGroupCreationButton;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.ui.UiUtils;
@@ -58,7 +58,6 @@ import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -159,6 +158,8 @@ public abstract class StackLayoutBase extends Layout {
     /** Rectangles that defines the area where each stack need to be laid out. */
     protected final ArrayList<RectF> mStackRects;
 
+    private final float mDpToPx;
+
     private int mStackAnimationCount;
 
     private float mFlingSpeed; // pixel/ms
@@ -231,8 +232,6 @@ public abstract class StackLayoutBase extends Layout {
     private final ArrayList<Pair<CompositorAnimator, FloatProperty>> mLayoutAnimations =
             new ArrayList<>();
 
-    private LayoutTabGroupCreationButton mLayoutTabGroupCreationButton;
-
     private class StackLayoutGestureHandler implements GestureHandler {
         @Override
         public void onDown(float x, float y, boolean fromMouse, int buttons) {
@@ -285,13 +284,6 @@ public abstract class StackLayoutBase extends Layout {
 
             // Click event happens before the up event. mClicked is set to mute the up event.
             mClicked = true;
-
-            if (mLayoutTabGroupCreationButton != null
-                    && mLayoutTabGroupCreationButton.getCreateGroupButton().checkClicked(x, y)) {
-                mLayoutTabGroupCreationButton.getCreateGroupButton().handleClick(time());
-                return;
-            }
-
             PortraitViewport viewportParams = getViewportParameters();
             final int stackIndexDeltaAt = viewportParams.getStackIndexDeltaAt(x, y);
             if (stackIndexDeltaAt == 0) {
@@ -345,7 +337,10 @@ public abstract class StackLayoutBase extends Layout {
 
         private void onUpOrCancel(long time) {
             if (shouldIgnoreTouchInput()) return;
+            cancelDragTabs(time);
+        }
 
+        private void cancelDragTabs(long time) {
             int currentIndex = getTabStackIndex();
             if (!mClicked
                     && Math.abs(currentIndex + mRenderedScrollOffset) > THRESHOLD_TO_SWITCH_STACK) {
@@ -390,6 +385,7 @@ public abstract class StackLayoutBase extends Layout {
         mStackRects = new ArrayList<RectF>();
         mViewContainer = new FrameLayout(getContext());
         mSceneLayer = new TabListSceneLayer();
+        mDpToPx = context.getResources().getDisplayMetrics().density;
     }
 
     /**
@@ -785,7 +781,27 @@ public abstract class StackLayoutBase extends Layout {
      * @param canUndo   Whether or not this close can be undone.
      * @param incognito Whether or not this was for the incognito stack or not.
      */
-    public void uiDoneClosingTab(long time, int id, boolean canUndo, boolean incognito) {
+    public void uiDoneClosingTab(
+            final long time, final int id, boolean canUndo, final boolean incognito) {
+        // If there are any ongoing layout animations, postpone this until they are done since
+        // closeTabById does a lot of work.
+        for (int i = 0; i < mLayoutAnimations.size(); i++) {
+            if (mLayoutAnimations.get(i).first.isRunning()) {
+                final boolean cachedCanUndo = canUndo;
+                final AnimatorListenerAdapter adapter = new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        uiDoneClosingTab(time, id, cachedCanUndo, incognito);
+                        animation.removeListener(this);
+                    }
+                };
+                mLayoutAnimations.get(i).first.addListener(adapter);
+                return;
+            }
+        }
+
+        assert !isLayoutAnimating();
+
         // If homepage is enabled and there is a maximum of 1 tab in both models
         // (this is the last tab), the tab closure cannot be undone.
         canUndo &= !(HomepageManager.shouldCloseAppWithZeroTabs()
@@ -1371,11 +1387,6 @@ public abstract class StackLayoutBase extends Layout {
         return distance - 2 * getViewportParameters().getInnerMargin();
     }
 
-    private int getCenteredTabIndex() {
-        if (!mIsActiveLayout) return -1;
-        return mStacks.get(getTabStackIndex()).getCenteredTabIndex();
-    }
-
     @Override
     public void startHiding(int nextTabId, boolean hintAtTabSelection) {
         super.startHiding(nextTabId, hintAtTabSelection);
@@ -1414,6 +1425,7 @@ public abstract class StackLayoutBase extends Layout {
         mIsHidingBecauseOfNewTabCreation = false;
 
         super.doneHiding();
+        RecordUserAction.record("MobileExitStackView");
 
         mInnerMarginPercent = 0.0f;
         mStackOffsetYPercent = 0.0f;
@@ -1575,25 +1587,9 @@ public abstract class StackLayoutBase extends Layout {
                 resourceManager, fullscreenManager);
         assert mSceneLayer != null;
 
-        int centerIndex = getCenteredTabIndex();
-        if (centerIndex != TabModel.INVALID_TAB_INDEX
-                && FeatureUtilities.isTabGroupsAndroidEnabled()
-                && layerTitleCache.getLayoutTabGroupCreationButton() != null) {
-            if (mLayoutTabGroupCreationButton == null) {
-                mLayoutTabGroupCreationButton = layerTitleCache.getLayoutTabGroupCreationButton();
-            }
-
-            Tab tab = mStacks.get(getTabStackIndex()).getTabList().getTabAt(centerIndex);
-            boolean ableToCreateGroup = mTabModelSelector.getTabModelFilterProvider()
-                                                .getCurrentTabModelFilter()
-                                                .getRelatedTabList(tab.getId())
-                                                .size()
-                    == 1;
-            mLayoutTabGroupCreationButton.updateLayout(tab, mLayoutTabs, ableToCreateGroup);
-        }
-
         mSceneLayer.pushLayers(getContext(), viewport, contentViewport, this, layerTitleCache,
-                tabContentManager, resourceManager, fullscreenManager);
+                tabContentManager, resourceManager, fullscreenManager,
+                SceneLayer.INVALID_RESOURCE_ID, 0);
     }
 
     /**
@@ -1606,6 +1602,17 @@ public abstract class StackLayoutBase extends Layout {
                 getAnimationHandler(), this, property, start, end, duration);
         compositorAnimator.setStartDelay(startTime);
         compositorAnimator.start();
+
+        for (int i = mLayoutAnimations.size() - 1; i >= 0; i--) {
+            if (mLayoutAnimations.get(i).second == property
+                    && !mLayoutAnimations.get(i).first.isRunning()) {
+                mLayoutAnimations.set(i,
+                        new Pair<CompositorAnimator, FloatProperty>(compositorAnimator, property));
+
+                requestUpdate();
+                return;
+            }
+        }
 
         mLayoutAnimations.add(
                 new Pair<CompositorAnimator, FloatProperty>(compositorAnimator, property));
@@ -1629,17 +1636,16 @@ public abstract class StackLayoutBase extends Layout {
      * @param prop   The property to search for.
      */
     protected void cancelAnimation(FloatProperty<StackLayoutBase> property) {
-        Pair<CompositorAnimator, FloatProperty> a;
-        Iterator<Pair<CompositorAnimator, FloatProperty>> animationIterator =
-                mLayoutAnimations.iterator();
-
-        while (animationIterator.hasNext()) {
-            a = animationIterator.next();
-            if (a.second == property) {
-                a.first.cancel();
-                animationIterator.remove();
+        for (int i = mLayoutAnimations.size() - 1; i >= 0; i--) {
+            if (mLayoutAnimations.get(i).second == property) {
+                mLayoutAnimations.get(i).first.cancel();
             }
         }
+    }
+
+    @Override
+    public void destroy() {
+        super.destroy();
     }
 
     @Override

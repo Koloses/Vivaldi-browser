@@ -4,48 +4,95 @@
 
 #include "media/gpu/test/video_player/video_player_test_environment.h"
 
+#include <utility>
+
+#include "base/system/sys_info.h"
+#include "media/base/video_types.h"
+#include "media/gpu/test/video_player/video.h"
+
 namespace media {
 namespace test {
-VideoPlayerTestEnvironment::VideoPlayerTestEnvironment(const Video* video)
-    : video_(video) {}
+
+// Default video to be used if no test video was specified.
+constexpr base::FilePath::CharType kDefaultTestVideoPath[] =
+    FILE_PATH_LITERAL("test-25fps.h264");
+
+// static
+VideoPlayerTestEnvironment* VideoPlayerTestEnvironment::Create(
+    const base::FilePath& video_path,
+    const base::FilePath& video_metadata_path,
+    bool enable_validator,
+    bool output_frames,
+    const base::FilePath& output_folder,
+    bool use_vd) {
+  auto video = std::make_unique<media::test::Video>(
+      video_path.empty() ? base::FilePath(kDefaultTestVideoPath) : video_path,
+      video_metadata_path);
+  if (!video->Load()) {
+    LOG(ERROR) << "Failed to load " << video_path;
+    return nullptr;
+  }
+
+  return new VideoPlayerTestEnvironment(std::move(video), enable_validator,
+                                        output_frames, output_folder, use_vd);
+}
+
+VideoPlayerTestEnvironment::VideoPlayerTestEnvironment(
+    std::unique_ptr<media::test::Video> video,
+    bool enable_validator,
+    bool output_frames,
+    const base::FilePath& output_folder,
+    bool use_vd)
+    : video_(std::move(video)),
+      enable_validator_(enable_validator),
+      output_frames_(output_frames),
+      output_folder_(output_folder),
+      use_vd_(use_vd) {}
 
 VideoPlayerTestEnvironment::~VideoPlayerTestEnvironment() = default;
 
 void VideoPlayerTestEnvironment::SetUp() {
-  // Setting up a task environment will create a task runner for the current
-  // thread and allow posting tasks to other threads. This is required for the
-  // test video player to function correctly.
-  TestTimeouts::Initialize();
-  task_environment_ = std::make_unique<base::test::ScopedTaskEnvironment>(
-      base::test::ScopedTaskEnvironment::MainThreadType::UI);
+  VideoTestEnvironment::SetUp();
 
-  // Perform all static initialization that is required when running video
-  // decoders in a test environment.
-#if BUILDFLAG(USE_VAAPI)
-  media::VaapiWrapper::PreSandboxInitialization();
-#endif
+  // TODO(dstaessens): Remove this check once all platforms support import mode.
+  // Some older platforms do not support importing buffers, but need to allocate
+  // buffers internally in the decoder.
+#if defined(OS_CHROMEOS)
+  constexpr const char* kImportModeBlacklist[] = {"nyan_big", "nyan_blaze",
+                                                  "nyan_kitty"};
+  const std::string board = base::SysInfo::GetLsbReleaseBoard();
+  import_supported_ = (std::find(std::begin(kImportModeBlacklist),
+                                 std::end(kImportModeBlacklist),
+                                 board) == std::end(kImportModeBlacklist));
+#endif  // defined(OS_CHROMEOS)
 
-#if defined(USE_OZONE)
-  // Initialize Ozone. This is necessary to gain access to the GPU for hardware
-  // video decode acceleration.
-  LOG(WARNING) << "Initializing Ozone Platform...\n"
-                  "If this hangs indefinitely please call 'stop ui' first!";
-  ui::OzonePlatform::InitParams params = {.single_process = false};
-  ui::OzonePlatform::InitializeForUI(params);
-  ui::OzonePlatform::InitializeForGPU(params);
-  ui::OzonePlatform::GetInstance()->AfterSandboxEntry();
-
-  // Initialize the Ozone GPU helper. If this is not done an error will occur:
-  // "Check failed: drm. No devices available for buffer allocation."
-  // Note: If a task environment is not set up initialization will hang
-  // indefinitely here.
-  gpu_helper_.reset(new ui::OzoneGpuTestHelper());
-  gpu_helper_->Initialize(base::ThreadTaskRunnerHandle::Get());
-#endif
+  // VideoDecoders always require import mode to be supported.
+  DCHECK(!use_vd_ || import_supported_);
 }
 
-void VideoPlayerTestEnvironment::TearDown() {
-  task_environment_.reset();
+const media::test::Video* VideoPlayerTestEnvironment::Video() const {
+  return video_.get();
 }
+
+bool VideoPlayerTestEnvironment::IsValidatorEnabled() const {
+  return enable_validator_;
+}
+
+bool VideoPlayerTestEnvironment::IsFramesOutputEnabled() const {
+  return output_frames_;
+}
+
+const base::FilePath& VideoPlayerTestEnvironment::OutputFolder() const {
+  return output_folder_;
+}
+
+bool VideoPlayerTestEnvironment::UseVD() const {
+  return use_vd_;
+}
+
+bool VideoPlayerTestEnvironment::ImportSupported() const {
+  return import_supported_;
+}
+
 }  // namespace test
 }  // namespace media

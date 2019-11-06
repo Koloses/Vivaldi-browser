@@ -10,18 +10,11 @@
 namespace app_list {
 
 AppListItem::AppListItem(const std::string& id)
-    : metadata_(ash::mojom::AppListItemMetadata::New(
-          id,
-          std::string() /* name */,
-          std::string() /* short_name */,
-          std::string() /* folder_id */,
-          syncer::StringOrdinal() /* position */,
-          false /* is_folder */,
-          false /* is_persistent */,
-          gfx::ImageSkia() /* icon */,
-          false /* is_page_break */)),
+    : metadata_(std::make_unique<ash::AppListItemMetadata>()),
       is_installing_(false),
-      percent_downloaded_(-1) {}
+      percent_downloaded_(-1) {
+  metadata_->id = id;
+}
 
 AppListItem::~AppListItem() {
   for (auto& observer : observers_)
@@ -72,13 +65,6 @@ AppListItem* AppListItem::FindChildItem(const std::string& id) {
 
 size_t AppListItem::ChildItemCount() const {
   return 0;
-}
-
-bool AppListItem::CompareForTest(const AppListItem* other) const {
-  return id() == other->id() && folder_id() == other->folder_id() &&
-         name() == other->name() && short_name_ == other->short_name_ &&
-         GetItemType() == other->GetItemType() &&
-         position().Equals(other->position());
 }
 
 std::string AppListItem::ToDebugString() const {

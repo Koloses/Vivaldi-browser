@@ -59,7 +59,7 @@ class ReportingServiceImpl : public ReportingService {
 
     context_->cache()->AddReport(sanitized_url, user_agent, group, type,
                                  std::move(body), depth,
-                                 context_->tick_clock()->NowTicks(), 0);
+                                 context_->tick_clock().NowTicks(), 0);
   }
 
   void ProcessHeader(const GURL& url,
@@ -132,9 +132,10 @@ ReportingService::~ReportingService() = default;
 // static
 std::unique_ptr<ReportingService> ReportingService::Create(
     const ReportingPolicy& policy,
-    URLRequestContext* request_context) {
+    URLRequestContext* request_context,
+    ReportingCache::PersistentReportingStore* store) {
   return std::make_unique<ReportingServiceImpl>(
-      ReportingContext::Create(policy, request_context));
+      ReportingContext::Create(policy, request_context, store));
 }
 
 // static

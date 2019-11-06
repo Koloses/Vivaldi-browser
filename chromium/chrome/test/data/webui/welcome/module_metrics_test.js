@@ -4,23 +4,19 @@
 
 cr.define('onboarding_welcome_module_metrics', function() {
   suite('ModuleMetricsTest', function() {
-    /** @type {nux.ModuleMetricsProxy} */
+    /** @type {welcome.ModuleMetricsProxy} */
     let testMetricsProxy;
 
-    /** @type {nux.ModuleMetricsManager} */
+    /** @type {welcome.ModuleMetricsManager} */
     let testMetricsManager;
 
     setup(function() {
       testMetricsProxy = new TestMetricsProxy();
-      testMetricsManager = new nux.ModuleMetricsManager(testMetricsProxy);
+      testMetricsManager = new welcome.ModuleMetricsManager(testMetricsProxy);
 
       testMetricsManager.recordPageInitialized();
 
       return testMetricsProxy.whenCalled('recordPageShown');
-    });
-
-    teardown(function() {
-      nux.EmailMetricsProxyImpl.instance_ = null;
     });
 
     test('do nothing, click skip', function() {

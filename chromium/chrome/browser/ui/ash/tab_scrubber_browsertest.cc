@@ -5,10 +5,10 @@
 #include "chrome/browser/ui/ash/tab_scrubber.h"
 
 #include <memory>
+#include <utility>
 
 #include "ash/display/event_transformation_handler.h"
 #include "ash/shell.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
@@ -26,7 +26,6 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/test_utils.h"
 #include "ui/aura/window.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
 
@@ -59,7 +58,7 @@ class ImmersiveRevealEndedWaiter : public ImmersiveModeController::Observer {
  private:
   void MaybeQuitRunLoop() {
     if (!quit_closure_.is_null())
-      base::ResetAndReturn(&quit_closure_).Run();
+      std::move(quit_closure_).Run();
   }
 
   // ImmersiveModeController::Observer:
@@ -287,8 +286,7 @@ class TabScrubberTest : public InProcessBrowserTest,
       Browser* browser) {
     aura::Window* window = browser->window()->GetNativeWindow();
     aura::Window* root = window->GetRootWindow();
-    return std::make_unique<ui::test::EventGenerator>(
-        features::IsUsingWindowService() ? nullptr : root, window);
+    return std::make_unique<ui::test::EventGenerator>(root, window);
   }
 
 

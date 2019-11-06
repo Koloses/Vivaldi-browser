@@ -22,10 +22,6 @@
 
 namespace printing {
 
-  /*static */
-std::vector<std::unique_ptr<PdfCompositorImpl::RequestInfo>>
-    PdfCompositorImpl::requests_;
-
 PdfCompositorImpl::PdfCompositorImpl(
     std::unique_ptr<service_manager::ServiceContextRef> service_ref)
     : service_ref_(std::move(service_ref)) {}
@@ -34,7 +30,7 @@ PdfCompositorImpl::~PdfCompositorImpl() = default;
 
 void PdfCompositorImpl::NotifyUnavailableSubframe(uint64_t frame_guid) {
   // Add this frame into the map.
-  DCHECK(!base::ContainsKey(frame_info_map_, frame_guid));
+  DCHECK(!base::Contains(frame_info_map_, frame_guid));
   auto& frame_info =
       frame_info_map_.emplace(frame_guid, std::make_unique<FrameInfo>())
           .first->second;
@@ -58,7 +54,7 @@ void PdfCompositorImpl::AddSubframeContent(
   }
 
   // Add this frame and its serialized content.
-  DCHECK(!base::ContainsKey(frame_info_map_, frame_guid));
+  DCHECK(!base::Contains(frame_info_map_, frame_guid));
   auto& frame_info =
       frame_info_map_.emplace(frame_guid, std::make_unique<FrameInfo>())
           .first->second;
@@ -78,7 +74,7 @@ void PdfCompositorImpl::AddSubframeContent(
   std::vector<uint64_t> pending_subframes;
   for (auto& subframe_content : subframe_content_map) {
     auto subframe_guid = subframe_content.second;
-    if (!base::ContainsKey(frame_info_map_, subframe_guid))
+    if (!base::Contains(frame_info_map_, subframe_guid))
       pending_subframes.push_back(subframe_guid);
   }
 
@@ -182,7 +178,7 @@ void PdfCompositorImpl::HandleCompositionRequest(
   base::ReadOnlySharedMemoryMapping mapping = serialized_content.Map();
   if (!mapping.IsValid()) {
     DLOG(ERROR) << "HandleCompositionRequest: Cannot map input.";
-    std::move(callback).Run(mojom::PdfCompositor::Status::HANDLE_MAP_ERROR,
+    std::move(callback).Run(mojom::PdfCompositor::Status::kHandleMapError,
                             base::ReadOnlySharedMemoryRegion());
     return;
   }
@@ -212,7 +208,7 @@ mojom::PdfCompositor::Status PdfCompositorImpl::CompositeToPdf(
     base::ReadOnlySharedMemoryRegion* region) {
   if (!shared_mem.IsValid()) {
     DLOG(ERROR) << "CompositeToPdf: Invalid input.";
-    return mojom::PdfCompositor::Status::HANDLE_MAP_ERROR;
+    return mojom::PdfCompositor::Status::kHandleMapError;
   }
 
   DeserializationContext subframes =
@@ -223,14 +219,14 @@ mojom::PdfCompositor::Status PdfCompositorImpl::CompositeToPdf(
   int page_count = SkMultiPictureDocumentReadPageCount(&stream);
   if (!page_count) {
     DLOG(ERROR) << "CompositeToPdf: No page is read.";
-    return mojom::PdfCompositor::Status::CONTENT_FORMAT_ERROR;
+    return mojom::PdfCompositor::Status::kContentFormatError;
   }
 
   std::vector<SkDocumentPage> pages(page_count);
   SkDeserialProcs procs = DeserializationProcs(&subframes);
   if (!SkMultiPictureDocumentRead(&stream, pages.data(), page_count, &procs)) {
     DLOG(ERROR) << "CompositeToPdf: Page reading failed.";
-    return mojom::PdfCompositor::Status::CONTENT_FORMAT_ERROR;
+    return mojom::PdfCompositor::Status::kContentFormatError;
   }
 
   SkDynamicMemoryWStream wstream;
@@ -247,12 +243,12 @@ mojom::PdfCompositor::Status PdfCompositorImpl::CompositeToPdf(
       mojo::CreateReadOnlySharedMemoryRegion(wstream.bytesWritten());
   if (!region_mapping.IsValid()) {
     DLOG(ERROR) << "CompositeToPdf: Cannot create new shared memory region.";
-    return mojom::PdfCompositor::Status::HANDLE_MAP_ERROR;
+    return mojom::PdfCompositor::Status::kHandleMapError;
   }
 
   wstream.copyToAndReset(region_mapping.mapping.memory());
   *region = std::move(region_mapping.region);
-  return mojom::PdfCompositor::Status::SUCCESS;
+  return mojom::PdfCompositor::Status::kSuccess;
 }
 
 void PdfCompositorImpl::CompositeSubframe(FrameInfo* frame_info) {

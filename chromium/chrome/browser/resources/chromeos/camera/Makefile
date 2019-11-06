@@ -77,6 +77,8 @@ RESOURCES = \
 	src/images/browser_button_delete.svg \
 	src/images/browser_button_export.svg \
 	src/images/browser_button_print.svg \
+	src/images/camera_button_fps_30.svg \
+	src/images/camera_button_fps_60.svg \
 	src/images/camera_button_grid_off.svg \
 	src/images/camera_button_grid_on.svg \
 	src/images/camera_button_mic_off.svg \
@@ -91,32 +93,44 @@ RESOURCES = \
 	src/images/camera_button_timer_on_10s.svg \
 	src/images/camera_button_timer_on_3s.svg \
 	src/images/camera_focus_aim.svg \
+	src/images/camera_intro_banner_close.svg \
+	src/images/camera_intro_banner_icon.svg \
 	src/images/camera_mode_photo.svg \
-	src/images/camera_mode_recording.svg \
+	src/images/camera_mode_portrait.svg \
+	src/images/camera_mode_square.svg \
+	src/images/camera_mode_video.svg \
 	src/images/camera_shutter_photo_start.svg \
 	src/images/camera_shutter_photo_start_active.svg \
 	src/images/camera_shutter_photo_start_hover.svg \
 	src/images/camera_shutter_photo_stop.svg \
 	src/images/camera_shutter_photo_stop_hover.svg \
-	src/images/camera_shutter_recording_start.svg \
-	src/images/camera_shutter_recording_start_hover.svg \
-	src/images/camera_shutter_recording_stop.svg \
-	src/images/camera_shutter_recording_stop_hover.svg \
+	src/images/camera_shutter_video_start.svg \
+	src/images/camera_shutter_video_start_hover.svg \
+	src/images/camera_shutter_video_stop.svg \
+	src/images/camera_shutter_video_stop_hover.svg \
 	src/images/settings_button_back.svg \
 	src/images/settings_button_expand.svg \
 	src/images/settings_feedback.svg \
 	src/images/settings_grid_type.svg \
 	src/images/settings_help.svg \
+	src/images/settings_resolution.svg \
 	src/images/settings_timer_duration.svg \
 	src/images/spinner.svg \
 	src/js/background.js \
+	src/js/browser_proxy/browser_proxy.js \
+	src/js/device/camera3_device_info.js \
+	src/js/device/constraints_preferrer.js \
+	src/js/device/device_info_updater.js \
 	src/js/gallerybutton.js \
 	src/js/google-analytics-bundle.js \
 	src/js/main.js \
 	src/js/metrics.js \
+	src/js/models/filenamer.js \
+	src/js/models/filesystem.js \
 	src/js/models/gallery.js \
-	src/js/models/file_system.js \
+	src/js/mojo/imagecapture.js \
 	src/js/nav.js \
+	src/js/resolution_event_broker.js \
 	src/js/scrollbar.js \
 	src/js/sound.js \
 	src/js/state.js \
@@ -126,6 +140,7 @@ RESOURCES = \
 	src/js/views/browser.js \
 	src/js/views/camera.js \
 	src/js/views/camera/layout.js \
+	src/js/views/camera/modes.js \
 	src/js/views/camera/options.js \
 	src/js/views/camera/preview.js \
 	src/js/views/camera/recordtime.js \

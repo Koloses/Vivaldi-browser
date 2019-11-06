@@ -43,7 +43,6 @@
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
-#include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/blink/renderer/platform/wtf/text/parsing_utilities.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
@@ -141,9 +140,8 @@ bool IsValidHTTPToken(const String& characters) {
 }
 
 bool IsContentDispositionAttachment(const String& content_disposition) {
-  CString cstring(content_disposition.Utf8());
-  std::string string(cstring.data(), cstring.length());
-  return net::HttpContentDisposition(string, std::string()).is_attachment();
+  return net::HttpContentDisposition(content_disposition.Utf8(), std::string())
+      .is_attachment();
 }
 
 // https://html.spec.whatwg.org/C/#attr-meta-http-equiv-refresh
@@ -214,7 +212,7 @@ bool ParseHTTPRefresh(const String& refresh,
 }
 
 double ParseDate(const String& value) {
-  return ParseDateFromNullTerminatedCharacters(value.Utf8().data());
+  return ParseDateFromNullTerminatedCharacters(value.Utf8().c_str());
 }
 
 AtomicString ExtractMIMETypeFromMediaType(const AtomicString& media_type) {
@@ -596,9 +594,8 @@ bool ParseMultipartHeadersFromBody(const char* bytes,
   std::string headers("HTTP/1.1 200 OK\r\n");
   headers.append(bytes, headers_end_pos);
 
-  scoped_refptr<net::HttpResponseHeaders> response_headers =
-      new net::HttpResponseHeaders(
-          net::HttpUtil::AssembleRawHeaders(headers.data(), headers.length()));
+  auto response_headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+      net::HttpUtil::AssembleRawHeaders(headers));
 
   std::string mime_type, charset;
   response_headers->GetMimeTypeAndCharset(&mime_type, &charset);
@@ -612,10 +609,10 @@ bool ParseMultipartHeadersFromBody(const char* bytes,
     base::StringPiece header_string_piece(adaptor.AsStringPiece());
     size_t iterator = 0;
 
-    response->ClearHTTPHeaderField(header);
+    response->ClearHttpHeaderField(header);
     while (response_headers->EnumerateHeader(&iterator, header_string_piece,
                                              &value)) {
-      response->AddHTTPHeaderField(header, WebString::FromLatin1(value));
+      response->AddHttpHeaderField(header, WebString::FromLatin1(value));
     }
   }
   return true;
@@ -640,9 +637,8 @@ bool ParseMultipartFormHeadersFromBody(const char* bytes,
   std::string headers("HTTP/1.1 200 OK\r\n");
   headers.append(bytes, headers_end_pos);
 
-  scoped_refptr<net::HttpResponseHeaders> responseHeaders =
-      new net::HttpResponseHeaders(
-          net::HttpUtil::AssembleRawHeaders(headers.data(), headers.length()));
+  auto responseHeaders = base::MakeRefCounted<net::HttpResponseHeaders>(
+      net::HttpUtil::AssembleRawHeaders(headers));
 
   // Copy selected header fields.
   const AtomicString* const headerNamePointers[] = {

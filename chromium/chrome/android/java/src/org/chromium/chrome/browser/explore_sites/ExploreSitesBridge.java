@@ -31,10 +31,13 @@ public class ExploreSitesBridge {
     }
 
     /**
-     * Fetches the catalog data for Explore page.
+     * @Deprecated Please use getCatalog instead.
+     *
+     * Fetches the catalog data from disk for Explore surfaces.
      *
      * Callback will be called with |null| if an error occurred.
      */
+    @Deprecated
     public static void getEspCatalog(
             Profile profile, Callback<List<ExploreSitesCategory>> callback) {
         if (sCatalogForTesting != null) {
@@ -46,19 +49,78 @@ public class ExploreSitesBridge {
         nativeGetEspCatalog(profile, result, callback);
     }
 
+    /**
+     * Retrieves the catalog data for Explore surfaces by attempting to retrieve the data from disk.
+     *
+     * If the catalog is not available on the disk, then loads the catalog from the network onto the
+     * disk and returns the new catalog from the disk.
+     *
+     * Use ExploreSitesBridge.isValidCatalog() to check for failure, as the callback can have a null
+     * catalog.
+     *
+     * @param profile - Profile associated with this update.
+     * @param source - int identifying source from ExploreSitesCatalogUpdateRequestSource.
+     * @param callback - method to call with resulting catalog.
+     *
+     */
+    public static void getCatalog(Profile profile,
+            @ExploreSitesCatalogUpdateRequestSource int source,
+            Callback<List<ExploreSitesCategory>> callback) {
+        if (sCatalogForTesting != null) {
+            callback.onResult(sCatalogForTesting);
+            return;
+        }
+
+        List<ExploreSitesCategory> result = new ArrayList<>();
+        nativeGetCatalog(profile, source, result, callback);
+    }
+
+    /**
+     * Check if a catalog is valid.
+     */
+    public static boolean isValidCatalog(List<ExploreSitesCategory> catalog) {
+        return catalog != null && !catalog.isEmpty();
+    }
+
+    /**
+     * Update the catalog from network. Takes care of updating histograms for
+     * ExploreSites.NTPLoadingCatalogFromNetwork and ExploreSites.CatalogUpdateRequestSource.
+     */
+    public static void initializeCatalog(
+            Profile profile, @ExploreSitesCatalogUpdateRequestSource int source) {
+        nativeInitializeCatalog(profile, source);
+    }
+
     public static void getSiteImage(Profile profile, int siteID, Callback<Bitmap> callback) {
         if (sCatalogForTesting != null) {
             callback.onResult(null);
+            return;
         }
         nativeGetIcon(profile, siteID, callback);
     }
 
+    /**
+     * Returns a Bitmap representing a summary of the sites available in the catalog for a specific
+     * category.
+     */
     public static void getCategoryImage(
             Profile profile, int categoryID, int pixelSize, Callback<Bitmap> callback) {
         if (sCatalogForTesting != null) {
             callback.onResult(null);
+            return;
         }
         nativeGetCategoryImage(profile, categoryID, pixelSize, callback);
+    }
+
+    /**
+     * Returns a Bitmap representing a summary of the sites available in the catalog.
+     */
+    public static void getSummaryImage(Profile profile, int pixelSize, Callback<Bitmap> callback) {
+        if (sCatalogForTesting != null) {
+            callback.onResult(null);
+            return;
+        }
+        nativeGetSummaryImage(profile, pixelSize, callback);
     }
 
     /**
@@ -92,18 +154,39 @@ public class ExploreSitesBridge {
         return nativeGetVariation();
     }
 
+    /**
+     * Gets the current Finch variation for last MostLikely icon that is configured by flag or
+     * experiment.
+     */
+    @MostLikelyVariation
+    public static int getIconVariation() {
+        return nativeGetIconVariation();
+    }
+
+    /**
+     * Gets the current Finch variation for dense that is configured by flag or experiment.
+     * */
+    @DenseVariation
+    public static int getDenseVariation() {
+        return nativeGetDenseVariation();
+    }
+
     public static boolean isEnabled(@ExploreSitesVariation int variation) {
         return variation == ExploreSitesVariation.ENABLED
                 || variation == ExploreSitesVariation.PERSONALIZED
-                || variation == ExploreSitesVariation.CONDENSED;
+                || variation == ExploreSitesVariation.MOST_LIKELY;
     }
 
     public static boolean isExperimental(@ExploreSitesVariation int variation) {
         return variation == ExploreSitesVariation.EXPERIMENT;
     }
 
-    public static boolean isCondensed(@ExploreSitesVariation int variation) {
-        return variation == ExploreSitesVariation.CONDENSED;
+    public static boolean isDense(@DenseVariation int variation) {
+        return variation != DenseVariation.ORIGINAL;
+    }
+
+    public static boolean isIntegratedWithMostLikely(@ExploreSitesVariation int variation) {
+        return variation == ExploreSitesVariation.MOST_LIKELY;
     }
 
     /**
@@ -135,6 +218,8 @@ public class ExploreSitesBridge {
     }
 
     static native int nativeGetVariation();
+    static native int nativeGetIconVariation();
+    static native int nativeGetDenseVariation();
     private static native void nativeGetEspCatalog(Profile profile,
             List<ExploreSitesCategory> result, Callback<List<ExploreSitesCategory>> callback);
 
@@ -147,9 +232,17 @@ public class ExploreSitesBridge {
     private static native void nativeGetCategoryImage(
             Profile profile, int categoryID, int pixelSize, Callback<Bitmap> callback);
 
+    private static native void nativeGetSummaryImage(
+            Profile profile, int pixelSize, Callback<Bitmap> callback);
+
     private static native void nativeBlacklistSite(Profile profile, String url);
 
     private static native void nativeRecordClick(Profile profile, String url, int type);
 
     private static native void nativeIncrementNtpShownCount(Profile profile, int categoryId);
+
+    private static native void nativeGetCatalog(Profile profile, int source,
+            List<ExploreSitesCategory> result, Callback<List<ExploreSitesCategory>> callback);
+
+    private static native void nativeInitializeCatalog(Profile profile, int source);
 }

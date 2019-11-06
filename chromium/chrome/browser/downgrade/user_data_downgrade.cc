@@ -110,8 +110,8 @@ void MoveUserDataForFirstRunAfterDowngrade() {
   if (!base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
     return;
   const base::Version current_version(chrome::kChromeVersion);
-  const base::Version downgrade_version = InstallUtil::GetDowngradeVersion();
-  if (downgrade_version.IsValid() && downgrade_version > current_version) {
+  // Note: nullopt is always less than any value.
+  if (InstallUtil::GetDowngradeVersion() > current_version) {
     base::FilePath disk_cache_dir(GetDiskCacheDir());
     // Without the browser process singleton protection, the directory may be
     // copied multiple times. In order to prevent that from happening, the temp
@@ -150,7 +150,7 @@ base::Version GetLastVersion(const base::FilePath& user_data_dir) {
 void DeleteMovedUserDataSoon() {
   base::FilePath user_data_dir;
   base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-  content::BrowserThread::PostAfterStartupTask(
+  content::BrowserThread::PostBestEffortTask(
       FROM_HERE,
       base::CreateTaskRunnerWithTraits(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,

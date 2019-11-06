@@ -31,10 +31,11 @@ class LookalikeUrlInterstitialPage
     kTopSite = 1,
     kSiteEngagement = 2,
     kEditDistance = 3,
+    kEditDistanceSiteEngagement = 4,
 
     // Append new items to the end of the list above; do not modify or replace
     // existing values. Comment out obsolete items.
-    kMaxValue = kEditDistance,
+    kMaxValue = kEditDistanceSiteEngagement,
   };
 
   // Used for UKM. There is only a single UserAction per navigation.
@@ -61,7 +62,7 @@ class LookalikeUrlInterstitialPage
   ~LookalikeUrlInterstitialPage() override;
 
   // InterstitialPageDelegate method:
-  InterstitialPageDelegate::TypeID GetTypeForTesting() const override;
+  InterstitialPageDelegate::TypeID GetTypeForTesting() override;
 
   // Allow easier reporting of UKM when no interstitial is shown.
   static void RecordUkmEvent(ukm::SourceId source_id,

@@ -62,8 +62,8 @@ class ChromeDownloadManagerDelegate
   static void DisableSafeBrowsing(download::DownloadItem* item);
 
   void SetDownloadManager(content::DownloadManager* dm);
-#if defined(OS_ANDROID)
 
+#if defined(OS_ANDROID)
   void ChooseDownloadLocation(
       gfx::NativeWindow native_window,
       int64_t total_bytes,
@@ -98,8 +98,8 @@ class ChromeDownloadManagerDelegate
       const std::string& mime_type,
       const std::string& request_origin,
       int64_t content_length,
+      bool is_transient,
       content::WebContents* web_contents) override;
-  bool GenerateFileHash() override;
   void GetSaveDir(content::BrowserContext* browser_context,
                   base::FilePath* website_save_dir,
                   base::FilePath* download_save_dir,
@@ -118,12 +118,13 @@ class ChromeDownloadManagerDelegate
   void CheckForFileExistence(
       download::DownloadItem* download,
       content::CheckForFileExistenceCallback callback) override;
-  std::string ApplicationClientIdForFileScanning() const override;
+  std::string ApplicationClientIdForFileScanning() override;
   void CheckDownloadAllowed(
       const content::ResourceRequestInfo::WebContentsGetter&
           web_contents_getter,
       const GURL& url,
       const std::string& request_method,
+      base::Optional<url::Origin> request_initiator,
       content::CheckDownloadAllowedCallback check_download_allowed_cb) override;
 
   // Opens a download using the platform handler. DownloadItem::OpenDownload,
@@ -144,6 +145,10 @@ class ChromeDownloadManagerDelegate
       const DownloadTargetDeterminerDelegate::ConfirmationCallback& callback);
 
   // DownloadTargetDeterminerDelegate. Protected for testing.
+  void ShouldBlockDownload(
+      download::DownloadItem* download,
+      const base::FilePath& virtual_path,
+      const ShouldBlockDownloadCallback& callback) override;
   void NotifyExtensions(download::DownloadItem* download,
                         const base::FilePath& suggested_virtual_path,
                         const NotifyExtensionsCallback& callback) override;
@@ -221,7 +226,7 @@ class ChromeDownloadManagerDelegate
   void ReturnNextId(const content::DownloadIdCallback& callback);
 
   void OnDownloadTargetDetermined(
-      int32_t download_id,
+      uint32_t download_id,
       const content::DownloadTargetCallback& callback,
       std::unique_ptr<DownloadTargetInfo> target_info);
 
@@ -291,7 +296,7 @@ class ChromeDownloadManagerDelegate
 
   content::NotificationRegistrar registrar_;
 
-  base::WeakPtrFactory<ChromeDownloadManagerDelegate> weak_ptr_factory_;
+  base::WeakPtrFactory<ChromeDownloadManagerDelegate> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ChromeDownloadManagerDelegate);
 };

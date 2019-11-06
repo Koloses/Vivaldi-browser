@@ -6,9 +6,10 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "media/mojo/interfaces/constants.mojom.h"
 #include "media/mojo/interfaces/media_service.mojom.h"
+#include "media/mojo/interfaces/renderer_extensions.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 
 namespace content {
@@ -45,13 +46,23 @@ void VideoDecoderProxy::CreateDefaultRenderer(
     const std::string& audio_device_id,
     media::mojom::RendererRequest request) {}
 
+#if BUILDFLAG(ENABLE_CAST_RENDERER)
+void VideoDecoderProxy::CreateCastRenderer(
+    const base::UnguessableToken& overlay_plane_id,
+    media::mojom::RendererRequest request) {}
+#endif  // BUILDFLAG(ENABLE_CAST_RENDERER)
+
 #if defined(OS_ANDROID)
 void VideoDecoderProxy::CreateFlingingRenderer(
     const std::string& audio_device_id,
+    media::mojom::FlingingRendererClientExtensionPtr client_extenion,
     media::mojom::RendererRequest request) {}
 
 void VideoDecoderProxy::CreateMediaPlayerRenderer(
-    media::mojom::RendererRequest request) {}
+    media::mojom::MediaPlayerRendererClientExtensionPtr client_extension_ptr,
+    media::mojom::RendererRequest request,
+    media::mojom::MediaPlayerRendererExtensionRequest
+        renderer_extension_request) {}
 #endif  // defined(OS_ANDROID)
 
 void VideoDecoderProxy::CreateCdm(
@@ -82,9 +93,8 @@ void VideoDecoderProxy::ConnectToMediaService() {
   media::mojom::MediaServicePtr media_service;
   // TODO(slan): Use the BrowserContext Connector instead.
   // See https://crbug.com/638950.
-  service_manager::Connector* connector =
-      ServiceManagerConnection::GetForProcess()->GetConnector();
-  connector->BindInterface(media::mojom::kMediaServiceName, &media_service);
+  GetSystemConnector()->BindInterface(media::mojom::kMediaServiceName,
+                                      &media_service);
 
   // TODO(sandersd): Do we need to bind an empty |interfaces| implementation?
   service_manager::mojom::InterfaceProviderPtr interfaces;

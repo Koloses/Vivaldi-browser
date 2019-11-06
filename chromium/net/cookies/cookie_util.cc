@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
@@ -68,6 +70,29 @@ bool SaturatedTimeFromUTCExploded(const base::Time::Exploded& exploded,
   }
 
   return false;
+}
+
+bool MatchesSiteForCookies(const GURL& url, const GURL& site_for_cookies) {
+  return registry_controlled_domains::SameDomainOrHost(
+      url, site_for_cookies,
+      registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+}
+
+CookieOptions::SameSiteCookieContext ComputeSameSiteContext(
+    const GURL& url,
+    const GURL& site_for_cookies,
+    const base::Optional<url::Origin>& initiator) {
+  if (MatchesSiteForCookies(url, site_for_cookies)) {
+    if (!initiator ||
+        registry_controlled_domains::SameDomainOrHost(
+            url, initiator.value(),
+            registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES)) {
+      return CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT;
+    } else {
+      return CookieOptions::SameSiteCookieContext::SAME_SITE_LAX;
+    }
+  }
+  return CookieOptions::SameSiteCookieContext::CROSS_SITE;
 }
 
 }  // namespace
@@ -368,25 +393,6 @@ std::string SerializeRequestCookieLine(
   return buffer;
 }
 
-CookieOptions::SameSiteCookieContext ComputeSameSiteContext(
-    const GURL& url,
-    const GURL& site_for_cookies,
-    const base::Optional<url::Origin>& initiator) {
-  if (registry_controlled_domains::SameDomainOrHost(
-          url, site_for_cookies,
-          registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES)) {
-    if (!initiator ||
-        registry_controlled_domains::SameDomainOrHost(
-            url, initiator.value(),
-            registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES)) {
-      return CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT;
-    } else {
-      return CookieOptions::SameSiteCookieContext::SAME_SITE_LAX;
-    }
-  }
-  return CookieOptions::SameSiteCookieContext::CROSS_SITE;
-}
-
 CookieOptions::SameSiteCookieContext ComputeSameSiteContextForRequest(
     const std::string& http_method,
     const GURL& url,
@@ -422,13 +428,110 @@ CookieOptions::SameSiteCookieContext ComputeSameSiteContextForRequest(
       ComputeSameSiteContext(url, site_for_cookies, initiator);
   if (same_site_context ==
       CookieOptions::SameSiteCookieContext::SAME_SITE_LAX) {
-    if (attach_same_site_cookies)
+    if (attach_same_site_cookies) {
       same_site_context =
           CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT;
-    else if (!net::HttpUtil::IsMethodSafe(http_method))
+    } else if (!net::HttpUtil::IsMethodSafe(http_method)) {
       same_site_context = CookieOptions::SameSiteCookieContext::CROSS_SITE;
+    }
   }
   return same_site_context;
+}
+
+NET_EXPORT CookieOptions::SameSiteCookieContext
+ComputeSameSiteContextForScriptGet(
+    const GURL& url,
+    const GURL& site_for_cookies,
+    const base::Optional<url::Origin>& initiator) {
+  return ComputeSameSiteContext(url, site_for_cookies, initiator);
+}
+
+CookieOptions::SameSiteCookieContext ComputeSameSiteContextForResponse(
+    const GURL& url,
+    const GURL& site_for_cookies,
+    const base::Optional<url::Origin>& initiator) {
+  // |initiator| is here in case it'll be decided to ignore |site_for_cookies|
+  // for entirely browser-side requests (see https://crbug.com/958335).
+  if (MatchesSiteForCookies(url, site_for_cookies))
+    return CookieOptions::SameSiteCookieContext::SAME_SITE_LAX;
+  else
+    return CookieOptions::SameSiteCookieContext::CROSS_SITE;
+}
+
+CookieOptions::SameSiteCookieContext ComputeSameSiteContextForScriptSet(
+    const GURL& url,
+    const GURL& site_for_cookies) {
+  if (MatchesSiteForCookies(url, site_for_cookies))
+    return CookieOptions::SameSiteCookieContext::SAME_SITE_LAX;
+  else
+    return CookieOptions::SameSiteCookieContext::CROSS_SITE;
+}
+
+NET_EXPORT CookieOptions::SameSiteCookieContext
+ComputeSameSiteContextForSubresource(const GURL& url,
+                                     const GURL& site_for_cookies) {
+  // If the URL is same-site as site_for_cookies it's same-site as all frames
+  // in the tree from the initiator frame up --- including the initiator frame.
+  if (MatchesSiteForCookies(url, site_for_cookies))
+    return CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT;
+  else
+    return CookieOptions::SameSiteCookieContext::CROSS_SITE;
+}
+
+CanonicalCookie::CookieInclusionStatus CookieWouldBeExcludedDueToSameSite(
+    const CanonicalCookie& cookie,
+    const CookieOptions& options) {
+  // Check if cookie would be excluded under SameSiteByDefaultCookies.
+  bool cross_site_context = options.same_site_cookie_context() ==
+                            CookieOptions::SameSiteCookieContext::CROSS_SITE;
+  if (cross_site_context && cookie.SameSite() == CookieSameSite::UNSPECIFIED) {
+    DCHECK_EQ(CookieSameSite::NO_RESTRICTION, cookie.GetEffectiveSameSite());
+    return CanonicalCookie::CookieInclusionStatus::
+        EXCLUDE_SAMESITE_UNSPECIFIED_TREATED_AS_LAX;
+  }
+
+  // Check if cookie would be excluded under CookiesWithoutSameSiteMustBeSecure.
+  if (cookie.SameSite() == CookieSameSite::NO_RESTRICTION &&
+      !cookie.IsSecure()) {
+    return CanonicalCookie::CookieInclusionStatus::
+        EXCLUDE_SAMESITE_NONE_INSECURE;
+  }
+
+  return CanonicalCookie::CookieInclusionStatus::INCLUDE;
+}
+
+base::OnceCallback<void(const CookieList&, const CookieStatusList&)>
+IgnoreCookieStatusList(base::OnceCallback<void(const CookieList&)> callback) {
+  return base::BindOnce(
+      [](base::OnceCallback<void(const CookieList&)> callback,
+         const CookieList& cookies, const CookieStatusList& excluded_list) {
+        std::move(callback).Run(cookies);
+      },
+      std::move(callback));
+}
+
+base::OnceCallback<void(const CookieList&)> AddCookieStatusList(
+    base::OnceCallback<void(const CookieList&, const CookieStatusList&)>
+        callback) {
+  return base::BindOnce(
+      [](base::OnceCallback<void(const CookieList&, const CookieStatusList&)>
+             inner_callback,
+         const CookieList& cookies) {
+        std::move(inner_callback).Run(cookies, net::CookieStatusList());
+      },
+      std::move(callback));
+}
+
+base::OnceCallback<void(net::CanonicalCookie::CookieInclusionStatus)>
+AdaptCookieInclusionStatusToBool(base::OnceCallback<void(bool)> callback) {
+  return base::BindOnce(
+      [](base::OnceCallback<void(bool)> inner_callback,
+         const net::CanonicalCookie::CookieInclusionStatus status) {
+        bool success =
+            (status == net::CanonicalCookie::CookieInclusionStatus::INCLUDE);
+        std::move(inner_callback).Run(success);
+      },
+      std::move(callback));
 }
 
 }  // namespace cookie_util

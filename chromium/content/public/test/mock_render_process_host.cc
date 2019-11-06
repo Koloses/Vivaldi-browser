@@ -63,8 +63,7 @@ MockRenderProcessHost::MockRenderProcessHost(BrowserContext* browser_context)
           BrowserContext::GetServiceInstanceGroupFor(browser_context),
           base::Token::CreateRandom(),
           base::Token::CreateRandom()),
-      url_loader_factory_(nullptr),
-      weak_ptr_factory_(this) {
+      url_loader_factory_(nullptr) {
   // Child process security operations can't be unit tested unless we add
   // ourselves as an existing child process.
   ChildProcessSecurityPolicyImpl::GetInstance()->Add(GetID(), browser_context);
@@ -93,32 +92,17 @@ void MockRenderProcessHost::SimulateRenderProcessExit(
     base::TerminationStatus status,
     int exit_code) {
   has_connection_ = false;
-  ChildProcessTerminationInfo termination_info{status, exit_code};
+  ChildProcessTerminationInfo termination_info;
+  termination_info.status = status;
+  termination_info.exit_code = exit_code;
+  termination_info.renderer_has_visible_clients = VisibleClientCount() > 0;
+  termination_info.renderer_was_subframe = GetFrameDepth() > 0;
   NotificationService::current()->Notify(
       NOTIFICATION_RENDERER_PROCESS_CLOSED, Source<RenderProcessHost>(this),
       Details<ChildProcessTerminationInfo>(&termination_info));
 
   for (auto& observer : observers_)
     observer.RenderProcessExited(this, termination_info);
-
-  // Send every routing ID a FrameHostMsg_RenderProcessGone message. To ensure a
-  // predictable order for unittests which may assert against the order, we sort
-  // the listeners by descending routing ID, instead of using the arbitrary
-  // hash-map order like RenderProcessHostImpl.
-  std::vector<std::pair<int32_t, IPC::Listener*>> sorted_listeners_;
-  base::IDMap<IPC::Listener*>::iterator iter(&listeners_);
-  while (!iter.IsAtEnd()) {
-    sorted_listeners_.push_back(
-        std::make_pair(iter.GetCurrentKey(), iter.GetCurrentValue()));
-    iter.Advance();
-  }
-  std::sort(sorted_listeners_.rbegin(), sorted_listeners_.rend());
-
-  for (auto& entry_pair : sorted_listeners_) {
-    entry_pair.second->OnMessageReceived(FrameHostMsg_RenderProcessGone(
-        entry_pair.first, static_cast<int>(termination_info.status),
-        termination_info.exit_code));
-  }
 }
 
 bool MockRenderProcessHost::Init() {
@@ -368,13 +352,11 @@ size_t MockRenderProcessHost::GetKeepAliveRefCount() const {
   return keep_alive_ref_count_;
 }
 
-void MockRenderProcessHost::IncrementKeepAliveRefCount(
-    KeepAliveClientType client) {
+void MockRenderProcessHost::IncrementKeepAliveRefCount() {
   ++keep_alive_ref_count_;
 }
 
-void MockRenderProcessHost::DecrementKeepAliveRefCount(
-    KeepAliveClientType client) {
+void MockRenderProcessHost::DecrementKeepAliveRefCount() {
   --keep_alive_ref_count_;
 }
 
@@ -396,8 +378,6 @@ bool MockRenderProcessHost::IsKeepAliveRefCountDisabled() {
   return false;
 }
 
-void MockRenderProcessHost::PurgeAndSuspend() {}
-
 void MockRenderProcessHost::Resume() {}
 
 mojom::Renderer* MockRenderProcessHost::GetRendererInterface() {
@@ -410,6 +390,8 @@ mojom::Renderer* MockRenderProcessHost::GetRendererInterface() {
 
 void MockRenderProcessHost::CreateURLLoaderFactory(
     const base::Optional<url::Origin>& origin,
+    const WebPreferences* preferences,
+    const net::NetworkIsolationKey& network_isolation_key,
     network::mojom::TrustedURLLoaderHeaderClientPtrInfo header_client,
     network::mojom::URLLoaderFactoryRequest request) {
   url_loader_factory_->Clone(std::move(request));
@@ -468,10 +450,6 @@ void MockRenderProcessHost::EnableAudioDebugRecordings(
 
 void MockRenderProcessHost::DisableAudioDebugRecordings() {}
 
-void MockRenderProcessHost::SetEchoCanceller3(
-    bool enable,
-    base::OnceCallback<void(bool, const std::string&)> callback) {}
-
 RenderProcessHost::WebRtcStopRtpDumpCallback
 MockRenderProcessHost::StartRtpDump(
     bool incoming,
@@ -523,7 +501,7 @@ MockRenderProcessHostFactory::~MockRenderProcessHostFactory() {
 
 RenderProcessHost* MockRenderProcessHostFactory::CreateRenderProcessHost(
     BrowserContext* browser_context,
-    SiteInstance* site_instance) const {
+    SiteInstance* site_instance) {
   std::unique_ptr<MockRenderProcessHost> host =
       std::make_unique<MockRenderProcessHost>(browser_context);
   host->OverrideURLLoaderFactory(default_mock_url_loader_factory_.get());

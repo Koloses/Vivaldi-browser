@@ -10,10 +10,12 @@
 #include "base/bind.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
+#include "chrome/common/pref_names.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "device/usb/public/mojom/device.mojom.h"
-#include "device/usb/public/mojom/device_manager.mojom.h"
+#include "services/device/public/mojom/usb_device.mojom.h"
+#include "services/device/public/mojom/usb_manager.mojom.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -22,18 +24,18 @@ constexpr char kPrefUrlsKey[] = "urls";
 constexpr char kPrefVendorIdKey[] = "vendor_id";
 constexpr char kPrefProductIdKey[] = "product_id";
 
-// Find the URL match by checking if a url pair in |url_set| matches the given
-// GURL pair. An empty embedding URL signifies a wildcard, so ignore the
-// embedding origin check for this case.
-bool FindMatchInSet(const std::set<std::pair<GURL, GURL>>& url_set,
-                    const GURL& requesting_origin,
-                    const GURL& embedding_origin) {
-  for (const auto& url_pair : url_set) {
-    if (url_pair.first.GetOrigin() == requesting_origin.GetOrigin()) {
-      if (url_pair.second.is_empty() ||
-          url_pair.second.GetOrigin() == embedding_origin.GetOrigin()) {
+// Find the origin match by checking if a origin pair in |origin_set| matches
+// the given origin pair. A nullopt embedding origin signifies a wildcard, so
+// ignore the embedding origin check for this case.
+bool FindMatchInSet(
+    const std::set<std::pair<url::Origin, base::Optional<url::Origin>>>&
+        origin_set,
+    const url::Origin& requesting_origin,
+    const url::Origin& embedding_origin) {
+  for (const auto& origin_pair : origin_set) {
+    if (origin_pair.first == requesting_origin) {
+      if (!origin_pair.second || *origin_pair.second == embedding_origin)
         return true;
-      }
     }
   }
   return false;
@@ -41,16 +43,26 @@ bool FindMatchInSet(const std::set<std::pair<GURL, GURL>>& url_set,
 
 }  // namespace
 
-UsbPolicyAllowedDevices::UsbPolicyAllowedDevices(PrefService* pref_service) {
-  pref_change_registrar_.Init(pref_service);
-  // Add an observer for |kManagedWebUsbAllowDevicesForUrls| to call
-  // CreateOrUpdateMap when the value is changed. The lifetime of
-  // |pref_change_registrar_| is managed by this class, therefore it is safe to
+UsbPolicyAllowedDevices::UsbPolicyAllowedDevices(
+    PrefService* profile_prefs,
+    PrefService* local_state_prefs) {
+  // Add observers for the prefs managed by user and device policy to call
+  // CreateOrUpdateMap when the value is changed. The lifetimes of the
+  // PrefChangeRegistrars are managed by this class, therefore it is safe to
   // use base::Unretained here.
-  pref_change_registrar_.Add(
-      prefs::kManagedWebUsbAllowDevicesForUrls,
-      base::BindRepeating(&UsbPolicyAllowedDevices::CreateOrUpdateMap,
-                          base::Unretained(this)));
+  const base::Closure change_callback = base::BindRepeating(
+      &UsbPolicyAllowedDevices::CreateOrUpdateMap, base::Unretained(this));
+
+  profile_pref_change_registrar_.Init(profile_prefs);
+  profile_pref_change_registrar_.Add(prefs::kManagedWebUsbAllowDevicesForUrls,
+                                     change_callback);
+#if defined(OS_CHROMEOS)
+  if (local_state_prefs) {  // Can be nullptr in tests.
+    local_state_pref_change_registrar_.Init(local_state_prefs);
+    local_state_pref_change_registrar_.Add(
+        prefs::kDeviceWebUsbAllowDevicesForUrls, change_callback);
+  }
+#endif  // defined(OS_CHROMEOS)
 
   CreateOrUpdateMap();
 }
@@ -58,8 +70,8 @@ UsbPolicyAllowedDevices::UsbPolicyAllowedDevices(PrefService* pref_service) {
 UsbPolicyAllowedDevices::~UsbPolicyAllowedDevices() {}
 
 bool UsbPolicyAllowedDevices::IsDeviceAllowed(
-    const GURL& requesting_origin,
-    const GURL& embedding_origin,
+    const url::Origin& requesting_origin,
+    const url::Origin& embedding_origin,
     const device::mojom::UsbDeviceInfo& device_info) {
   return IsDeviceAllowed(
       requesting_origin, embedding_origin,
@@ -67,8 +79,8 @@ bool UsbPolicyAllowedDevices::IsDeviceAllowed(
 }
 
 bool UsbPolicyAllowedDevices::IsDeviceAllowed(
-    const GURL& requesting_origin,
-    const GURL& embedding_origin,
+    const url::Origin& requesting_origin,
+    const url::Origin& embedding_origin,
     const std::pair<int, int>& device_ids) {
   // Search through each set of URL pair that match the given device. The
   // keys correspond to the following URL pair sets:
@@ -91,10 +103,24 @@ bool UsbPolicyAllowedDevices::IsDeviceAllowed(
 }
 
 void UsbPolicyAllowedDevices::CreateOrUpdateMap() {
-  const base::Value* pref_value = pref_change_registrar_.prefs()->Get(
-      prefs::kManagedWebUsbAllowDevicesForUrls);
   usb_device_ids_to_urls_.clear();
 
+#if defined(OS_CHROMEOS)
+  if (local_state_pref_change_registrar_.prefs()) {  // Can be nullptr in tests.
+    const base::Value* local_state_pref_value =
+        local_state_pref_change_registrar_.prefs()->Get(
+            prefs::kDeviceWebUsbAllowDevicesForUrls);
+    CreateOrUpdateMapFromPrefValue(local_state_pref_value);
+  }
+#endif  // defined(OS_CHROMEOS)
+  const base::Value* profile_pref_value =
+      profile_pref_change_registrar_.prefs()->Get(
+          prefs::kManagedWebUsbAllowDevicesForUrls);
+  CreateOrUpdateMapFromPrefValue(profile_pref_value);
+}
+
+void UsbPolicyAllowedDevices::CreateOrUpdateMapFromPrefValue(
+    const base::Value* pref_value) {
   // A policy has not been assigned.
   if (!pref_value) {
     return;
@@ -104,7 +130,7 @@ void UsbPolicyAllowedDevices::CreateOrUpdateMap() {
   // safe to assume that |pref_value| follows the policy template.
   for (const auto& item : pref_value->GetList()) {
     const base::Value* urls_list = item.FindKey(kPrefUrlsKey);
-    std::set<std::pair<GURL, GURL>> parsed_url_set;
+    std::set<std::pair<url::Origin, base::Optional<url::Origin>>> parsed_set;
 
     // A urls item can contain a pair of URLs that are delimited by a comma. If
     // it does not contain a second URL, set the embedding URL to an empty GURL
@@ -118,18 +144,18 @@ void UsbPolicyAllowedDevices::CreateOrUpdateMap() {
       if (urls.empty())
         continue;
 
-      GURL requesting_url(urls[0]);
-      GURL embedding_url;
+      auto requesting_origin = url::Origin::Create(GURL(urls[0]));
+      base::Optional<url::Origin> embedding_origin;
       if (urls.size() == 2 && !urls[1].empty())
-        embedding_url = GURL(urls[1]);
-      auto url_pair =
-          std::make_pair(std::move(requesting_url), std::move(embedding_url));
+        embedding_origin = url::Origin::Create(GURL(urls[1]));
+      auto origin_pair = std::make_pair(std::move(requesting_origin),
+                                        std::move(embedding_origin));
 
-      parsed_url_set.insert(std::move(url_pair));
+      parsed_set.insert(std::move(origin_pair));
     }
 
     // Ignore items with empty parsed URLs.
-    if (parsed_url_set.empty())
+    if (parsed_set.empty())
       continue;
 
     // For each device entry in the map, create or update its respective URL
@@ -145,8 +171,7 @@ void UsbPolicyAllowedDevices::CreateOrUpdateMap() {
       DCHECK(vendor_id != -1 || product_id == -1);
 
       auto key = std::make_pair(vendor_id, product_id);
-      usb_device_ids_to_urls_[key].insert(parsed_url_set.begin(),
-                                          parsed_url_set.end());
+      usb_device_ids_to_urls_[key].insert(parsed_set.begin(), parsed_set.end());
     }
   }
 }

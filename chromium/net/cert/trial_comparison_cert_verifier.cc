@@ -31,12 +31,10 @@ namespace net {
 
 namespace {
 
-std::unique_ptr<base::Value> TrialVerificationJobResultCallback(
-    bool trial_success,
-    NetLogCaptureMode capture_mode) {
-  std::unique_ptr<base::DictionaryValue> results(new base::DictionaryValue());
-  results->SetKey("trial_success", base::Value(trial_success));
-  return std::move(results);
+base::Value TrialVerificationJobResultParams(bool trial_success) {
+  base::Value results(base::Value::Type::DICTIONARY);
+  results.SetBoolKey("trial_success", trial_success);
+  return results;
 }
 
 bool CertVerifyResultEqual(const CertVerifyResult& a,
@@ -140,9 +138,9 @@ class TrialComparisonCertVerifier::TrialVerificationJob {
         primary_error_(primary_error),
         primary_result_(primary_result) {
     net_log_.BeginEvent(NetLogEventType::TRIAL_CERT_VERIFIER_JOB);
-    source_net_log.AddEvent(
+    source_net_log.AddEventReferencingSource(
         NetLogEventType::TRIAL_CERT_VERIFIER_JOB_COMPARISON_STARTED,
-        net_log_.source().ToEventParametersCallback());
+        net_log_.source());
   }
 
   ~TrialVerificationJob() {
@@ -173,9 +171,9 @@ class TrialComparisonCertVerifier::TrialVerificationJob {
     UMA_HISTOGRAM_ENUMERATION("Net.CertVerifier_TrialComparisonResult",
                               result_code);
 
-    net_log_.EndEvent(
-        NetLogEventType::TRIAL_CERT_VERIFIER_JOB,
-        base::BindRepeating(&TrialVerificationJobResultCallback, is_success));
+    net_log_.EndEvent(NetLogEventType::TRIAL_CERT_VERIFIER_JOB, [&] {
+      return TrialVerificationJobResultParams(is_success);
+    });
 
     if (!is_success) {
       cert_verifier->report_callback_.Run(
@@ -263,9 +261,9 @@ class TrialComparisonCertVerifier::TrialVerificationJob {
       }
       // Chains were different, reverify the trial_result_.verified_cert chain
       // using the platform verifier and compare results again.
-      RequestParams reverification_params(trial_result_.verified_cert,
-                                          params_.hostname(), params_.flags(),
-                                          params_.ocsp_response());
+      RequestParams reverification_params(
+          trial_result_.verified_cert, params_.hostname(), params_.flags(),
+          params_.ocsp_response(), params_.sct_list());
 
       int rv = cert_verifier_->primary_reverifier()->Verify(
           reverification_params, &reverification_result_,

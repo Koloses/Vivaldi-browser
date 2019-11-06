@@ -5,10 +5,7 @@
 package org.chromium.ui.resources;
 
 import android.content.res.AssetManager;
-import android.os.Handler;
-import android.os.Looper;
 
-import org.chromium.base.BuildConfig;
 import org.chromium.base.BuildInfo;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.FileUtils;
@@ -17,8 +14,10 @@ import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
-import org.chromium.base.task.AsyncTask;
+import org.chromium.base.task.PostTask;
+import org.chromium.base.task.TaskTraits;
 import org.chromium.ui.base.LocalizationUtils;
+import org.chromium.ui.base.ResourceBundle;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * Handles extracting the necessary resources bundled in an APK and moving them to a location on
@@ -40,11 +40,34 @@ public class ResourceExtractor {
     private static final String FALLBACK_LOCALE = "en-US";
     private static final String COMPRESSED_LOCALES_DIR = "locales";
     private static final String COMPRESSED_LOCALES_FALLBACK_DIR = "fallback-locales";
-    private static final int BUFFER_SIZE = 16 * 1024;
 
-    private class ExtractTask extends AsyncTask<Void> {
+    private class ExtractTask implements Runnable {
         private final List<Runnable> mCompletionCallbacks = new ArrayList<Runnable>();
         private final String mUiLanguage;
+        private final CountDownLatch mLatch = new CountDownLatch(1);
+        private boolean mDone;
+
+        public ExtractTask(String uiLanguage) {
+            mUiLanguage = uiLanguage;
+        }
+
+        @Override
+        public void run() {
+            try (TraceEvent e = TraceEvent.scoped("ResourceExtractor.ExtractTask.doInBackground")) {
+                doInBackgroundImpl();
+            }
+            synchronized (this) {
+                mDone = true;
+            }
+            mLatch.countDown();
+
+            PostTask.postTask(mResultTaskTraits, () -> {
+                try (TraceEvent e =
+                                TraceEvent.scoped("ResourceExtractor.ExtractTask.onPostExecute")) {
+                    onPostExecuteImpl();
+                }
+            });
+        }
 
         private void doInBackgroundImpl() {
             final File outputDir = getOutputDir();
@@ -81,57 +104,36 @@ public class ResourceExtractor {
                 throw new RuntimeException();
             }
 
-            AssetManager assetManager = ContextUtils.getApplicationAssets();
-            byte[] buffer = new byte[BUFFER_SIZE];
             for (int n = 0; n < assetPaths.length; ++n) {
                 String assetPath = assetPaths[n];
                 File output = new File(outputDir, outputNames[n]);
-                TraceEvent.begin("ExtractResource");
-                try (InputStream inputStream = assetManager.open(assetPath)) {
-                    FileUtils.copyFileStreamAtomicWithBuffer(inputStream, output, buffer);
-                } catch (IOException e) {
+                if (!FileUtils.extractAsset(
+                            ContextUtils.getApplicationContext(), assetPath, output)) {
                     // The app would just crash later if files are missing.
-                    throw new RuntimeException(e);
-                } finally {
-                    TraceEvent.end("ExtractResource");
+                    throw new RuntimeException();
                 }
             }
         }
 
-        @Override
-        protected Void doInBackground() {
-            TraceEvent.begin("ResourceExtractor.ExtractTask.doInBackground");
-            try {
-                doInBackgroundImpl();
-            } finally {
-                TraceEvent.end("ResourceExtractor.ExtractTask.doInBackground");
-            }
-            return null;
-        }
-
         private void onPostExecuteImpl() {
+            ThreadUtils.assertOnUiThread();
             for (int i = 0; i < mCompletionCallbacks.size(); i++) {
                 mCompletionCallbacks.get(i).run();
             }
             mCompletionCallbacks.clear();
         }
 
-        @Override
-        protected void onPostExecute(Void result) {
-            TraceEvent.begin("ResourceExtractor.ExtractTask.onPostExecute");
-            try {
-                onPostExecuteImpl();
-            } finally {
-                TraceEvent.end("ResourceExtractor.ExtractTask.onPostExecute");
-            }
+        public void await() throws Exception {
+            mLatch.await();
         }
 
-        public ExtractTask(String uiLanguage) {
-            mUiLanguage = uiLanguage;
+        public synchronized boolean isDone() {
+            return mDone;
         }
     }
 
     private ExtractTask mExtractTask;
+    private TaskTraits mResultTaskTraits;
 
     private static ResourceExtractor sInstance;
 
@@ -156,14 +158,15 @@ public class ResourceExtractor {
         // Currenty (Apr 2018), this array can be as big as 6 entries, so using a capacity
         // that allows a bit of growth, but is still in the right ballpark..
         ArrayList<String> activeLocales = new ArrayList<String>(6);
-        for (String locale : BuildConfig.COMPRESSED_LOCALES) {
+        String[] compressedLocales = ResourceBundle.getAvailableCompressedPakLocales();
+        for (String locale : compressedLocales) {
             if (LocalizationUtils.chromiumLocaleMatchesLanguage(locale, uiLanguage)) {
                 activeLocales.add(locale);
             }
         }
         if (activeLocales.isEmpty()) {
-            assert BuildConfig.COMPRESSED_LOCALES.length > 0;
-            assert Arrays.asList(BuildConfig.COMPRESSED_LOCALES).contains(FALLBACK_LOCALE);
+            assert compressedLocales.length > 0;
+            assert Arrays.asList(compressedLocales).contains(FALLBACK_LOCALE);
             activeLocales.add(FALLBACK_LOCALE);
         }
 
@@ -264,10 +267,17 @@ public class ResourceExtractor {
         }
 
         try {
-            mExtractTask.get();
+            mExtractTask.await();
         } catch (Exception e) {
             assert false;
         }
+    }
+
+    /**
+     * Sets the traits to use for the reply task.
+     */
+    public void setResultTraits(TaskTraits traits) {
+        mResultTaskTraits = traits;
     }
 
     /**
@@ -284,16 +294,14 @@ public class ResourceExtractor {
     public void addCompletionCallback(Runnable callback) {
         ThreadUtils.assertOnUiThread();
 
-        Handler handler = new Handler(Looper.getMainLooper());
         if (shouldSkipPakExtraction()) {
-            handler.post(callback);
+            PostTask.postTask(mResultTaskTraits, callback);
             return;
         }
 
         assert mExtractTask != null;
-        assert !mExtractTask.isCancelled();
-        if (mExtractTask.getStatus() == AsyncTask.Status.FINISHED) {
-            handler.post(callback);
+        if (mExtractTask.isDone()) {
+            PostTask.postTask(mResultTaskTraits, callback);
         } else {
             mExtractTask.mCompletionCallbacks.add(callback);
         }
@@ -303,6 +311,8 @@ public class ResourceExtractor {
      * This will extract the application pak resources in an
      * AsyncTask. Call waitForCompletion() at the point resources
      * are needed to block until the task completes.
+     *
+     * @param uiLanguage The language to extract.
      */
     public void startExtractingResources(String uiLanguage) {
         if (mExtractTask != null) {
@@ -318,7 +328,7 @@ public class ResourceExtractor {
         }
 
         mExtractTask = new ExtractTask(uiLanguage);
-        mExtractTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        PostTask.postTask(TaskTraits.USER_BLOCKING, mExtractTask);
     }
 
     private File getAppDataDir() {
@@ -329,21 +339,15 @@ public class ResourceExtractor {
         return new File(getAppDataDir(), "paks");
     }
 
-    private static void deleteFile(File file) {
-        if (file.exists() && !file.delete()) {
-            Log.w(TAG, "Unable to remove %s", file.getName());
-        }
-    }
-
     private void deleteFiles(String[] existingFileNames) {
         // These used to be extracted, but no longer are, so just clean them up.
-        deleteFile(new File(getAppDataDir(), ICU_DATA_FILENAME));
-        deleteFile(new File(getAppDataDir(), V8_NATIVES_DATA_FILENAME));
-        deleteFile(new File(getAppDataDir(), V8_SNAPSHOT_DATA_FILENAME));
+        FileUtils.recursivelyDeleteFile(new File(getAppDataDir(), ICU_DATA_FILENAME));
+        FileUtils.recursivelyDeleteFile(new File(getAppDataDir(), V8_NATIVES_DATA_FILENAME));
+        FileUtils.recursivelyDeleteFile(new File(getAppDataDir(), V8_SNAPSHOT_DATA_FILENAME));
 
         if (existingFileNames != null) {
             for (String fileName : existingFileNames) {
-                deleteFile(new File(getOutputDir(), fileName));
+                FileUtils.recursivelyDeleteFile(new File(getOutputDir(), fileName));
             }
         }
     }
@@ -354,6 +358,6 @@ public class ResourceExtractor {
     private static boolean shouldSkipPakExtraction() {
         // Certain apks like ContentShell.apk don't have any compressed locale
         // assets however, so skip extraction entirely for them.
-        return BuildConfig.COMPRESSED_LOCALES.length == 0;
+        return ResourceBundle.getAvailableCompressedPakLocales().length == 0;
     }
 }

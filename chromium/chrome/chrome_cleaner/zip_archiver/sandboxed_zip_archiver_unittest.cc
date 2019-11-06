@@ -16,7 +16,7 @@
 #include "base/test/scoped_task_environment.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/chrome_cleaner/constants/quarantine_constants.h"
-#include "chrome/chrome_cleaner/interfaces/zip_archiver.mojom.h"
+#include "chrome/chrome_cleaner/mojom/zip_archiver.mojom.h"
 #include "chrome/chrome_cleaner/ipc/mojo_task_runner.h"
 #include "chrome/chrome_cleaner/os/disk_util.h"
 #include "chrome/chrome_cleaner/zip_archiver/broker/sandbox_setup.h"
@@ -70,7 +70,8 @@ class ZipArchiverSandboxedArchiverTest : public base::MultiProcessTest {
     ComputeSHA256DigestOfPath(src_file_path, &src_file_hash);
 
     const base::string16 zip_filename = internal::ConstructZipArchiveFileName(
-        src_file_path.BaseName().value(), src_file_hash);
+        src_file_path.BaseName().value(), src_file_hash,
+        /*max_filename_length=*/255);
 
     const base::FilePath& dst_archive_folder = test_file_.GetTempDirPath();
     expect_zip_file_path_ = dst_archive_folder.Append(zip_filename);

@@ -10,7 +10,9 @@ import android.view.Window;
 
 import org.chromium.chrome.browser.fullscreen.FullscreenHtmlApiHandler.FullscreenHtmlApiDelegate;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabBrowserControlsOffsetHelper;
+import org.chromium.chrome.browser.tab.TabBrowserControlsState;
+import org.chromium.content_public.browser.GestureListenerManager;
+import org.chromium.content_public.browser.WebContents;
 
 /**
  * Manages the basic fullscreen functionality required by a Tab.
@@ -120,19 +122,7 @@ public abstract class FullscreenManager {
     public void setTab(@Nullable Tab tab) {
         if (mTab == tab) return;
 
-        // Remove the fullscreen manager from the old tab before setting the new tab.
-        setFullscreenManager(null);
-
         mTab = tab;
-
-        // Initialize the new tab with the correct fullscreen manager reference.
-        setFullscreenManager(this);
-    }
-
-    private void setFullscreenManager(FullscreenManager manager) {
-        if (mTab == null) return;
-        mTab.setFullscreenManager(manager);
-        TabBrowserControlsOffsetHelper.from(mTab).resetPositions();
     }
 
     /**
@@ -146,13 +136,10 @@ public abstract class FullscreenManager {
      * Enters persistent fullscreen mode.  In this mode, the browser controls will be
      * permanently hidden until this mode is exited.
      */
-    public void enterPersistentFullscreenMode(FullscreenOptions options) {
+    protected void enterPersistentFullscreenMode(FullscreenOptions options) {
         mHtmlApiHandler.enterPersistentFullscreenMode(options);
-
-        Tab tab = getTab();
-        if (tab != null) {
-            tab.updateFullscreenEnabledState();
-        }
+        TabBrowserControlsState.updateEnabledState(getTab());
+        updateMultiTouchZoomSupport(false);
     }
 
     /**
@@ -161,10 +148,20 @@ public abstract class FullscreenManager {
      */
     public void exitPersistentFullscreenMode() {
         mHtmlApiHandler.exitPersistentFullscreenMode();
+        TabBrowserControlsState.updateEnabledState(getTab());
+        updateMultiTouchZoomSupport(true);
+    }
 
+    /**
+     * @see GestureListenerManager#updateMultiTouchZoomSupport(boolean).
+     */
+    protected void updateMultiTouchZoomSupport(boolean enable) {
         Tab tab = getTab();
-        if (tab != null) {
-            tab.updateFullscreenEnabledState();
+        if (tab == null || tab.isHidden()) return;
+        WebContents webContents = tab.getWebContents();
+        if (webContents != null) {
+            GestureListenerManager manager = GestureListenerManager.fromWebContents(webContents);
+            if (manager != null) manager.updateMultiTouchZoomSupport(enable);
         }
     }
 

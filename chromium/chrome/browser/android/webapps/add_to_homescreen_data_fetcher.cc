@@ -45,15 +45,16 @@ GURL GetShortcutUrl(content::WebContents* web_contents) {
       web_contents->GetVisibleURL());
 }
 
-bool DoesAndroidSupportMaskableIcons() {
-  return base::android::BuildInfo::GetInstance()->sdk_int() >=
-         base::android::SDK_VERSION_OREO;
+bool DoesAndroidSupportMaskableIconsForHomescreen() {
+  // TODO(crbug.com/977173): re-enable maskable icon support once server support
+  // is ready.
+  return false;
 }
 
 InstallableParams ParamsToPerformManifestAndIconFetch() {
   InstallableParams params;
   params.valid_primary_icon = true;
-  params.prefer_maskable_icon = DoesAndroidSupportMaskableIcons();
+  params.prefer_maskable_icon = DoesAndroidSupportMaskableIconsForHomescreen();
   params.valid_badge_icon = true;
   params.wait_for_worker = true;
   return params;
@@ -65,7 +66,7 @@ InstallableParams ParamsToPerformInstallableCheck() {
   params.valid_manifest = true;
   params.has_worker = true;
   params.valid_primary_icon = true;
-  params.prefer_maskable_icon = DoesAndroidSupportMaskableIcons();
+  params.prefer_maskable_icon = DoesAndroidSupportMaskableIconsForHomescreen();
   params.wait_for_worker = true;
   return params;
 }
@@ -187,8 +188,8 @@ void AddToHomescreenDataFetcher::OnDidGetWebApplicationInfo(
 
   installable_manager_->GetData(
       ParamsToPerformManifestAndIconFetch(),
-      base::Bind(&AddToHomescreenDataFetcher::OnDidGetManifestAndIcons,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&AddToHomescreenDataFetcher::OnDidGetManifestAndIcons,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void AddToHomescreenDataFetcher::StopTimer() {
@@ -202,11 +203,6 @@ void AddToHomescreenDataFetcher::OnDataTimedout() {
 
   if (!web_contents())
     return;
-
-  if (is_waiting_for_manifest_)
-    installable_manager_->RecordAddToHomescreenManifestAndIconTimeout();
-  else
-    installable_manager_->RecordAddToHomescreenInstallabilityTimeout();
 
   observer_->OnUserTitleAvailable(shortcut_info_.user_title, shortcut_info_.url,
                                   false);
@@ -233,7 +229,6 @@ void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
     observer_->OnUserTitleAvailable(shortcut_info_.user_title,
                                     shortcut_info_.url, false);
     StopTimer();
-    installable_manager_->RecordAddToHomescreenNoTimeout();
     FetchFavicon();
     return;
   }
@@ -248,7 +243,7 @@ void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
   shortcut_info_.minimum_splash_image_size_in_px =
       ShortcutHelper::GetMinimumSplashImageSizeInPx();
   shortcut_info_.splash_image_url =
-      blink::ManifestIconSelector::FindBestMatchingIcon(
+      blink::ManifestIconSelector::FindBestMatchingSquareIcon(
           data.manifest->icons, shortcut_info_.ideal_splash_image_size_in_px,
           shortcut_info_.minimum_splash_image_size_in_px,
           blink::Manifest::ImageResource::Purpose::ANY);
@@ -259,8 +254,8 @@ void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
 
   installable_manager_->GetData(
       ParamsToPerformInstallableCheck(),
-      base::Bind(&AddToHomescreenDataFetcher::OnDidPerformInstallableCheck,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&AddToHomescreenDataFetcher::OnDidPerformInstallableCheck,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void AddToHomescreenDataFetcher::OnDidPerformInstallableCheck(
@@ -270,11 +265,9 @@ void AddToHomescreenDataFetcher::OnDidPerformInstallableCheck(
   if (!web_contents())
     return;
 
-  installable_manager_->RecordAddToHomescreenNoTimeout();
-
   bool webapk_compatible =
-      (data.error_code == NO_ERROR_DETECTED && data.valid_manifest &&
-       data.has_worker && AreWebManifestUrlsWebApkCompatible(*data.manifest) &&
+      (data.errors.empty() && data.valid_manifest && data.has_worker &&
+       AreWebManifestUrlsWebApkCompatible(*data.manifest) &&
        ChromeWebApkHost::CanInstallWebApk());
   observer_->OnUserTitleAvailable(
       webapk_compatible ? shortcut_info_.name : shortcut_info_.user_title,

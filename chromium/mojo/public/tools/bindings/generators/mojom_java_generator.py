@@ -152,7 +152,7 @@ def GetNameForElement(element):
   raise Exception('Unexpected element: %s' % element)
 
 def GetInterfaceResponseName(method):
-  return UpperCamelCase(method.name + 'Response')
+  return UpperCamelCase(method.name + '_Response')
 
 def ParseStringAttribute(attribute):
   assert isinstance(attribute, basestring)
@@ -221,9 +221,11 @@ def DecodeMethod(context, kind, offset, bit):
       return 'readInterfaceRequest'
     if mojom.IsInterfaceKind(kind) or mojom.IsPendingRemoteKind(kind):
       return 'readServiceInterface'
-    if mojom.IsAssociatedInterfaceRequestKind(kind):
+    if (mojom.IsAssociatedInterfaceRequestKind(kind) or
+        mojom.IsPendingAssociatedReceiverKind(kind)):
       return 'readAssociatedInterfaceRequestNotSupported'
-    if mojom.IsAssociatedInterfaceKind(kind):
+    if (mojom.IsAssociatedInterfaceKind(kind) or
+        mojom.IsPendingAssociatedRemoteKind(kind)):
       return 'readAssociatedServiceInterfaceNotSupported'
     return _spec_to_decode_method[kind.spec]
   methodName = _DecodeMethodName(kind)
@@ -282,9 +284,11 @@ def GetJavaType(context, kind, boxed=False, with_generics=True):
   if mojom.IsInterfaceRequestKind(kind) or mojom.IsPendingReceiverKind(kind):
     return ('org.chromium.mojo.bindings.InterfaceRequest<%s>' %
             GetNameForKind(context, kind.kind))
-  if mojom.IsAssociatedInterfaceKind(kind):
+  if (mojom.IsAssociatedInterfaceKind(kind) or
+      mojom.IsPendingAssociatedRemoteKind(kind)):
     return 'org.chromium.mojo.bindings.AssociatedInterfaceNotSupported'
-  if mojom.IsAssociatedInterfaceRequestKind(kind):
+  if (mojom.IsAssociatedInterfaceRequestKind(kind) or
+      mojom.IsPendingAssociatedReceiverKind(kind)):
     return 'org.chromium.mojo.bindings.AssociatedInterfaceRequestNotSupported'
   if mojom.IsMapKind(kind):
     if with_generics:
@@ -339,7 +343,6 @@ def ExpressionToText(context, token, kind_spec=''):
   if isinstance(token, mojom.NamedValue):
     return _TranslateNamedValue(token)
   if kind_spec.startswith('i') or kind_spec.startswith('u'):
-    # Add Long suffix to all integer literals.
     number = ast.literal_eval(token.lstrip('+ '))
     if not isinstance(number, (int, long)):
       raise ValueError('got unexpected type %r for int literal %r' % (
@@ -348,6 +351,8 @@ def ExpressionToText(context, token, kind_spec=''):
     # equivalent signed long.
     if number >= 2 ** 63:
       number -= 2 ** 64
+    if number < 2 ** 31 and number >= -2 ** 31:
+      return '%d' % number
     return '%dL' % number
   if isinstance(token, mojom.BuiltinValue):
     if token.value == 'double.INFINITY':
@@ -421,6 +426,15 @@ def TempDir():
   finally:
     shutil.rmtree(dirname)
 
+def EnumCoversContinuousRange(kind):
+  if not kind.fields:
+    return False
+  number_of_unique_keys = len(set(map(
+      lambda field: field.numeric_value, kind.fields)))
+  if kind.max_value - kind.min_value + 1 != number_of_unique_keys:
+    return False
+  return True
+
 class Generator(generator.Generator):
   def _GetJinjaExports(self):
     return {
@@ -436,6 +450,7 @@ class Generator(generator.Generator):
       'array_expected_length': GetArrayExpectedLength,
       'array': GetArrayKind,
       'constant_value': ConstantValue,
+      'covers_continuous_range': EnumCoversContinuousRange,
       'decode_method': DecodeMethod,
       'default_value': DefaultValue,
       'encode_method': EncodeMethod,

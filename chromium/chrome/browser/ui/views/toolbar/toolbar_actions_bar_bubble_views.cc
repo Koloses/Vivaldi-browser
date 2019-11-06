@@ -54,7 +54,11 @@ void ToolbarActionsBarBubbleViews::Show() {
   GetWidget()->Show();
 }
 
-views::View* ToolbarActionsBarBubbleViews::CreateExtraView() {
+std::string ToolbarActionsBarBubbleViews::GetAnchorActionId() {
+  return delegate_->GetAnchorActionId();
+}
+
+std::unique_ptr<views::View> ToolbarActionsBarBubbleViews::CreateExtraView() {
   std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
       extra_view_info = delegate_->GetExtraViewInfo();
 
@@ -73,11 +77,12 @@ views::View* ToolbarActionsBarBubbleViews::CreateExtraView() {
   const base::string16& text = extra_view_info->text;
   if (!text.empty()) {
     if (extra_view_info->is_learn_more) {
-      image_button_ = views::CreateVectorImageButton(this);
-      image_button_->SetFocusForPlatform();
-      image_button_->SetTooltipText(text);
-      views::SetImageFromVectorIcon(image_button_,
+      auto image_button = views::CreateVectorImageButton(this);
+      image_button->SetFocusForPlatform();
+      image_button->SetTooltipText(text);
+      views::SetImageFromVectorIcon(image_button.get(),
                                     vector_icons::kHelpOutlineIcon);
+      image_button_ = image_button.release();
       extra_view.reset(image_button_);
     } else {
       extra_view = std::make_unique<views::Label>(text);
@@ -85,18 +90,16 @@ views::View* ToolbarActionsBarBubbleViews::CreateExtraView() {
   }
 
   if (icon && extra_view) {
-    views::View* parent = new views::View();
+    std::unique_ptr<views::View> parent = std::make_unique<views::View>();
     parent->SetLayoutManager(std::make_unique<views::BoxLayout>(
-        views::BoxLayout::kHorizontal, gfx::Insets(),
+        views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
         ChromeLayoutProvider::Get()->GetDistanceMetric(
             views::DISTANCE_RELATED_CONTROL_VERTICAL)));
-    parent->AddChildView(icon.release());
-    parent->AddChildView(extra_view.release());
+    parent->AddChildView(std::move(icon));
+    parent->AddChildView(std::move(extra_view));
     return parent;
   }
-
-  return icon ? static_cast<views::View*>(icon.release())
-              : static_cast<views::View*>(extra_view.release());
+  return icon ? std::move(icon) : std::move(extra_view);
 }
 
 base::string16 ToolbarActionsBarBubbleViews::GetWindowTitle() const {
@@ -141,7 +144,7 @@ void ToolbarActionsBarBubbleViews::Init() {
 
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
   SetLayoutManager(std::make_unique<views::BoxLayout>(
-      views::BoxLayout::kVertical, gfx::Insets(),
+      views::BoxLayout::Orientation::kVertical, gfx::Insets(),
       provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL)));
 
   int width = provider->GetDistanceMetric(

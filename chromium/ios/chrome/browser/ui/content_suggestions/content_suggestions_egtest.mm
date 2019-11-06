@@ -20,6 +20,7 @@
 #include "components/ntp_snippets/content_suggestions_service.h"
 #include "components/ntp_snippets/mock_content_suggestions_provider.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/unified_consent/feature.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_switches.h"
 #include "ios/chrome/browser/ntp_snippets/ios_chrome_content_suggestions_service_factory.h"
@@ -34,8 +35,6 @@
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
-#import "ios/chrome/test/app/history_test_util.h"
-#import "ios/chrome/test/app/tab_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
@@ -169,7 +168,7 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
 // to iOS 10.2.
 + (NSArray*)testInvocations {
 #if TARGET_IPHONE_SIMULATOR
-  if (IsIPadIdiom() && !base::ios::IsRunningOnOrLater(10, 3, 0))
+  if ([ChromeEarlGrey isIPadIdiom] && !base::ios::IsRunningOnOrLater(10, 3, 0))
     return @[];
 #endif  // TARGET_IPHONE_SIMULATOR
   return [super testInvocations];
@@ -184,9 +183,7 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
 - (void)tearDown {
   self.provider->FireCategoryStatusChanged(
       self.category, CategoryStatus::ALL_SUGGESTIONS_EXPLICITLY_DISABLED);
-  GREYAssertTrue(chrome_test_util::ClearBrowsingHistory(),
-                 @"Clearing Browsing History timed out");
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGrey clearBrowsingHistory];
   [super tearDown];
 }
 
@@ -230,7 +227,7 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
   [ChromeEarlGrey waitForMainTabCount:2];
 
   // Go back to the previous tab.
-  chrome_test_util::SelectTabAtIndexInCurrentMode(0);
+  [ChromeEarlGrey selectTabAtIndex:0];
 
   // Make sure the additional items are still displayed.
   [CellWithMatcher(grey_accessibilityID(@"AdditionalSuggestion2"))
@@ -242,6 +239,14 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
 // behavior depends on having a real remote provider, so it cannot be tested
 // here.
 - (void)testPrivacySwitch {
+  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
+    EARL_GREY_TEST_DISABLED(
+        @"Privacy swich for ContentSuggestion was moved to the Sync and Google "
+         "services settings screen, so it is no longer present in the privacy "
+         "section. This test is now covered by "
+         "-[GoogleServicesSettingsTestCase testOpeningServices].");
+  }
+
   [ChromeEarlGreyUI openSettingsMenu];
   [ChromeEarlGreyUI
       tapSettingsMenuButton:chrome_test_util::SettingsMenuPrivacyButton()];
@@ -285,12 +290,16 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
       [ContentSuggestionsLearnMoreItem accessibilityIdentifier]))
       assertWithMatcher:grey_notNil()];
 
-  // Open the last item.
+  // Open the last item. After the extra space of the last suggestion is
+  // removed, this test case fails on iPhoneX. Double-Tap on the last suggestion
+  // is a workaround.
+  // TODO(crbug.com/979143): Find out the reason and fix it. Also consider
+  // converting the test case to EG2 or deprecating MDCCollectionView.
   [CellWithMatcher(grey_accessibilityID(@"AdditionalSuggestion9"))
-      performAction:grey_tap()];
+      performAction:grey_doubleTap()];
 
   // Check that the page has been opened.
-  [ChromeEarlGrey waitForWebViewContainingText:kPageLoadedString];
+  [ChromeEarlGrey waitForWebStateContainingText:kPageLoadedString];
   [[EarlGrey selectElementWithMatcher:chrome_test_util::OmniboxText(
                                           pageURL.GetContent())]
       assertWithMatcher:grey_notNil()];
@@ -359,8 +368,8 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
              @"Collection view not visible");
 
   // Check the page has been correctly opened.
-  chrome_test_util::SelectTabAtIndexInCurrentMode(1);
-  [ChromeEarlGrey waitForWebViewContainingText:kPageLoadedString];
+  [ChromeEarlGrey selectTabAtIndex:1];
+  [ChromeEarlGrey waitForWebStateContainingText:kPageLoadedString];
   [[EarlGrey selectElementWithMatcher:chrome_test_util::OmniboxText(
                                           pageURL.GetContent())]
       assertWithMatcher:grey_notNil()];
@@ -382,12 +391,12 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
   [ChromeEarlGrey waitForIncognitoTabCount:1];
 
   // Check that the tab has been opened in foreground.
-  [ChromeEarlGrey waitForWebViewContainingText:kPageLoadedString];
+  [ChromeEarlGrey waitForWebStateContainingText:kPageLoadedString];
   [[EarlGrey selectElementWithMatcher:chrome_test_util::OmniboxText(
                                           pageURL.GetContent())]
       assertWithMatcher:grey_notNil()];
 
-  GREYAssertTrue(chrome_test_util::IsIncognitoMode(),
+  GREYAssertTrue([ChromeEarlGrey isIncognitoMode],
                  @"Test did not switch to incognito");
 }
 
@@ -489,11 +498,9 @@ GREYElementInteraction* CellWithMatcher(id<GREYMatcher> matcher) {
   NSString* pageTitle = base::SysUTF8ToNSString(kPageTitle);
 
   // Clear history and verify that the tile does not exist.
-  GREYAssertTrue(chrome_test_util::ClearBrowsingHistory(),
-                 @"Clearing Browsing History timed out");
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGrey clearBrowsingHistory];
   [ChromeEarlGrey loadURL:pageURL];
-  [ChromeEarlGrey waitForWebViewContainingText:kPageLoadedString];
+  [ChromeEarlGrey waitForWebStateContainingText:kPageLoadedString];
 
   // After loading URL, need to do another action before opening a new tab
   // with the icon present.

@@ -110,7 +110,7 @@ class Separator;
 class BrowserActionsContainer : public views::View,
                                 public ToolbarActionsBarDelegate,
                                 public views::ResizeAreaDelegate,
-                                public gfx::AnimationDelegate,
+                                public views::AnimationDelegateViews,
                                 public ToolbarActionView::Delegate,
                                 public views::WidgetObserver {
  public:
@@ -118,11 +118,14 @@ class BrowserActionsContainer : public views::View,
    public:
     // Returns the view of the toolbar actions overflow menu to use as a
     // reference point for a popup when this view isn't visible.
-    virtual views::MenuButton* GetOverflowReferenceView() = 0;
+    virtual views::LabelButton* GetOverflowReferenceView() = 0;
 
     // Returns the maximum width the browser actions container can have. An
     // empty value means there is no maximum.
     virtual base::Optional<int> GetMaxBrowserActionsWidth() const = 0;
+
+    // Whether the container supports showing extensions outside of the menu.
+    virtual bool CanShowIconInToolbar() const;
 
     // Creates a ToolbarActionsBar for the BrowserActionsContainer to use.
     virtual std::unique_ptr<ToolbarActionsBar> CreateToolbarActionsBar(
@@ -217,7 +220,7 @@ class BrowserActionsContainer : public views::View,
   void OnResize(int resize_amount, bool done_resizing) override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
 
-  // Overridden from gfx::AnimationDelegate:
+  // Overridden from views::AnimationDelegateViews:
   void AnimationProgressed(const gfx::Animation* animation) override;
   void AnimationCanceled(const gfx::Animation* animation) override;
   void AnimationEnded(const gfx::Animation* animation) override;
@@ -225,8 +228,9 @@ class BrowserActionsContainer : public views::View,
   // Overridden from ToolbarActionView::Delegate:
   content::WebContents* GetCurrentWebContents() override;
   bool ShownInsideMenu() const override;
+  bool CanShowIconInToolbar() const override;
   void OnToolbarActionViewDragDone() override;
-  views::MenuButton* GetOverflowReferenceView() override;
+  views::LabelButton* GetOverflowReferenceView() override;
   gfx::Size GetToolbarActionSize() override;
 
   // ToolbarActionsBarDelegate:
@@ -255,7 +259,7 @@ class BrowserActionsContainer : public views::View,
  protected:
   // Overridden from views::View:
   void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) override;
+      const views::ViewHierarchyChangedDetails& details) override;
   void OnPaint(gfx::Canvas* canvas) override;
 
  private:

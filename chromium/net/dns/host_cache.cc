@@ -14,7 +14,6 @@
 #include "base/time/default_tick_clock.h"
 #include "base/trace_event/trace_event.h"
 #include "net/base/ip_endpoint.h"
-#include "net/base/net_errors.h"
 #include "net/base/trace_constants.h"
 #include "net/dns/host_resolver.h"
 #include "net/log/net_log.h"
@@ -77,6 +76,17 @@ void MergeLists(base::Optional<T>* target, const base::Optional<T>& source) {
     *target = source;
   }
 }
+
+class InvalidatorImpl : public HostCache::Invalidator {
+ public:
+  explicit InvalidatorImpl(HostCache* cache) : cache_(cache) {}
+  void Invalidate() override { cache_->Invalidate(); }
+
+ private:
+  HostCache* cache_;
+
+  DISALLOW_COPY_AND_ASSIGN(InvalidatorImpl);
+};
 
 }  // namespace
 
@@ -184,15 +194,11 @@ HostCache::Entry HostCache::Entry::MergeEntries(Entry front, Entry back) {
   front.expires_ = std::min(front.expires(), back.expires());
   front.network_changes_ =
       std::max(front.network_changes(), back.network_changes());
-  front.total_hits_ = front.total_hits() + back.total_hits();
-  front.stale_hits_ = front.stale_hits() + back.stale_hits();
+
+  front.total_hits_ = front.total_hits_ + back.total_hits_;
+  front.stale_hits_ = front.stale_hits_ + back.stale_hits_;
 
   return front;
-}
-
-NetLogParametersCallback HostCache::Entry::CreateNetLogCallback() const {
-  return base::BindRepeating(&HostCache::Entry::NetLogCallback,
-                             base::Unretained(this));
 }
 
 HostCache::Entry HostCache::Entry::CopyWithDefaultPort(uint16_t port) const {
@@ -244,9 +250,7 @@ HostCache::Entry::Entry(const HostCache::Entry& entry,
       source_(entry.source()),
       ttl_(entry.ttl()),
       expires_(now + ttl),
-      network_changes_(network_changes),
-      total_hits_(0),
-      stale_hits_(0) {}
+      network_changes_(network_changes) {}
 
 HostCache::Entry::Entry(int error,
                         const base::Optional<AddressList>& addresses,
@@ -260,11 +264,8 @@ HostCache::Entry::Entry(int error,
       text_records_(std::move(text_records)),
       hostnames_(std::move(hostnames)),
       source_(source),
-      ttl_(base::TimeDelta::FromSeconds(-1)),
       expires_(expires),
-      network_changes_(network_changes),
-      total_hits_(0),
-      stale_hits_(0) {}
+      network_changes_(network_changes) {}
 
 bool HostCache::Entry::IsStale(base::TimeTicks now, int network_changes) const {
   EntryStaleness stale;
@@ -289,10 +290,8 @@ void HostCache::Entry::GetStaleness(base::TimeTicks now,
   out->stale_hits = stale_hits_;
 }
 
-std::unique_ptr<base::Value> HostCache::Entry::NetLogCallback(
-    NetLogCaptureMode capture_mode) const {
-  return std::make_unique<base::Value>(
-      GetAsValue(false /* include_staleness */));
+base::Value HostCache::Entry::NetLogParams() const {
+  return GetAsValue(false /* include_staleness */);
 }
 
 base::DictionaryValue HostCache::Entry::GetAsValue(
@@ -362,7 +361,9 @@ HostCache::HostCache(size_t max_entries)
       network_changes_(0),
       restore_size_(0),
       delegate_(nullptr),
-      tick_clock_(base::DefaultTickClock::GetInstance()) {}
+      tick_clock_(base::DefaultTickClock::GetInstance()),
+      owned_invalidator_(std::make_unique<InvalidatorImpl>(this)),
+      invalidator_(owned_invalidator_.get()) {}
 
 HostCache::~HostCache() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
@@ -556,7 +557,7 @@ void HostCache::AddEntry(const Key& key, Entry&& entry) {
   DCHECK_GE(max_entries_, size());
 }
 
-void HostCache::OnNetworkChange() {
+void HostCache::Invalidate() {
   ++network_changes_;
 }
 

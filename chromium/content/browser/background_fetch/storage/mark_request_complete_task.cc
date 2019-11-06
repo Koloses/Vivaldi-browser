@@ -12,16 +12,17 @@
 #include "content/browser/background_fetch/storage/database_helpers.h"
 #include "content/browser/background_fetch/storage/get_metadata_task.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
+#include "content/browser/cache_storage/cache_storage.h"
 #include "content/browser/cache_storage/cache_storage_manager.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/common/background_fetch/background_fetch_types.h"
-#include "content/common/service_worker/service_worker_utils.h"
+#include "content/common/fetch/fetch_api_request_proto.h"
 #include "services/network/public/cpp/cors/cors.h"
 #include "storage/browser/blob/blob_impl.h"
+#include "third_party/blink/public/common/cache_storage/cache_storage_utils.h"
 #include "third_party/blink/public/mojom/blob/blob.mojom.h"
 
 namespace content {
-
 namespace background_fetch {
 
 namespace {
@@ -44,8 +45,7 @@ MarkRequestCompleteTask::MarkRequestCompleteTask(
     : DatabaseTask(host),
       registration_id_(registration_id),
       request_info_(std::move(request_info)),
-      callback_(std::move(callback)),
-      weak_factory_(this) {}
+      callback_(std::move(callback)) {}
 
 MarkRequestCompleteTask::~MarkRequestCompleteTask() = default;
 
@@ -107,6 +107,11 @@ void MarkRequestCompleteTask::StoreResponse(base::OnceClosure done_closure) {
 void MarkRequestCompleteTask::DidGetIsQuotaAvailable(
     base::OnceClosure done_closure,
     bool is_available) {
+  int64_t trace_id = blink::cache_storage::CreateTraceId();
+  TRACE_EVENT_WITH_FLOW0("CacheStorage",
+                         "MarkRequestCompleteTask::DidGetIsQuotaAvailable",
+                         TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT);
+
   if (!is_available) {
     FinishWithError(blink::mojom::BackgroundFetchError::QUOTA_EXCEEDED);
     return;
@@ -114,9 +119,10 @@ void MarkRequestCompleteTask::DidGetIsQuotaAvailable(
 
   CacheStorageHandle cache_storage = GetOrOpenCacheStorage(registration_id_);
   cache_storage.value()->OpenCache(
-      /* cache_name= */ registration_id_.unique_id(),
+      /* cache_name= */ registration_id_.unique_id(), trace_id,
       base::BindOnce(&MarkRequestCompleteTask::DidOpenCache,
-                     weak_factory_.GetWeakPtr(), std::move(done_closure)));
+                     weak_factory_.GetWeakPtr(), std::move(done_closure),
+                     trace_id));
 }
 
 void MarkRequestCompleteTask::PopulateResponseBody(
@@ -144,8 +150,13 @@ void MarkRequestCompleteTask::PopulateResponseBody(
 
 void MarkRequestCompleteTask::DidOpenCache(
     base::OnceClosure done_closure,
+    int64_t trace_id,
     CacheStorageCacheHandle handle,
     blink::mojom::CacheStorageError error) {
+  TRACE_EVENT_WITH_FLOW0("CacheStorage",
+                         "MarkRequestCompleteTask::DidOpenCache",
+                         TRACE_ID_GLOBAL(trace_id),
+                         TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
   if (error != blink::mojom::CacheStorageError::kSuccess) {
     SetStorageError(BackgroundFetchStorageError::kCacheStorageError);
     CreateAndStoreCompletedRequest(std::move(done_closure));
@@ -165,6 +176,7 @@ void MarkRequestCompleteTask::DidOpenCache(
   // overwritten here, it should be written back.
   handle.value()->Put(
       std::move(request), BackgroundFetchSettledFetch::CloneResponse(response_),
+      trace_id,
       base::BindOnce(&MarkRequestCompleteTask::DidWriteToCache,
                      weak_factory_.GetWeakPtr(), std::move(handle),
                      std::move(done_closure)));
@@ -184,8 +196,7 @@ void MarkRequestCompleteTask::CreateAndStoreCompletedRequest(
   completed_request_.set_unique_id(registration_id_.unique_id());
   completed_request_.set_request_index(request_info_->request_index());
   completed_request_.set_serialized_request(
-      ServiceWorkerUtils::SerializeFetchRequestToString(
-          *(request_info_->fetch_request())));
+      SerializeFetchRequestToString(*(request_info_->fetch_request())));
   completed_request_.set_download_guid(request_info_->download_guid());
   completed_request_.set_failure_reason(failure_reason_);
 
@@ -298,5 +309,4 @@ std::string MarkRequestCompleteTask::HistogramName() const {
 }
 
 }  // namespace background_fetch
-
 }  // namespace content

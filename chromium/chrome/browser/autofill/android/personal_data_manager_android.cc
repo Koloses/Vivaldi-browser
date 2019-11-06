@@ -17,6 +17,7 @@
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "chrome/android/chrome_jni_headers/PersonalDataManager_jni.h"
 #include "chrome/browser/android/preferences/prefs.h"
 #include "chrome/browser/android/resource_mapper.h"
 #include "chrome/browser/autofill/address_normalizer_factory.h"
@@ -29,13 +30,13 @@
 #include "chrome/common/pref_names.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
-#include "components/autofill/core/browser/address_i18n.h"
 #include "components/autofill/core/browser/address_normalizer.h"
-#include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
 #include "components/autofill/core/browser/autofill_type.h"
-#include "components/autofill/core/browser/country_names.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/geo/address_i18n.h"
+#include "components/autofill/core/browser/geo/autofill_country.h"
+#include "components/autofill/core/browser/geo/country_names.h"
 #include "components/autofill/core/browser/payments/full_card_request.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/validation.h"
@@ -44,7 +45,6 @@
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_contents.h"
-#include "jni/PersonalDataManager_jni.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "third_party/libaddressinput/chromium/chrome_metadata_source.h"
 #include "third_party/libaddressinput/chromium/chrome_storage_impl.h"
@@ -573,7 +573,7 @@ void PersonalDataManagerAndroid::AddServerCreditCardForTest(
   PopulateNativeCreditCardFromJava(jcard, env, card.get());
   card->set_record_type(CreditCard::MASKED_SERVER_CARD);
   personal_data_manager_->AddServerCreditCardForTest(std::move(card));
-  personal_data_manager_->NotifyPersonalDataChangedForTest();
+  personal_data_manager_->NotifyPersonalDataObserver();
 }
 
 void PersonalDataManagerAndroid::RemoveByGUID(
@@ -636,7 +636,7 @@ void PersonalDataManagerAndroid::SetProfileUseStatsForTesting(
   profile->set_use_count(static_cast<size_t>(count));
   profile->set_use_date(base::Time::FromTimeT(date));
 
-  personal_data_manager_->NotifyPersonalDataChangedForTest();
+  personal_data_manager_->NotifyPersonalDataObserver();
 }
 
 jint PersonalDataManagerAndroid::GetProfileUseCountForTesting(
@@ -680,7 +680,7 @@ void PersonalDataManagerAndroid::SetCreditCardUseStatsForTesting(
   card->set_use_count(static_cast<size_t>(count));
   card->set_use_date(base::Time::FromTimeT(date));
 
-  personal_data_manager_->NotifyPersonalDataChangedForTest();
+  personal_data_manager_->NotifyPersonalDataObserver();
 }
 
 jint PersonalDataManagerAndroid::GetCreditCardUseCountForTesting(

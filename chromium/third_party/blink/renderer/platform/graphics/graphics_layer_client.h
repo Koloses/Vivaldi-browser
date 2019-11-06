@@ -70,6 +70,8 @@ enum {
 };
 typedef unsigned LayerTreeFlags;
 
+enum class DisplayLockContextLifecycleTarget { kSelf, kChildren };
+
 class PLATFORM_EXPORT GraphicsLayerClient {
  public:
   virtual ~GraphicsLayerClient() = default;
@@ -92,11 +94,15 @@ class PLATFORM_EXPORT GraphicsLayerClient {
   // (see LocalFrameView::ShouldThrottleRendering()).
   virtual bool ShouldThrottleRendering() const { return false; }
 
+  // Content under a LayoutSVGHiddenContainer is an auxiliary resource for
+  // painting and hit testing.
+  virtual bool IsUnderSVGHiddenContainer() const { return false; }
+
   virtual bool IsTrackingRasterInvalidations() const { return false; }
 
   virtual void SetOverlayScrollbarsHidden(bool) {}
 
-  virtual void SetPaintArtifactCompositorNeedsUpdate() const {}
+  virtual void GraphicsLayersDidChange() {}
 
   virtual String DebugName(const GraphicsLayer*) const = 0;
 
@@ -104,6 +110,15 @@ class PLATFORM_EXPORT GraphicsLayerClient {
       const GraphicsLayer*) const {
     return nullptr;
   }
+
+  // Returns true if this client is prevented from painting by its own
+  // display-lock (in case of target = kSelf) or by any of its ancestors (in
+  // case of target = kSelf or kChildren).
+  virtual bool PaintBlockedByDisplayLockIncludingAncestors(
+      DisplayLockContextLifecycleTarget) const {
+    return false;
+  }
+  virtual void NotifyDisplayLockNeedsGraphicsLayerCollection() {}
 
 #if DCHECK_IS_ON()
   // CompositedLayerMapping overrides this to verify that it is not

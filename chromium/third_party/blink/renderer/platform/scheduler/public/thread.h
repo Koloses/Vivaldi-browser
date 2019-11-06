@@ -32,7 +32,7 @@
 #include "base/threading/thread.h"
 #include "third_party/blink/public/platform/web_thread_type.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -60,10 +60,13 @@ struct PLATFORM_EXPORT ThreadCreationParams {
   // of this thread.
   ThreadCreationParams& SetFrameOrWorkerScheduler(FrameOrWorkerScheduler*);
 
+  ThreadCreationParams& SetSupportsGC(bool supports_gc);
+
   WebThreadType thread_type;
   const char* name;
   FrameOrWorkerScheduler* frame_or_worker_scheduler;  // NOT OWNED
-  base::Thread::Options thread_options;
+  base::ThreadPriority thread_priority = base::ThreadPriority::NORMAL;
+  bool supports_gc = false;
 };
 
 // The interface of a thread recognized by Blink.
@@ -143,6 +146,12 @@ class PLATFORM_EXPORT Thread {
 
   // Returns the scheduler associated with the thread.
   virtual ThreadScheduler* Scheduler() = 0;
+
+  // See WorkerThread::ShutdownOnThread().
+  virtual void ShutdownOnThread() {}
+
+ protected:
+  static void UpdateThreadTLS(Thread* thread);
 
  private:
   // For Platform and ScopedMainThreadOverrider. Return the thread object

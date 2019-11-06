@@ -19,15 +19,18 @@
 #include "base/task/post_task.h"
 #include "base/task_runner.h"
 #include "build/build_config.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/page_visibility_state.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #include "ui/views/linux_ui/linux_ui.h"
@@ -145,7 +148,7 @@ void SetBrowserStartupIsComplete() {
 // flag accordingly.
 class StartupObserver : public WebContentsObserver {
  public:
-  StartupObserver() : weak_factory_(this) {}
+  StartupObserver() {}
   ~StartupObserver() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DCHECK(IsBrowserStartupComplete());
@@ -181,7 +184,7 @@ class StartupObserver : public WebContentsObserver {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<StartupObserver> weak_factory_;
+  base::WeakPtrFactory<StartupObserver> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(StartupObserver);
 };

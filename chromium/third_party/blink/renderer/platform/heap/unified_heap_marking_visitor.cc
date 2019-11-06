@@ -7,28 +7,35 @@
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/heap/unified_heap_controller.h"
 
 namespace blink {
 
-std::unique_ptr<UnifiedHeapMarkingVisitor> UnifiedHeapMarkingVisitor::Create(
+UnifiedHeapMarkingVisitorBase::UnifiedHeapMarkingVisitorBase(
     ThreadState* thread_state,
     MarkingMode mode,
-    v8::Isolate* isolate) {
-  DCHECK(thread_state);
-  DCHECK(isolate);
-  return std::unique_ptr<UnifiedHeapMarkingVisitor>(
-      new UnifiedHeapMarkingVisitor(thread_state, mode, isolate));
+    v8::Isolate* isolate)
+    : MarkingVisitor(thread_state, mode),
+      isolate_(isolate),
+      controller_(thread_state->unified_heap_controller()) {
+  DCHECK(controller_);
+}
+
+void UnifiedHeapMarkingVisitorBase::Visit(
+    const TraceWrapperV8Reference<v8::Value>& v8_reference) {
+  if (v8_reference.Get().IsEmpty())
+    return;
+  DCHECK(isolate_);
+  // TODO(mlippautz): Do not call into controller directly but rather use a
+  // Worklist or similar as temporary storage.
+  controller_->RegisterEmbedderReference(v8_reference.Get());
 }
 
 UnifiedHeapMarkingVisitor::UnifiedHeapMarkingVisitor(ThreadState* thread_state,
                                                      MarkingMode mode,
                                                      v8::Isolate* isolate)
-    : MarkingVisitor(thread_state, mode),
-      isolate_(isolate),
-      controller_(V8PerIsolateData::From(isolate)->GetUnifiedHeapController()) {
-  DCHECK(controller_);
-}
+    : UnifiedHeapMarkingVisitorBase(thread_state, mode, isolate) {}
 
 void UnifiedHeapMarkingVisitor::WriteBarrier(
     const TraceWrapperV8Reference<v8::Value>& object) {
@@ -56,14 +63,6 @@ void UnifiedHeapMarkingVisitor::WriteBarrier(
     return;
 
   wrapper_type_info->Trace(thread_state->CurrentVisitor(), object);
-}
-
-void UnifiedHeapMarkingVisitor::Visit(
-    const TraceWrapperV8Reference<v8::Value>& v8_reference) {
-  if (v8_reference.Get().IsEmpty())
-    return;
-  DCHECK(isolate_);
-  controller_->RegisterEmbedderReference(v8_reference.Get());
 }
 
 }  // namespace blink

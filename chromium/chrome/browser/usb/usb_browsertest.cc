@@ -23,9 +23,9 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
-#include "device/usb/public/cpp/fake_usb_device_manager.h"
-#include "device/usb/public/mojom/device.mojom.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
+#include "services/device/public/cpp/test/fake_usb_device_manager.h"
+#include "services/device/public/mojom/usb_device.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
 namespace blink {
@@ -73,7 +73,7 @@ class FakeChooserView : public ChooserController::View {
 class FakeUsbChooser : public WebUsbChooser {
  public:
   explicit FakeUsbChooser(RenderFrameHost* render_frame_host)
-      : WebUsbChooser(render_frame_host), weak_factory_(this) {}
+      : WebUsbChooser(render_frame_host) {}
 
   ~FakeUsbChooser() override {}
 
@@ -92,7 +92,7 @@ class FakeUsbChooser : public WebUsbChooser {
   }
 
  private:
-  base::WeakPtrFactory<FakeUsbChooser> weak_factory_;
+  base::WeakPtrFactory<FakeUsbChooser> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(FakeUsbChooser);
 };

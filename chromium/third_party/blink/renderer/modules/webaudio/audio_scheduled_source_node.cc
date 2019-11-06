@@ -33,8 +33,8 @@
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
@@ -256,9 +256,10 @@ void AudioScheduledSourceHandler::FinishWithoutOnEnded() {
 void AudioScheduledSourceHandler::Finish() {
   FinishWithoutOnEnded();
 
-  PostCrossThreadTask(*task_runner_, FROM_HERE,
-                      CrossThreadBind(&AudioScheduledSourceHandler::NotifyEnded,
-                                      WrapRefCounted(this)));
+  PostCrossThreadTask(
+      *task_runner_, FROM_HERE,
+      CrossThreadBindOnce(&AudioScheduledSourceHandler::NotifyEnded,
+                          WrapRefCounted(this)));
 }
 
 void AudioScheduledSourceHandler::NotifyEnded() {

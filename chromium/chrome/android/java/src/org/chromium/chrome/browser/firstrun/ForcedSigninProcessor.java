@@ -4,15 +4,15 @@
 
 package org.chromium.chrome.browser.firstrun;
 
-import android.content.Context;
 import android.support.annotation.Nullable;
 
 import org.chromium.base.Log;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
 import org.chromium.chrome.browser.externalauth.UserRecoverableErrorHandler;
+import org.chromium.chrome.browser.preferences.sync.AccountManagementFragment;
 import org.chromium.chrome.browser.services.AndroidEduAndChildAccountHelper;
-import org.chromium.chrome.browser.signin.AccountManagementFragment;
+import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.components.signin.AccountManagerFacade;
@@ -43,7 +43,7 @@ public final class ForcedSigninProcessor {
      * This is triggered once per Chrome Application lifetime and everytime the Account state
      * changes with early exit if an account has already been signed in.
      */
-    public static void start(final Context appContext, @Nullable final Runnable onComplete) {
+    public static void start(@Nullable final Runnable onComplete) {
         new AndroidEduAndChildAccountHelper() {
             @Override
             public void onParametersReady() {
@@ -55,7 +55,7 @@ public final class ForcedSigninProcessor {
                 boolean forceSignin = isAndroidEduDevice || hasChildAccount;
                 AccountManagementFragment.setSignOutAllowedPreferenceValue(!forceSignin);
                 if (forceSignin) {
-                    processForcedSignIn(appContext, onComplete);
+                    processForcedSignIn(onComplete);
                 }
             }
         }.start();
@@ -65,12 +65,11 @@ public final class ForcedSigninProcessor {
      * Processes the fully automatic non-FRE-related forced sign-in.
      * This is used to enforce the environment for Android EDU and child accounts.
      */
-    private static void processForcedSignIn(
-            final Context appContext, @Nullable final Runnable onComplete) {
-        final SigninManager signinManager = SigninManager.get();
+    private static void processForcedSignIn(@Nullable final Runnable onComplete) {
+        final SigninManager signinManager = IdentityServicesProvider.getSigninManager();
         // By definition we have finished all the checks for first run.
         signinManager.onFirstRunCheckDone();
-        if (!FeatureUtilities.canAllowSync(appContext) || !signinManager.isSignInAllowed()) {
+        if (!FeatureUtilities.canAllowSync() || !signinManager.isSignInAllowed()) {
             Log.d(TAG, "Sign in disallowed");
             return;
         }
@@ -105,7 +104,7 @@ public final class ForcedSigninProcessor {
     // TODO(bauerb): Once external dependencies reliably use policy to force sign-in,
     // consider removing the child account / EDU checks.
     public static void checkCanSignIn(final ChromeActivity activity) {
-        if (SigninManager.get().isForceSigninEnabled()) {
+        if (IdentityServicesProvider.getSigninManager().isForceSigninEnabled()) {
             ExternalAuthUtils.getInstance().canUseGooglePlayServices(
                     new UserRecoverableErrorHandler.ModalDialog(activity, false));
         }

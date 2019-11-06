@@ -158,8 +158,8 @@ class RenderViewTest : public testing::Test {
   // Sends a tap at the |rect|.
   void SimulateRectTap(const gfx::Rect& rect);
 
-  // Simulates |node| being focused.
-  void SetFocused(const blink::WebNode& node);
+  // Simulates |element| being focused.
+  void SetFocused(const blink::WebElement& element);
 
   // Simulates a navigation with a type of reload to the given url.
   void Reload(const GURL& url);
@@ -201,6 +201,9 @@ class RenderViewTest : public testing::Test {
   void SetUp() override;
 
   void TearDown() override;
+
+  // Install a fake URL loader factory for the RenderFrameImpl.
+  void CreateFakeWebURLLoaderFactory();
 
   base::test::ScopedTaskEnvironment scoped_task_environment_;
 

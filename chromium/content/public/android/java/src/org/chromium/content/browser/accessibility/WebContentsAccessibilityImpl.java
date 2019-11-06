@@ -148,8 +148,8 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProvider
 
     protected WebContentsAccessibilityImpl(WebContents webContents) {
         mWebContents = (WebContentsImpl) webContents;
-        mContext = mWebContents.getContext();
         mView = mWebContents.getViewAndroidDelegate().getContainerView();
+        mContext = mView.getContext();
         mProductVersion = mWebContents.getProductVersion();
         mAccessibilityManager =
                 (AccessibilityManager) mContext.getSystemService(Context.ACCESSIBILITY_SERVICE);
@@ -946,9 +946,7 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProvider
 
     @CalledByNative
     private void handleSliderChanged(int id) {
-        // Sending a TYPE_VIEW_SELECTED event triggers talkback to report new
-        // slider value
-        sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_SELECTED);
+        sendAccessibilityEvent(id, AccessibilityEvent.TYPE_VIEW_SCROLLED);
     }
 
     @CalledByNative

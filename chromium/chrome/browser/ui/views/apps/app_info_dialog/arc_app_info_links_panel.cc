@@ -27,14 +27,14 @@ ArcAppInfoLinksPanel::ArcAppInfoLinksPanel(Profile* profile,
       app_list_observer_(this),
       manage_link_(nullptr) {
   SetLayoutManager(std::make_unique<views::BoxLayout>(
-      views::BoxLayout::kVertical, gfx::Insets(),
+      views::BoxLayout::Orientation::kVertical, gfx::Insets(),
       ChromeLayoutProvider::Get()->GetDistanceMetric(
           views::DISTANCE_RELATED_CONTROL_VERTICAL)));
-  manage_link_ = new views::Link(
+  auto manage_link = std::make_unique<views::Link>(
       l10n_util::GetStringUTF16(IDS_ARC_APPLICATION_INFO_MANAGE_LINK));
-  manage_link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  manage_link_->set_listener(this);
-  AddChildView(manage_link_);
+  manage_link->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  manage_link->set_listener(this);
+  manage_link_ = AddChildView(std::move(manage_link));
 
   ArcAppListPrefs* const arc_prefs = ArcAppListPrefs::Get(profile_);
   DCHECK(arc_prefs);

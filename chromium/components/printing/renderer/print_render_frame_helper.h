@@ -225,8 +225,7 @@ class PrintRenderFrameHelper
 
   // Renders a print preview page. |page_number| is 0-based.
   // Returns true if print preview should continue, false on failure.
-  bool RenderPreviewPage(int page_number,
-                         const PrintMsg_Print_Params& print_params);
+  bool RenderPreviewPage(int page_number);
 
   // Finalize the print ready preview document.
   bool FinalizePrintReadyDocument();
@@ -537,9 +536,9 @@ class PrintRenderFrameHelper
   // hangs because RequestPrintPreview is called before DidStopLoading() is
   // called. This is a store for the RequestPrintPreview() call and its
   // parameters so that it can be invoked after DidStopLoading.
-  base::Closure on_stop_loading_closure_;
+  base::OnceClosure on_stop_loading_closure_;
 
-  base::WeakPtrFactory<PrintRenderFrameHelper> weak_ptr_factory_;
+  base::WeakPtrFactory<PrintRenderFrameHelper> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PrintRenderFrameHelper);
 };

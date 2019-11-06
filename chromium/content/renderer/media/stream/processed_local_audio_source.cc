@@ -14,38 +14,34 @@
 #include "build/build_config.h"
 #include "content/public/common/content_features.h"
 #include "content/renderer/media/audio/audio_device_factory.h"
-#include "content/renderer/media/stream/media_stream_audio_processor_options.h"
-#include "content/renderer/media/stream/media_stream_constraints_util.h"
 #include "content/renderer/media/webrtc/peer_connection_dependency_factory.h"
 #include "content/renderer/media/webrtc/webrtc_audio_device_impl.h"
-#include "content/renderer/media/webrtc_logging.h"
 #include "content/renderer/render_frame_impl.h"
 #include "media/base/channel_layout.h"
 #include "media/base/sample_rates.h"
+#include "media/webrtc/audio_processor_controls.h"
 #include "media/webrtc/webrtc_switches.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
+#include "third_party/blink/public/platform/modules/mediastream/media_stream_audio_processor_options.h"
+#include "third_party/blink/public/platform/modules/webrtc/webrtc_logging.h"
+#include "third_party/blink/public/web/modules/mediastream/media_stream_constraints_util.h"
 #include "third_party/webrtc/media/base/media_channel.h"
 
 namespace content {
 
-using EchoCancellationType = AudioProcessingProperties::EchoCancellationType;
+using EchoCancellationType =
+    blink::AudioProcessingProperties::EchoCancellationType;
 
 namespace {
 // Used as an identifier for ProcessedLocalAudioSource::From().
 void* const kProcessedLocalAudioSourceIdentifier =
     const_cast<void**>(&kProcessedLocalAudioSourceIdentifier);
 
-bool ApmInAudioServiceEnabled() {
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
-  return base::FeatureList::IsEnabled(features::kWebRtcApmInAudioService);
-#else
-  return false;
-#endif
-}
-
-void LogAudioProcesingProperties(const AudioProcessingProperties& properties) {
+void LogAudioProcesingProperties(
+    const blink::AudioProcessingProperties& properties) {
   auto aec_to_string =
-      [](AudioProcessingProperties::EchoCancellationType type) {
-        using AEC = AudioProcessingProperties::EchoCancellationType;
+      [](blink::AudioProcessingProperties::EchoCancellationType type) {
+        using AEC = blink::AudioProcessingProperties::EchoCancellationType;
         switch (type) {
           case AEC::kEchoCancellationDisabled:
             return "disabled";
@@ -81,26 +77,35 @@ void LogAudioProcesingProperties(const AudioProcessingProperties& properties) {
       bool_to_string(properties.goog_experimental_auto_gain_control),
       bool_to_string(base::FeatureList::IsEnabled(features::kWebRtcHybridAgc)));
 
-  WebRtcLogMessage(str);
+  blink::WebRtcLogMessage(str);
 }
 }  // namespace
+
+bool IsApmInAudioServiceEnabled() {
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
+  return base::FeatureList::IsEnabled(features::kWebRtcApmInAudioService);
+#else
+  return false;
+#endif
+}
 
 ProcessedLocalAudioSource::ProcessedLocalAudioSource(
     int consumer_render_frame_id,
     const blink::MediaStreamDevice& device,
     bool disable_local_echo,
-    const AudioProcessingProperties& audio_processing_properties,
-    const ConstraintsCallback& started_callback,
-    PeerConnectionDependencyFactory* factory)
-    : blink::MediaStreamAudioSource(true /* is_local_source */,
+    const blink::AudioProcessingProperties& audio_processing_properties,
+    ConstraintsOnceCallback started_callback,
+    PeerConnectionDependencyFactory* factory,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+    : blink::MediaStreamAudioSource(std::move(task_runner),
+                                    true /* is_local_source */,
                                     disable_local_echo),
       consumer_render_frame_id_(consumer_render_frame_id),
       pc_factory_(factory),
       audio_processing_properties_(audio_processing_properties),
-      started_callback_(started_callback),
+      started_callback_(std::move(started_callback)),
       volume_(0),
-      allow_invalid_render_frame_id_for_testing_(false),
-      weak_factory_(this) {
+      allow_invalid_render_frame_id_for_testing_(false) {
   DCHECK(pc_factory_);
   DVLOG(1) << "ProcessedLocalAudioSource::ProcessedLocalAudioSource()";
   SetDevice(device);
@@ -134,8 +139,9 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {
   // to initialize the audio source.
   if (!allow_invalid_render_frame_id_for_testing_ &&
       !RenderFrameImpl::FromRoutingID(consumer_render_frame_id_)) {
-    WebRtcLogMessage("ProcessedLocalAudioSource::EnsureSourceIsStarted() fails "
-                     " because the render frame does not exist.");
+    blink::WebRtcLogMessage(
+        "ProcessedLocalAudioSource::EnsureSourceIsStarted() fails "
+        " because the render frame does not exist.");
     return false;
   }
 
@@ -146,7 +152,7 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {
       consumer_render_frame_id_, device().input.channel_layout(),
       device().input.sample_rate(), device().input.frames_per_buffer(),
       device().session_id, device().input.effects());
-  WebRtcLogMessage(str);
+  blink::WebRtcLogMessage(str);
   DVLOG(1) << str;
 
   LogAudioProcesingProperties(audio_processing_properties_);
@@ -193,7 +199,7 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {
   WebRtcAudioDeviceImpl* const rtc_audio_device =
       pc_factory_->GetWebRtcAudioDevice();
   if (!rtc_audio_device) {
-    WebRtcLogMessage(
+    blink::WebRtcLogMessage(
         "ProcessedLocalAudioSource::EnsureSourceIsStarted() fails"
         " because there is no WebRtcAudioDeviceImpl instance.");
     return false;
@@ -223,7 +229,7 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {
       channel_layout != media::CHANNEL_LAYOUT_STEREO &&
       channel_layout != media::CHANNEL_LAYOUT_STEREO_AND_KEYBOARD_MIC &&
       channel_layout != media::CHANNEL_LAYOUT_DISCRETE) {
-    WebRtcLogMessage(base::StringPrintf(
+    blink::WebRtcLogMessage(base::StringPrintf(
         "ProcessedLocalAudioSource::EnsureSourceIsStarted() fails "
         " because the input channel layout (%d) is not supported.",
         static_cast<int>(channel_layout)));
@@ -256,7 +262,7 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {
   DCHECK(params.IsValid());
   media::AudioSourceParameters source_params(device().session_id);
   const bool use_remote_apm =
-      ApmInAudioServiceEnabled() &&
+      IsApmInAudioServiceEnabled() &&
       MediaStreamAudioProcessor::WouldModifyAudio(audio_processing_properties_);
   if (use_remote_apm) {
     audio_processor_proxy_ =
@@ -273,12 +279,12 @@ bool ProcessedLocalAudioSource::EnsureSourceIsStarted() {
       source_params.processing->settings.automatic_gain_control =
           media::AutomaticGainControlType::kHybridExperimental;
     }
-    WebRtcLogMessage(base::StringPrintf(
+    blink::WebRtcLogMessage(base::StringPrintf(
         "Using APM in audio process; settings: %s",
         source_params.processing->settings.ToString().c_str()));
 
   } else {
-    WebRtcLogMessage("Using APM in renderer process.");
+    blink::WebRtcLogMessage("Using APM in renderer process.");
     audio_processor_ = new rtc::RefCountedObject<MediaStreamAudioProcessor>(
         audio_processing_properties_, rtc_audio_device);
     params.set_frames_per_buffer(GetBufferSize(device().input.sample_rate()));
@@ -353,28 +359,27 @@ int ProcessedLocalAudioSource::MaxVolume() const {
 }
 
 void ProcessedLocalAudioSource::OnCaptureStarted() {
-  started_callback_.Run(this, blink::MEDIA_DEVICE_OK, "");
+  std::move(started_callback_)
+      .Run(this, blink::mojom::MediaStreamRequestResult::OK, "");
 }
 
 void ProcessedLocalAudioSource::Capture(const media::AudioBus* audio_bus,
-                                        int audio_delay_milliseconds,
+                                        base::TimeTicks audio_capture_time,
                                         double volume,
                                         bool key_pressed) {
   if (audio_processor_) {
     // The data must be processed here.
-    CaptureUsingProcessor(audio_bus, audio_delay_milliseconds, volume,
-                          key_pressed);
+    CaptureUsingProcessor(audio_bus, audio_capture_time, volume, key_pressed);
   } else {
     // The audio is already processed in the audio service, just send it along.
     level_calculator_.Calculate(*audio_bus, false);
-    DeliverDataToTracks(
-        *audio_bus, base::TimeTicks::Now() - base::TimeDelta::FromMilliseconds(
-                                                 audio_delay_milliseconds));
+    DeliverDataToTracks(*audio_bus, audio_capture_time);
   }
 }
 
 void ProcessedLocalAudioSource::OnCaptureError(const std::string& message) {
-  WebRtcLogMessage("ProcessedLocalAudioSource::OnCaptureError: " + message);
+  blink::WebRtcLogMessage("ProcessedLocalAudioSource::OnCaptureError: " +
+                          message);
   StopSourceOnError(message);
 }
 
@@ -397,7 +402,7 @@ void ProcessedLocalAudioSource::SetOutputDeviceForAec(
 
 void ProcessedLocalAudioSource::CaptureUsingProcessor(
     const media::AudioBus* audio_bus,
-    int audio_delay_milliseconds,
+    base::TimeTicks audio_capture_time,
     double volume,
     bool key_pressed) {
 #if defined(OS_WIN) || defined(OS_MACOSX)
@@ -411,13 +416,8 @@ void ProcessedLocalAudioSource::CaptureUsingProcessor(
   DCHECK_LE(volume, 1.6);
 #endif
 
-  // TODO(miu): Plumbing is needed to determine the actual capture timestamp
-  // of the audio, instead of just snapshotting TimeTicks::Now(), for proper
-  // audio/video sync.  https://crbug.com/335335
-  const base::TimeTicks reference_clock_snapshot = base::TimeTicks::Now();
-  TRACE_EVENT2("audio", "ProcessedLocalAudioSource::Capture", "now (ms)",
-               (reference_clock_snapshot - base::TimeTicks()).InMillisecondsF(),
-               "delay (ms)", audio_delay_milliseconds);
+  TRACE_EVENT1("audio", "ProcessedLocalAudioSource::Capture", "capture-time",
+               audio_capture_time);
 
   // Map internal volume range of [0.0, 1.0] into [0, 255] used by AGC.
   // The volume can be higher than 255 on Linux, and it will be cropped to
@@ -446,8 +446,7 @@ void ProcessedLocalAudioSource::CaptureUsingProcessor(
 
   // Push the data to the processor for processing.
   audio_processor_->PushCaptureData(
-      *audio_bus,
-      base::TimeDelta::FromMilliseconds(audio_delay_milliseconds));
+      *audio_bus, base::TimeTicks::Now() - audio_capture_time);
 
   // Process and consume the data in the processor until there is not enough
   // data in the processor.
@@ -461,8 +460,7 @@ void ProcessedLocalAudioSource::CaptureUsingProcessor(
 
     level_calculator_.Calculate(*processed_data, force_report_nonzero_energy);
 
-    DeliverDataToTracks(*processed_data,
-                        reference_clock_snapshot - processed_data_audio_delay);
+    DeliverDataToTracks(*processed_data, audio_capture_time);
 
     if (new_volume) {
       GetTaskRunner()->PostTask(

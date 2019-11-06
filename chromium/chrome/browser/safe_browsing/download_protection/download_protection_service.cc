@@ -13,12 +13,12 @@
 #include "chrome/browser/extensions/api/safe_browsing_private/safe_browsing_private_event_router.h"
 #include "chrome/browser/extensions/api/safe_browsing_private/safe_browsing_private_event_router_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/safe_browsing/advanced_protection_status_manager.h"
 #include "chrome/browser/safe_browsing/download_protection/check_client_download_request.h"
 #include "chrome/browser/safe_browsing/download_protection/download_feedback_service.h"
 #include "chrome/browser/safe_browsing/download_protection/download_url_sb_client.h"
 #include "chrome/browser/safe_browsing/download_protection/ppapi_download_request.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
-#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/common/safe_browsing/binary_feature_extractor.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/common/google_util.h"
@@ -30,7 +30,6 @@
 #include "content/public/browser/web_contents.h"
 #include "net/base/url_util.h"
 #include "net/cert/x509_util.h"
-#include "services/identity/public/cpp/identity_manager.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 using content::BrowserThread;
@@ -281,14 +280,27 @@ void DownloadProtectionService::PPAPIDownloadCheckRequestFinished(
 }
 
 void DownloadProtectionService::ShowDetailsForDownload(
-    const download::DownloadItem& item,
+    const download::DownloadItem* item,
     content::PageNavigator* navigator) {
   GURL learn_more_url(chrome::kDownloadScanningLearnMoreURL);
   learn_more_url = google_util::AppendGoogleLocaleParam(
       learn_more_url, g_browser_process->GetApplicationLocale());
   learn_more_url = net::AppendQueryParameter(
       learn_more_url, "ctx",
-      base::NumberToString(static_cast<int>(item.GetDangerType())));
+      base::NumberToString(static_cast<int>(item->GetDangerType())));
+
+  Profile* profile = Profile::FromBrowserContext(
+      content::DownloadItemUtils::GetBrowserContext(item));
+  if (profile &&
+      AdvancedProtectionStatusManager::RequestsAdvancedProtectionVerdicts(
+          profile) &&
+      item->GetDangerType() ==
+          download::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT) {
+    learn_more_url = GURL(chrome::kAdvancedProtectionDownloadLearnMoreURL);
+    learn_more_url = google_util::AppendGoogleLocaleParam(
+        learn_more_url, g_browser_process->GetApplicationLocale());
+  }
+
   navigator->OpenURL(
       content::OpenURLParams(learn_more_url, content::Referrer(),
                              WindowOpenDisposition::NEW_FOREGROUND_TAB,
@@ -433,18 +445,11 @@ void DownloadProtectionService::AddReferrerChainToPPAPIClientDownloadRequest(
 void DownloadProtectionService::OnDangerousDownloadOpened(
     const download::DownloadItem* item,
     Profile* profile) {
-  identity::IdentityManager* identity_manager =
-      IdentityManagerFactory::GetForProfileIfExists(profile);
-  std::string username = identity_manager
-                             ? identity_manager->GetPrimaryAccountInfo().email
-                             : std::string();
-
   std::string raw_digest_sha256 = item->GetHash();
   extensions::SafeBrowsingPrivateEventRouterFactory::GetForProfile(profile)
       ->OnDangerousDownloadOpened(
           item->GetURL(), item->GetTargetFilePath().AsUTF8Unsafe(),
-          base::HexEncode(raw_digest_sha256.data(), raw_digest_sha256.size()),
-          username);
+          base::HexEncode(raw_digest_sha256.data(), raw_digest_sha256.size()));
 }
 
 bool DownloadProtectionService::MaybeBeginFeedbackForDownload(

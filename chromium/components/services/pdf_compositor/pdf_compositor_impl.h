@@ -17,7 +17,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/optional.h"
 #include "components/services/pdf_compositor/public/cpp/pdf_service_mojo_types.h"
-#include "components/services/pdf_compositor/public/interfaces/pdf_compositor.mojom.h"
+#include "components/services/pdf_compositor/public/mojom/pdf_compositor.mojom.h"
 #include "services/service_manager/public/cpp/service_context_ref.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
@@ -169,7 +169,7 @@ class PdfCompositorImpl : public mojom::PdfCompositor {
   // Keep track of all frames' information indexed by frame id.
   FrameMap frame_info_map_;
 
-  static std::vector<std::unique_ptr<RequestInfo>> requests_;
+  std::vector<std::unique_ptr<RequestInfo>> requests_;
 
   DISALLOW_COPY_AND_ASSIGN(PdfCompositorImpl);
 };

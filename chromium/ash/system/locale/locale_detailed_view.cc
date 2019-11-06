@@ -4,6 +4,7 @@
 
 #include "ash/system/locale/locale_detailed_view.h"
 
+#include "ash/public/cpp/system_tray_client.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
@@ -74,7 +75,7 @@ class LocaleItem : public ActionableView {
           kCheckCircleIcon, kMenuIconSize, gfx::kGoogleGreen700));
       tri_view->AddView(TriView::Container::END, checked_image);
     }
-    SetAccessibleName(display_name_view->text());
+    SetAccessibleName(display_name_view->GetText());
   }
 
   ~LocaleItem() override = default;
@@ -90,6 +91,8 @@ class LocaleItem : public ActionableView {
     ActionableView::OnFocus();
     ScrollViewToVisible();
   }
+
+  const char* GetClassName() const override { return "LocaleItem"; }
 
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
     ActionableView::GetAccessibleNodeData(node_data);
@@ -120,32 +123,36 @@ void LocaleDetailedView::CreateItems() {
   CreateTitleRow(IDS_ASH_STATUS_TRAY_LOCALE_TITLE);
   CreateScrollableList();
 
-  const std::vector<mojom::LocaleInfoPtr>& locales =
+  const std::vector<LocaleInfo>& locales =
       Shell::Get()->system_tray_model()->locale()->locale_list();
   int id = 0;
   for (auto& entry : locales) {
     const bool checked =
-        entry->iso_code ==
+        entry.iso_code ==
         Shell::Get()->system_tray_model()->locale()->current_locale_iso_code();
     LocaleItem* item =
-        new LocaleItem(this, entry->iso_code, entry->display_name, checked);
+        new LocaleItem(this, entry.iso_code, entry.display_name, checked);
     scroll_content()->AddChildView(item);
-    item->set_id(id);
-    id_to_locale_[id] = entry->iso_code;
+    item->SetID(id);
+    id_to_locale_[id] = entry.iso_code;
     ++id;
   }
   Layout();
 }
 
 void LocaleDetailedView::HandleViewClicked(views::View* view) {
-  auto it = id_to_locale_.find(view->id());
+  auto it = id_to_locale_.find(view->GetID());
   DCHECK(it != id_to_locale_.end());
   const std::string locale_iso_code = it->second;
   if (locale_iso_code !=
       Shell::Get()->system_tray_model()->locale()->current_locale_iso_code()) {
-    Shell::Get()->system_tray_model()->client_ptr()->SetLocaleAndExit(
+    Shell::Get()->system_tray_model()->client()->SetLocaleAndExit(
         locale_iso_code);
   }
+}
+
+const char* LocaleDetailedView::GetClassName() const {
+  return "LocaleDetailedView";
 }
 
 }  // namespace tray

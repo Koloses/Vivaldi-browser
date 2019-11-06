@@ -17,9 +17,9 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/webrtc/webrtc_content_browsertest_base.h"
 #include "content/browser/webrtc/webrtc_internals.h"
+#include "content/public/browser/system_connector.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_manager_connection.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -756,7 +756,8 @@ IN_PROC_BROWSER_TEST_P(WebRtcGetUserMediaBrowserTest,
 }
 
 // Flaky on Win, see https://crbug.com/915135
-#if defined(OS_WIN)
+// Flaky on Linux, see https://crbug.com/952381
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_ApplyConstraintsNonDevice DISABLED_ApplyConstraintsNonDevice
 #else
 #define MAYBE_ApplyConstraintsNonDevice ApplyConstraintsNonDevice
@@ -865,23 +866,41 @@ IN_PROC_BROWSER_TEST_P(WebRtcGetUserMediaBrowserTest,
 
   ExecuteJavascriptAndWaitForOk("setUpForAudioServiceCrash()");
 
-  // Crash the utility process for the audio service
-  service_manager::Connector* connector =
-      ServiceManagerConnection::GetForProcess()->GetConnector();
+  // Crash the audio service process.
   audio::mojom::TestingApiPtr service_testing_api;
-  connector->BindInterface(audio::mojom::kServiceName,
-                           mojo::MakeRequest(&service_testing_api));
+  GetSystemConnector()->BindInterface(audio::mojom::kServiceName,
+                                      mojo::MakeRequest(&service_testing_api));
   service_testing_api->Crash();
 
   ExecuteJavascriptAndWaitForOk("verifyAfterAudioServiceCrash()");
 }
 
+// Test crashes on MSAN. See https://crbug.com/941934
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_GetUserMediaCloneAndApplyConstraints \
+  DISABLED_GetUserMediaCloneAndApplyConstraints
+#else
+#define MAYBE_GetUserMediaCloneAndApplyConstraints \
+  GetUserMediaCloneAndApplyConstraints
+#endif
+IN_PROC_BROWSER_TEST_P(WebRtcGetUserMediaBrowserTest,
+                       MAYBE_GetUserMediaCloneAndApplyConstraints) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url(embedded_test_server()->GetURL("/media/getusermedia.html"));
+  NavigateToURL(shell(), url);
+  ExecuteJavascriptAndWaitForOk("getUserMediaCloneAndApplyConstraints()");
+}
+
 // We run these tests with the audio service both in and out of the the browser
 // process to have waterfall coverage while the feature rolls out. It should be
 // removed after launch.
-#if (defined(OS_LINUX) && !defined(CHROME_OS)) || defined(OS_MACOSX) || \
-    defined(OS_WIN)
-// Supported platforms.
+#if defined(OS_LINUX) && !defined(CHROME_OS)
+// Platforms launched on.
+INSTANTIATE_TEST_SUITE_P(,
+                         WebRtcGetUserMediaBrowserTest,
+                         ::testing::Values(true));
+#elif defined(OS_MACOSX) || defined(OS_WIN)
+// Supported platforms but not launched on.
 INSTANTIATE_TEST_SUITE_P(, WebRtcGetUserMediaBrowserTest, ::testing::Bool());
 #else
 // Platforms where the out of process audio service is not supported

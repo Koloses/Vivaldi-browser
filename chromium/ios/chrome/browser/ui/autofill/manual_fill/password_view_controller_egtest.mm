@@ -27,10 +27,8 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#include "ios/web/public/features.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #include "ios/web/public/test/element_selector.h"
-#import "ios/web/public/test/web_view_interaction_test_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "url/gurl.h"
 
@@ -137,17 +135,11 @@ class TestStoreConsumer : public password_manager::PasswordStoreConsumer {
   const std::vector<autofill::PasswordForm>& GetStoreResults() {
     results_.clear();
     ResetObtained();
-    GetPasswordStore()->GetAutofillableLogins(this);
+    GetPasswordStore()->GetAllLogins(this);
     bool responded = base::test::ios::WaitUntilConditionOrTimeout(1.0, ^bool {
       return !AreObtainedReset();
     });
     GREYAssert(responded, @"Obtaining fillable items took too long.");
-    AppendObtainedToResults();
-    GetPasswordStore()->GetBlacklistLogins(this);
-    responded = base::test::ios::WaitUntilConditionOrTimeout(1.0, ^bool {
-      return !AreObtainedReset();
-    });
-    GREYAssert(responded, @"Obtaining blacklisted items took too long.");
     AppendObtainedToResults();
     return results_;
   }
@@ -244,12 +236,10 @@ BOOL WaitForJavaScriptCondition(NSString* java_script_condition) {
 
 - (void)setUp {
   [super setUp];
-  GREYAssert(autofill::features::IsPasswordManualFallbackEnabled(),
-             @"Manual Fallback must be enabled for this Test Case");
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
   const GURL URL = self.testServer->GetURL(kFormHTMLFile);
   [ChromeEarlGrey loadURL:URL];
-  [ChromeEarlGrey waitForWebViewContainingText:"hello!"];
+  [ChromeEarlGrey waitForWebStateContainingText:"hello!"];
   SaveExamplePasswordForm();
 }
 
@@ -312,10 +302,6 @@ BOOL WaitForJavaScriptCondition(NSString* java_script_condition) {
 
 // Tests that the Password View Controller is not present when presenting UI.
 - (void)testPasswordControllerPauses {
-  // For the search bar to appear in password settings at least one password is
-  // needed.
-  SaveExamplePasswordForm();
-
   // Bring up the keyboard.
   [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
       performAction:chrome_test_util::TapWebElement(kFormElementUsername)];
@@ -340,14 +326,13 @@ BOOL WaitForJavaScriptCondition(NSString* java_script_condition) {
 
 // Tests that the Password View Controller is resumed after selecting other
 // password.
-- (void)testPasswordControllerResumes {
-  if (([UIDevice currentDevice].systemVersion.doubleValue < 11.3)) {
-    // TODO(crbug.com/908776): OtherPasswordsMatcher is disabled in <11.3.
+// TODO(crbug.com/981922): Re-enable this test due to failing DB call.
+- (void)DISABLED_testPasswordControllerResumes {
+  if (([UIDevice currentDevice].systemVersion.doubleValue < 12)) {
+    // TODO(crbug.com/976348): iOS 11 support is being deprecated, disable this
+    // failing test for now.
     return;
   }
-
-  // For this test one password is needed.
-  SaveExamplePasswordForm();
 
   // Bring up the keyboard.
   [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
@@ -392,6 +377,10 @@ BOOL WaitForJavaScriptCondition(NSString* java_script_condition) {
     // TODO(crbug.com/908776): OtherPasswordsMatcher is disabled in <11.3.
     return;
   }
+  if (base::ios::IsRunningOnIOS13OrLater() && [ChromeEarlGrey isIPadIdiom]) {
+    // TODO(crbug.com/984977): Support this behavior in iPads again.
+    return;
+  }
 
   // Bring up the keyboard.
   [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewMatcher()]
@@ -427,7 +416,7 @@ BOOL WaitForJavaScriptCondition(NSString* java_script_condition) {
 // Tests that the Password View Controller is dismissed when tapping the
 // keyboard icon.
 - (void)testKeyboardIconDismissPasswordController {
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     // The keyboard icon is never present in iPads.
     return;
   }
@@ -458,7 +447,7 @@ BOOL WaitForJavaScriptCondition(NSString* java_script_condition) {
 // Tests that the Password View Controller is dismissed when tapping the outside
 // the popover on iPad.
 - (void)testIPadTappingOutsidePopOverDismissPasswordController {
-  if (!IsIPadIdiom()) {
+  if (![ChromeEarlGrey isIPadIdiom]) {
     return;
   }
   // Bring up the keyboard.
@@ -492,7 +481,7 @@ BOOL WaitForJavaScriptCondition(NSString* java_script_condition) {
 // TODO(crbug.com/909629): started to be flaky and sometimes opens full list
 // when typing text.
 - (void)DISABLED_testTappingKeyboardDismissPasswordControllerPopOver {
-  if (!IsIPadIdiom()) {
+  if (![ChromeEarlGrey isIPadIdiom]) {
     return;
   }
   // Bring up the keyboard.
@@ -579,12 +568,10 @@ BOOL WaitForJavaScriptCondition(NSString* java_script_condition) {
   if (!base::ios::IsRunningOnOrLater(11, 3, 0)) {
     EARL_GREY_TEST_SKIPPED(@"Skipped for iOS < 11.3");
   }
-  GREYAssert(base::FeatureList::IsEnabled(web::features::kWebFrameMessaging),
-             @"Frame Messaging must be enabled for this Test Case");
 
   const GURL URL = self.testServer->GetURL(kIFrameHTMLFile);
   [ChromeEarlGrey loadURL:URL];
-  [ChromeEarlGrey waitForWebViewContainingText:"iFrame"];
+  [ChromeEarlGrey waitForWebStateContainingText:"iFrame"];
   SaveLocalPasswordForm(URL);
 
   // Bring up the keyboard.

@@ -29,7 +29,7 @@
 class RegistryEntry;
 
 namespace base {
-class CancellationFlag;
+class AtomicFlag;
 class CommandLine;
 }
 
@@ -70,8 +70,8 @@ class ShellUtil {
     SHORTCUT_LOCATION_START_MENU_ROOT,
     SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED,  // now placed in root
     SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR,
-    SHORTCUT_LOCATION_TASKBAR_PINS,   // base::win::VERSION_WIN7 +
-    SHORTCUT_LOCATION_APP_SHORTCUTS,  // base::win::VERSION_WIN8 +
+    SHORTCUT_LOCATION_TASKBAR_PINS,   // base::win::Version::WIN7 +
+    SHORTCUT_LOCATION_APP_SHORTCUTS,  // base::win::Version::WIN8 +
     NUM_SHORTCUT_LOCATIONS
   };
 
@@ -580,7 +580,7 @@ class ShellUtil {
       const base::FilePath& old_target_exe,
       const base::FilePath& new_target_exe);
 
-  typedef base::RefCountedData<base::CancellationFlag> SharedCancellationFlag;
+  typedef base::RefCountedData<base::AtomicFlag> SharedCancellationFlag;
 
   // Appends Chrome shortcuts with non-whitelisted arguments to |shortcuts| if
   // not NULL. If |do_removal|, also removes non-whitelisted arguments from

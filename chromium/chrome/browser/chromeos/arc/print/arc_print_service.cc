@@ -15,6 +15,7 @@
 #include "base/bind_helpers.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -26,9 +27,10 @@
 #include "chrome/browser/chromeos/printing/printer_configurer.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_job_worker.h"
+#include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
+#include "components/arc/session/arc_bridge_service.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -50,6 +52,14 @@ namespace {
 
 class PrintJobHostImpl;
 class PrinterDiscoverySessionHostImpl;
+
+using chromeos::PrinterClass;
+
+constexpr PrinterClass kClassesToFetch[] = {
+    PrinterClass::kEnterprise,
+    PrinterClass::kSaved,
+    PrinterClass::kAutomatic,
+};
 
 class ArcPrintServiceImpl : public ArcPrintService,
                             public chromeos::CupsPrintJobManager::Observer,
@@ -140,27 +150,30 @@ std::unique_ptr<printing::MetafileSkia> ReadFileOnBlockingTaskRunner(
 }
 
 using PrinterQueryCallback =
-    base::OnceCallback<void(scoped_refptr<printing::PrinterQuery>)>;
+    base::OnceCallback<void(std::unique_ptr<printing::PrinterQuery>)>;
 
-void OnSetSettingsDoneOnIOThread(scoped_refptr<printing::PrinterQuery> query,
+void OnSetSettingsDoneOnIOThread(std::unique_ptr<printing::PrinterQuery> query,
                                  PrinterQueryCallback callback);
 
 void CreateQueryOnIOThread(std::unique_ptr<printing::PrintSettings> settings,
                            PrinterQueryCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  auto query = base::MakeRefCounted<printing::PrinterQuery>(
+  auto query = std::make_unique<printing::PrinterQuery>(
       content::ChildProcessHost::kInvalidUniqueID,
       content::ChildProcessHost::kInvalidUniqueID);
-  query->SetSettingsFromPOD(
+  auto* query_ptr = query.get();
+  query_ptr->SetSettingsFromPOD(
       std::move(settings),
-      base::BindOnce(&OnSetSettingsDoneOnIOThread, query, std::move(callback)));
+      base::BindOnce(&OnSetSettingsDoneOnIOThread, std::move(query),
+                     std::move(callback)));
 }
 
 // Send initialized PrinterQuery to UI thread.
-void OnSetSettingsDoneOnIOThread(scoped_refptr<printing::PrinterQuery> query,
+void OnSetSettingsDoneOnIOThread(std::unique_ptr<printing::PrinterQuery> query,
                                  PrinterQueryCallback callback) {
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           base::BindOnce(std::move(callback), query));
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
+      base::BindOnce(std::move(callback), std::move(query)));
 }
 
 std::unique_ptr<printing::PrinterSemanticCapsAndDefaults>
@@ -218,13 +231,14 @@ class PrinterDiscoverySessionHostImpl
   void StartPrinterDiscovery(
       const std::vector<std::string>& printer_ids) override {
     std::vector<mojom::PrinterInfoPtr> arc_printers;
-    for (size_t i = 0; i < chromeos::CupsPrintersManager::kNumPrinterClasses;
-         i++) {
-      std::vector<chromeos::Printer> printers = printers_manager_->GetPrinters(
-          static_cast<chromeos::CupsPrintersManager::PrinterClass>(i));
+
+    for (size_t i = 0; i < base::size(kClassesToFetch); ++i) {
+      auto printer_class = kClassesToFetch[i];
+      const auto& printers = printers_manager_->GetPrinters(printer_class);
       for (const auto& printer : printers)
-        arc_printers.emplace_back(ToArcPrinter(printer, nullptr));
+        arc_printers.push_back(ToArcPrinter(printer, nullptr));
     }
+
     if (!arc_printers.empty())
       instance_->AddPrinters(std::move(arc_printers));
   }
@@ -238,21 +252,20 @@ class PrinterDiscoverySessionHostImpl
   }
 
   void StartPrinterStateTracking(const std::string& printer_id) override {
-    std::unique_ptr<chromeos::Printer> printer =
+    base::Optional<chromeos::Printer> printer =
         printers_manager_->GetPrinter(printer_id);
     if (!printer) {
       RemovePrinter(printer_id);
       return;
     }
     if (printers_manager_->IsPrinterInstalled(*printer)) {
-      PrinterInstalled(std::move(printer), chromeos::kSuccess);
+      FetchCapabilities(*printer);
       return;
     }
-    const chromeos::Printer& printer_ref = *printer;
     configurer_->SetUpPrinter(
-        printer_ref,
+        *printer,
         base::BindOnce(&PrinterDiscoverySessionHostImpl::PrinterInstalled,
-                       weak_ptr_factory_.GetWeakPtr(), std::move(printer)));
+                       weak_ptr_factory_.GetWeakPtr(), *printer));
   }
 
   void StopPrinterStateTracking(const std::string& printer_id) override {
@@ -263,7 +276,7 @@ class PrinterDiscoverySessionHostImpl
 
   // chromeos::CupsPrintersManager::Observer:
   void OnPrintersChanged(
-      chromeos::CupsPrintersManager::PrinterClass printer_class,
+      PrinterClass printer_class,
       const std::vector<chromeos::Printer>& printers) override {
     // TODO(vkuzkokov) remove missing printers and only add new ones.
     std::vector<mojom::PrinterInfoPtr> arc_printers;
@@ -281,19 +294,22 @@ class PrinterDiscoverySessionHostImpl
   }
 
   // Fetch capabilities for newly installed printer.
-  void PrinterInstalled(std::unique_ptr<chromeos::Printer> printer,
+  void PrinterInstalled(const chromeos::Printer& printer,
                         chromeos::PrinterSetupResult result) {
     if (result != chromeos::kSuccess) {
-      RemovePrinter(printer->id());
+      RemovePrinter(printer.id());
       return;
     }
-    printers_manager_->PrinterInstalled(*printer, true /*is_automatic*/);
-    const std::string& printer_id = printer->id();
+    printers_manager_->PrinterInstalled(printer, true /*is_automatic*/);
+    FetchCapabilities(printer);
+  }
+
+  void FetchCapabilities(const chromeos::Printer& printer) {
     base::PostTaskWithTraitsAndReplyWithResult(
         FROM_HERE, {base::MayBlock()},
-        base::BindOnce(&FetchCapabilitiesOnBlockingTaskRunner, printer_id),
+        base::BindOnce(&FetchCapabilitiesOnBlockingTaskRunner, printer.id()),
         base::BindOnce(&PrinterDiscoverySessionHostImpl::CapabilitiesReceived,
-                       weak_ptr_factory_.GetWeakPtr(), std::move(printer)));
+                       weak_ptr_factory_.GetWeakPtr(), printer));
   }
 
   // Remove from the list of available printers.
@@ -303,14 +319,14 @@ class PrinterDiscoverySessionHostImpl
 
   // Transform printer capabilities to mojo type and send to container.
   void CapabilitiesReceived(
-      std::unique_ptr<chromeos::Printer> printer,
+      const chromeos::Printer& printer,
       std::unique_ptr<printing::PrinterSemanticCapsAndDefaults> caps) {
     if (!caps) {
-      RemovePrinter(printer->id());
+      RemovePrinter(printer.id());
       return;
     }
     std::vector<mojom::PrinterInfoPtr> arc_printers;
-    arc_printers.emplace_back(ToArcPrinter(*printer, std::move(caps)));
+    arc_printers.push_back(ToArcPrinter(printer, std::move(caps)));
     instance_->AddPrinters(std::move(arc_printers));
   }
 
@@ -458,10 +474,10 @@ class PrintJobHostImpl : public mojom::PrintJobHost,
   }
 
   // Create PrintJob and start printing if Metafile is created as well.
-  void OnSetSettingsDone(scoped_refptr<printing::PrinterQuery> query) {
+  void OnSetSettingsDone(std::unique_ptr<printing::PrinterQuery> query) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     job_ = base::MakeRefCounted<printing::PrintJob>();
-    job_->Initialize(query.get(), base::string16() /* name */,
+    job_->Initialize(std::move(query), base::string16() /* name */,
                      1 /* page_count */);
     registrar_.Add(this, chrome::NOTIFICATION_PRINT_JOB_EVENT,
                    content::Source<printing::PrintJob>(job_.get()));

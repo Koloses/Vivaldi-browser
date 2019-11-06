@@ -15,8 +15,8 @@
 #include "cc/base/synced_property.h"
 #include "cc/cc_export.h"
 #include "cc/layers/layer_sticky_position_constraint.h"
+#include "cc/paint/element_id.h"
 #include "cc/paint/filter_operations.h"
-#include "cc/trees/element_id.h"
 #include "cc/trees/mutator_host_client.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/scroll_offset.h"
@@ -35,7 +35,6 @@ class CopyOutputRequest;
 namespace cc {
 
 class LayerTreeImpl;
-class MutatorHost;
 class RenderSurfaceImpl;
 class ScrollState;
 struct ClipNode;
@@ -320,6 +319,8 @@ class CC_EXPORT EffectTree final : public PropertyTree<EffectNode> {
   EffectNode* FindNodeFromElementId(ElementId id);
   bool OnOpacityAnimated(ElementId id, float opacity);
   bool OnFilterAnimated(ElementId id, const FilterOperations& filters);
+  bool OnBackdropFilterAnimated(ElementId id,
+                                const FilterOperations& backdrop_filters);
 
   void UpdateEffects(int id);
 
@@ -372,13 +373,16 @@ class CC_EXPORT EffectTree final : public PropertyTree<EffectNode> {
   // 2) There are no mask layers.
   bool ClippedHitTestRegionIsRectangle(int effect_node_id) const;
 
+  // This function checks if the associated layer can use its layer bounds to
+  // correctly hit test. It returns true if the layer bounds cannot be trusted.
+  bool HitTestMayBeAffectedByMask(int effect_node_id) const;
+
  private:
   void UpdateOpacities(EffectNode* node, EffectNode* parent_node);
   void UpdateSubtreeHidden(EffectNode* node, EffectNode* parent_node);
   void UpdateIsDrawn(EffectNode* node, EffectNode* parent_node);
   void UpdateBackfaceVisibility(EffectNode* node, EffectNode* parent_node);
   void UpdateHasMaskingChild(EffectNode* node, EffectNode* parent_node);
-  void UpdateIsMasked(EffectNode* node, EffectNode* parent_node);
 
   // Stores copy requests, keyed by node id.
   std::unordered_multimap<int, std::unique_ptr<viz::CopyOutputRequest>>
@@ -512,14 +516,6 @@ struct AnimationScaleData {
   // updates.
   int update_number;
 
-  // Current animations, considering only scales at keyframes not including the
-  // starting keyframe of each animation.
-  float local_maximum_animation_target_scale;
-
-  // The maximum scale that this node's |local| transform will have during
-  // current animatons, considering only the starting scale of each animation.
-  float local_starting_animation_scale;
-
   // The maximum scale that this node's |to_target| transform will have during
   // current animations, considering only scales at keyframes not incuding the
   // starting keyframe of each animation.
@@ -533,8 +529,6 @@ struct AnimationScaleData {
 
   AnimationScaleData() {
     update_number = -1;
-    local_maximum_animation_target_scale = 0.f;
-    local_starting_animation_scale = 0.f;
     combined_maximum_animation_target_scale = 0.f;
     combined_starting_animation_scale = 0.f;
     to_screen_has_scale_animation = false;
@@ -637,7 +631,6 @@ class CC_EXPORT PropertyTrees final {
   ClipTree clip_tree;
   ScrollTree scroll_tree;
   bool needs_rebuild;
-  bool can_adjust_raster_scales;
   // Change tracking done on property trees needs to be preserved across commits
   // (when they are not rebuild). We cache a global bool which stores whether
   // we did any change tracking so that we can skip copying the change status
@@ -658,12 +651,13 @@ class CC_EXPORT PropertyTrees final {
   // Applies an animation state change for a particular element in
   // this property tree. Returns whether a draw property update is
   // needed.
-  bool ElementIsAnimatingChanged(const MutatorHost* mutator_host,
-                                 const PropertyToElementIdMap& element_id_map,
-                                 ElementListType list_type,
+  bool ElementIsAnimatingChanged(const PropertyToElementIdMap& element_id_map,
                                  const PropertyAnimationState& mask,
                                  const PropertyAnimationState& state,
                                  bool check_node_existence);
+  void AnimationScalesChanged(ElementId element_id,
+                              float maximum_scale,
+                              float starting_scale);
   void SetInnerViewportContainerBoundsDelta(gfx::Vector2dF bounds_delta);
   void SetOuterViewportContainerBoundsDelta(gfx::Vector2dF bounds_delta);
   void SetInnerViewportScrollBoundsDelta(gfx::Vector2dF bounds_delta);
@@ -706,6 +700,8 @@ class CC_EXPORT PropertyTrees final {
       int effect_id) const;
 
   ClipRectData* FetchClipRectFromCache(int clip_id, int target_id);
+
+  bool HasElement(ElementId element_id) const;
 
  private:
   gfx::Vector2dF inner_viewport_container_bounds_delta_;

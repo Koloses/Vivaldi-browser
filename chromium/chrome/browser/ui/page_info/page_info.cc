@@ -57,8 +57,10 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/content_settings_utils.h"
+#include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/rappor/public/rappor_utils.h"
 #include "components/rappor/rappor_service_impl.h"
+#include "components/signin/public/identity_manager/account_info.h"
 #include "components/ssl_errors/error_info.h"
 #include "components/strings/grit/components_chromium_strings.h"
 #include "components/strings/grit/components_strings.h"
@@ -89,18 +91,17 @@
 #include "chrome/browser/ui/page_info/page_info_infobar_delegate.h"
 #endif
 
-#if defined(SAFE_BROWSING_DB_LOCAL)
+#if defined(FULL_SAFE_BROWSING)
 #include "chrome/browser/safe_browsing/chrome_password_protection_service.h"
 #endif
 
+#include "app/vivaldi_apptools.h"
+
 using base::ASCIIToUTF16;
-using base::UTF8ToUTF16;
 using base::UTF16ToUTF8;
+using base::UTF8ToUTF16;
 using content::BrowserThread;
-#if defined(SAFE_BROWSING_DB_LOCAL)
-using PasswordReuseEvent =
-    safe_browsing::LoginReputationClientRequest::PasswordReuseEvent;
-#endif  // SAFE_BROWSING_DB_LOCAL
+using password_manager::metrics_util::PasswordType;
 
 namespace {
 
@@ -127,6 +128,10 @@ ContentSettingsType kPermissionType[] = {
     CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
     CONTENT_SETTINGS_TYPE_CLIPBOARD_READ,
     CONTENT_SETTINGS_TYPE_USB_GUARD,
+#if !defined(OS_ANDROID)
+    CONTENT_SETTINGS_TYPE_SERIAL_GUARD,
+#endif
+    CONTENT_SETTINGS_TYPE_BLUETOOTH_SCANNING,
 };
 
 // Checks whether this permission is currently the factory default, as set by
@@ -177,11 +182,6 @@ bool ShouldShowPermission(
       return true;
   }
 
-  if (info.type == CONTENT_SETTINGS_TYPE_CLIPBOARD_READ) {
-    if (!base::FeatureList::IsEnabled(features::kClipboardContentSetting))
-      return false;
-  }
-
 #if defined(OS_ANDROID)
   // Special geolocation DSE settings apply only on Android, so make sure it
   // gets checked there regardless of default setting on Desktop.
@@ -217,44 +217,27 @@ bool ShouldShowPermission(
   return false;
 }
 
-void CheckContentStatus(security_state::ContentStatus content_status,
-                        bool* displayed,
-                        bool* ran) {
-  switch (content_status) {
-    case security_state::CONTENT_STATUS_DISPLAYED:
-      *displayed = true;
-      break;
-    case security_state::CONTENT_STATUS_RAN:
-      *ran = true;
-      break;
-    case security_state::CONTENT_STATUS_DISPLAYED_AND_RAN:
-      *displayed = true;
-      *ran = true;
-      break;
-    case security_state::CONTENT_STATUS_UNKNOWN:
-    case security_state::CONTENT_STATUS_NONE:
-      break;
-  }
-}
-
-// If the |security_info| indicates that mixed content or certificate errors
-// were present, update |connection_status| and |connection_details|.
-void ReportAnyInsecureContent(const security_state::SecurityInfo& security_info,
-                              PageInfo::SiteConnectionStatus* connection_status,
-                              base::string16* connection_details) {
-  bool displayed_insecure_content = false;
-  bool ran_insecure_content = false;
-  CheckContentStatus(security_info.mixed_content_status,
-                     &displayed_insecure_content, &ran_insecure_content);
+// If the |visible_security_state| indicates that mixed content or certificate
+// errors were present, update |connection_status| and |connection_details|.
+void ReportAnyInsecureContent(
+    const security_state::VisibleSecurityState& visible_security_state,
+    PageInfo::SiteConnectionStatus* connection_status,
+    base::string16* connection_details) {
+  bool displayed_insecure_content =
+      visible_security_state.displayed_mixed_content;
+  bool ran_insecure_content = visible_security_state.ran_mixed_content;
   // Only note subresources with certificate errors if the main resource was
   // loaded without major certificate errors. If the main resource had a
   // certificate error, then it would not be that useful (and could
   // potentially be confusing) to warn about subresources that had certificate
   // errors too.
-  if (!net::IsCertStatusError(security_info.cert_status) ||
-      net::IsCertStatusMinorError(security_info.cert_status)) {
-    CheckContentStatus(security_info.content_with_cert_errors_status,
-                       &displayed_insecure_content, &ran_insecure_content);
+  if (!net::IsCertStatusError(visible_security_state.cert_status) ||
+      net::IsCertStatusMinorError(visible_security_state.cert_status)) {
+    displayed_insecure_content =
+        displayed_insecure_content ||
+        visible_security_state.displayed_content_with_cert_errors;
+    ran_insecure_content = ran_insecure_content ||
+                           visible_security_state.ran_content_with_cert_errors;
   }
 
   // Only one insecure content warning is displayed; show the most severe.
@@ -267,7 +250,7 @@ void ReportAnyInsecureContent(const security_state::SecurityInfo& security_info,
             IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_INSECURE_CONTENT_ERROR)));
     return;
   }
-  if (security_info.contained_mixed_form) {
+  if (visible_security_state.contained_mixed_form) {
     *connection_status = PageInfo::SITE_CONNECTION_STATUS_INSECURE_FORM_ACTION;
     connection_details->assign(l10n_util::GetStringFUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_SENTENCE_LINK, *connection_details,
@@ -307,12 +290,12 @@ const PageInfo::ChooserUIInfo kChooserUIInfo[] = {
     {CONTENT_SETTINGS_TYPE_USB_CHOOSER_DATA, &GetUsbChooserContext,
      IDS_PAGE_INFO_USB_DEVICE_SECONDARY_LABEL,
      IDS_PAGE_INFO_USB_DEVICE_ALLOWED_BY_POLICY_LABEL,
-     IDS_PAGE_INFO_DELETE_USB_DEVICE, "name"},
+     IDS_PAGE_INFO_DELETE_USB_DEVICE, &UsbChooserContext::GetObjectName},
 #if !defined(OS_ANDROID)
     {CONTENT_SETTINGS_TYPE_SERIAL_CHOOSER_DATA, &GetSerialChooserContext,
      IDS_PAGE_INFO_SERIAL_PORT_SECONDARY_LABEL,
      /*allowed_by_policy_description_string_id=*/-1,
-     IDS_PAGE_INFO_DELETE_SERIAL_PORT, "name"},
+     IDS_PAGE_INFO_DELETE_SERIAL_PORT, &SerialChooserContext::GetObjectName},
 #endif
 };
 
@@ -324,12 +307,14 @@ const char kPageInfoTimeNoActionPrefix[] =
 
 }  // namespace
 
-PageInfo::PageInfo(PageInfoUI* ui,
-                   Profile* profile,
-                   TabSpecificContentSettings* tab_specific_content_settings,
-                   content::WebContents* web_contents,
-                   const GURL& url,
-                   const security_state::SecurityInfo& security_info)
+PageInfo::PageInfo(
+    PageInfoUI* ui,
+    Profile* profile,
+    TabSpecificContentSettings* tab_specific_content_settings,
+    content::WebContents* web_contents,
+    const GURL& url,
+    security_state::SecurityLevel security_level,
+    const security_state::VisibleSecurityState& visible_security_state)
     : TabSpecificContentSettings::SiteDataObserver(
           tab_specific_content_settings),
       content::WebContentsObserver(web_contents),
@@ -337,6 +322,7 @@ PageInfo::PageInfo(PageInfoUI* ui,
       show_info_bar_(false),
       site_url_(url),
       site_identity_status_(SITE_IDENTITY_STATUS_UNKNOWN),
+      safe_browsing_status_(SAFE_BROWSING_STATUS_NONE),
       site_connection_status_(SITE_CONNECTION_STATUS_UNKNOWN),
       show_ssl_decision_revoke_button_(false),
       content_settings_(HostContentSettingsMapFactory::GetForProfile(profile)),
@@ -345,14 +331,14 @@ PageInfo::PageInfo(PageInfoUI* ui,
       did_revoke_user_ssl_decisions_(false),
       profile_(profile),
       security_level_(security_state::NONE),
-#if defined(SAFE_BROWSING_DB_LOCAL)
+#if defined(FULL_SAFE_BROWSING)
       password_protection_service_(
           safe_browsing::ChromePasswordProtectionService::
               GetPasswordProtectionService(profile_)),
 #endif
       show_change_password_buttons_(false),
       did_perform_action_(false) {
-  Init(url, security_info);
+  ComputeUIInputs(url, security_level, visible_security_state);
 
   PresentSitePermissions();
   PresentSiteIdentity();
@@ -402,6 +388,13 @@ PageInfo::~PageInfo() {
         base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromHours(1),
         100);
   }
+}
+
+void PageInfo::UpdateSecurityState(
+    security_state::SecurityLevel security_level,
+    const security_state::VisibleSecurityState& visible_security_state) {
+  ComputeUIInputs(site_url_, security_level, visible_security_state);
+  PresentSiteIdentity();
 }
 
 void PageInfo::RecordPageInfoAction(PageInfoAction action) {
@@ -508,10 +501,10 @@ void PageInfo::OnSitePermissionChanged(ContentSettingsType type,
 }
 
 void PageInfo::OnSiteChosenObjectDeleted(const ChooserUIInfo& ui_info,
-                                         const base::DictionaryValue& object) {
+                                         const base::Value& object) {
   // TODO(reillyg): Create metrics for revocations. crbug.com/556845
   ChooserContextBase* context = ui_info.get_context(profile_);
-  const GURL origin = site_url_.GetOrigin();
+  const auto origin = url::Origin::Create(site_url_);
   context->RevokeObjectPermission(origin, origin, object);
   show_info_bar_ = true;
 
@@ -523,15 +516,20 @@ void PageInfo::OnSiteDataAccessed() {
   PresentSiteData();
 }
 
-void PageInfo::OnUIClosing() {
+void PageInfo::OnUIClosing(bool* reload_prompt) {
+  if (reload_prompt)
+    *reload_prompt = false;
 #if defined(OS_ANDROID)
   NOTREACHED();
 #else
   if (show_info_bar_ && web_contents() && !web_contents()->IsBeingDestroyed()) {
     InfoBarService* infobar_service =
         InfoBarService::FromWebContents(web_contents());
-    if (infobar_service)
+    if (infobar_service) {
       PageInfoInfoBarDelegate::Create(infobar_service);
+      if (reload_prompt)
+        *reload_prompt = true;
+    }
   }
 #endif
 }
@@ -555,16 +553,16 @@ void PageInfo::OpenSiteSettingsView() {
 
 void PageInfo::OnChangePasswordButtonPressed(
     content::WebContents* web_contents) {
-#if defined(SAFE_BROWSING_DB_LOCAL)
+#if defined(FULL_SAFE_BROWSING)
   DCHECK(password_protection_service_);
-  DCHECK(site_identity_status_ == SITE_IDENTITY_STATUS_SIGN_IN_PASSWORD_REUSE ||
-         site_identity_status_ ==
-             SITE_IDENTITY_STATUS_ENTERPRISE_PASSWORD_REUSE);
+  DCHECK(safe_browsing_status_ == SAFE_BROWSING_STATUS_SIGN_IN_PASSWORD_REUSE ||
+         safe_browsing_status_ ==
+             SAFE_BROWSING_STATUS_ENTERPRISE_PASSWORD_REUSE);
   password_protection_service_->OnUserAction(
       web_contents,
-      site_identity_status_ == SITE_IDENTITY_STATUS_SIGN_IN_PASSWORD_REUSE
-          ? PasswordReuseEvent::SIGN_IN_PASSWORD
-          : PasswordReuseEvent::ENTERPRISE_PASSWORD,
+      safe_browsing_status_ == SAFE_BROWSING_STATUS_SIGN_IN_PASSWORD_REUSE
+          ? PasswordType::PRIMARY_ACCOUNT_PASSWORD
+          : PasswordType::ENTERPRISE_PASSWORD,
       safe_browsing::WarningUIType::PAGE_INFO,
       safe_browsing::WarningAction::CHANGE_PASSWORD);
 #endif
@@ -572,23 +570,25 @@ void PageInfo::OnChangePasswordButtonPressed(
 
 void PageInfo::OnWhitelistPasswordReuseButtonPressed(
     content::WebContents* web_contents) {
-#if defined(SAFE_BROWSING_DB_LOCAL)
+#if defined(FULL_SAFE_BROWSING)
   DCHECK(password_protection_service_);
-  DCHECK(site_identity_status_ == SITE_IDENTITY_STATUS_SIGN_IN_PASSWORD_REUSE ||
-         site_identity_status_ ==
-             SITE_IDENTITY_STATUS_ENTERPRISE_PASSWORD_REUSE);
+  DCHECK(safe_browsing_status_ == SAFE_BROWSING_STATUS_SIGN_IN_PASSWORD_REUSE ||
+         safe_browsing_status_ ==
+             SAFE_BROWSING_STATUS_ENTERPRISE_PASSWORD_REUSE);
   password_protection_service_->OnUserAction(
       web_contents,
-      site_identity_status_ == SITE_IDENTITY_STATUS_SIGN_IN_PASSWORD_REUSE
-          ? PasswordReuseEvent::SIGN_IN_PASSWORD
-          : PasswordReuseEvent::ENTERPRISE_PASSWORD,
+      safe_browsing_status_ == SAFE_BROWSING_STATUS_SIGN_IN_PASSWORD_REUSE
+          ? PasswordType::PRIMARY_ACCOUNT_PASSWORD
+          : PasswordType::ENTERPRISE_PASSWORD,
       safe_browsing::WarningUIType::PAGE_INFO,
       safe_browsing::WarningAction::MARK_AS_LEGITIMATE);
 #endif
 }
 
-void PageInfo::Init(const GURL& url,
-                    const security_state::SecurityInfo& security_info) {
+void PageInfo::ComputeUIInputs(
+    const GURL& url,
+    security_state::SecurityLevel security_level,
+    const security_state::VisibleSecurityState& visible_security_state) {
 #if !defined(OS_ANDROID)
   // On desktop, internal URLs aren't handled by this class. Instead, a
   // custom and simpler bubble is shown.
@@ -603,13 +603,13 @@ void PageInfo::Init(const GURL& url,
   is_chrome_ui_native_scheme = url.SchemeIs(chrome::kChromeUINativeScheme);
 #endif
 
-  security_level_ = security_info.security_level;
+  security_level_ = security_level;
 
   if (url.SchemeIs(url::kAboutScheme)) {
     // All about: URLs except about:blank are redirected.
     DCHECK_EQ(url::kAboutBlankURL, url.spec());
     site_identity_status_ = SITE_IDENTITY_STATUS_NO_CERT;
-    site_identity_details_ =
+    site_details_message_ =
         l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_INSECURE_IDENTITY);
     site_connection_status_ = SITE_CONNECTION_STATUS_UNENCRYPTED;
     site_connection_details_ = l10n_util::GetStringFUTF16(
@@ -620,41 +620,29 @@ void PageInfo::Init(const GURL& url,
 
   if (url.SchemeIs(content::kChromeUIScheme) || is_chrome_ui_native_scheme) {
     site_identity_status_ = SITE_IDENTITY_STATUS_INTERNAL_PAGE;
-    site_identity_details_ =
+    site_details_message_ =
         l10n_util::GetStringUTF16(IDS_PAGE_INFO_INTERNAL_PAGE);
     site_connection_status_ = SITE_CONNECTION_STATUS_INTERNAL_PAGE;
     return;
   }
 
   // Identity section.
-  certificate_ = security_info.certificate;
+  certificate_ = visible_security_state.certificate;
 
-  if (security_info.malicious_content_status !=
-      security_state::MALICIOUS_CONTENT_STATUS_NONE) {
-    // The site has been flagged by Safe Browsing as dangerous.
-    GetSiteIdentityByMaliciousContentStatus(
-        security_info.malicious_content_status, &site_identity_status_,
-        &site_identity_details_);
-    show_change_password_buttons_ =
-        (security_info.malicious_content_status ==
-             security_state::MALICIOUS_CONTENT_STATUS_SIGN_IN_PASSWORD_REUSE ||
-         security_info.malicious_content_status ==
-             security_state::
-                 MALICIOUS_CONTENT_STATUS_ENTERPRISE_PASSWORD_REUSE);
-  } else if (certificate_ &&
-             (!net::IsCertStatusError(security_info.cert_status) ||
-              net::IsCertStatusMinorError(security_info.cert_status))) {
+  if (certificate_ &&
+      (!net::IsCertStatusError(visible_security_state.cert_status) ||
+       net::IsCertStatusMinorError(visible_security_state.cert_status))) {
     // HTTPS with no or minor errors.
-    if (security_info.security_level ==
-        security_state::SECURE_WITH_POLICY_INSTALLED_CERT) {
+    if (security_level == security_state::SECURE_WITH_POLICY_INSTALLED_CERT) {
 #if defined(OS_CHROMEOS)
       site_identity_status_ = SITE_IDENTITY_STATUS_ADMIN_PROVIDED_CERT;
-      site_identity_details_ = l10n_util::GetStringFUTF16(
+      site_details_message_ = l10n_util::GetStringFUTF16(
           IDS_CERT_POLICY_PROVIDED_CERT_MESSAGE, UTF8ToUTF16(url.host()));
 #else
       DCHECK(false) << "Policy certificates exist only on ChromeOS";
 #endif
-    } else if (net::IsCertStatusMinorError(security_info.cert_status)) {
+    } else if (net::IsCertStatusMinorError(
+                   visible_security_state.cert_status)) {
       site_identity_status_ = SITE_IDENTITY_STATUS_CERT_REVOCATION_UNKNOWN;
       base::string16 issuer_name(
           UTF8ToUTF16(certificate_->issuer().GetDisplayName()));
@@ -663,24 +651,24 @@ void PageInfo::Init(const GURL& url,
             IDS_PAGE_INFO_SECURITY_TAB_UNKNOWN_PARTY));
       }
 
-      site_identity_details_.assign(l10n_util::GetStringFUTF16(
+      site_details_message_.assign(l10n_util::GetStringFUTF16(
           IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_VERIFIED, issuer_name));
 
-      site_identity_details_ += ASCIIToUTF16("\n\n");
-      if (security_info.cert_status &
+      site_details_message_ += ASCIIToUTF16("\n\n");
+      if (visible_security_state.cert_status &
           net::CERT_STATUS_UNABLE_TO_CHECK_REVOCATION) {
-        site_identity_details_ += l10n_util::GetStringUTF16(
+        site_details_message_ += l10n_util::GetStringUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_UNABLE_TO_CHECK_REVOCATION);
-      } else if (security_info.cert_status &
+      } else if (visible_security_state.cert_status &
                  net::CERT_STATUS_NO_REVOCATION_MECHANISM) {
-        site_identity_details_ += l10n_util::GetStringUTF16(
+        site_details_message_ += l10n_util::GetStringUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_NO_REVOCATION_MECHANISM);
       } else {
         NOTREACHED() << "Need to specify string for this warning";
       }
     } else {
       // No major or minor errors.
-      if (security_info.cert_status & net::CERT_STATUS_IS_EV) {
+      if (visible_security_state.cert_status & net::CERT_STATUS_IS_EV) {
         // EV HTTPS page.
         site_identity_status_ = SITE_IDENTITY_STATUS_EV_CERT;
         DCHECK(!certificate_->subject().organization_names.empty());
@@ -690,24 +678,10 @@ void PageInfo::Init(const GURL& url,
         // state is "if any".
         DCHECK(!certificate_->subject().locality_name.empty());
         DCHECK(!certificate_->subject().country_name.empty());
-        base::string16 locality;
-        if (!certificate_->subject().state_or_province_name.empty()) {
-          locality = l10n_util::GetStringFUTF16(
-              IDS_PAGE_INFO_ADDRESS,
-              UTF8ToUTF16(certificate_->subject().locality_name),
-              UTF8ToUTF16(certificate_->subject().state_or_province_name),
-              UTF8ToUTF16(certificate_->subject().country_name));
-        } else {
-          locality = l10n_util::GetStringFUTF16(
-              IDS_PAGE_INFO_PARTIAL_ADDRESS,
-              UTF8ToUTF16(certificate_->subject().locality_name),
-              UTF8ToUTF16(certificate_->subject().country_name));
-        }
-        DCHECK(!certificate_->subject().organization_names.empty());
-        site_identity_details_.assign(l10n_util::GetStringFUTF16(
+        site_details_message_.assign(l10n_util::GetStringFUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV_VERIFIED,
-            UTF8ToUTF16(certificate_->subject().organization_names[0]),
-            locality, UTF8ToUTF16(certificate_->issuer().GetDisplayName())));
+            organization_name_,
+            UTF8ToUTF16(certificate_->subject().country_name)));
       } else {
         // Non-EV OK HTTPS page.
         site_identity_status_ = SITE_IDENTITY_STATUS_CERT;
@@ -718,13 +692,13 @@ void PageInfo::Init(const GURL& url,
               IDS_PAGE_INFO_SECURITY_TAB_UNKNOWN_PARTY));
         }
 
-        site_identity_details_.assign(l10n_util::GetStringFUTF16(
+        site_details_message_.assign(l10n_util::GetStringFUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_VERIFIED, issuer_name));
       }
-      if (security_info.sha1_in_chain) {
+      if (security_state::IsSHA1InChain(visible_security_state)) {
         site_identity_status_ =
             SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM;
-        site_identity_details_ +=
+        site_details_message_ +=
             UTF8ToUTF16("\n\n") +
             l10n_util::GetStringUTF16(
                 IDS_PAGE_INFO_SECURITY_TAB_DEPRECATED_SIGNATURE_ALGORITHM);
@@ -732,27 +706,52 @@ void PageInfo::Init(const GURL& url,
     }
   } else {
     // HTTP or HTTPS with errors (not warnings).
-    site_identity_details_.assign(l10n_util::GetStringUTF16(
+    site_details_message_.assign(l10n_util::GetStringUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_INSECURE_IDENTITY));
-    if (!security_info.scheme_is_cryptographic || !security_info.certificate)
+    if (!security_state::IsSchemeCryptographic(visible_security_state.url) ||
+        !visible_security_state.certificate) {
       site_identity_status_ = SITE_IDENTITY_STATUS_NO_CERT;
-    else
+    } else {
       site_identity_status_ = SITE_IDENTITY_STATUS_ERROR;
+    }
 
     const base::string16 bullet = UTF8ToUTF16("\n • ");
     std::vector<ssl_errors::ErrorInfo> errors;
     ssl_errors::ErrorInfo::GetErrorsForCertStatus(
-        certificate_, security_info.cert_status, url, &errors);
+        certificate_, visible_security_state.cert_status, url, &errors);
     for (size_t i = 0; i < errors.size(); ++i) {
-      site_identity_details_ += bullet;
-      site_identity_details_ += errors[i].short_description();
+      site_details_message_ += bullet;
+      site_details_message_ += errors[i].short_description();
     }
 
-    if (security_info.cert_status & net::CERT_STATUS_NON_UNIQUE_NAME) {
-      site_identity_details_ += ASCIIToUTF16("\n\n");
-      site_identity_details_ +=
+    if (visible_security_state.cert_status & net::CERT_STATUS_NON_UNIQUE_NAME) {
+      site_details_message_ += ASCIIToUTF16("\n\n");
+      site_details_message_ +=
           l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_NON_UNIQUE_NAME);
     }
+  }
+
+  if (visible_security_state.malicious_content_status !=
+      security_state::MALICIOUS_CONTENT_STATUS_NONE) {
+    // The site has been flagged by Safe Browsing. Takes precedence over TLS.
+    GetSafeBrowsingStatusByMaliciousContentStatus(
+        visible_security_state.malicious_content_status, &safe_browsing_status_,
+        &site_details_message_);
+#if defined(FULL_SAFE_BROWSING)
+    bool old_show_change_pw_buttons = show_change_password_buttons_;
+#endif
+    show_change_password_buttons_ =
+        (visible_security_state.malicious_content_status ==
+             security_state::MALICIOUS_CONTENT_STATUS_SIGN_IN_PASSWORD_REUSE ||
+         visible_security_state.malicious_content_status ==
+             security_state::
+                 MALICIOUS_CONTENT_STATUS_ENTERPRISE_PASSWORD_REUSE);
+#if defined(FULL_SAFE_BROWSING)
+    // Only record password reuse when adding the button, not on updates.
+    if (show_change_password_buttons_ && !old_show_change_pw_buttons) {
+      RecordPasswordReuseEvent();
+    }
+#endif
   }
 
   // Site Connection
@@ -767,7 +766,8 @@ void PageInfo::Init(const GURL& url,
         l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_UNKNOWN_PARTY));
   }
 
-  if (!security_info.certificate || !security_info.scheme_is_cryptographic) {
+  if (!visible_security_state.certificate ||
+      !security_state::IsSchemeCryptographic(visible_security_state.url)) {
     // Page is still loading (so SSL status is not yet available) or
     // loaded over HTTP or loaded over HTTPS with no cert.
     site_connection_status_ = SITE_CONNECTION_STATUS_UNENCRYPTED;
@@ -775,13 +775,16 @@ void PageInfo::Init(const GURL& url,
     site_connection_details_.assign(l10n_util::GetStringFUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_NOT_ENCRYPTED_CONNECTION_TEXT,
         subject_name));
-  } else if (!security_info.connection_info_initialized) {
-    DCHECK_NE(security_info.security_level, security_state::NONE);
+  } else if (!visible_security_state.connection_info_initialized) {
+    DCHECK_NE(security_level, security_state::NONE);
     site_connection_status_ = SITE_CONNECTION_STATUS_ENCRYPTED_ERROR;
   } else {
     site_connection_status_ = SITE_CONNECTION_STATUS_ENCRYPTED;
 
-    if (security_info.obsolete_ssl_status == net::OBSOLETE_SSL_NONE) {
+    if (net::ObsoleteSSLStatus(
+            visible_security_state.connection_status,
+            visible_security_state.peer_signature_algorithm) ==
+        net::OBSOLETE_SSL_NONE) {
       site_connection_details_.assign(l10n_util::GetStringFUTF16(
           IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_CONNECTION_TEXT, subject_name));
     } else {
@@ -790,15 +793,15 @@ void PageInfo::Init(const GURL& url,
           subject_name));
     }
 
-    ReportAnyInsecureContent(security_info, &site_connection_status_,
+    ReportAnyInsecureContent(visible_security_state, &site_connection_status_,
                              &site_connection_details_);
   }
 
-  uint16_t cipher_suite =
-      net::SSLConnectionStatusToCipherSuite(security_info.connection_status);
-  if (security_info.connection_info_initialized && cipher_suite) {
-    int ssl_version =
-        net::SSLConnectionStatusToVersion(security_info.connection_status);
+  uint16_t cipher_suite = net::SSLConnectionStatusToCipherSuite(
+      visible_security_state.connection_status);
+  if (visible_security_state.connection_info_initialized && cipher_suite) {
+    int ssl_version = net::SSLConnectionStatusToVersion(
+        visible_security_state.connection_status);
     const char* ssl_version_str;
     net::SSLVersionToString(&ssl_version_str, ssl_version);
     site_connection_details_ += ASCIIToUTF16("\n\n");
@@ -815,7 +818,8 @@ void PageInfo::Init(const GURL& url,
       if (is_tls13) {
         // For TLS 1.3 ciphers, report the group (historically, curve) as the
         // key exchange.
-        key_exchange = SSL_get_curve_name(security_info.key_exchange_group);
+        key_exchange =
+            SSL_get_curve_name(visible_security_state.key_exchange_group);
         if (!key_exchange) {
           NOTREACHED();
           key_exchange = "";
@@ -837,8 +841,13 @@ void PageInfo::Init(const GURL& url,
       ChromeSSLHostStateDelegateFactory::GetForProfile(profile_);
   DCHECK(delegate);
   // Only show an SSL decision revoke button if the user has chosen to bypass
-  // SSL host errors for this host in the past.
-  show_ssl_decision_revoke_button_ = delegate->HasAllowException(url.host());
+  // SSL host errors for this host in the past, and we're not presently on a
+  // Safe Browsing error (since otherwise it's confusing which warning you're
+  // re-enabling).
+  show_ssl_decision_revoke_button_ =
+      delegate->HasAllowException(url.host()) &&
+      visible_security_state.malicious_content_status ==
+          security_state::MALICIOUS_CONTENT_STATUS_NONE;
 }
 
 void PageInfo::PresentSitePermissions() {
@@ -891,6 +900,12 @@ void PageInfo::PresentSitePermissions() {
           permission_result.source ==
               PermissionStatusSource::MULTIPLE_DISMISSALS) {
         permission_info.setting = permission_result.content_setting;
+      } else if (vivaldi::IsVivaldiRunning() &&
+                 permission_info.type == CONTENT_SETTINGS_TYPE_PLUGINS) {
+        // NOTE(andre@vivaldi.com) : Vivaldi can set the Flash setting globally
+        // via chrome.contentSettings.plugins. So always update to the current.
+        // This is "temporary" as Flash is going away in 2020 :-)
+        permission_info.setting = permission_result.content_setting;
       }
     }
 
@@ -900,15 +915,9 @@ void PageInfo::PresentSitePermissions() {
     }
   }
 
+  const auto origin = url::Origin::Create(site_url_);
   for (const ChooserUIInfo& ui_info : kChooserUIInfo) {
     ChooserContextBase* context = ui_info.get_context(profile_);
-    const GURL origin = site_url_.GetOrigin();
-
-    // Hide individual object permissions because when the chooser is blocked
-    // previously granted device permissions are also ignored.
-    if (!context->CanRequestObjectPermission(origin, origin))
-      continue;
-
     auto chosen_objects = context->GetGrantedObjects(origin, origin);
     for (std::unique_ptr<ChooserContextBase::Object>& object : chosen_objects) {
       chosen_object_info_list.push_back(
@@ -958,30 +967,12 @@ void PageInfo::PresentSiteIdentity() {
   info.connection_status = site_connection_status_;
   info.connection_status_description = UTF16ToUTF8(site_connection_details_);
   info.identity_status = site_identity_status_;
-  info.identity_status_description = UTF16ToUTF8(site_identity_details_);
+  info.safe_browsing_status = safe_browsing_status_;
+  info.identity_status_description = UTF16ToUTF8(site_details_message_);
   info.certificate = certificate_;
   info.show_ssl_decision_revoke_button = show_ssl_decision_revoke_button_;
   info.show_change_password_buttons = show_change_password_buttons_;
   ui_->SetIdentityInfo(info);
-#if defined(SAFE_BROWSING_DB_LOCAL)
-  if (password_protection_service_ && show_change_password_buttons_) {
-    if (site_identity_status_ == SITE_IDENTITY_STATUS_SIGN_IN_PASSWORD_REUSE) {
-      safe_browsing::LogWarningAction(
-          safe_browsing::WarningUIType::PAGE_INFO,
-          safe_browsing::WarningAction::SHOWN,
-          safe_browsing::LoginReputationClientRequest::PasswordReuseEvent::
-              SIGN_IN_PASSWORD,
-          password_protection_service_->GetSyncAccountType());
-    } else {
-      safe_browsing::LogWarningAction(
-          safe_browsing::WarningUIType::PAGE_INFO,
-          safe_browsing::WarningAction::SHOWN,
-          safe_browsing::LoginReputationClientRequest::PasswordReuseEvent::
-              ENTERPRISE_PASSWORD,
-          password_protection_service_->GetSyncAccountType());
-    }
-  }
-#endif
 }
 
 void PageInfo::PresentPageFeatureInfo() {
@@ -991,6 +982,30 @@ void PageInfo::PresentPageFeatureInfo() {
 
   ui_->SetPageFeatureInfo(info);
 }
+
+#if defined(FULL_SAFE_BROWSING)
+void PageInfo::RecordPasswordReuseEvent() {
+  if (!password_protection_service_) {
+    return;
+  }
+
+  if (safe_browsing_status_ == SAFE_BROWSING_STATUS_SIGN_IN_PASSWORD_REUSE) {
+    safe_browsing::LogWarningAction(
+        safe_browsing::WarningUIType::PAGE_INFO,
+        safe_browsing::WarningAction::SHOWN,
+        password_protection_service_
+            ->GetPasswordProtectionReusedPasswordAccountType(
+                PasswordType::PRIMARY_ACCOUNT_PASSWORD));
+  } else {
+    safe_browsing::LogWarningAction(
+        safe_browsing::WarningUIType::PAGE_INFO,
+        safe_browsing::WarningAction::SHOWN,
+        password_protection_service_
+            ->GetPasswordProtectionReusedPasswordAccountType(
+                PasswordType::ENTERPRISE_PASSWORD));
+  }
+}
+#endif
 
 std::vector<ContentSettingsType> PageInfo::GetAllPermissionsForTesting() {
   std::vector<ContentSettingsType> permission_list;
@@ -1004,50 +1019,50 @@ std::vector<ContentSettingsType> PageInfo::GetAllPermissionsForTesting() {
   return permission_list;
 }
 
-void PageInfo::GetSiteIdentityByMaliciousContentStatus(
+void PageInfo::GetSafeBrowsingStatusByMaliciousContentStatus(
     security_state::MaliciousContentStatus malicious_content_status,
-    PageInfo::SiteIdentityStatus* status,
+    PageInfo::SafeBrowsingStatus* status,
     base::string16* details) {
   switch (malicious_content_status) {
     case security_state::MALICIOUS_CONTENT_STATUS_NONE:
       NOTREACHED();
       break;
     case security_state::MALICIOUS_CONTENT_STATUS_MALWARE:
-      *status = PageInfo::SITE_IDENTITY_STATUS_MALWARE;
+      *status = PageInfo::SAFE_BROWSING_STATUS_MALWARE;
       *details = l10n_util::GetStringUTF16(IDS_PAGE_INFO_MALWARE_DETAILS);
       break;
     case security_state::MALICIOUS_CONTENT_STATUS_SOCIAL_ENGINEERING:
-      *status = PageInfo::SITE_IDENTITY_STATUS_SOCIAL_ENGINEERING;
+      *status = PageInfo::SAFE_BROWSING_STATUS_SOCIAL_ENGINEERING;
       *details =
           l10n_util::GetStringUTF16(IDS_PAGE_INFO_SOCIAL_ENGINEERING_DETAILS);
       break;
     case security_state::MALICIOUS_CONTENT_STATUS_UNWANTED_SOFTWARE:
-      *status = PageInfo::SITE_IDENTITY_STATUS_UNWANTED_SOFTWARE;
+      *status = PageInfo::SAFE_BROWSING_STATUS_UNWANTED_SOFTWARE;
       *details =
           l10n_util::GetStringUTF16(IDS_PAGE_INFO_UNWANTED_SOFTWARE_DETAILS);
       break;
     case security_state::MALICIOUS_CONTENT_STATUS_SIGN_IN_PASSWORD_REUSE:
-#if defined(SAFE_BROWSING_DB_LOCAL)
-      *status = PageInfo::SITE_IDENTITY_STATUS_SIGN_IN_PASSWORD_REUSE;
+#if defined(FULL_SAFE_BROWSING)
+      *status = PageInfo::SAFE_BROWSING_STATUS_SIGN_IN_PASSWORD_REUSE;
       // |password_protection_service_| may be null in test.
       *details = password_protection_service_
                      ? password_protection_service_->GetWarningDetailText(
-                           PasswordReuseEvent::SIGN_IN_PASSWORD)
+                           PasswordType::PRIMARY_ACCOUNT_PASSWORD)
                      : base::string16();
 #endif
       break;
     case security_state::MALICIOUS_CONTENT_STATUS_ENTERPRISE_PASSWORD_REUSE:
-#if defined(SAFE_BROWSING_DB_LOCAL)
-      *status = PageInfo::SITE_IDENTITY_STATUS_ENTERPRISE_PASSWORD_REUSE;
+#if defined(FULL_SAFE_BROWSING)
+      *status = PageInfo::SAFE_BROWSING_STATUS_ENTERPRISE_PASSWORD_REUSE;
       // |password_protection_service_| maybe null in test.
       *details = password_protection_service_
                      ? password_protection_service_->GetWarningDetailText(
-                           PasswordReuseEvent::ENTERPRISE_PASSWORD)
+                           PasswordType::ENTERPRISE_PASSWORD)
                      : base::string16();
 #endif
       break;
     case security_state::MALICIOUS_CONTENT_STATUS_BILLING:
-      *status = PageInfo::SITE_IDENTITY_STATUS_BILLING;
+      *status = PageInfo::SAFE_BROWSING_STATUS_BILLING;
       *details = l10n_util::GetStringUTF16(IDS_PAGE_INFO_BILLING_DETAILS);
       break;
   }

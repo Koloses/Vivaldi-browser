@@ -19,22 +19,22 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.MockitoAnnotations.initMocks;
 
 import android.accounts.Account;
-import android.content.Context;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.Spy;
+import org.mockito.Mock;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.JniMocker;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.AccountTrackerService;
-import org.chromium.components.sync.AndroidSyncSettings;
-import org.chromium.components.sync.test.util.MockSyncContentResolverDelegate;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -42,130 +42,128 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class SigninManagerTest {
-    /**
-     * Overrides the native methods called during SigninManager construction.
-     * Other native* methods can be overridden using Spy.
-     */
-    static class TestableSigninManager extends SigninManager {
-        TestableSigninManager(Context context, AccountTrackerService accountTrackerService,
-                AndroidSyncSettings androidSyncSettings) {
-            super(context, accountTrackerService, androidSyncSettings);
-        }
+    @Rule
+    public JniMocker mocker = new JniMocker();
 
-        @Override
-        long nativeInit() {
-            return 0;
-        }
+    @Mock
+    SigninManager.Natives mNativeMock;
 
-        @Override
-        boolean nativeIsSigninAllowedByPolicy(long nativeSigninManagerAndroid) {
-            return true;
-        }
-    }
+    @Mock
+    SigninManagerDelegate mDelegateMock;
 
     private AccountTrackerService mAccountTrackerService;
-    @Spy
-    private TestableSigninManager mSigninManager;
+    private SigninManager mSigninManager;
 
     @Before
     public void setUp() {
+        initMocks(this);
+
+        mocker.mock(SigninManagerJni.TEST_HOOKS, mNativeMock);
+
+        doReturn(true).when(mNativeMock).isSigninAllowedByPolicy(any(), anyLong());
+
         mAccountTrackerService = mock(AccountTrackerService.class);
-        AndroidSyncSettings androidSyncSettings = mock(AndroidSyncSettings.class);
 
-        mSigninManager = spy(new TestableSigninManager(
-                ContextUtils.getApplicationContext(), mAccountTrackerService, androidSyncSettings));
-
-        // SinginManager interacts with AndroidSyncSettings, but its not the focus
-        // of this test. Using MockSyncContentResolver reduces burden of test setup.
-        AndroidSyncSettings.overrideForTests(new MockSyncContentResolverDelegate(), null);
+        mSigninManager = spy(new SigninManager(ContextUtils.getApplicationContext(),
+                0 /* nativeSigninManagerAndroid */, mDelegateMock, mAccountTrackerService));
     }
 
     @Test
     public void signOutFromJavaWithManagedDomain() {
         // Stub out various native calls. Some of these are verified as never called
         // and those stubs simply allow that verification to catch any issues.
-        doNothing().when(mSigninManager).nativeSignOut(anyLong(), anyInt());
-        doNothing().when(mSigninManager).nativeWipeProfileData(anyLong());
-        doNothing().when(mSigninManager).nativeWipeGoogleServiceWorkerCaches(anyLong());
+        doNothing().when(mNativeMock).signOut(any(), anyLong(), anyInt());
+        doNothing().when(mDelegateMock).disableSyncAndWipeData(eq(true), any());
         // See verification of nativeWipeProfileData below.
-        doReturn("TestDomain").when(mSigninManager).nativeGetManagementDomain(anyLong());
+        doReturn("TestDomain").when(mDelegateMock).getManagementDomain();
 
         // Trigger the sign out flow!
         mSigninManager.signOut(SignoutReason.SIGNOUT_TEST);
 
         // nativeSignOut should be called *before* clearing any account data.
         // http://crbug.com/589028
-        verify(mSigninManager, times(1)).nativeSignOut(anyLong(), eq(SignoutReason.SIGNOUT_TEST));
-        verify(mSigninManager, never()).nativeWipeGoogleServiceWorkerCaches(anyLong());
-        verify(mSigninManager, never()).nativeWipeProfileData(anyLong());
+        verify(mNativeMock, times(1)).signOut(any(), anyLong(), eq(SignoutReason.SIGNOUT_TEST));
+        verify(mDelegateMock, never()).disableSyncAndWipeData(eq(true), any());
 
         // Simulate native callback to trigger clearing of account data.
         mSigninManager.onNativeSignOut();
 
-        // Sign-out should wipe all profile data when user has managed domain.
-        verify(mSigninManager, times(1)).nativeWipeProfileData(anyLong());
-        verify(mSigninManager, never()).nativeWipeGoogleServiceWorkerCaches(anyLong());
+        verify(mDelegateMock, times(1)).disableSyncAndWipeData(eq(true), any());
     }
 
     @Test
     public void signOutFromJavaWithNullDomain() {
         // Stub out various native calls. Some of these are verified as never called
         // and those stubs simply allow that verification to catch any issues.
-        doNothing().when(mSigninManager).nativeSignOut(anyLong(), anyInt());
-        doNothing().when(mSigninManager).nativeWipeProfileData(anyLong());
-        doNothing().when(mSigninManager).nativeWipeGoogleServiceWorkerCaches(anyLong());
+        doNothing().when(mNativeMock).signOut(any(), anyLong(), anyInt());
+        doNothing().when(mDelegateMock).disableSyncAndWipeData(eq(false), any());
         // See verification of nativeWipeGoogleServiceWorkerCaches below.
-        doReturn(null).when(mSigninManager).nativeGetManagementDomain(anyLong());
+        doReturn(null).when(mDelegateMock).getManagementDomain();
 
         // Trigger the sign out flow!
         mSigninManager.signOut(SignoutReason.SIGNOUT_TEST);
 
         // nativeSignOut should be called *before* clearing any account data.
         // http://crbug.com/589028
-        verify(mSigninManager, times(1)).nativeSignOut(anyLong(), eq(SignoutReason.SIGNOUT_TEST));
-        verify(mSigninManager, never()).nativeWipeGoogleServiceWorkerCaches(anyLong());
-        verify(mSigninManager, never()).nativeWipeProfileData(anyLong());
+        verify(mNativeMock, times(1)).signOut(any(), anyLong(), eq(SignoutReason.SIGNOUT_TEST));
+        verify(mDelegateMock, never()).disableSyncAndWipeData(eq(false), any());
 
         // Simulate native callback to trigger clearing of account data.
         mSigninManager.onNativeSignOut();
 
-        // Sign-out should only clear the service worker cache when the domain is null.
-        verify(mSigninManager, never()).nativeWipeProfileData(anyLong());
-        verify(mSigninManager, times(1)).nativeWipeGoogleServiceWorkerCaches(anyLong());
+        verify(mDelegateMock, times(1)).disableSyncAndWipeData(eq(false), any());
+    }
+
+    @Test
+    public void signOutFromJavaWithNullDomainAndForceWipe() {
+        // Stub out various native calls. Some of these are verified as never called
+        // and those stubs simply allow that verification to catch any issues.
+        doNothing().when(mNativeMock).signOut(any(), anyLong(), anyInt());
+        doNothing().when(mDelegateMock).disableSyncAndWipeData(eq(false), any());
+        // See verification of nativeWipeGoogleServiceWorkerCaches below.
+        doReturn(null).when(mDelegateMock).getManagementDomain();
+
+        // Trigger the sign out flow!
+        mSigninManager.signOut(SignoutReason.SIGNOUT_TEST, null, null, true);
+
+        // nativeSignOut should be called *before* clearing any account data.
+        // http://crbug.com/589028
+        verify(mNativeMock, times(1)).signOut(any(), anyLong(), eq(SignoutReason.SIGNOUT_TEST));
+        verify(mDelegateMock, never()).disableSyncAndWipeData(eq(false), any());
+
+        // Simulate native callback to trigger clearing of account data.
+        mSigninManager.onNativeSignOut();
+
+        verify(mDelegateMock, times(1)).disableSyncAndWipeData(eq(true), any());
     }
 
     @Test
     public void signOutFromNativeWithManagedDomain() {
         // Stub out various native calls. Some of these are verified as never called
         // and those stubs simply allow that verification to catch any issues.
-        doNothing().when(mSigninManager).nativeSignOut(anyLong(), anyInt());
-        doNothing().when(mSigninManager).nativeWipeProfileData(anyLong());
-        doNothing().when(mSigninManager).nativeWipeGoogleServiceWorkerCaches(anyLong());
+        doNothing().when(mNativeMock).signOut(any(), anyLong(), anyInt());
+        doNothing().when(mDelegateMock).disableSyncAndWipeData(eq(true), any());
         // See verification of nativeWipeProfileData below.
-        doReturn("TestDomain").when(mSigninManager).nativeGetManagementDomain(anyLong());
+        doReturn("TestDomain").when(mDelegateMock).getManagementDomain();
 
         // Trigger the sign out flow!
         mSigninManager.onNativeSignOut();
-
         // nativeSignOut should only be called when signOut() is triggered on
         // the Java side of the JNI boundary. This test instead initiates sign-out
         // from the native side.
-        verify(mSigninManager, never()).nativeSignOut(anyLong(), anyInt());
+        verify(mNativeMock, never()).signOut(any(), anyLong(), anyInt());
 
-        // Sign-out should wipe profile data when user has managed domain.
-        verify(mSigninManager, times(1)).nativeWipeProfileData(anyLong());
-        verify(mSigninManager, never()).nativeWipeGoogleServiceWorkerCaches(anyLong());
+        verify(mDelegateMock, times(1)).disableSyncAndWipeData(eq(true), any());
     }
 
     @Test
     public void signOutFromNativeWithNullDomain() {
         // Stub out various native calls. Some of these are verified as never called
         // and those stubs simply allow that verification to catch any issues.
-        doNothing().when(mSigninManager).nativeSignOut(anyLong(), anyInt());
-        doNothing().when(mSigninManager).nativeWipeProfileData(anyLong());
-        doNothing().when(mSigninManager).nativeWipeGoogleServiceWorkerCaches(anyLong());
+        doNothing().when(mNativeMock).signOut(any(), anyLong(), anyInt());
+        doNothing().when(mDelegateMock).disableSyncAndWipeData(eq(false), any());
         // See verification of nativeWipeGoogleServiceWorkerCaches below.
-        doReturn(null).when(mSigninManager).nativeGetManagementDomain(anyLong());
+        doReturn(null).when(mDelegateMock).getManagementDomain();
 
         // Trigger the sign out flow!
         mSigninManager.onNativeSignOut();
@@ -173,11 +171,9 @@ public class SigninManagerTest {
         // nativeSignOut should only be called when signOut() is triggered on
         // the Java side of the JNI boundary. This test instead initiates sign-out
         // from the native side.
-        verify(mSigninManager, never()).nativeSignOut(anyLong(), anyInt());
+        verify(mNativeMock, never()).signOut(any(), anyLong(), anyInt());
 
-        // Sign-out should only clear the service worker cache when the domain is null.
-        verify(mSigninManager, never()).nativeWipeProfileData(anyLong());
-        verify(mSigninManager, times(1)).nativeWipeGoogleServiceWorkerCaches(anyLong());
+        verify(mDelegateMock, times(1)).disableSyncAndWipeData(eq(false), any());
     }
 
     @Test
@@ -194,9 +190,9 @@ public class SigninManagerTest {
         doAnswer(invocation -> {
             mSigninManager.onNativeSignOut();
             return null;
-        }).when(mSigninManager).nativeSignOut(anyLong(), anyInt());
-        doReturn(null).when(mSigninManager).nativeGetManagementDomain(anyLong());
-        doNothing().when(mSigninManager).nativeWipeGoogleServiceWorkerCaches(anyLong());
+        })
+                .when(mNativeMock)
+                .signOut(any(), anyLong(), anyInt());
 
         mSigninManager.signOut(SignoutReason.SIGNOUT_TEST);
         assertTrue(mSigninManager.isOperationInProgress());
@@ -215,11 +211,10 @@ public class SigninManagerTest {
         doReturn(true).when(mAccountTrackerService).checkAndSeedSystemAccounts();
         // Request that policy is loaded. It will pause sign-in until onPolicyCheckedBeforeSignIn is
         // invoked.
-        doReturn(true).when(mSigninManager).nativeShouldLoadPolicyForUser(any());
-        doNothing().when(mSigninManager).nativeCheckPolicyBeforeSignIn(anyLong(), any());
+        doNothing().when(mDelegateMock).fetchAndApplyCloudPolicy(any(), any());
 
         doReturn(true).when(mSigninManager).isSigninSupported();
-        doNothing().when(mSigninManager).nativeOnSignInCompleted(anyLong(), any());
+        doNothing().when(mNativeMock).onSignInCompleted(any(), anyLong(), any());
         doNothing().when(mSigninManager).logInSignedInUser();
 
         mSigninManager.onFirstRunCheckDone(); // Allow sign-in.
@@ -231,7 +226,7 @@ public class SigninManagerTest {
         mSigninManager.runAfterOperationInProgress(callCount::incrementAndGet);
         assertEquals(0, callCount.get());
 
-        mSigninManager.onPolicyCheckedBeforeSignIn(null); // Test user is unmanaged.
+        mSigninManager.onPolicyFetchedBeforeSignIn();
         assertFalse(mSigninManager.isOperationInProgress());
         assertEquals(1, callCount.get());
     }

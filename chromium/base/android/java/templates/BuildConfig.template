@@ -28,12 +28,6 @@ public class BuildConfig {
     public static MAYBE_FINAL boolean IS_MULTIDEX_ENABLED MAYBE_FALSE;
 #endif
 
-#if defined(_FIREBASE_APP_ID)
-    public static MAYBE_FINAL String FIREBASE_APP_ID = QUOTE(_FIREBASE_APP_ID);
-#else
-    public static MAYBE_FINAL String FIREBASE_APP_ID = "";
-#endif
-
 #if defined(_DCHECK_IS_ON)
     public static MAYBE_FINAL boolean DCHECK_IS_ON = true;
 #else
@@ -46,20 +40,10 @@ public class BuildConfig {
     public static MAYBE_FINAL boolean IS_UBSAN MAYBE_FALSE;
 #endif
 
-    // Sorted list of locales that have a compressed .pak within assets.
-    // Stored as an array because AssetManager.list() is slow.
-#if defined(COMPRESSED_LOCALE_LIST)
-    public static MAYBE_FINAL String[] COMPRESSED_LOCALES = COMPRESSED_LOCALE_LIST;
+#if defined(_IS_CHROME_BRANDED)
+    public static MAYBE_FINAL boolean IS_CHROME_BRANDED = true;
 #else
-    public static MAYBE_FINAL String[] COMPRESSED_LOCALES = {};
-#endif
-
-    // Sorted list of locales that have an uncompressed .pak within assets.
-    // Stored as an array because AssetManager.list() is slow.
-#if defined(UNCOMPRESSED_LOCALE_LIST)
-    public static MAYBE_FINAL String[] UNCOMPRESSED_LOCALES = UNCOMPRESSED_LOCALE_LIST;
-#else
-    public static MAYBE_FINAL String[] UNCOMPRESSED_LOCALES = {};
+    public static MAYBE_FINAL boolean IS_CHROME_BRANDED MAYBE_FALSE;
 #endif
 
     // The ID of the android string resource that stores the product version.

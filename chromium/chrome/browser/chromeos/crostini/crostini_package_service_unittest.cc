@@ -23,9 +23,8 @@
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_cicerone_client.h"
+#include "chromeos/dbus/fake_concierge_client.h"
 #include "chromeos/dbus/vm_applications/apps.pb.h"
-#include "chromeos/disks/disk_mount_manager.h"
-#include "chromeos/disks/mock_disk_mount_manager.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -40,7 +39,6 @@ namespace {
 using ::chromeos::DBusMethodCallback;
 using ::chromeos::DBusThreadManager;
 using ::chromeos::FakeCiceroneClient;
-using ::chromeos::disks::MockDiskMountManager;
 using ::testing::_;
 using ::testing::Invoke;
 using ::testing::IsEmpty;
@@ -54,6 +52,7 @@ using ::vm_tools::cicerone::InstallLinuxPackageRequest;
 using ::vm_tools::cicerone::InstallLinuxPackageResponse;
 using ::vm_tools::cicerone::LinuxPackageInfoRequest;
 using ::vm_tools::cicerone::LinuxPackageInfoResponse;
+using ::vm_tools::cicerone::PendingAppListUpdatesSignal;
 using ::vm_tools::cicerone::UninstallPackageOwningFileRequest;
 using ::vm_tools::cicerone::UninstallPackageOwningFileResponse;
 using ::vm_tools::cicerone::UninstallPackageProgressSignal;
@@ -155,17 +154,10 @@ class CrostiniPackageServiceTest : public testing::Test {
         DBusThreadManager::Get()->GetCiceroneClient());
     ASSERT_TRUE(fake_cicerone_client_);
 
-    mock_disk_mount_manager_ = new MockDiskMountManager;
-    ON_CALL(*mock_disk_mount_manager_, MountPath(_, _, _, _, _, _))
-        .WillByDefault(Invoke(
-            this,
-            &CrostiniPackageServiceTest::HandleDiskMountManagerMountPath));
-    chromeos::disks::DiskMountManager::InitializeForTesting(
-        mock_disk_mount_manager_);
     test_browser_thread_bundle_ =
         std::make_unique<content::TestBrowserThreadBundle>(
             base::test::ScopedTaskEnvironment::MainThreadType::UI,
-            base::test::ScopedTaskEnvironment::ExecutionMode::ASYNC,
+            base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::ASYNC,
             content::TestBrowserThreadBundle::REAL_IO_THREAD);
     profile_ = std::make_unique<TestingProfile>();
     crostini_test_helper_ =
@@ -194,8 +186,6 @@ class CrostiniPackageServiceTest : public testing::Test {
     crostini_test_helper_.reset();
     profile_.reset();
     test_browser_thread_bundle_.reset();
-    chromeos::disks::DiskMountManager::Shutdown();
-    mock_disk_mount_manager_ = nullptr;  // Destroyed in Shutdown()
     DBusThreadManager::Shutdown();
   }
 
@@ -211,29 +201,6 @@ class CrostiniPackageServiceTest : public testing::Test {
                                                 // kDifferentContainerAppFileId.
   const std::string kDifferentContainerApp2Id;  // App_id for app with
                                                 // kDifferentContainerApp2FileId
-
-  // Called when our MockDiskMountManager has its MountPath called. Needed so
-  // that CrostiniManager::CrostiniRestarter::OnMountEvent gets called properly
-  // after CrostiniManager::CrostiniRestarter::GetContainerSshKeysFinished.
-  void HandleDiskMountManagerMountPath(
-      const std::string& source_path,
-      const std::string& source_format,
-      const std::string& mount_label,
-      const std::vector<std::string>& mount_options,
-      chromeos::MountType type,
-      chromeos::MountAccessMode access_mode) {
-    if (mock_disk_mount_manager_) {
-      chromeos::disks::DiskMountManager::MountPointInfo info(
-          source_path, "/tmp/fake_mount_path", type,
-          chromeos::disks::MOUNT_CONDITION_NONE);
-      base::PostTaskWithTraits(
-          FROM_HERE, {content::BrowserThread::UI},
-          base::BindOnce(&MockDiskMountManager::NotifyMountEvent,
-                         base::Unretained(mock_disk_mount_manager_),
-                         chromeos::disks::DiskMountManager::MOUNTING,
-                         chromeos::MOUNT_ERROR_NONE, info));
-    }
-  }
 
   UninstallPackageProgressSignal MakeUninstallSignal(
       const UninstallPackageOwningFileRequest& request) {
@@ -251,6 +218,16 @@ class CrostiniPackageServiceTest : public testing::Test {
     signal.set_container_name(request.container_name());
     signal.set_owner_id(request.owner_id());
     return signal;
+  }
+
+  void SendAppListUpdateSignal(const std::string& vm_name,
+                               const std::string& container_name,
+                               int count) {
+    PendingAppListUpdatesSignal signal;
+    signal.set_vm_name(vm_name);
+    signal.set_container_name(container_name);
+    signal.set_count(count);
+    fake_cicerone_client_->NotifyPendingAppListUpdates(signal);
   }
 
   // Closes the notification as if the user had clicked 'close'.
@@ -331,9 +308,6 @@ class CrostiniPackageServiceTest : public testing::Test {
 
   // Owned by DBusThreadManager
   FakeCiceroneClient* fake_cicerone_client_ = nullptr;
-
-  // Owned by chromeos::disks::DiskMountManager
-  MockDiskMountManager* mock_disk_mount_manager_ = nullptr;
 
   std::unique_ptr<content::TestBrowserThreadBundle> test_browser_thread_bundle_;
   std::unique_ptr<TestingProfile> profile_;
@@ -620,6 +594,17 @@ Matcher<PrintableNotification> IsUninstallProgressNotification(
       expected_progress));
 }
 
+Matcher<PrintableNotification> IsUninstallWaitingForAppListNotification(
+    KnownApp app = DEFAULT_APP) {
+  return MakeMatcher(new NotificationMatcher(
+      l10n_util::GetStringUTF16(
+          IDS_CROSTINI_APPLICATION_UNINSTALL_NOTIFICATION_DISPLAY_SOURCE),
+      l10n_util::GetStringFUTF16(
+          IDS_CROSTINI_APPLICATION_UNINSTALL_NOTIFICATION_IN_PROGRESS_TITLE,
+          GetAppName(app)),
+      -1));
+}
+
 Matcher<PrintableNotification> IsUninstallQueuedNotification(
     KnownApp app = DEFAULT_APP) {
   return MakeMatcher(new NotificationMatcher(
@@ -640,6 +625,15 @@ Matcher<PrintableNotification> IsInstallProgressNotification(
       l10n_util::GetStringUTF16(
           IDS_CROSTINI_PACKAGE_INSTALL_NOTIFICATION_IN_PROGRESS_TITLE),
       expected_progress));
+}
+
+Matcher<PrintableNotification> IsInstallWaitingForAppListNotification() {
+  return MakeMatcher(new NotificationMatcher(
+      l10n_util::GetStringUTF16(
+          IDS_CROSTINI_PACKAGE_INSTALL_NOTIFICATION_DISPLAY_SOURCE),
+      l10n_util::GetStringUTF16(
+          IDS_CROSTINI_PACKAGE_INSTALL_NOTIFICATION_IN_PROGRESS_TITLE),
+      -1));
 }
 
 Matcher<PrintableNotification> IsInstallSuccessNotification() {
@@ -879,6 +873,27 @@ TEST_F(CrostiniPackageServiceTest, SecondUninstallStartsWhenFirstFails) {
                            IsUninstallProgressNotification(0, SECOND_APP)));
 }
 
+TEST_F(CrostiniPackageServiceTest, DuplicateUninstallSucceeds) {
+  service_->QueueUninstallApplication(kDefaultAppId);
+  service_->QueueUninstallApplication(kDefaultAppId);
+
+  UninstallPackageOwningFileRequest request;
+  StartAndSignalUninstall(UninstallPackageProgressSignal::UNINSTALLING,
+                          50 /*progress_percent*/, kDefaultAppFileId, &request);
+
+  crostini_test_helper_->RemoveApp(0);
+
+  UninstallPackageProgressSignal signal_success = MakeUninstallSignal(request);
+  signal_success.set_status(UninstallPackageProgressSignal::SUCCEEDED);
+  fake_cicerone_client_->UninstallPackageProgress(signal_success);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsUninstallSuccessNotification(DEFAULT_APP),
+                           IsUninstallSuccessNotification(DEFAULT_APP)));
+}
+
 TEST_F(CrostiniPackageServiceTest,
        AfterSecondInstallStartsProgressAppliesToSecond) {
   service_->QueueUninstallApplication(kDefaultAppId);
@@ -954,6 +969,116 @@ TEST_F(CrostiniPackageServiceTest, QueuedUninstallsProcessedInFifoOrder) {
       UnorderedElementsAre(IsUninstallSuccessNotification(DEFAULT_APP),
                            IsUninstallSuccessNotification(SECOND_APP),
                            IsUninstallSuccessNotification(THIRD_APP)));
+}
+
+TEST_F(CrostiniPackageServiceTest, UninstallNotificationWaitsForAppListUpdate) {
+  service_->QueueUninstallApplication(kDefaultAppId);
+
+  SendAppListUpdateSignal(kCrostiniDefaultVmName, kCrostiniDefaultContainerName,
+                          1);
+
+  StartAndSignalUninstall(UninstallPackageProgressSignal::SUCCEEDED);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(
+          IsUninstallWaitingForAppListNotification(DEFAULT_APP)));
+
+  SendAppListUpdateSignal(kCrostiniDefaultVmName, kCrostiniDefaultContainerName,
+                          0);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsUninstallSuccessNotification(DEFAULT_APP)));
+}
+
+TEST_F(CrostiniPackageServiceTest,
+       UninstallNotificationDoesntWaitForAppListUpdate) {
+  service_->QueueUninstallApplication(kDefaultAppId);
+
+  SendAppListUpdateSignal(kCrostiniDefaultVmName, kCrostiniDefaultContainerName,
+                          0);
+
+  StartAndSignalUninstall(UninstallPackageProgressSignal::SUCCEEDED);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsUninstallSuccessNotification(DEFAULT_APP)));
+
+  SendAppListUpdateSignal(kCrostiniDefaultVmName, kCrostiniDefaultContainerName,
+                          1);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsUninstallSuccessNotification(DEFAULT_APP)));
+}
+
+TEST_F(CrostiniPackageServiceTest,
+       UninstallNotificationAppListUpdatesAreVmSpecific) {
+  UninstallPackageOwningFileRequest request;
+  DBusMethodCallback<UninstallPackageOwningFileResponse> callback;
+
+  service_->QueueUninstallApplication(kDefaultAppId);
+  RunUntilUninstallRequestMade(fake_cicerone_client_, &request, &callback);
+  UninstallPackageProgressSignal signal_progress = MakeUninstallSignal(request);
+  signal_progress.set_status(UninstallPackageProgressSignal::SUCCEEDED);
+
+  service_->QueueUninstallApplication(kDifferentVmAppId);
+  RunUntilUninstallRequestMade(fake_cicerone_client_, &request, &callback);
+  UninstallPackageProgressSignal signal_progress2 =
+      MakeUninstallSignal(request);
+  signal_progress2.set_status(UninstallPackageProgressSignal::SUCCEEDED);
+
+  SendAppListUpdateSignal(kDifferentVmVmName, kCrostiniDefaultContainerName, 1);
+  fake_cicerone_client_->UninstallPackageProgress(signal_progress);
+  fake_cicerone_client_->UninstallPackageProgress(signal_progress2);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(
+          IsUninstallSuccessNotification(DEFAULT_APP),
+          IsUninstallWaitingForAppListNotification(DIFFERENT_VM)));
+}
+
+TEST_F(CrostiniPackageServiceTest,
+       UninstallNotificationAppListUpdatesFromUnknownContainersAreIgnored) {
+  service_->QueueUninstallApplication(kDefaultAppId);
+
+  SendAppListUpdateSignal(kDifferentVmVmName, kCrostiniDefaultContainerName, 1);
+
+  StartAndSignalUninstall(UninstallPackageProgressSignal::SUCCEEDED);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsUninstallSuccessNotification(DEFAULT_APP)));
+}
+
+TEST_F(CrostiniPackageServiceTest, UninstallNotificationFailsOnVmShutdown) {
+  // Use two apps to ensure one is queued up.
+  service_->QueueUninstallApplication(kDefaultAppId);
+  service_->QueueUninstallApplication(kSecondAppId);
+
+  base::RunLoop run_loop;
+  CrostiniManager::GetForProfile(profile_.get())
+      ->StopVm(kCrostiniDefaultVmName,
+               base::BindOnce(
+                   [](base::OnceClosure quit, crostini::CrostiniResult) {
+                     std::move(quit).Run();
+                   },
+                   run_loop.QuitClosure()));
+  run_loop.Run();
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsUninstallFailedNotification(DEFAULT_APP),
+                           IsUninstallFailedNotification(SECOND_APP)));
 }
 
 TEST_F(CrostiniPackageServiceTest, ClosingSuccessNotificationWorks) {
@@ -1629,6 +1754,135 @@ TEST_F(CrostiniPackageServiceTest,
                                 kCrostiniDefaultContainerName, kPackageFilePath,
                                 base::DoNothing());
   StartAndSignalInstall(InstallLinuxPackageProgressSignal::FAILED);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsInstallFailedNotification()));
+}
+
+TEST_F(CrostiniPackageServiceTest, InstallNotificationWaitsForAppListUpdate) {
+  service_->InstallLinuxPackage(kCrostiniDefaultVmName,
+                                kCrostiniDefaultContainerName, kPackageFilePath,
+                                base::DoNothing());
+  base::RunLoop().RunUntilIdle();
+
+  SendAppListUpdateSignal(kCrostiniDefaultVmName, kCrostiniDefaultContainerName,
+                          1);
+
+  StartAndSignalInstall(InstallLinuxPackageProgressSignal::SUCCEEDED);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsInstallWaitingForAppListNotification()));
+
+  SendAppListUpdateSignal(kCrostiniDefaultVmName, kCrostiniDefaultContainerName,
+                          0);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsInstallSuccessNotification()));
+}
+
+TEST_F(CrostiniPackageServiceTest,
+       InstallNotificationDoesntWaitForAppListUpdate) {
+  service_->InstallLinuxPackage(kCrostiniDefaultVmName,
+                                kCrostiniDefaultContainerName, kPackageFilePath,
+                                base::DoNothing());
+  base::RunLoop().RunUntilIdle();
+
+  SendAppListUpdateSignal(kCrostiniDefaultVmName, kCrostiniDefaultContainerName,
+                          0);
+
+  StartAndSignalInstall(InstallLinuxPackageProgressSignal::SUCCEEDED);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsInstallSuccessNotification()));
+
+  SendAppListUpdateSignal(kCrostiniDefaultVmName, kCrostiniDefaultContainerName,
+                          1);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsInstallSuccessNotification()));
+}
+
+TEST_F(CrostiniPackageServiceTest,
+       InstallNotificationAppListUpdatesAreVmSpecific) {
+  InstallLinuxPackageRequest request;
+
+  service_->InstallLinuxPackage(kCrostiniDefaultVmName,
+                                kCrostiniDefaultContainerName, kPackageFilePath,
+                                base::DoNothing());
+  request =
+      fake_cicerone_client_->get_most_recent_install_linux_package_request();
+  InstallLinuxPackageProgressSignal signal_progress =
+      MakeInstallSignal(request);
+  signal_progress.set_status(InstallLinuxPackageProgressSignal::SUCCEEDED);
+
+  service_->InstallLinuxPackage(kDifferentVmVmName,
+                                kCrostiniDefaultContainerName, kPackageFilePath,
+                                base::DoNothing());
+  request =
+      fake_cicerone_client_->get_most_recent_install_linux_package_request();
+  InstallLinuxPackageProgressSignal signal_progress2 =
+      MakeInstallSignal(request);
+  signal_progress2.set_status(InstallLinuxPackageProgressSignal::SUCCEEDED);
+
+  base::RunLoop().RunUntilIdle();
+
+  SendAppListUpdateSignal(kDifferentVmVmName, kCrostiniDefaultContainerName, 1);
+  fake_cicerone_client_->InstallLinuxPackageProgress(signal_progress);
+  fake_cicerone_client_->InstallLinuxPackageProgress(signal_progress2);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsInstallSuccessNotification(),
+                           IsInstallWaitingForAppListNotification()));
+}
+
+TEST_F(CrostiniPackageServiceTest,
+       InstallNotificationAppListUpdatesFromUnknownContainersAreIgnored) {
+  service_->InstallLinuxPackage(kCrostiniDefaultVmName,
+                                kCrostiniDefaultContainerName, kPackageFilePath,
+                                base::DoNothing());
+
+  base::RunLoop().RunUntilIdle();
+
+  SendAppListUpdateSignal(kDifferentVmVmName, kCrostiniDefaultContainerName, 1);
+
+  StartAndSignalInstall(InstallLinuxPackageProgressSignal::SUCCEEDED);
+
+  EXPECT_THAT(
+      Printable(notification_display_service_->GetDisplayedNotificationsForType(
+          NotificationHandler::Type::TRANSIENT)),
+      UnorderedElementsAre(IsInstallSuccessNotification()));
+}
+
+TEST_F(CrostiniPackageServiceTest, InstallNotificationFailsOnVmShutdown) {
+  service_->InstallLinuxPackage(kCrostiniDefaultVmName,
+                                kCrostiniDefaultContainerName, kPackageFilePath,
+                                base::DoNothing());
+
+  base::RunLoop().RunUntilIdle();
+
+  StartAndSignalInstall(InstallLinuxPackageProgressSignal::INSTALLING);
+
+  base::RunLoop run_loop;
+  CrostiniManager::GetForProfile(profile_.get())
+      ->StopVm(kCrostiniDefaultVmName,
+               base::BindOnce(
+                   [](base::OnceClosure quit, crostini::CrostiniResult) {
+                     std::move(quit).Run();
+                   },
+                   run_loop.QuitClosure()));
+  run_loop.Run();
 
   EXPECT_THAT(
       Printable(notification_display_service_->GetDisplayedNotificationsForType(

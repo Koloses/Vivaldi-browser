@@ -16,7 +16,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_chunk_subset.h"
 #include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
 #include "third_party/blink/renderer/platform/graphics/paint/raster_invalidation_tracking.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -202,6 +202,9 @@ class ConversionContext {
     const EffectPaintPropertyNode* effect;
     // See ConversionContext::previous_transform_.
     const TransformPaintPropertyNode* previous_transform;
+#if DCHECK_IS_ON()
+    bool has_pre_cap_effect_hierarchy_issue = false;
+#endif
   };
   void PushState(StateEntry::PairedType, int saved_count);
   void PopState();
@@ -295,7 +298,7 @@ static bool CombineClip(const ClipPaintPropertyNode& clip,
   const auto& parent_transform_space = clip.Parent()->LocalTransformSpace();
   if (&transform_space != &parent_transform_space &&
       (transform_space.Parent() != &parent_transform_space ||
-       !transform_space.Matrix().IsIdentity()))
+       !transform_space.IsIdentity()))
     return false;
 
   // Don't combine two rounded clip rects.
@@ -340,9 +343,8 @@ void ConversionContext::SwitchToClip(
 #if DCHECK_IS_ON()
       DLOG(ERROR) << "Error: Chunk has a clip that escaped its layer's or "
                   << "effect's clip.\ntarget_clip:\n"
-                  << target_clip.ToTreeString().Utf8().data()
-                  << "current_clip_:\n"
-                  << current_clip_->ToTreeString().Utf8().data();
+                  << target_clip.ToTreeString().Utf8() << "current_clip_:\n"
+                  << current_clip_->ToTreeString().Utf8();
 #endif
       if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled())
         NOTREACHED();
@@ -436,6 +438,16 @@ void ConversionContext::StartClip(
   current_transform_ = &local_transform;
 }
 
+bool HasRealEffects(const EffectPaintPropertyNode& current,
+                    const EffectPaintPropertyNode& ancestor) {
+  for (const auto* node = &current; node != &ancestor;
+       node = SafeUnalias(node->Parent())) {
+    if (node->HasRealEffects())
+      return true;
+  }
+  return false;
+}
+
 void ConversionContext::SwitchToEffect(
     const EffectPaintPropertyNode& target_effect_arg) {
   const auto& target_effect = target_effect_arg.Unalias();
@@ -445,6 +457,11 @@ void ConversionContext::SwitchToEffect(
   // Step 1: Exit all effects until the lowest common ancestor is found.
   const auto& lca_effect =
       LowestCommonAncestor(target_effect, *current_effect_).Unalias();
+
+#if DCHECK_IS_ON()
+  bool has_pre_cap_effect_hierarchy_issue = false;
+#endif
+
   while (current_effect_ != &lca_effect) {
     // This EndClips() and the later EndEffect() pop to the parent effect.
     EndClips();
@@ -455,12 +472,18 @@ void ConversionContext::SwitchToEffect(
 #if DCHECK_IS_ON()
       DLOG(ERROR) << "Error: Chunk has an effect that escapes layer's effect.\n"
                   << "target_effect:\n"
-                  << target_effect.ToTreeString().Utf8().data()
-                  << "current_effect_:\n"
-                  << current_effect_->ToTreeString().Utf8().data();
+                  << target_effect.ToTreeString().Utf8() << "current_effect_:\n"
+                  << current_effect_->ToTreeString().Utf8();
+      has_pre_cap_effect_hierarchy_issue = true;
 #endif
       if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled())
         NOTREACHED();
+      // In pre-CompositeAfterPaint, we may squash one layer into another, but
+      // the squashing layer may create more effect nodes not for real effects,
+      // causing squashed layer's effect to escape the squashing layer's effect.
+      // We can continue because the extra effects are noop.
+      if (!HasRealEffects(*current_effect_, lca_effect))
+        break;
       return;
     }
     EndEffect();
@@ -469,7 +492,7 @@ void ConversionContext::SwitchToEffect(
   // Step 2: Collect all effects between the target effect and the current
   // effect. At this point the current effect must be an ancestor of the target.
   Vector<const EffectPaintPropertyNode*, 1u> pending_effects;
-  for (const auto* effect = &target_effect; effect != current_effect_;
+  for (const auto* effect = &target_effect; effect != &lca_effect;
        effect = SafeUnalias(effect->Parent())) {
     // This should never happen unless the DCHECK in step 1 failed.
     if (!effect)
@@ -480,8 +503,17 @@ void ConversionContext::SwitchToEffect(
   // Step 3: Now apply the list of effects in top-down order.
   for (size_t i = pending_effects.size(); i--;) {
     const EffectPaintPropertyNode* sub_effect = pending_effects[i];
-    DCHECK_EQ(current_effect_, SafeUnalias(sub_effect->Parent()));
+#if DCHECK_IS_ON()
+    if (!has_pre_cap_effect_hierarchy_issue)
+      DCHECK_EQ(current_effect_, SafeUnalias(sub_effect->Parent()));
+#endif
     StartEffect(*sub_effect);
+#if DCHECK_IS_ON()
+    state_stack_.back().has_pre_cap_effect_hierarchy_issue =
+        has_pre_cap_effect_hierarchy_issue;
+    // This applies only to the first new effect.
+    has_pre_cap_effect_hierarchy_issue = false;
+#endif
   }
 }
 
@@ -585,10 +617,13 @@ void ConversionContext::UpdateEffectBounds(
 }
 
 void ConversionContext::EndEffect() {
+#if DCHECK_IS_ON()
   const auto& previous_state = state_stack_.back();
   DCHECK_EQ(previous_state.type, StateEntry::kEffect);
-  DCHECK_EQ(SafeUnalias(current_effect_->Parent()), previous_state.effect);
+  if (!previous_state.has_pre_cap_effect_hierarchy_issue)
+    DCHECK_EQ(SafeUnalias(current_effect_->Parent()), previous_state.effect);
   DCHECK_EQ(current_clip_, previous_state.clip);
+#endif
 
   DCHECK(effect_bounds_stack_.size());
   const auto& bounds_info = effect_bounds_stack_.back();
@@ -721,7 +756,7 @@ void ConversionContext::Convert(const PaintChunkSubset& paint_chunks,
       cc_list_.EndPaintOfUnpaired(
           chunk_to_layer_mapper_.MapVisualRect(item.VisualRect()));
     }
-    UpdateEffectBounds(chunk.bounds, chunk_state.Transform());
+    UpdateEffectBounds(FloatRect(chunk.bounds), chunk_state.Transform());
   }
 }
 

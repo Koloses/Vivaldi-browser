@@ -25,7 +25,6 @@
 #include "chrome/common/constants.mojom.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
-#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safe_browsing.mojom.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
@@ -101,9 +100,7 @@ ClientSideDetectionService::CacheState::CacheState(bool phish, base::Time time)
 
 ClientSideDetectionService::ClientSideDetectionService(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
-    : enabled_(false),
-      url_loader_factory_(url_loader_factory),
-      weak_factory_(this) {
+    : enabled_(false), url_loader_factory_(url_loader_factory) {
   base::Closure update_renderers =
       base::Bind(&ClientSideDetectionService::SendModelToRenderers,
                  base::Unretained(this));
@@ -209,10 +206,10 @@ void ClientSideDetectionService::OnURLLoaderComplete(
   if (url_loader->ResponseInfo() && url_loader->ResponseInfo()->headers)
     response_code = url_loader->ResponseInfo()->headers->response_code();
 
-  if (base::ContainsKey(client_phishing_reports_, url_loader)) {
+  if (base::Contains(client_phishing_reports_, url_loader)) {
     HandlePhishingVerdict(url_loader, url_loader->GetFinalURL(),
                           url_loader->NetError(), response_code, data);
-  } else if (base::ContainsKey(client_malware_reports_, url_loader)) {
+  } else if (base::Contains(client_malware_reports_, url_loader)) {
     HandleMalwareVerdict(url_loader, url_loader->GetFinalURL(),
                          url_loader->NetError(), response_code, data);
   } else {

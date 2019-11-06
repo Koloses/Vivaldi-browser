@@ -28,17 +28,15 @@
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
-#include "ios/chrome/test/app/navigation_test_util.h"
+#import "ios/chrome/test/app/static_html_view_test_util.h"
 #import "ios/chrome/test/app/tab_test_util.h"
-#import "ios/chrome/test/earl_grey/accessibility_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
-#include "ios/web/public/features.h"
-#import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/reload_type.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/navigation/reload_type.h"
 #import "ios/web/public/test/web_view_content_test_util.h"
 #import "ios/web/public/web_state/web_state.h"
 #include "net/base/network_change_notifier.h"
@@ -50,6 +48,8 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+using base::test::ios::kWaitForUIElementTimeout;
 
 namespace {
 const char kContentToRemove[] = "Text that distillation should remove.";
@@ -397,10 +397,42 @@ void OpenPageSecurityInfoBubble() {
       tapToolsMenuButton:grey_accessibilityID(kToolsMenuSiteInformation)];
 }
 
+// Waits for a static html view containing |text|. If the condition is not met
+// within a timeout, a GREYAssert is induced.
+void WaitForStaticHtmlViewContainingText(NSString* text) {
+  bool has_static_view =
+      base::test::ios::WaitUntilConditionOrTimeout(kWaitForUIElementTimeout, ^{
+        return chrome_test_util::StaticHtmlViewContainingText(
+            chrome_test_util::GetCurrentWebState(),
+            base::SysNSStringToUTF8(text));
+      });
+
+  NSString* error_description = [NSString
+      stringWithFormat:@"Failed to find static html view containing %@", text];
+  GREYAssert(has_static_view, error_description);
+}
+
+// Waits for there to be no static html view, or a static html view that does
+// not contain |text|. If the condition is not met within a timeout, a
+// GREYAssert is induced.
+void WaitForStaticHtmlViewNotContainingText(NSString* text) {
+  bool no_static_view =
+      base::test::ios::WaitUntilConditionOrTimeout(kWaitForUIElementTimeout, ^{
+        return !chrome_test_util::StaticHtmlViewContainingText(
+            chrome_test_util::GetCurrentWebState(),
+            base::SysNSStringToUTF8(text));
+      });
+
+  NSString* error_description = [NSString
+      stringWithFormat:@"Failed, there was a static html view containing %@",
+                       text];
+  GREYAssert(no_static_view, error_description);
+}
+
 void AssertIsShowingDistillablePageNoNativeContent(
     bool online,
     const GURL& distillable_url) {
-  [ChromeEarlGrey waitForWebViewContainingText:kContentToKeep];
+  [ChromeEarlGrey waitForWebStateContainingText:kContentToKeep];
 
   [[EarlGrey selectElementWithMatcher:chrome_test_util::OmniboxText(
                                           distillable_url.GetContent())]
@@ -408,11 +440,11 @@ void AssertIsShowingDistillablePageNoNativeContent(
 
   // Test that the offline and online pages are properly displayed.
   if (online) {
-    [ChromeEarlGrey waitForWebViewContainingText:kContentToRemove];
-    [ChromeEarlGrey waitForWebViewContainingText:kContentToKeep];
+    [ChromeEarlGrey waitForWebStateContainingText:kContentToRemove];
+    [ChromeEarlGrey waitForWebStateContainingText:kContentToKeep];
   } else {
-    [ChromeEarlGrey waitForWebViewNotContainingText:kContentToRemove];
-    [ChromeEarlGrey waitForWebViewContainingText:kContentToKeep];
+    [ChromeEarlGrey waitForWebStateNotContainingText:kContentToRemove];
+    [ChromeEarlGrey waitForWebStateContainingText:kContentToKeep];
   }
 
   // Test the presence of the omnibox offline chip.
@@ -430,7 +462,7 @@ void AssertIsShowingDistillablePageNativeContent(bool online,
   // There will be multiple reloads, wait for the page to be displayed.
   if (online) {
     // Due to the reloads, a timeout longer than what is provided in
-    // [ChromeEarlGrey waitForWebViewContainingText] is required, so call
+    // [ChromeEarlGrey waitForWebStateContainingText] is required, so call
     // WebViewContainingText directly.
     GREYAssert(base::test::ios::WaitUntilConditionOrTimeout(
                    kLoadOfflineTimeout,
@@ -441,7 +473,7 @@ void AssertIsShowingDistillablePageNativeContent(bool online,
                    }),
                @"Waiting for online page.");
   } else {
-    [ChromeEarlGrey waitForStaticHTMLViewContainingText:contentToKeep];
+    WaitForStaticHtmlViewContainingText(contentToKeep);
   }
 
   [[EarlGrey selectElementWithMatcher:chrome_test_util::OmniboxText(
@@ -451,11 +483,11 @@ void AssertIsShowingDistillablePageNativeContent(bool online,
   // Test that the offline and online pages are properly displayed.
   if (online) {
     [ChromeEarlGrey
-        waitForWebViewContainingText:base::SysNSStringToUTF8(contentToKeep)];
-    [ChromeEarlGrey waitForStaticHTMLViewNotContainingText:contentToKeep];
+        waitForWebStateContainingText:base::SysNSStringToUTF8(contentToKeep)];
+    WaitForStaticHtmlViewNotContainingText(contentToKeep);
   } else {
-    [ChromeEarlGrey waitForWebViewNotContainingText:kContentToKeep];
-    [ChromeEarlGrey waitForStaticHTMLViewContainingText:contentToKeep];
+    [ChromeEarlGrey waitForWebStateNotContainingText:kContentToKeep];
+    WaitForStaticHtmlViewContainingText(contentToKeep);
   }
 
   // Test the presence of the omnibox offline chip.
@@ -516,9 +548,9 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
 - (void)testAccessibility {
   AddEntriesAndEnterEdit();
   // In edit mode.
-  chrome_test_util::VerifyAccessibilityForCurrentScreen();
+  [ChromeEarlGrey verifyAccessibilityForCurrentScreen];
   TapToolbarButtonWithID(kReadingListToolbarCancelButtonID);
-  chrome_test_util::VerifyAccessibilityForCurrentScreen();
+  [ChromeEarlGrey verifyAccessibilityForCurrentScreen];
 }
 
 // Tests that sharing a web page to the Reading List results in a snackbar
@@ -640,6 +672,13 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
       web::ReloadType::NORMAL, false);
   AssertIsShowingDistillablePage(false, distillableURL);
 
+  // TODO(crbug.com/954248) This DCHECK's (but works) with slimnav disabled.
+  if ([ChromeEarlGrey isSlimNavigationManagerEnabled]) {
+    [ChromeEarlGrey goBack];
+    [ChromeEarlGrey goForward];
+    AssertIsShowingDistillablePage(false, distillableURL);
+  }
+
   // Start server to reload online error.
   self.serverRespondsWithContent = YES;
   base::test::ios::SpinRunLoopWithMinDelay(
@@ -677,6 +716,10 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
   // Open the entry.
   TapEntry(pageTitle);
 
+  AssertIsShowingDistillablePage(false, distillableURL);
+
+  [ChromeEarlGrey goBack];
+  [ChromeEarlGrey goForward];
   AssertIsShowingDistillablePage(false, distillableURL);
 
   // Reload should load online page.

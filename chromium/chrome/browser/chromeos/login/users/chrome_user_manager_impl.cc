@@ -12,8 +12,7 @@
 #include <vector>
 
 #include "ash/public/cpp/ash_pref_names.h"
-#include "ash/public/interfaces/constants.mojom.h"
-#include "ash/public/interfaces/session_controller.mojom.h"
+#include "ash/public/cpp/session/session_controller.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -52,8 +51,14 @@
 #include "chrome/browser/chromeos/login/users/supervised_user_manager_impl.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_network_configuration_updater.h"
-#include "chrome/browser/chromeos/printing/external_printers.h"
-#include "chrome/browser/chromeos/printing/external_printers_factory.h"
+#include "chrome/browser/chromeos/policy/external_data_handlers/native_printers_external_data_handler.h"
+#include "chrome/browser/chromeos/policy/external_data_handlers/print_servers_external_data_handler.h"
+#include "chrome/browser/chromeos/policy/external_data_handlers/user_avatar_image_external_data_handler.h"
+#include "chrome/browser/chromeos/policy/external_data_handlers/wallpaper_image_external_data_handler.h"
+#include "chrome/browser/chromeos/printing/bulk_printers_calculator_factory.h"
+#include "chrome/browser/chromeos/printing/print_servers_provider.h"
+#include "chrome/browser/chromeos/printing/print_servers_provider_factory.h"
+#include "chrome/browser/chromeos/policy/user_network_configuration_updater.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/session_length_limiter.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -76,7 +81,7 @@
 #include "chromeos/dbus/cryptohome/rpc.pb.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/upstart_client.h"
+#include "chromeos/dbus/upstart/upstart_client.h"
 #include "chromeos/login/login_state/login_state.h"
 #include "chromeos/network/proxy/proxy_config_service_impl.h"
 #include "chromeos/settings/cros_settings_names.h"
@@ -99,9 +104,8 @@
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/common/service_manager_connection.h"
 #include "extensions/browser/device_local_account_util.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
@@ -194,11 +198,6 @@ policy::MinimumVersionPolicyHandler* GetMinimumVersionPolicyHandler() {
       ->GetMinimumVersionPolicyHandler();
 }
 
-base::WeakPtr<ExternalPrinters> GetExternalPrinters(
-    const AccountId& account_id) {
-  return ExternalPrintersFactory::Get()->GetForAccountId(account_id);
-}
-
 // Starts bluetooth logging service for accounts ending with |kGoogleDotCom|
 // and certain devices.
 void MaybeStartBluetoothLogging(const AccountId& account_id) {
@@ -206,14 +205,8 @@ void MaybeStartBluetoothLogging(const AccountId& account_id) {
                       base::CompareCase::INSENSITIVE_ASCII)) {
     return;
   }
-  const std::vector<std::string> board =
-      base::SplitString(base::SysInfo::GetLsbReleaseBoard(), "-",
-                        base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-  const std::string board_name = board[0];
-  if (board_name != "eve" && board_name != "nocturne")
-    return;
-  chromeos::DBusThreadManager::Get()->GetUpstartClient()->StartJob(
-      kBluetoothLoggingUpstartJob, {}, EmptyVoidDBusMethodCallback());
+  chromeos::UpstartClient::Get()->StartJob(kBluetoothLoggingUpstartJob, {},
+                                           EmptyVoidDBusMethodCallback());
 }
 
 bool IsManagedSessionEnabled(policy::DeviceLocalAccountPolicyBroker* broker) {
@@ -233,15 +226,6 @@ const base::Value::ListStorage* GetListPolicyValue(
     return nullptr;
 
   return &entry->value->GetList();
-}
-
-bool IsPacHttpsUrlStrippingDisabled(
-    policy::DeviceLocalAccountPolicyBroker* broker) {
-  const policy::PolicyMap::Entry* entry =
-      broker->core()->store()->policy_map().Get(
-          policy::key::kPacHttpsUrlStrippingEnabled);
-  // Policy is enabled and it's value is set to 'false'.
-  return entry && entry->value && !entry->value->GetBool();
 }
 
 bool AreRiskyPoliciesUsed(policy::DeviceLocalAccountPolicyBroker* broker) {
@@ -306,12 +290,11 @@ bool AreRiskyExtensionsForceInstalled(
   return false;
 }
 
-bool AreForcedNetworkCertificatesInstalled() {
-  return !g_browser_process->platform_part()
-              ->browser_policy_connector_chromeos()
-              ->GetDeviceNetworkConfigurationUpdater()
-              ->GetAllAuthorityCertificates()
-              .empty();
+bool PolicyHasWebTrustedAuthorityCertificate(
+    policy::DeviceLocalAccountPolicyBroker* broker) {
+  return policy::UserNetworkConfigurationUpdater::
+      PolicyHasWebTrustedAuthorityCertificate(
+          broker->core()->store()->policy_map());
 }
 
 }  // namespace
@@ -403,21 +386,18 @@ ChromeUserManagerImpl::ChromeUserManagerImpl()
     GetMinimumVersionPolicyHandler()->AddObserver(this);
   }
 
-  avatar_policy_observer_ =
-      std::make_unique<policy::CloudExternalDataPolicyObserver>(
-          cros_settings_, device_local_account_policy_service,
-          policy::key::kUserAvatarImage, this);
-  avatar_policy_observer_->Init();
-  wallpaper_policy_observer_ =
-      std::make_unique<policy::CloudExternalDataPolicyObserver>(
-          cros_settings_, device_local_account_policy_service,
-          policy::key::kWallpaperImage, this);
-  wallpaper_policy_observer_->Init();
-  printers_policy_observer_ =
-      std::make_unique<policy::CloudExternalDataPolicyObserver>(
-          cros_settings_, device_local_account_policy_service,
-          policy::key::kNativePrintersBulkConfiguration, this);
-  printers_policy_observer_->Init();
+  cloud_external_data_policy_handlers_.emplace_back(
+      std::make_unique<policy::UserAvatarImageExternalDataHandler>(
+          cros_settings_, device_local_account_policy_service));
+  cloud_external_data_policy_handlers_.emplace_back(
+      std::make_unique<policy::WallpaperImageExternalDataHandler>(
+          cros_settings_, device_local_account_policy_service));
+  cloud_external_data_policy_handlers_.emplace_back(
+      std::make_unique<policy::NativePrintersExternalDataHandler>(
+          cros_settings_, device_local_account_policy_service));
+  cloud_external_data_policy_handlers_.emplace_back(
+      std::make_unique<policy::PrintServersExternalDataHandler>(
+          cros_settings_, device_local_account_policy_service));
 
   // Record the stored session length for enrolled device.
   if (IsEnterpriseManaged())
@@ -431,6 +411,7 @@ ChromeUserManagerImpl::~ChromeUserManagerImpl() {
 
 void ChromeUserManagerImpl::Shutdown() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   ChromeUserManager::Shutdown();
 
   if (GetMinimumVersionPolicyHandler()) {
@@ -462,11 +443,8 @@ void ChromeUserManagerImpl::Shutdown() {
     it->second->Shutdown();
   }
   multi_profile_user_controller_.reset();
-  avatar_policy_observer_.reset();
-  wallpaper_policy_observer_.reset();
-  // Remove the observer before shutting down the printer policy objects.
-  printers_policy_observer_.reset();
-  ExternalPrintersFactory::Get()->Shutdown();
+  cloud_external_data_policy_handlers_.clear();
+  BulkPrintersCalculatorFactory::Get()->ShutdownProfiles();
   registrar_.RemoveAll();
 }
 
@@ -527,20 +505,6 @@ user_manager::UserList ChromeUserManagerImpl::GetUsersAllowedForMultiProfile()
   }
 
   return result;
-}
-
-user_manager::UserList
-ChromeUserManagerImpl::GetUsersAllowedForSupervisedUsersCreation() const {
-  CrosSettings* cros_settings = CrosSettings::Get();
-  bool allow_new_user = true;
-  cros_settings->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
-  bool supervised_users_allowed = AreSupervisedUsersAllowed();
-
-  // Restricted either by policy or by owner.
-  if (!allow_new_user || !supervised_users_allowed)
-    return user_manager::UserList();
-
-  return GetUsersAllowedAsSupervisedUserManagers(GetUsers());
 }
 
 user_manager::UserList ChromeUserManagerImpl::GetUnlockUsers() const {
@@ -636,9 +600,7 @@ void ChromeUserManagerImpl::SaveUserDisplayName(
 }
 
 void ChromeUserManagerImpl::StopPolicyObserverForTesting() {
-  avatar_policy_observer_.reset();
-  wallpaper_policy_observer_.reset();
-  printers_policy_observer_.reset();
+  cloud_external_data_policy_handlers_.clear();
 }
 
 void ChromeUserManagerImpl::Observe(
@@ -703,52 +665,6 @@ void ChromeUserManagerImpl::OwnershipStatusChanged() {
       device_local_account_policy_service_->AddObserver(this);
   }
   RetrieveTrustedDevicePolicies();
-}
-
-void ChromeUserManagerImpl::OnExternalDataSet(const std::string& policy,
-                                              const std::string& user_id) {
-  const AccountId account_id = user_manager::known_user::GetAccountId(
-      user_id, std::string() /* id */, AccountType::UNKNOWN);
-  if (policy == policy::key::kUserAvatarImage)
-    GetUserImageManager(account_id)->OnExternalDataSet(policy);
-  else if (policy == policy::key::kNativePrintersBulkConfiguration)
-    GetExternalPrinters(account_id)->ClearData();
-  else if (policy != policy::key::kWallpaperImage)
-    NOTREACHED();
-}
-
-void ChromeUserManagerImpl::OnExternalDataCleared(const std::string& policy,
-                                                  const std::string& user_id) {
-  const AccountId account_id = user_manager::known_user::GetAccountId(
-      user_id, std::string() /* id */, AccountType::UNKNOWN);
-  if (policy == policy::key::kUserAvatarImage)
-    GetUserImageManager(account_id)->OnExternalDataCleared(policy);
-  else if (policy == policy::key::kNativePrintersBulkConfiguration)
-    GetExternalPrinters(account_id)->ClearData();
-  else if (policy == policy::key::kWallpaperImage)
-    WallpaperControllerClient::Get()->RemovePolicyWallpaper(account_id);
-  else
-    NOTREACHED();
-}
-
-void ChromeUserManagerImpl::OnExternalDataFetched(
-    const std::string& policy,
-    const std::string& user_id,
-    std::unique_ptr<std::string> data,
-    const base::FilePath& file_path) {
-  const AccountId account_id = user_manager::known_user::GetAccountId(
-      user_id, std::string() /* id */, AccountType::UNKNOWN);
-  if (policy == policy::key::kUserAvatarImage) {
-    GetUserImageManager(account_id)
-        ->OnExternalDataFetched(policy, std::move(data));
-  } else if (policy == policy::key::kNativePrintersBulkConfiguration) {
-    GetExternalPrinters(account_id)->SetData(std::move(data));
-  } else if (policy == policy::key::kWallpaperImage) {
-    WallpaperControllerClient::Get()->SetPolicyWallpaper(account_id,
-                                                         std::move(data));
-  } else {
-    NOTREACHED();
-  }
 }
 
 void ChromeUserManagerImpl::OnPolicyUpdated(const std::string& user_id) {
@@ -1161,9 +1077,8 @@ void ChromeUserManagerImpl::RemoveNonCryptohomeData(
     const AccountId& account_id) {
   // Wallpaper removal depends on user preference, so it must happen before
   // |known_user::RemovePrefs|. See https://crbug.com/778077.
-  WallpaperControllerClient::Get()->RemoveUserWallpaper(account_id);
-  GetUserImageManager(account_id)->DeleteUserImage();
-  ExternalPrintersFactory::Get()->RemoveForUserId(account_id);
+  for (auto& handler : cloud_external_data_policy_handlers_)
+    handler->RemoveForAccountId(account_id);
   // TODO(tbarzic): Forward data removal request to ash::HammerDeviceHandler,
   // instead of removing the prefs value here.
   if (GetLocalState()->FindPreference(ash::prefs::kDetachableBaseDevices)) {
@@ -1442,11 +1357,8 @@ void ChromeUserManagerImpl::NotifyUserAddedToSession(
 void ChromeUserManagerImpl::OnUserNotAllowed(const std::string& user_email) {
   LOG(ERROR) << "Shutdown session because a user is not allowed to be in the "
                 "current session";
-  ash::mojom::SessionControllerPtr session_controller;
-  content::ServiceManagerConnection::GetForProcess()
-      ->GetConnector()
-      ->BindInterface(ash::mojom::kServiceName, &session_controller);
-  session_controller->ShowMultiprofilesSessionAbortedDialog(user_email);
+  ash::SessionController::Get()->ShowMultiprofilesSessionAbortedDialog(
+      user_email);
   chrome::RecordDialogCreation(
       chrome::DialogIdentifier::MULTIPROFILES_SESSION_ABORTED);
 }
@@ -1536,10 +1448,9 @@ bool ChromeUserManagerImpl::IsManagedSessionEnabledForUser(
 bool ChromeUserManagerImpl::IsFullManagementDisclosureNeeded(
     policy::DeviceLocalAccountPolicyBroker* broker) const {
   return IsManagedSessionEnabled(broker) &&
-         (IsPacHttpsUrlStrippingDisabled(broker) ||
-          AreRiskyPoliciesUsed(broker) ||
+         (AreRiskyPoliciesUsed(broker) ||
           AreRiskyExtensionsForceInstalled(broker) ||
-          AreForcedNetworkCertificatesInstalled() ||
+          PolicyHasWebTrustedAuthorityCertificate(broker) ||
           IsProxyUsed(GetLocalState()));
 }
 
@@ -1569,7 +1480,7 @@ void ChromeUserManagerImpl::AsyncRemoveCryptohome(
   cryptohome::AccountIdentifier account_id_proto;
   account_id_proto.set_account_id(cryptohome::Identification(account_id).id());
 
-  DBusThreadManager::Get()->GetCryptohomeClient()->RemoveEx(
+  CryptohomeClient::Get()->RemoveEx(
       account_id_proto, base::BindOnce(&OnRemoveUserComplete, account_id));
 }
 

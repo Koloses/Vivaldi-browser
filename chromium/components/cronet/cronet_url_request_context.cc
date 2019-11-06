@@ -51,8 +51,7 @@
 #include "net/net_buildflags.h"
 #include "net/nqe/network_quality_estimator_params.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
-#include "net/ssl/channel_id_service.h"
-#include "net/third_party/quic/core/quic_versions.h"
+#include "net/third_party/quiche/src/quic/core/quic_versions.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -393,7 +392,7 @@ void CronetURLRequestContext::NetworkTasks::Initialize(
           static_cast<uint16_t>(quic_hint->alternate_port));
       context_->http_server_properties()->SetQuicAlternativeService(
           quic_server, alternative_service, base::Time::Max(),
-          quic::QuicTransportVersionVector());
+          quic::ParsedQuicVersionVector());
     }
   }
 
@@ -633,8 +632,8 @@ void CronetURLRequestContext::NetworkTasks::StartNetLog(
   CreateNetLogEntriesForActiveObjects({context_.get()},
                                       net_log_file_observer_.get());
   net::NetLogCaptureMode capture_mode =
-      include_socket_bytes ? net::NetLogCaptureMode::IncludeSocketBytes()
-                           : net::NetLogCaptureMode::Default();
+      include_socket_bytes ? net::NetLogCaptureMode::kEverything
+                           : net::NetLogCaptureMode::kDefault;
   net_log_file_observer_->StartObserving(g_net_log.Get().net_log(),
                                          capture_mode);
 }
@@ -672,8 +671,8 @@ void CronetURLRequestContext::NetworkTasks::StartNetLogToBoundedFile(
                                       net_log_file_observer_.get());
 
   net::NetLogCaptureMode capture_mode =
-      include_socket_bytes ? net::NetLogCaptureMode::IncludeSocketBytes()
-                           : net::NetLogCaptureMode::Default();
+      include_socket_bytes ? net::NetLogCaptureMode::kEverything
+                           : net::NetLogCaptureMode::kDefault;
   net_log_file_observer_->StartObserving(g_net_log.Get().net_log(),
                                          capture_mode);
 }

@@ -8,8 +8,9 @@
 #include <string>
 
 #include "base/memory/shared_memory_handle.h"
-#include "browser/thumbnails/vivaldi_capture_contents.h"
-#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "browser/thumbnails/capture_page.h"
+#include "components/datasource/vivaldi_data_source_api.h"
+#include "extensions/browser/extension_function.h"
 #include "extensions/common/api/extension_types.h"
 #include "extensions/schema/thumbnails.h"
 
@@ -26,47 +27,23 @@ using extensions::api::extension_types::ImageFormat;
 
 namespace extensions {
 
-class ThumbnailsIsThumbnailAvailableFunction
-    : public ChromeAsyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("thumbnails.isThumbnailAvailable",
-                             THUMBNAILS_ISTHUMBNAILAVAILABLE)
-  ThumbnailsIsThumbnailAvailableFunction();
-
- protected:
-  ~ThumbnailsIsThumbnailAvailableFunction() override;
-
-  // ExtensionFunction:
-  bool RunAsync() override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ThumbnailsIsThumbnailAvailableFunction);
-};
-
-class ThumbnailsCaptureUIFunction : public ChromeAsyncExtensionFunction {
+class ThumbnailsCaptureUIFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("thumbnails.captureUI", THUMBNAILS_CAPTUREUI)
 
   ThumbnailsCaptureUIFunction();
 
-  enum FailureReason {
-    FAILURE_REASON_UNKNOWN,
-    FAILURE_REASON_ENCODING_FAILED,
-    FAILURE_REASON_VIEW_INVISIBLE
-  };
-
- protected:
-  ~ThumbnailsCaptureUIFunction() override;
-  bool CaptureAsync(content::WebContents *web_contents,
-                    const gfx::Rect &capture_area,
-                    base::OnceCallback<void(const SkBitmap &)> callback);
-  void OnCaptureSuccess(const SkBitmap& bitmap);
-  void OnCaptureFailure(FailureReason reason);
-  void CopyFromBackingStoreComplete(const SkBitmap& bitmap);
-  // ExtensionFunction:
-  bool RunAsync() override;
-
  private:
+  ~ThumbnailsCaptureUIFunction() override;
+  void CaptureAsync(content::RenderWidgetHostView* view,
+                    const gfx::Rect& capture_area);
+  void OnCaptureSuccess(const SkBitmap& bitmap);
+  void CopyFromBackingStoreComplete(const SkBitmap& bitmap);
+  std::string CaptureError(base::StringPiece details = base::StringPiece());
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+
   ImageFormat image_format_ = ImageFormat::IMAGE_FORMAT_PNG;
   int encode_quality_ = 90;
   bool show_file_in_path_ = false;
@@ -82,45 +59,33 @@ class ThumbnailsCaptureUIFunction : public ChromeAsyncExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(ThumbnailsCaptureUIFunction);
 };
 
-class ThumbnailsCaptureTabFunction : public ChromeAsyncExtensionFunction {
+class ThumbnailsCaptureTabFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("thumbnails.captureTab", THUMBNAILS_CAPTURETAB)
 
   ThumbnailsCaptureTabFunction();
 
- protected:
+ private:
   ~ThumbnailsCaptureTabFunction() override;
 
-  void OnThumbnailsCaptureCompleted(base::SharedMemoryHandle handle,
-                                    const gfx::Size image_size,
-                                    int callback_id,
-                                    bool success);
+  void OnThumbnailsCaptureCompleted(::vivaldi::CapturePage::Result captured);
 
-  void ScaleAndConvertImage(base::SharedMemoryHandle handle,
-                            const gfx::Size image_size,
-                            int callback_id);
+  void ConvertImageOnWorkerThread(::vivaldi::CapturePage::Result captured);
 
-  void ScaleAndConvertImageDoneOnUIThread(const SkBitmap bitmap,
-                                          const std::string image_data,
-                                          int callback_id);
-
-  void DispatchErrorOnUIThread(const std::string& error_msg);
-  void DispatchError(const std::string& error_msg);
+  void OnImageConverted(const SkBitmap& bitmap,
+                        const std::string& image_data,
+                        bool success);
 
   // ExtensionFunction:
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
- private:
   ImageFormat image_format_ = ImageFormat::IMAGE_FORMAT_PNG;
   int encode_quality_ = 90;
-  bool capture_full_page_ = false;
   bool show_file_in_path_ = false;
   bool copy_to_clipboard_ = false;
   bool save_to_disk_ = false;
   base::FilePath file_path_;
   std::string save_folder_;
-  int width_ = 0;
-  int height_ = 0;
   std::string save_file_pattern_;
   GURL url_;
   std::string title_;
@@ -133,18 +98,21 @@ class ThumbnailsCaptureUrlFunction : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("thumbnails.captureUrl", THUMBNAILS_CAPTUREURL)
   ThumbnailsCaptureUrlFunction();
 
- protected:
+ private:
   ~ThumbnailsCaptureUrlFunction() override;
 
   // ExtensionFunction:
   ResponseAction Run() override;
 
-  void OnCapturedAndScaled(const SkBitmap& bitmap, bool success);
-  void OnBookmarkThumbnailStored(int bookmark_id, std::string& image_url);
+  void OnCaptured(::vivaldi::CapturePage::Result captured);
 
- private:
-  scoped_refptr<::vivaldi::ThumbnailCaptureContents> capture_page_;
-  int bookmark_id_ = 0;
+  void ConvertImageOnWorkerThread(scoped_refptr<VivaldiDataSourcesAPI> api,
+                                  ::vivaldi::CapturePage::Result captured);
+
+  void SendResult(bool success);
+
+  int64_t bookmark_id_ = 0;
+  GURL url_;
 
   DISALLOW_COPY_AND_ASSIGN(ThumbnailsCaptureUrlFunction);
 };

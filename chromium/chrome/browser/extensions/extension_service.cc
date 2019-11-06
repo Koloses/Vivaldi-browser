@@ -18,19 +18,20 @@
 #include "base/location.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/one_shot_event.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/syslog_logging.h"
 #include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_custom_extension_provider.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_service.h"
@@ -62,7 +63,7 @@
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
-#include "chrome/browser/web_applications/extensions/web_app_extension_ids_map.h"
+#include "chrome/browser/web_applications/components/externally_installed_web_app_prefs.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
@@ -70,6 +71,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/crx_file/id_util.h"
+#include "components/favicon_base/favicon_url_parser.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -90,6 +92,7 @@
 #include "extensions/browser/update_observer.h"
 #include "extensions/browser/updater/extension_cache.h"
 #include "extensions/browser/updater/extension_downloader.h"
+#include "extensions/browser/updater/manifest_fetch_data.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/feature_switch.h"
@@ -98,7 +101,6 @@
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "extensions/common/manifest_url_handlers.h"
-#include "extensions/common/one_shot_event.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permissions_data.h"
@@ -165,7 +167,8 @@ void ExtensionService::CheckExternalUninstall(const std::string& id) {
   //
   // Long term, PWAs will be completely separate from extensions, and we can
   // remove this cross-link.
-  if (web_app::ExtensionIdsMap::HasExtensionId(profile_->GetPrefs(), id)) {
+  if (web_app::ExternallyInstalledWebAppPrefs::HasAppId(profile_->GetPrefs(),
+                                                        id)) {
     return;
   }
 
@@ -293,7 +296,7 @@ ExtensionService::ExtensionService(Profile* profile,
                                    Blacklist* blacklist,
                                    bool autoupdate_enabled,
                                    bool extensions_enabled,
-                                   OneShotEvent* ready)
+                                   base::OneShotEvent* ready)
     : Blacklist::Observer(blacklist),
       command_line_(command_line),
       profile_(profile),
@@ -341,8 +344,7 @@ ExtensionService::ExtensionService(Profile* profile,
                    profile)));
   }
 
-  component_loader_.reset(new ComponentLoader(
-      this, profile->GetPrefs(), g_browser_process->local_state(), profile));
+  component_loader_ = std::make_unique<ComponentLoader>(this, profile);
 
   if (extensions_enabled_) {
     ExternalProviderImpl::CreateExternalProviders(
@@ -418,6 +420,7 @@ void ExtensionService::Init() {
   if (load_saved_extensions)
     InstalledLoader(this).LoadAllExtensions();
 
+  CheckManagementPolicy();
   OnInstalledExtensionsLoaded();
 
   LoadExtensionsFromCommandLineFlag(::switches::kDisableExtensionsExcept);
@@ -799,7 +802,7 @@ void ExtensionService::DisableUserExtensionsExcept(
             ManifestURL::GetUpdateURL(extension.get())))
       continue;
     const std::string& id = extension->id();
-    if (!base::ContainsValue(except_ids, id))
+    if (!base::Contains(except_ids, id))
       DisableExtension(id, disable_reason::DISABLE_USER_ACTION);
   }
 }
@@ -893,7 +896,7 @@ void ExtensionService::PostActivateExtension(
   // TODO(kalman): Convert ExtensionSpecialStoragePolicy to a
   // BrowserContextKeyedService and use ExtensionRegistryObserver.
   profile_->GetExtensionSpecialStoragePolicy()->GrantRightsForExtension(
-      extension.get(), profile_);
+      extension.get());
 
   // TODO(kalman): This is broken. The crash reporter is process-wide so doesn't
   // work properly multi-profile. Besides which, it should be using
@@ -906,8 +909,9 @@ void ExtensionService::PostActivateExtension(
   // to make sure that the FaviconSource is registered with the
   // ChromeURLDataManager.
   if (permissions_data->HasHostPermission(GURL(chrome::kChromeUIFaviconURL))) {
-    content::URLDataSource::Add(profile_,
-                                std::make_unique<FaviconSource>(profile_));
+    content::URLDataSource::Add(
+        profile_, std::make_unique<FaviconSource>(
+                      profile_, chrome::FaviconUrlFormat::kFaviconLegacy));
   }
 
   // Same for chrome://theme/ resources.
@@ -1059,6 +1063,23 @@ void ExtensionService::CheckManagementPolicy() {
     if (!to_recheck.ids.empty())
       updater_->CheckNow(std::move(to_recheck));
   }
+
+  // Check the disabled extensions to see if any should be force uninstalled.
+  std::vector<ExtensionId> remove_list;
+  for (const auto& extension : registry_->disabled_extensions()) {
+    if (system_->management_policy()->ShouldForceUninstall(extension.get(),
+                                                           nullptr /*error*/)) {
+      remove_list.push_back(extension->id());
+    }
+  }
+  for (auto extension_id : remove_list) {
+    base::string16 error;
+    if (!UninstallExtension(extension_id, UNINSTALL_REASON_INTERNAL_MANAGEMENT,
+                            &error)) {
+      SYSLOG(WARNING) << "Extension with id " << extension_id
+                      << " failed to be uninstalled via policy: " << error;
+    }
+  }
 }
 
 void ExtensionService::CheckForUpdatesSoon() {
@@ -1132,6 +1153,14 @@ void ExtensionService::OnAllExternalProvidersReady() {
             : base::BindOnce(
                   [](base::RepeatingClosure callback) { callback.Run(); },
                   external_updates_finished_callback_);
+    // We have to mark high-priority extensions (such as policy-forced
+    // extensions or external component extensions) with foreground fetch
+    // priority; otherwise their installation may be throttled by bandwidth
+    // limits.
+    // See https://crbug.com/904600 and https://crbug.com/965686.
+    if (pending_extension_manager_.HasHighPriorityPendingExtension()) {
+      params.fetch_priority = ManifestFetchData::FOREGROUND;
+    }
     updater()->CheckNow(std::move(params));
   }
 
@@ -1245,6 +1274,8 @@ void ExtensionService::AddExtension(const Extension* extension) {
 }
 
 void ExtensionService::AddComponentExtension(const Extension* extension) {
+  extension_prefs_->ClearInapplicableDisableReasonsForComponentExtension(
+      extension->id());
   const std::string old_version_string(
       extension_prefs_->GetVersionString(extension->id()));
   const base::Version old_version(old_version_string);

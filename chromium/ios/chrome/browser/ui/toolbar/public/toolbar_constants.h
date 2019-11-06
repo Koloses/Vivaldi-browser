@@ -30,10 +30,14 @@ extern const CGFloat kAdaptiveToolbarStackViewSpacing;
 // Progress Bar Height.
 extern const CGFloat kProgressBarHeight;
 
+// Separator.
+// Height of the separator. Should be aligned to upper pixel.
+extern const CGFloat kToolbarSeparatorHeight;
+
 // Toolbar Buttons.
 extern const CGFloat kAdaptiveToolbarButtonHeight;
 extern const CGFloat kAdaptiveToolbarButtonWidth;
-extern const CGFloat kOmniboxButtonWidth;
+extern const CGFloat kSearchButtonWidth;
 extern const CGFloat kCancelButtonHorizontalInset;
 extern const CGFloat kToolbarDimmedButtonAlpha;
 
@@ -85,7 +89,7 @@ extern NSString* const kToolbarStackButtonIdentifier;
 // Accessibility identifier of the share button.
 extern NSString* const kToolbarShareButtonIdentifier;
 // Accessibility identifier of the omnibox button.
-extern NSString* const kToolbarOmniboxButtonIdentifier;
+extern NSString* const kToolbarSearchButtonIdentifier;
 // Accessibility identifier of the cancel omnibox edit button.
 extern NSString* const kToolbarCancelOmniboxEditButtonIdentifier;
 

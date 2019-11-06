@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_UI_WEBUI_AUTOFILL_INTERNALS_UI_H_
 
 #include "base/macros.h"
+#include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_controller.h"
 
 class AutofillInternalsUI : public content::WebUIController {
  public:
   explicit AutofillInternalsUI(content::WebUI* web_ui);
+  ~AutofillInternalsUI() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AutofillInternalsUI);

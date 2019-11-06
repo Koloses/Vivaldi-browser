@@ -30,20 +30,19 @@ cr.define('key_event_test', function() {
           print_preview_test_utils.getDefaultInitialSettings();
       nativeLayer = new print_preview.NativeLayerStub();
       nativeLayer.setInitialSettings(initialSettings);
-      // Use advanced settings so that we can test with the paper-button.
+      // Use advanced settings so that we can test with the cr-button.
       nativeLayer.setLocalDestinationCapabilities(
           print_preview_test_utils.getCddTemplateWithAdvancedSettings(
               1, initialSettings.printerName));
       nativeLayer.setPageCount(3);
       print_preview.NativeLayer.setInstance(nativeLayer);
       const pluginProxy = new print_preview.PDFPluginStub();
-      print_preview_new.PluginProxy.setInstance(pluginProxy);
+      print_preview.PluginProxy.setInstance(pluginProxy);
 
       PolymerTest.clearBody();
       page = document.createElement('print-preview-app');
       document.body.appendChild(page);
       const previewArea = page.$.previewArea;
-      pluginProxy.setLoadCallback(previewArea.onPluginLoad_.bind(previewArea));
 
       // Wait for initialization to complete.
       return Promise
@@ -75,7 +74,8 @@ cr.define('key_event_test', function() {
     test(assert(TestNames.EnterOnInputTriggersPrint), function() {
       const whenPrintCalled = nativeLayer.whenCalled('print');
       MockInteractions.keyEventOn(
-          page.$$('print-preview-copies-settings')
+          page.$$('print-preview-sidebar')
+              .$$('print-preview-copies-settings')
               .$$('print-preview-number-settings-section')
               .$$('cr-input')
               .inputElement,
@@ -88,33 +88,41 @@ cr.define('key_event_test', function() {
     test(assert(TestNames.EnterOnDropdownDoesNotPrint), function() {
       const whenKeyEventFired = test_util.eventToPromise('keydown', page);
       MockInteractions.keyEventOn(
-          page.$$('print-preview-layout-settings').$$('.md-select'), 'keydown',
-          'Enter', [], 'Enter');
-      return whenKeyEventFired.then(
-          () => assertEquals(0, nativeLayer.getCallCount('print')));
-    });
-
-    // Tests that the enter key does not trigger a call to print if the event
-    // comes from a button.
-    test(assert(TestNames.EnterOnButtonDoesNotPrint), function() {
-      const moreSettingsElement = page.$$('print-preview-more-settings');
-      moreSettingsElement.$.label.click();
-      const whenKeyEventFired = test_util.eventToPromise('keydown', page);
-      MockInteractions.keyEventOn(
-          page.$$('print-preview-advanced-options-settings').$$('paper-button'),
+          page.$$('print-preview-sidebar')
+              .$$('print-preview-layout-settings')
+              .$$('.md-select'),
           'keydown', 'Enter', [], 'Enter');
       return whenKeyEventFired.then(
           () => assertEquals(0, nativeLayer.getCallCount('print')));
     });
 
     // Tests that the enter key does not trigger a call to print if the event
+    // comes from a button.
+    test(assert(TestNames.EnterOnButtonDoesNotPrint), async () => {
+      const moreSettingsElement =
+          page.$$('print-preview-sidebar').$$('print-preview-more-settings');
+      moreSettingsElement.$.label.click();
+      const button = page.$$('print-preview-sidebar')
+                         .$$('print-preview-advanced-options-settings')
+                         .$$('cr-button');
+      const whenKeyEventFired = test_util.eventToPromise('keydown', button);
+      MockInteractions.keyEventOn(button, 'keydown', 'Enter', [], 'Enter');
+      await whenKeyEventFired;
+      await PolymerTest.flushTasks();
+      assertEquals(0, nativeLayer.getCallCount('print'));
+    });
+
+    // Tests that the enter key does not trigger a call to print if the event
     // comes from a checkbox.
     test(assert(TestNames.EnterOnCheckboxDoesNotPrint), function() {
-      const moreSettingsElement = page.$$('print-preview-more-settings');
+      const moreSettingsElement =
+          page.$$('print-preview-sidebar').$$('print-preview-more-settings');
       moreSettingsElement.$.label.click();
       const whenKeyEventFired = test_util.eventToPromise('keydown', page);
       MockInteractions.keyEventOn(
-          page.$$('print-preview-other-options-settings').$$('cr-checkbox'),
+          page.$$('print-preview-sidebar')
+              .$$('print-preview-other-options-settings')
+              .$$('cr-checkbox'),
           'keydown', 'Enter', [], 'Enter');
       return whenKeyEventFired.then(
           () => assertEquals(0, nativeLayer.getCallCount('print')));

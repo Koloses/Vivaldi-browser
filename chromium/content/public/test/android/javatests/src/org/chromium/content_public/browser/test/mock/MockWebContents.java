@@ -8,14 +8,15 @@ import android.annotation.SuppressLint;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Parcel;
+import android.support.annotation.Nullable;
 
-import org.chromium.base.Callback;
 import org.chromium.content_public.browser.AccessibilitySnapshotCallback;
 import org.chromium.content_public.browser.ImageDownloadCallback;
 import org.chromium.content_public.browser.JavaScriptCallback;
 import org.chromium.content_public.browser.MessagePort;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.RenderFrameHost;
+import org.chromium.content_public.browser.RenderWidgetHostView;
 import org.chromium.content_public.browser.ViewEventSink;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
@@ -66,6 +67,9 @@ public class MockWebContents implements WebContents {
     }
 
     @Override
+    public void clearNativeReference() {}
+
+    @Override
     public NavigationController getNavigationController() {
         return null;
     }
@@ -73,6 +77,17 @@ public class MockWebContents implements WebContents {
     @Override
     public RenderFrameHost getMainFrame() {
         return renderFrameHost;
+    }
+
+    @Override
+    public RenderFrameHost getFocusedFrame() {
+        return null;
+    }
+
+    @Override
+    @Nullable
+    public RenderWidgetHostView getRenderWidgetHostView() {
+        return null;
     }
 
     @Override
@@ -119,22 +134,12 @@ public class MockWebContents implements WebContents {
     public void setAudioMuted(boolean mute) {}
 
     @Override
-    public int getBackgroundColor() {
-        return 0;
-    }
-
-    @Override
     public boolean isShowingInterstitialPage() {
         return false;
     }
 
     @Override
     public boolean focusLocationBarByDefault() {
-        return false;
-    }
-
-    @Override
-    public boolean isReady() {
         return false;
     }
 
@@ -174,8 +179,8 @@ public class MockWebContents implements WebContents {
     public void addMessageToDevToolsConsole(int level, String message) {}
 
     @Override
-    public void postMessageToFrame(String frameName, String message, String sourceOrigin,
-            String targetOrigin, MessagePort[] ports) {}
+    public void postMessageToMainFrame(
+            String message, String sourceOrigin, String targetOrigin, MessagePort[] ports) {}
 
     @Override
     public MessagePort[] createMessageChannel() {
@@ -189,6 +194,11 @@ public class MockWebContents implements WebContents {
 
     @Override
     public int getThemeColor() {
+        return 0;
+    }
+
+    @Override
+    public int getLoadProgress() {
         return 0;
     }
 
@@ -216,8 +226,7 @@ public class MockWebContents implements WebContents {
     public void setOverscrollRefreshHandler(OverscrollRefreshHandler handler) {}
 
     @Override
-    public void writeContentBitmapToDiskAsync(
-            int width, int height, String path, Callback<String> callback) {}
+    public void setSpatialNavigationDisabled(boolean disabled) {}
 
     @Override
     public void reloadLoFiImages() {}
@@ -261,4 +270,7 @@ public class MockWebContents implements WebContents {
 
     @Override
     public void setDisplayCutoutSafeArea(Rect insets) {}
+
+    @Override
+    public void notifyRendererPreferenceUpdate() {}
 }

@@ -14,8 +14,7 @@
 
 namespace viz {
 
-TestContextSupport::TestContextSupport()
-    : out_of_order_callbacks_(false), weak_ptr_factory_(this) {}
+TestContextSupport::TestContextSupport() : out_of_order_callbacks_(false) {}
 
 TestContextSupport::~TestContextSupport() = default;
 
@@ -131,6 +130,11 @@ void TestContextSupport::DeleteTransferCacheEntry(uint32_t entry_type,
 unsigned int TestContextSupport::GetTransferBufferFreeSize() const {
   NOTIMPLEMENTED();
   return 0;
+}
+bool TestContextSupport::CanDecodeWithHardwareAcceleration(
+    base::span<const uint8_t> encoded_data) const {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 bool TestContextSupport::HasGrContextSupport() const {

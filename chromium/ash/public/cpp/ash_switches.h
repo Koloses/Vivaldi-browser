@@ -16,10 +16,13 @@ namespace switches {
 
 // Please keep alphabetized.
 // TODO(sky): fix order!
+ASH_PUBLIC_EXPORT extern const char kAshColorMode[];
+ASH_PUBLIC_EXPORT extern const char kAshColorModeDark[];
+ASH_PUBLIC_EXPORT extern const char kAshColorModeDefault[];
+ASH_PUBLIC_EXPORT extern const char kAshColorModeLight[];
 ASH_PUBLIC_EXPORT extern const char kAshConstrainPointerToRoot[];
 ASH_PUBLIC_EXPORT extern const char kAshDebugShortcuts[];
 ASH_PUBLIC_EXPORT extern const char kAshDeveloperShortcuts[];
-ASH_PUBLIC_EXPORT extern const char kAshDisableTabletSplitView[];
 ASH_PUBLIC_EXPORT extern const char kAshDisableTouchExplorationMode[];
 ASH_PUBLIC_EXPORT extern const char kAshEnableCursorMotionBlur[];
 ASH_PUBLIC_EXPORT extern const char kAshEnableV1AppBackButton[];
@@ -30,7 +33,6 @@ ASH_PUBLIC_EXPORT extern const char kAshEnableWaylandServer[];
 ASH_PUBLIC_EXPORT extern const char kAshForceEnableStylusTools[];
 ASH_PUBLIC_EXPORT extern const char kAshPowerButtonPosition[];
 ASH_PUBLIC_EXPORT extern const char kAshUiMode[];
-ASH_PUBLIC_EXPORT extern const char kAshUiModeAuto[];
 ASH_PUBLIC_EXPORT extern const char kAshUiModeClamshell[];
 ASH_PUBLIC_EXPORT extern const char kAshUiModeTablet[];
 ASH_PUBLIC_EXPORT extern const char kAshHideNotificationsForFactory[];
@@ -44,6 +46,7 @@ ASH_PUBLIC_EXPORT extern const char kAshShelfColorSchemeNormalMuted[];
 ASH_PUBLIC_EXPORT extern const char kAshShelfColorSchemeNormalVibrant[];
 ASH_PUBLIC_EXPORT extern const char kAshShelfColorSchemeDarkMuted[];
 ASH_PUBLIC_EXPORT extern const char kAshShelfColorSchemeDarkVibrant[];
+ASH_PUBLIC_EXPORT extern const char kAshSideVolumeButtonPosition[];
 ASH_PUBLIC_EXPORT extern const char kAshTouchHud[];
 ASH_PUBLIC_EXPORT extern const char kAuraLegacyPowerButton[];
 ASH_PUBLIC_EXPORT extern const char kForceTabletPowerButton[];

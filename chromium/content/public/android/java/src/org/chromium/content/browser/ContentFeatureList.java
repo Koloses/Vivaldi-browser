@@ -30,14 +30,10 @@ public abstract class ContentFeatureList {
     }
 
     // Alphabetical:
-    public static final String ENHANCED_SELECTION_INSERTION_HANDLE =
-            "EnhancedSelectionInsertionHandle";
-
     public static final String BACKGROUND_MEDIA_RENDERER_HAS_MODERATE_BINDING =
             "BackgroundMediaRendererHasModerateBinding";
 
-    public static final String SERVICE_WORKER_FOREGROUND_PRIORITY =
-            "ServiceWorkerForegroundPriority";
+    public static final String SERVICE_GROUP_IMPORTANCE = "ServiceGroupImportance";
 
     private static native boolean nativeIsEnabled(String featureName);
 }

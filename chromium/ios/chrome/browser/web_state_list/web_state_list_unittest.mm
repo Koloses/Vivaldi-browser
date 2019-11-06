@@ -62,6 +62,7 @@ class WebStateListTestObserver : public WebStateListObserver {
                           web::WebState* web_state,
                           int index,
                           bool activating) override {
+    EXPECT_TRUE(web_state_list->IsMutating());
     web_state_inserted_called_ = true;
   }
 
@@ -69,6 +70,7 @@ class WebStateListTestObserver : public WebStateListObserver {
                      web::WebState* web_state,
                      int from_index,
                      int to_index) override {
+    EXPECT_TRUE(web_state_list->IsMutating());
     web_state_moved_called_ = true;
   }
 
@@ -82,6 +84,7 @@ class WebStateListTestObserver : public WebStateListObserver {
   void WebStateDetachedAt(WebStateList* web_state_list,
                           web::WebState* web_state,
                           int index) override {
+    EXPECT_TRUE(web_state_list->IsMutating());
     web_state_detached_called_ = true;
   }
 
@@ -566,6 +569,25 @@ TEST_F(WebStateListTest, OpenersEmptyList) {
   EXPECT_EQ(WebStateList::kInvalidIndex,
             web_state_list_.GetIndexOfLastWebStateOpenedBy(
                 nullptr, WebStateList::kInvalidIndex, true));
+}
+
+// Test detaching a webstate which has an invalid opener.  This is a regression
+// test for https://crbug.com/960628.
+TEST_F(WebStateListTest, DetachWebStateWithInvalidOpener) {
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  // Sanity check before closing WebState.
+  ASSERT_EQ(2, web_state_list_.count());
+  EXPECT_EQ(kURL0, web_state_list_.GetWebStateAt(0)->GetVisibleURL().spec());
+  EXPECT_EQ(kURL1, web_state_list_.GetWebStateAt(1)->GetVisibleURL().spec());
+  web_state_list_.ActivateWebStateAt(1);
+  // Update a WebState to have an invalid opener.
+  web_state_list_.SetOpenerOfWebStateAt(
+      1, WebStateOpener(web_state_list_.GetWebStateAt(1)));
+  // After detaching, the active index should be valid.
+  web_state_list_.DetachWebStateAt(1);
+  EXPECT_EQ(1, web_state_list_.count());
+  EXPECT_TRUE(web_state_list_.ContainsIndex(web_state_list_.active_index()));
 }
 
 // Test finding opended-by indexes when no webstates have been opened.

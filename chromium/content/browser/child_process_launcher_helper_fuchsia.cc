@@ -19,7 +19,6 @@ void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
     const ChildProcessLauncherPriority& priority) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
   // TODO(https://crbug.com/926583): Fuchsia does not currently support this.
-  NOTIMPLEMENTED_LOG_ONCE();
 }
 
 ChildProcessTerminationInfo ChildProcessLauncherHelper::GetTerminationInfo(
@@ -49,7 +48,7 @@ void ChildProcessLauncherHelper::ResetRegisteredFilesForTesting() {
 }
 
 void ChildProcessLauncherHelper::BeforeLaunchOnClientThread() {
-  DCHECK_CURRENTLY_ON(client_thread_id_);
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
 
   sandbox_policy_.Initialize(delegate_->GetSandboxType());
 }
@@ -61,7 +60,7 @@ ChildProcessLauncherHelper::GetFilesToMap() {
 }
 
 bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
-    const PosixFileDescriptorInfo& files_to_register,
+    PosixFileDescriptorInfo& files_to_register,
     base::LaunchOptions* options) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
 

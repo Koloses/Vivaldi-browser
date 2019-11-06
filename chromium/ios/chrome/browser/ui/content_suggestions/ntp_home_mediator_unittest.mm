@@ -6,10 +6,14 @@
 
 #include <memory>
 
+#include "components/signin/public/identity_manager/identity_manager.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/ntp_snippets/ios_chrome_content_suggestions_service_factory.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
+#include "ios/chrome/browser/signin/authentication_service_factory.h"
+#import "ios/chrome/browser/signin/authentication_service_fake.h"
+#include "ios/chrome/browser/signin/identity_manager_factory.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_controller.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
@@ -18,9 +22,10 @@
 #import "ios/chrome/browser/ui/content_suggestions/cells/content_suggestions_most_visited_item.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_consumer.h"
-#import "ios/chrome/browser/ui/location_bar_notification_names.h"
+#import "ios/chrome/browser/ui/location_bar/location_bar_notification_names.h"
 #import "ios/chrome/browser/ui/toolbar/test/toolbar_test_navigation_manager.h"
 #include "ios/chrome/browser/url_loading/test_url_loading_service.h"
+#include "ios/chrome/browser/url_loading/url_loading_params.h"
 #include "ios/chrome/browser/url_loading/url_loading_service_factory.h"
 #include "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
 #include "ios/chrome/browser/web_state_list/web_state_list.h"
@@ -57,6 +62,10 @@ class NTPHomeMediatorTest : public PlatformTest {
     test_cbs_builder.AddTestingFactory(
         UrlLoadingServiceFactory::GetInstance(),
         UrlLoadingServiceFactory::GetDefaultFactory());
+    test_cbs_builder.AddTestingFactory(
+        AuthenticationServiceFactory::GetInstance(),
+        base::BindRepeating(
+            &AuthenticationServiceFake::CreateAuthenticationService));
     chrome_browser_state_ = test_cbs_builder.Build();
 
     std::unique_ptr<ToolbarTestNavigationManager> navigation_manager =
@@ -73,11 +82,18 @@ class NTPHomeMediatorTest : public PlatformTest {
     url_loader_ =
         (TestUrlLoadingService*)UrlLoadingServiceFactory::GetForBrowserState(
             chrome_browser_state_.get());
+    auth_service_ = static_cast<AuthenticationServiceFake*>(
+        AuthenticationServiceFactory::GetInstance()->GetForBrowserState(
+            chrome_browser_state_.get()));
+    identity_manager_ =
+        IdentityManagerFactory::GetForBrowserState(chrome_browser_state_.get());
     mediator_ = [[NTPHomeMediator alloc]
         initWithWebStateList:web_state_list_.get()
           templateURLService:ios::TemplateURLServiceFactory::GetForBrowserState(
                                  chrome_browser_state_.get())
            urlLoadingService:url_loader_
+                 authService:auth_service_
+             identityManager:identity_manager_
                   logoVendor:logo_vendor_];
     mediator_.suggestionsService =
         IOSChromeContentSuggestionsServiceFactory::GetForBrowserState(
@@ -121,6 +137,8 @@ class NTPHomeMediatorTest : public PlatformTest {
   std::unique_ptr<WebStateList> web_state_list_;
   FakeWebStateListDelegate web_state_list_delegate_;
   TestUrlLoadingService* url_loader_;
+  AuthenticationServiceFake* auth_service_;
+  signin::IdentityManager* identity_manager_;
 
  private:
   std::unique_ptr<web::TestWebState> test_web_state_;
@@ -266,10 +284,10 @@ TEST_F(NTPHomeMediatorTest, TestOpenPage) {
   [mediator_ openPageForItemAtIndexPath:indexPath];
 
   // Test.
-  EXPECT_EQ(url, url_loader_->last_web_params.url);
+  EXPECT_EQ(url, url_loader_->last_params.web_params.url);
   EXPECT_TRUE(ui::PageTransitionCoreTypeIs(
       ui::PAGE_TRANSITION_AUTO_BOOKMARK,
-      url_loader_->last_web_params.transition_type));
+      url_loader_->last_params.web_params.transition_type));
 }
 
 // Tests that the command is sent to the loader when opening a most visited.
@@ -285,8 +303,8 @@ TEST_F(NTPHomeMediatorTest, TestOpenMostVisited) {
   [mediator_ openMostVisitedItem:item atIndex:0];
 
   // Test.
-  EXPECT_EQ(url, url_loader_->last_web_params.url);
+  EXPECT_EQ(url, url_loader_->last_params.web_params.url);
   EXPECT_TRUE(ui::PageTransitionCoreTypeIs(
       ui::PAGE_TRANSITION_AUTO_BOOKMARK,
-      url_loader_->last_web_params.transition_type));
+      url_loader_->last_params.web_params.transition_type));
 }

@@ -50,8 +50,6 @@ const char TranslatePrefs::kPrefTranslateIgnoredCount[] =
     "translate_ignored_count_for_language";
 const char TranslatePrefs::kPrefTranslateAcceptedCount[] =
     "translate_accepted_count";
-const char TranslatePrefs::kPrefTranslateBlockedLanguages[] =
-    "translate_blocked_languages";
 const char TranslatePrefs::kPrefTranslateLastDeniedTimeForLanguage[] =
     "translate_last_denied_time_for_language";
 const char TranslatePrefs::kPrefTranslateTooOftenDeniedForLanguage[] =
@@ -78,20 +76,14 @@ const char TranslatePrefs::kPrefExplicitLanguageAskShown[] =
 // * translate_too_often_denied
 // * translate_language_blacklist
 
-const base::Feature kRegionalLocalesAsDisplayUI{
-    "RegionalLocalesAsDisplayUI", base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kTranslateRecentTarget{"TranslateRecentTarget",
                                            base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kTranslateUI{"TranslateUI",
                                  base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kTranslateAndroidManualTrigger{
-    "TranslateAndroidManualTrigger", base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kCompactTranslateInfobarIOS{
-    "CompactTranslateInfobarIOS", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kTranslateMobileManualTrigger{
+    "TranslateAndroidManualTrigger", base::FEATURE_ENABLED_BY_DEFAULT};
 
 DenialTimeUpdate::DenialTimeUpdate(PrefService* prefs,
                                    const std::string& language,
@@ -155,7 +147,9 @@ TranslateLanguageInfo::TranslateLanguageInfo(
 TranslatePrefs::TranslatePrefs(PrefService* user_prefs,
                                const char* accept_languages_pref,
                                const char* preferred_languages_pref)
-    : accept_languages_pref_(accept_languages_pref), prefs_(user_prefs) {
+    : accept_languages_pref_(accept_languages_pref),
+      prefs_(user_prefs),
+      language_prefs_(std::make_unique<language::LanguagePrefs>(user_prefs)) {
 #if defined(OS_CHROMEOS)
   preferred_languages_pref_ = preferred_languages_pref;
 #else
@@ -164,6 +158,8 @@ TranslatePrefs::TranslatePrefs(PrefService* user_prefs,
   MigrateSitesBlacklist();
   ResetEmptyBlockedLanguagesToDefaults();
 }
+
+TranslatePrefs::~TranslatePrefs() = default;
 
 bool TranslatePrefs::IsOfferTranslateEnabled() const {
   return prefs_->GetBoolean(prefs::kOfferTranslateEnabled);
@@ -187,7 +183,7 @@ std::string TranslatePrefs::GetCountry() const {
 }
 
 void TranslatePrefs::ResetToDefaults() {
-  ClearBlockedLanguages();
+  ResetBlockedLanguagesToDefault();
   ClearBlacklistedSites();
   ClearWhitelistedLanguagePairs();
   prefs_->ClearPref(kPrefTranslateDeniedCount);
@@ -202,11 +198,13 @@ void TranslatePrefs::ResetToDefaults() {
 
   prefs_->ClearPref(kPrefTranslateLastDeniedTimeForLanguage);
   prefs_->ClearPref(kPrefTranslateTooOftenDeniedForLanguage);
+
+  prefs_->ClearPref(prefs::kOfferTranslateEnabled);
 }
 
 bool TranslatePrefs::IsBlockedLanguage(
-    const std::string& original_language) const {
-  return IsValueBlacklisted(kPrefTranslateBlockedLanguages, original_language);
+    const std::string& input_language) const {
+  return language_prefs_->IsFluent(input_language);
 }
 
 // Note: the language codes used in the language settings list have the Chrome
@@ -233,7 +231,7 @@ void TranslatePrefs::AddToLanguageList(const std::string& input_language,
   }
 
   // Add the language to the list.
-  if (!base::ContainsValue(languages, chrome_language)) {
+  if (!base::Contains(languages, chrome_language)) {
     languages.push_back(chrome_language);
     UpdateLanguageList(languages);
   }
@@ -451,22 +449,12 @@ void TranslatePrefs::GetLanguageInfoList(
 
 void TranslatePrefs::BlockLanguage(const std::string& input_language) {
   DCHECK(!input_language.empty());
-
-  std::string translate_language = input_language;
-  language::ToTranslateLanguageSynonym(&translate_language);
-
-  BlacklistValue(kPrefTranslateBlockedLanguages, translate_language);
+  language_prefs_->SetFluent(input_language);
 }
 
 void TranslatePrefs::UnblockLanguage(const std::string& input_language) {
   DCHECK(!input_language.empty());
-
-  std::string translate_language = input_language;
-  language::ToTranslateLanguageSynonym(&translate_language);
-  if (GetListSize(kPrefTranslateBlockedLanguages) > 1) {
-    RemoveValueFromBlacklist(kPrefTranslateBlockedLanguages,
-                             translate_language);
-  }
+  language_prefs_->ClearFluent(input_language);
 }
 
 bool TranslatePrefs::IsSiteBlacklisted(const std::string& site) const {
@@ -498,8 +486,10 @@ std::vector<std::string> TranslatePrefs::GetBlacklistedSitesBetween(
   for (const auto& entry : *dict) {
     std::string site = entry.first;
     base::Time time;
-    // TODO(crbug.com/928787): Handle base::GetValueAsTime() failure.
-    ignore_result(base::GetValueAsTime(*entry.second, &time));
+    if (!base::GetValueAsTime(*entry.second, &time)) {
+      NOTREACHED();
+      continue;
+    }
     if (begin <= time && time < end)
       result.push_back(site);
   }
@@ -549,12 +539,8 @@ void TranslatePrefs::RemoveLanguagePairFromWhitelist(
   dict->Remove(original_language, nullptr);
 }
 
-bool TranslatePrefs::HasBlockedLanguages() const {
-  return GetListSize(kPrefTranslateBlockedLanguages) != 0;
-}
-
-void TranslatePrefs::ClearBlockedLanguages() {
-  prefs_->ClearPref(kPrefTranslateBlockedLanguages);
+void TranslatePrefs::ResetBlockedLanguagesToDefault() {
+  language_prefs_->ResetFluentLanguagesToDefaults();
 }
 
 bool TranslatePrefs::HasBlacklistedSites() const {
@@ -841,9 +827,6 @@ void TranslatePrefs::RegisterProfilePrefs(
   registry->RegisterDictionaryPref(
       kPrefTranslateAcceptedCount,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterListPref(kPrefTranslateBlockedLanguages,
-                             GetDefaultBlockedLanguages(),
-                             user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterDictionaryPref(kPrefTranslateLastDeniedTimeForLanguage);
   registry->RegisterDictionaryPref(
       kPrefTranslateTooOftenDeniedForLanguage,
@@ -893,8 +876,7 @@ void TranslatePrefs::MigrateSitesBlacklist() {
 }
 
 void TranslatePrefs::ResetEmptyBlockedLanguagesToDefaults() {
-  if (!HasBlockedLanguages())
-    ClearBlockedLanguages();
+  language_prefs_->ResetEmptyFluentLanguagesToDefault();
 }
 
 bool TranslatePrefs::IsValueInList(const base::ListValue* list,
@@ -972,40 +954,6 @@ void TranslatePrefs::PurgeUnsupportedLanguagesInLanguageFamily(
       return languages_in_same_family.count(lang) > 0;
     });
   }
-}
-
-base::Value TranslatePrefs::GetDefaultBlockedLanguages() {
-#if defined(OS_CHROMEOS)
-  // Preferred languages.
-  std::vector<std::string> languages = {language::kFallbackInputMethodLocale};
-#else
-  // Accept languages.
-  std::vector<std::string> languages =
-      base::SplitString(l10n_util::GetStringUTF8(IDS_ACCEPT_LANGUAGES), ",",
-                        base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-#endif
-  base::ListValue language_values;
-  for (std::string& language : languages) {
-    language::ToTranslateLanguageSynonym(&language);
-    if (std::find(language_values.GetList().begin(),
-                  language_values.GetList().end(),
-                  base::Value(language)) == language_values.GetList().end()) {
-      language_values.GetList().emplace_back(language);
-
-      // crbug.com/958348: The default value for Accept-Language *should* be the
-      // same as the one for Fluent Languages. However, Accept-Language contains
-      // English (and more) in addition to the local language in most locales
-      // due to historical reasons. Exiting early from this loop is a temporary
-      // fix that allows Fluent Languages to be at least populated with the UI
-      // language while still allowing Translate to trigger on other languages,
-      // most importantly English.
-      // Once the change to remove English from Accept-Language defaults lands,
-      // this break should be removed to enable the Fluent Language List and the
-      // Accept-Language list to be initialized to the same values.
-      break;
-    }
-  }
-  return std::move(language_values);
 }
 
 }  // namespace translate

@@ -22,7 +22,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/infobars/infobar_service.h"
@@ -45,6 +44,7 @@
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
 #include "chrome/browser/ui/startup/startup_tab_provider.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/welcome/nux_helper.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -53,6 +53,8 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/infobars/core/infobar.h"
+#include "components/infobars/core/infobar_delegate.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/metrics/metrics_pref_names.h"
@@ -92,6 +94,10 @@ using testing::Return;
 #include "base/win/windows_version.h"
 #endif
 
+#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+#include "chrome/browser/ui/webui/welcome/nux_helper.h"
+#endif  // defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
+
 using testing::_;
 using extensions::Extension;
 
@@ -114,7 +120,7 @@ Browser* FindOneOtherBrowser(Browser* browser) {
 
 bool IsWindows10OrNewer() {
 #if defined(OS_WIN)
-  return base::win::GetVersion() >= base::win::VERSION_WIN10;
+  return base::win::GetVersion() >= base::win::Version::WIN10;
 #else
   return false;
 #endif
@@ -124,11 +130,6 @@ bool IsWindows10OrNewer() {
 void DisableWelcomePages(const std::vector<Profile*>& profiles) {
   for (Profile* profile : profiles)
     profile->GetPrefs()->SetBoolean(prefs::kHasSeenWelcomePage, true);
-
-#if defined(OS_WIN)
-  g_browser_process->local_state()->SetBoolean(prefs::kHasSeenWin10PromoPage,
-                                               true);
-#endif
 }
 
 Browser* OpenNewBrowser(Profile* profile) {
@@ -140,10 +141,8 @@ Browser* OpenNewBrowser(Profile* profile) {
 }
 
 Browser* CloseBrowserAndOpenNew(Browser* browser, Profile* profile) {
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_BROWSER_CLOSED, content::Source<Browser>(browser));
   browser->window()->Close();
-  observer.Wait();
+  ui_test_utils::WaitForBrowserToClose(browser);
   return OpenNewBrowser(profile);
 }
 
@@ -211,9 +210,6 @@ class StartupBrowserCreatorTest : public extensions::ExtensionBrowserTest {
     EXPECT_EQ(1U, infobar_service->infobar_count());
 #endif  // defined(OS_MACOSX)
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StartupBrowserCreatorTest);
 };
 
 class OpenURLsPopupObserver : public BrowserListObserver {
@@ -333,7 +329,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   // The new browser should have exactly one tab (not the startup URLs).
   TabStripModel* tab_strip = new_browser->tab_strip_model();
   ASSERT_EQ(1, tab_strip->count());
-  EXPECT_EQ("chrome://newtab/",
+  EXPECT_EQ(chrome::kChromeUINewTabURL,
             tab_strip->GetWebContentsAt(0)->GetURL().possibly_invalid_spec());
 }
 
@@ -399,11 +395,9 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutNoPref) {
   EXPECT_EQ(2, tab_strip->count());
   EXPECT_EQ(tab_strip->GetActiveWebContents(), tab_strip->GetWebContentsAt(1));
 
-  // If new bookmark apps are enabled, it should be a standard tabbed window,
-  // not an app window; otherwise the reverse should be true.
-  bool new_bookmark_apps_enabled = extensions::util::IsNewBookmarkAppsEnabled();
-  EXPECT_EQ(!new_bookmark_apps_enabled, browser()->is_app());
-  EXPECT_EQ(new_bookmark_apps_enabled, browser()->is_type_tabbed());
+  // It should be a standard tabbed window, not an app window.
+  EXPECT_FALSE(browser()->is_app());
+  EXPECT_TRUE(browser()->is_type_tabbed());
 }
 
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, OpenAppShortcutWindowPref) {
@@ -1031,36 +1025,6 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest,
   ASSERT_EQ(1u, chrome::GetBrowserCount(profile2));
 }
 
-class SupervisedUserBrowserCreatorTest : public InProcessBrowserTest {
- protected:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(switches::kSupervisedUserId,
-                                    supervised_users::kChildAccountSUID);
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(SupervisedUserBrowserCreatorTest,
-                       StartupSupervisedUserProfile) {
-  StartupBrowserCreator browser_creator;
-
-  // Do a simple non-process-startup browser launch.
-  base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
-  StartupBrowserCreatorImpl launch(base::FilePath(), dummy, &browser_creator,
-                                   chrome::startup::IS_FIRST_RUN);
-  content::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
-      content::NotificationService::AllSources());
-  ASSERT_TRUE(launch.Launch(browser()->profile(), std::vector<GURL>(), false));
-
-  // This should have created a new browser window.
-  Browser* new_browser = FindOneOtherBrowser(browser());
-  ASSERT_TRUE(new_browser);
-
-  TabStripModel* tab_strip = new_browser->tab_strip_model();
-
-  EXPECT_EQ(1, tab_strip->count());
-}
-
 #endif  // !defined(OS_CHROMEOS)
 
 // These tests are not applicable to Chrome OS as neither master_preferences nor
@@ -1068,12 +1032,23 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBrowserCreatorTest,
 #if !defined(OS_CHROMEOS)
 
 class StartupBrowserCreatorFirstRunTest : public InProcessBrowserTest {
+ public:
+  StartupBrowserCreatorFirstRunTest() {
+    scoped_feature_list_.InitWithFeatures({nux::kNuxOnboardingForceEnabled},
+                                          {});
+  }
+
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override;
   void SetUpInProcessBrowserTestFixture() override;
 
   policy::MockConfigurationPolicyProvider provider_;
   policy::PolicyMap policy_map_;
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(StartupBrowserCreatorFirstRunTest);
 };
 
 void StartupBrowserCreatorFirstRunTest::SetUpCommandLine(
@@ -1235,46 +1210,35 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorFirstRunTest, WelcomePages) {
   // Open the two profiles.
   base::FilePath dest_path = profile_manager->user_data_dir();
 
-  Profile* profile1 = nullptr;
+  std::unique_ptr<Profile> profile1;
   {
     base::ScopedAllowBlockingForTesting allow_blocking;
     profile1 = Profile::CreateProfile(
         dest_path.Append(FILE_PATH_LITERAL("New Profile 1")), nullptr,
         Profile::CreateMode::CREATE_MODE_SYNCHRONOUS);
   }
-  ASSERT_TRUE(profile1);
-  profile_manager->RegisterTestingProfile(profile1, true, false);
+  Profile* profile1_ptr = profile1.get();
+  ASSERT_TRUE(profile1_ptr);
+  profile_manager->RegisterTestingProfile(std::move(profile1), true, false);
 
-  Browser* browser = OpenNewBrowser(profile1);
+  Browser* browser = OpenNewBrowser(profile1_ptr);
   ASSERT_TRUE(browser);
 
   TabStripModel* tab_strip = browser->tab_strip_model();
 
-  // Windows 10 has its own Welcome page; the standard Welcome page does not
-  // appear until second run.
-  if (IsWindows10OrNewer()) {
-    ASSERT_EQ(1, tab_strip->count());
-    EXPECT_EQ("chrome://welcome-win10/",
-              tab_strip->GetWebContentsAt(0)->GetURL().possibly_invalid_spec());
-
-    browser = CloseBrowserAndOpenNew(browser, profile1);
-    ASSERT_TRUE(browser);
-    tab_strip = browser->tab_strip_model();
-  }
-
   // Ensure that the standard Welcome page appears on second run on Win 10, and
   // on first run on all other platforms.
   ASSERT_EQ(1, tab_strip->count());
-  EXPECT_EQ("chrome://welcome/",
+  EXPECT_EQ(chrome::kChromeUIWelcomeURL,
             tab_strip->GetWebContentsAt(0)->GetURL().possibly_invalid_spec());
 
-  browser = CloseBrowserAndOpenNew(browser, profile1);
+  browser = CloseBrowserAndOpenNew(browser, profile1_ptr);
   ASSERT_TRUE(browser);
   tab_strip = browser->tab_strip_model();
 
   // Ensure that the new tab page appears on subsequent runs.
   ASSERT_EQ(1, tab_strip->count());
-  EXPECT_EQ("chrome://newtab/",
+  EXPECT_EQ(chrome::kChromeUINewTabURL,
             tab_strip->GetWebContentsAt(0)->GetURL().possibly_invalid_spec());
 }
 
@@ -1303,17 +1267,18 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorFirstRunTest,
   // Open the two profiles.
   base::FilePath dest_path = profile_manager->user_data_dir();
 
-  Profile* profile1 = nullptr;
+  std::unique_ptr<Profile> profile1;
   {
     base::ScopedAllowBlockingForTesting allow_blocking;
     profile1 = Profile::CreateProfile(
         dest_path.Append(FILE_PATH_LITERAL("New Profile 1")), nullptr,
         Profile::CreateMode::CREATE_MODE_SYNCHRONOUS);
   }
-  ASSERT_TRUE(profile1);
-  profile_manager->RegisterTestingProfile(profile1, true, false);
+  Profile* profile1_ptr = profile1.get();
+  ASSERT_TRUE(profile1_ptr);
+  profile_manager->RegisterTestingProfile(std::move(profile1), true, false);
 
-  Browser* browser = OpenNewBrowser(profile1);
+  Browser* browser = OpenNewBrowser(profile1_ptr);
   ASSERT_TRUE(browser);
 
   TabStripModel* tab_strip = browser->tab_strip_model();
@@ -1325,7 +1290,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorFirstRunTest,
     EXPECT_EQ("title1.html",
               tab_strip->GetWebContentsAt(0)->GetURL().ExtractFileName());
 
-    browser = CloseBrowserAndOpenNew(browser, profile1);
+    browser = CloseBrowserAndOpenNew(browser, profile1_ptr);
     ASSERT_TRUE(browser);
     tab_strip = browser->tab_strip_model();
   }
@@ -1336,7 +1301,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorFirstRunTest,
   EXPECT_EQ("title1.html",
             tab_strip->GetWebContentsAt(0)->GetURL().ExtractFileName());
 
-  browser = CloseBrowserAndOpenNew(browser, profile1);
+  browser = CloseBrowserAndOpenNew(browser, profile1_ptr);
   ASSERT_TRUE(browser);
   tab_strip = browser->tab_strip_model();
 
@@ -1371,9 +1336,8 @@ class StartupBrowserCreatorWelcomeBackTest : public InProcessBrowserTest {
     ASSERT_EQ(0U, BrowserList::GetInstance()->size());
   }
 
-  void StartBrowser(StartupBrowserCreator::WelcomeBackPage welcome_back_page,
-                    PolicyVariant variant) {
-    browser_creator_.set_welcome_back_page(welcome_back_page);
+  void StartBrowser(PolicyVariant variant) {
+    browser_creator_.set_welcome_back_page(true);
 
     if (variant) {
       policy::PolicyMap values;
@@ -1408,41 +1372,11 @@ class StartupBrowserCreatorWelcomeBackTest : public InProcessBrowserTest {
   std::unique_ptr<ScopedKeepAlive> scoped_keep_alive_;
   StartupBrowserCreator browser_creator_;
   policy::MockConfigurationPolicyProvider provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(StartupBrowserCreatorWelcomeBackTest);
 };
-
-#if defined(OS_WIN)
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorWelcomeBackTest,
-                       WelcomeBackWin10NoPolicy) {
-  ASSERT_NO_FATAL_FAILURE(StartBrowser(
-      StartupBrowserCreator::WelcomeBackPage::kWelcomeWin10, PolicyVariant()));
-  ExpectUrlInBrowserAtPosition(
-      StartupTabProviderImpl::GetWin10WelcomePageUrl(false), 0);
-}
-
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorWelcomeBackTest,
-                       WelcomeBackWin10MandatoryPolicy) {
-  ASSERT_NO_FATAL_FAILURE(
-      StartBrowser(StartupBrowserCreator::WelcomeBackPage::kWelcomeWin10,
-                   PolicyVariant(policy::POLICY_LEVEL_MANDATORY)));
-  ExpectUrlInBrowserAtPosition(GURL("http://managed.site.com/"), 0);
-}
-
-IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorWelcomeBackTest,
-                       WelcomeBackWin10RecommendedPolicy) {
-  ASSERT_NO_FATAL_FAILURE(
-      StartBrowser(StartupBrowserCreator::WelcomeBackPage::kWelcomeWin10,
-                   PolicyVariant(policy::POLICY_LEVEL_RECOMMENDED)));
-  ExpectUrlInBrowserAtPosition(GURL("http://managed.site.com/"), 0);
-}
-#endif  // defined(OS_WIN)
 
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorWelcomeBackTest,
                        WelcomeBackStandardNoPolicy) {
-  ASSERT_NO_FATAL_FAILURE(
-      StartBrowser(StartupBrowserCreator::WelcomeBackPage::kWelcomeStandard,
-                   PolicyVariant()));
+  ASSERT_NO_FATAL_FAILURE(StartBrowser(PolicyVariant()));
   ExpectUrlInBrowserAtPosition(StartupTabProviderImpl::GetWelcomePageUrl(false),
                                0);
 }
@@ -1450,16 +1384,14 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorWelcomeBackTest,
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorWelcomeBackTest,
                        WelcomeBackStandardMandatoryPolicy) {
   ASSERT_NO_FATAL_FAILURE(
-      StartBrowser(StartupBrowserCreator::WelcomeBackPage::kWelcomeStandard,
-                   PolicyVariant(policy::POLICY_LEVEL_MANDATORY)));
+      StartBrowser(PolicyVariant(policy::POLICY_LEVEL_MANDATORY)));
   ExpectUrlInBrowserAtPosition(GURL("http://managed.site.com/"), 0);
 }
 
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorWelcomeBackTest,
                        WelcomeBackStandardRecommendedPolicy) {
   ASSERT_NO_FATAL_FAILURE(
-      StartBrowser(StartupBrowserCreator::WelcomeBackPage::kWelcomeStandard,
-                   PolicyVariant(policy::POLICY_LEVEL_RECOMMENDED)));
+      StartBrowser(PolicyVariant(policy::POLICY_LEVEL_RECOMMENDED)));
   ExpectUrlInBrowserAtPosition(GURL("http://managed.site.com/"), 0);
 }
 
@@ -1486,8 +1418,6 @@ class StartupBrowserCreatorWasRestartedFlag : public InProcessBrowserTest {
 
  private:
   base::ScopedTempDir temp_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(StartupBrowserCreatorWasRestartedFlag);
 };
 
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorWasRestartedFlag, Test) {
@@ -1495,3 +1425,116 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorWasRestartedFlag, Test) {
   EXPECT_FALSE(
       g_browser_process->local_state()->GetBoolean(prefs::kWasRestarted));
 }
+
+// The kCommandLineFlagSecurityWarningsEnabled policy doesn't exist on ChromeOS.
+#if !defined(OS_CHROMEOS)
+enum class CommandLineFlagSecurityWarningsPolicy {
+  kNoPolicy,
+  kEnabled,
+  kDisabled,
+};
+
+// Verifies that infobars are displayed (or not) depending on enterprise policy.
+class StartupBrowserCreatorInfobarsTest
+    : public InProcessBrowserTest,
+      public ::testing::WithParamInterface<
+          CommandLineFlagSecurityWarningsPolicy> {
+ public:
+  StartupBrowserCreatorInfobarsTest() : policy_(GetParam()) {}
+
+ protected:
+  InfoBarService* LaunchBrowserAndGetCreatedInfobarService(
+      const base::CommandLine& command_line) {
+    Profile* profile = browser()->profile();
+    StartupBrowserCreatorImpl launch(base::FilePath(), command_line,
+                                     chrome::startup::IS_NOT_FIRST_RUN);
+    EXPECT_TRUE(launch.Launch(profile, std::vector<GURL>(), true));
+
+    // This should have created a new browser window.
+    Browser* new_browser = FindOneOtherBrowser(browser());
+    EXPECT_TRUE(new_browser);
+
+    return InfoBarService::FromWebContents(
+        new_browser->tab_strip_model()->GetWebContentsAt(0));
+  }
+
+  const CommandLineFlagSecurityWarningsPolicy policy_;
+
+ private:
+  void SetUpInProcessBrowserTestFixture() override {
+    EXPECT_CALL(policy_provider_, IsInitializationComplete(_))
+        .WillRepeatedly(Return(true));
+    policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
+        &policy_provider_);
+
+    if (policy_ != CommandLineFlagSecurityWarningsPolicy::kNoPolicy) {
+      bool is_enabled =
+          policy_ == CommandLineFlagSecurityWarningsPolicy::kEnabled;
+      policy::PolicyMap policies;
+      policies.Set(policy::key::kCommandLineFlagSecurityWarningsEnabled,
+                   policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+                   policy::POLICY_SOURCE_PLATFORM,
+                   std::make_unique<base::Value>(is_enabled), nullptr);
+      policy_provider_.UpdateChromePolicy(policies);
+    }
+  }
+
+  policy::MockConfigurationPolicyProvider policy_provider_;
+};
+
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorInfobarsTest,
+                       CheckInfobarForEnableAutomation) {
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+  command_line.AppendSwitch(switches::kEnableAutomation);
+  InfoBarService* infobar_service =
+      LaunchBrowserAndGetCreatedInfobarService(command_line);
+  ASSERT_TRUE(infobar_service);
+
+  bool found_automation_infobar = false;
+  for (size_t i = 0; i < infobar_service->infobar_count(); i++) {
+    infobars::InfoBar* infobar = infobar_service->infobar_at(i);
+    if (infobar->delegate()->GetIdentifier() ==
+        infobars::InfoBarDelegate::AUTOMATION_INFOBAR_DELEGATE) {
+      found_automation_infobar = true;
+    }
+  }
+
+  EXPECT_EQ(found_automation_infobar,
+            policy_ != CommandLineFlagSecurityWarningsPolicy::kDisabled);
+}
+
+IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorInfobarsTest,
+                       CheckInfobarForBadFlag) {
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
+  // Test one of the flags from |bad_flags_prompt.cc|. Any of the flags should
+  // have the same behavior.
+  command_line.AppendSwitch(switches::kDisableWebSecurity);
+  // BadFlagsPrompt::ShowBadFlagsPrompt uses CommandLine::ForCurrentProcess
+  // instead of the command-line passed to StartupBrowserCreator. In browser
+  // tests, this references the browser test's instead of the new process.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisableWebSecurity);
+  InfoBarService* infobar_service =
+      LaunchBrowserAndGetCreatedInfobarService(command_line);
+  ASSERT_TRUE(infobar_service);
+
+  bool found_bad_flags_infobar = false;
+  for (size_t i = 0; i < infobar_service->infobar_count(); i++) {
+    infobars::InfoBar* infobar = infobar_service->infobar_at(i);
+    if (infobar->delegate()->GetIdentifier() ==
+        infobars::InfoBarDelegate::BAD_FLAGS_INFOBAR_DELEGATE) {
+      found_bad_flags_infobar = true;
+    }
+  }
+
+  EXPECT_EQ(found_bad_flags_infobar,
+            policy_ != CommandLineFlagSecurityWarningsPolicy::kDisabled);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PolicyControl,
+    StartupBrowserCreatorInfobarsTest,
+    ::testing::Values(CommandLineFlagSecurityWarningsPolicy::kNoPolicy,
+                      CommandLineFlagSecurityWarningsPolicy::kEnabled,
+                      CommandLineFlagSecurityWarningsPolicy::kDisabled));
+#endif  // !defined(OS_CHROMEOS)

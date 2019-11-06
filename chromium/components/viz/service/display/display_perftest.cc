@@ -66,7 +66,8 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
     SkBlendMode blend_mode = SkBlendMode::kSrcOver;
 
     SharedQuadState* state = render_pass->CreateAndAppendSharedQuadState();
-    state->SetAll(quad_transform, rect, rect, rect, is_clipped,
+    state->SetAll(quad_transform, rect, rect,
+                  /*rounded_corner_bounds=*/gfx::RRectF(), rect, is_clipped,
                   are_contents_opaque, opacity, blend_mode, sorting_context_id);
     return state;
   }
@@ -100,7 +101,7 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
                      premultiplied_alpha, uv_top_left, uv_bottom_right,
                      background_color, vertex_opacity, y_flipped,
                      nearest_neighbor, /*secure_output_only=*/false,
-                     ui::ProtectedVideoType::kClear);
+                     gfx::ProtectedVideoType::kClear);
         j += quad_height;
       }
       j = y_top;

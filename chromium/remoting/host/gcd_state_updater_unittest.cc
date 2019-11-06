@@ -35,8 +35,8 @@ class GcdStateUpdaterTest : public testing::Test {
  public:
   GcdStateUpdaterTest()
       : scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME,
-            base::test::ScopedTaskEnvironment::ExecutionMode::QUEUED),
+            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME,
+            base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::QUEUED),
         test_shared_url_loader_factory_(
             base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
                 &test_url_loader_factory_)),

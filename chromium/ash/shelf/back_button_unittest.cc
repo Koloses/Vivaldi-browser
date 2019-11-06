@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "ash/accelerators/accelerator_controller.h"
+#include "ash/accelerators/accelerator_controller_impl.h"
 #include "ash/app_list/test/app_list_test_helper.h"
 #include "ash/app_list/views/app_list_view.h"
 #include "ash/shelf/shelf.h"
@@ -27,14 +27,13 @@ class BackButtonTest : public AshTestBase {
   BackButtonTest() = default;
   ~BackButtonTest() override = default;
 
-  BackButton* back_button() { return back_button_; }
+  BackButton* back_button() { return test_api_->shelf_view()->GetBackButton(); }
   ShelfViewTestAPI* test_api() { return test_api_.get(); }
 
   void SetUp() override {
     AshTestBase::SetUp();
     test_api_ = std::make_unique<ShelfViewTestAPI>(
         GetPrimaryShelf()->GetShelfViewForTesting());
-    back_button_ = test_api_->shelf_view()->GetBackButton();
 
     // Finish all setup tasks. In particular we want to finish the
     // GetSwitchStates post task in (Fake)PowerManagerClient which is triggered
@@ -43,8 +42,7 @@ class BackButtonTest : public AshTestBase {
     base::RunLoop().RunUntilIdle();
   }
 
- private:
-  BackButton* back_button_ = nullptr;
+ protected:
   std::unique_ptr<ShelfViewTestAPI> test_api_;
 
   DISALLOW_COPY_AND_ASSIGN(BackButtonTest);
@@ -55,11 +53,11 @@ TEST_F(BackButtonTest, Visibility) {
   ASSERT_TRUE(back_button()->layer());
   EXPECT_EQ(0.f, back_button()->layer()->opacity());
 
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   test_api()->RunMessageLoopUntilAnimationsDone();
   EXPECT_EQ(1.f, back_button()->layer()->opacity());
 
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
   test_api()->RunMessageLoopUntilAnimationsDone();
   EXPECT_EQ(0.f, back_button()->layer()->opacity());
 }
@@ -71,21 +69,22 @@ TEST_F(BackButtonTest, VisibilityWithVerticalShelf) {
   ASSERT_TRUE(back_button()->layer());
   EXPECT_EQ(0.f, back_button()->layer()->opacity());
 
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   test_api()->RunMessageLoopUntilAnimationsDone();
   EXPECT_EQ(1.f, back_button()->layer()->opacity());
 
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
   test_api()->RunMessageLoopUntilAnimationsDone();
   EXPECT_EQ(0.f, back_button()->layer()->opacity());
 }
 
 TEST_F(BackButtonTest, BackKeySequenceGenerated) {
   // Enter tablet mode; the back button is not visible in non tablet mode.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   test_api()->RunMessageLoopUntilAnimationsDone();
 
-  AcceleratorController* controller = Shell::Get()->accelerator_controller();
+  AcceleratorControllerImpl* controller =
+      Shell::Get()->accelerator_controller();
 
   // Register an accelerator that looks for back presses. Note there is already
   // an accelerator on AppListView, which will handle the accelerator since it

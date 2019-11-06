@@ -4020,6 +4020,22 @@ error::Error GLES2DecoderPassthroughImpl::HandleDispatchCompute(
   return error::kNoError;
 }
 
+error::Error GLES2DecoderPassthroughImpl::HandleDispatchComputeIndirect(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  if (!feature_info_->IsWebGL2ComputeContext())
+    return error::kUnknownCommand;
+  const volatile gles2::cmds::DispatchComputeIndirect& c =
+      *static_cast<const volatile gles2::cmds::DispatchComputeIndirect*>(
+          cmd_data);
+  GLintptr offset = static_cast<GLintptr>(c.offset);
+  error::Error error = DoDispatchComputeIndirect(offset);
+  if (error != error::kNoError) {
+    return error;
+  }
+  return error::kNoError;
+}
+
 error::Error GLES2DecoderPassthroughImpl::HandleGetProgramInterfaceiv(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
@@ -4835,17 +4851,15 @@ GLES2DecoderPassthroughImpl::HandleSetReadbackBufferShadowAllocationINTERNAL(
   return error::kNoError;
 }
 
-error::Error
-GLES2DecoderPassthroughImpl::HandleFramebufferTextureMultiviewLayeredANGLE(
+error::Error GLES2DecoderPassthroughImpl::HandleFramebufferTextureMultiviewOVR(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
   if (!feature_info_->IsWebGL2OrES3OrHigherContext())
     return error::kUnknownCommand;
-  const volatile gles2::cmds::FramebufferTextureMultiviewLayeredANGLE& c =
-      *static_cast<
-          const volatile gles2::cmds::FramebufferTextureMultiviewLayeredANGLE*>(
+  const volatile gles2::cmds::FramebufferTextureMultiviewOVR& c =
+      *static_cast<const volatile gles2::cmds::FramebufferTextureMultiviewOVR*>(
           cmd_data);
-  if (!features().angle_multiview) {
+  if (!features().ovr_multiview2) {
     return error::kUnknownCommand;
   }
 
@@ -4855,7 +4869,7 @@ GLES2DecoderPassthroughImpl::HandleFramebufferTextureMultiviewLayeredANGLE(
   GLint level = static_cast<GLint>(c.level);
   GLint baseViewIndex = static_cast<GLint>(c.baseViewIndex);
   GLsizei numViews = static_cast<GLsizei>(c.numViews);
-  error::Error error = DoFramebufferTextureMultiviewLayeredANGLE(
+  error::Error error = DoFramebufferTextureMultiviewOVR(
       target, attachment, texture, level, baseViewIndex, numViews);
   if (error != error::kNoError) {
     return error;
@@ -4890,6 +4904,7 @@ error::Error GLES2DecoderPassthroughImpl::
                            CreateAndTexStorage2DSharedImageINTERNALImmediate*>(
           cmd_data);
   GLuint texture = static_cast<GLuint>(c.texture);
+  GLenum internalformat = static_cast<GLenum>(c.internalformat);
   uint32_t mailbox_size;
   if (!GLES2Util::ComputeDataSize<GLbyte, 16>(1, &mailbox_size)) {
     return error::kOutOfBounds;
@@ -4899,12 +4914,11 @@ error::Error GLES2DecoderPassthroughImpl::
   }
   volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
       c, mailbox_size, immediate_data_size);
-  GLenum internalformat = static_cast<GLenum>(c.internalformat);
   if (mailbox == nullptr) {
     return error::kOutOfBounds;
   }
   error::Error error = DoCreateAndTexStorage2DSharedImageINTERNAL(
-      texture, mailbox, internalformat);
+      texture, internalformat, mailbox);
   if (error != error::kNoError) {
     return error;
   }

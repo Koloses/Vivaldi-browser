@@ -11,7 +11,6 @@ import android.os.Bundle;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.SnackbarActivity;
-import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.download.home.DownloadManagerCoordinator;
 import org.chromium.chrome.browser.download.home.DownloadManagerCoordinatorFactory;
 import org.chromium.chrome.browser.download.home.DownloadManagerUiConfig;
@@ -19,16 +18,18 @@ import org.chromium.chrome.browser.download.items.OfflineContentAggregatorNotifi
 import org.chromium.chrome.browser.download.ui.DownloadManagerUi;
 import org.chromium.chrome.browser.modaldialog.AppModalPresenter;
 import org.chromium.chrome.browser.util.IntentUtils;
+import org.chromium.chrome.browser.util.UrlConstants;
 import org.chromium.ui.base.ActivityAndroidPermissionDelegate;
 import org.chromium.ui.base.AndroidPermissionDelegate;
 import org.chromium.ui.modaldialog.ModalDialogManager;
+import org.chromium.ui.modaldialog.ModalDialogManagerHolder;
 
 import java.lang.ref.WeakReference;
 
 /**
  * Activity for managing downloads handled through Chrome.
  */
-public class DownloadActivity extends SnackbarActivity {
+public class DownloadActivity extends SnackbarActivity implements ModalDialogManagerHolder {
     private static final String BUNDLE_KEY_CURRENT_URL = "current_url";
 
     private DownloadManagerCoordinator mDownloadCoordinator;
@@ -103,6 +104,11 @@ public class DownloadActivity extends SnackbarActivity {
         mDownloadCoordinator.destroy();
         mModalDialogManager.destroy();
         super.onDestroy();
+    }
+
+    @Override
+    public ModalDialogManager getModalDialogManager() {
+        return mModalDialogManager;
     }
 
     @VisibleForTesting

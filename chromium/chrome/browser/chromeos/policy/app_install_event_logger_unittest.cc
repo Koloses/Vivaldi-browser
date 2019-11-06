@@ -98,15 +98,17 @@ class AppInstallEventLoggerTest : public testing::Test {
   AppInstallEventLoggerTest()
       : browser_thread_bundle_(
             base::test::ScopedTaskEnvironment::MainThreadType::UI,
-            base::test::ScopedTaskEnvironment::ExecutionMode::QUEUED) {}
+            base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::
+                QUEUED) {}
 
   void SetUp() override {
     RegisterLocalState(pref_service_.registry());
     TestingBrowserProcess::GetGlobal()->SetLocalState(&pref_service_);
 
     chromeos::DBusThreadManager::Initialize();
+    chromeos::PowerManagerClient::InitializeFake();
+
     chromeos::NetworkHandler::Initialize();
-    chromeos::PowerManagerClient::Initialize();
 
     disk_mount_manager_ = new chromeos::disks::MockDiskMountManager;
     chromeos::disks::DiskMountManager::InitializeForTesting(

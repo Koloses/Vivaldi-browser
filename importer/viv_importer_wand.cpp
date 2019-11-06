@@ -465,7 +465,7 @@ bool OperaImporter::ImportWand_ReadEntryHTML(
 
   autofill::PasswordForm password;
 
-  password.scheme = autofill::PasswordForm::SCHEME_HTML;
+  password.scheme = autofill::PasswordForm::Scheme::kHtml;
 
   password.submit_element = submit_button;
   password.origin = GURL(url).ReplaceComponents(rep);
@@ -488,7 +488,7 @@ bool OperaImporter::ImportWand_ReadEntryHTML(
   for (uint32_t i = 0; i < field_count; i++) {
     if (static_cast<int>(i) != first_field &&
         static_cast<int>(i) != first_pass && !fields[first_pass].is_password)
-      password.other_possible_usernames.push_back(
+      password.all_possible_usernames.push_back(
           autofill::ValueElementPair(fields[first_pass].fieldvalue,
                                          submit_button));
   }
@@ -559,12 +559,12 @@ bool OperaImporter::ImportWand_ReadEntryAuth(
 
   autofill::PasswordForm password;
 
-  password.scheme = autofill::PasswordForm::SCHEME_OTHER;
+  password.scheme = autofill::PasswordForm::Scheme::kOther;
   /*
   if(http_auth)
-    password.scheme = autofill::PasswordForm::SCHEME_OTHER;
+    password.scheme = autofill::PasswordForm::Scheme::kOther;
   else if (mail_url)
-    password.scheme = autofill::PasswordForm::SCHEME_OTHER;
+    password.scheme = autofill::PasswordForm::Scheme::kOther;
     */
 
   password.origin = GURL(url8).ReplaceComponents(rep);
@@ -584,7 +584,7 @@ bool OperaImporter::ImportWand_ReadEntryAuth(
   for (uint32_t i = 0; i < field_count; i++) {
     if (static_cast<int>(i) != first_field &&
         static_cast<int>(i) != first_pass && !fields[first_pass].is_password) {
-      password.other_possible_usernames.push_back(
+      password.all_possible_usernames.push_back(
         autofill::ValueElementPair(fields[first_pass].fieldvalue,
                                        base::string16()));
     }

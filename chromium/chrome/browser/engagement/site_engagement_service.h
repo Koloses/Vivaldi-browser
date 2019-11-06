@@ -26,8 +26,7 @@ class Clock;
 }
 
 namespace banners {
-FORWARD_DECLARE_TEST(AppBannerManagerBrowserTest,
-                     ExperimentalFlowWebAppBannerNeedsEngagement);
+FORWARD_DECLARE_TEST(AppBannerManagerBrowserTest, WebAppBannerNeedsEngagement);
 }
 
 namespace content {
@@ -215,7 +214,7 @@ class SiteEngagementService : public KeyedService,
                            IncognitoEngagementService);
   FRIEND_TEST_ALL_PREFIXES(SiteEngagementServiceTest, GetScoreFromSettings);
   FRIEND_TEST_ALL_PREFIXES(banners::AppBannerManagerBrowserTest,
-                           ExperimentalFlowWebAppBannerNeedsEngagement);
+                           WebAppBannerNeedsEngagement);
   FRIEND_TEST_ALL_PREFIXES(AppBannerSettingsHelperTest, SiteEngagementTrigger);
   FRIEND_TEST_ALL_PREFIXES(HostedAppPWAOnlyTest, EngagementHistogram);
 
@@ -342,7 +341,7 @@ class SiteEngagementService : public KeyedService,
   // event, each observer's OnEngagementEvent method will be called.
   base::ObserverList<SiteEngagementObserver>::Unchecked observer_list_;
 
-  base::WeakPtrFactory<SiteEngagementService> weak_factory_;
+  base::WeakPtrFactory<SiteEngagementService> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SiteEngagementService);
 };

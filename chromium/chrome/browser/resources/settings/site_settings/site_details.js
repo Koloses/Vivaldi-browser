@@ -55,11 +55,19 @@ Polymer({
     },
 
     /** @private */
-    enableSiteSettings_: {
+    enableExperimentalWebPlatformFeatures_: {
       type: Boolean,
       value: function() {
-        return loadTimeData.getBoolean('enableSiteSettings');
+        return loadTimeData.getBoolean('enableExperimentalWebPlatformFeatures');
       },
+    },
+
+    /** @private */
+    enableBluetoothScanningContentSetting_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('enableBluetoothScanningContentSetting');
+      }
     },
   },
 
@@ -105,10 +113,7 @@ Polymer({
       if (!valid) {
         settings.navigateToPreviousRoute();
       } else {
-        if (this.enableSiteSettings_) {
-          this.$.usageApi.fetchUsageTotal(this.toUrl(this.origin_).hostname);
-        }
-
+        this.$.usageApi.fetchUsageTotal(this.toUrl(this.origin_).hostname);
         this.updatePermissions_(this.getCategoryList());
       }
     });
@@ -226,10 +231,7 @@ Polymer({
    * @private
    */
   onClearStorage_: function(e) {
-    // Since usage is only shown when "Site Settings" is enabled, don't
-    // clear it when it's not shown.
-    if (this.enableSiteSettings_ &&
-        this.hasUsage_(this.storedData_, this.numCookies_)) {
+    if (this.hasUsage_(this.storedData_, this.numCookies_)) {
       this.$.usageApi.clearUsage(this.toUrl(this.origin_).href);
     }
 
@@ -247,16 +249,6 @@ Polymer({
       this.storedData_ = '';
       this.numCookies_ = '';
     }
-  },
-
-  /**
-   * Checks whether the permission list is standalone or has a heading.
-   * @return {string} CSS class applied when the permission list has no
-   *     heading.
-   * @private
-   */
-  permissionListClass_: function(hasHeading) {
-    return hasHeading ? '' : 'without-heading';
   },
 
   /**

@@ -40,10 +40,12 @@
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "gpu/config/gpu_feature_info.h"
+#include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/webgl_image_conversion.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types_3d.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -116,6 +118,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   static scoped_refptr<DrawingBuffer> Create(
       std::unique_ptr<WebGraphicsContext3DProvider>,
       bool using_gpu_compositing,
+      bool using_swap_chain,
       Client*,
       const IntSize&,
       bool premultiplied_alpha,
@@ -224,6 +227,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   bool CopyToPlatformTexture(gpu::gles2::GLES2Interface*,
                              GLenum dst_target,
                              GLuint dst_texture,
+                             GLint dst_level,
                              bool premultiply_alpha,
                              bool flip_y,
                              const IntPoint& dst_texture_offset,
@@ -235,7 +239,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
 
   int SampleCount() const { return sample_count_; }
   bool ExplicitResolveOfMultisampleData() const {
-    return anti_aliasing_mode_ == gpu::kAntialiasingModeMSAAExplicitResolve;
+    return anti_aliasing_mode_ == kAntialiasingModeMSAAExplicitResolve;
   }
 
   // Rebind the read and draw framebuffers that WebGL is expecting.
@@ -244,10 +248,14 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // Restore all state that may have been dirtied by any call.
   void RestoreAllState();
 
+  void PresentSwapChain();
+
   // This class helps implement correct semantics for BlitFramebuffer
   // when the DrawingBuffer is using a CHROMIUM image for its backing
   // store and RGB emulation is in use (basically, macOS only).
   class PLATFORM_EXPORT ScopedRGBEmulationForBlitFramebuffer {
+    STACK_ALLOCATED();
+
    public:
     ScopedRGBEmulationForBlitFramebuffer(DrawingBuffer*,
                                          bool is_user_draw_framebuffer_bound);
@@ -264,6 +272,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
  protected:  // For unittests
   DrawingBuffer(std::unique_ptr<WebGraphicsContext3DProvider>,
                 bool using_gpu_compositing,
+                bool using_swap_chain,
                 std::unique_ptr<Extensions3DUtil>,
                 Client*,
                 bool discard_framebuffer_supported,
@@ -298,6 +307,8 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // This structure should wrap all public entrypoints that may modify GL state.
   // It will restore all state when it drops out of scope.
   class ScopedStateRestorer {
+    USING_FAST_MALLOC(ScopedStateRestorer);
+
    public:
     ScopedStateRestorer(DrawingBuffer*);
     ~ScopedStateRestorer();
@@ -488,6 +499,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   bool have_alpha_channel_ = false;
   const bool premultiplied_alpha_;
   const bool using_gpu_compositing_;
+  const bool using_swap_chain_;
   bool has_implicit_stencil_buffer_ = false;
   bool storage_texture_supported_ = false;
 
@@ -555,7 +567,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   const gfx::ColorSpace storage_color_space_;
   const gfx::ColorSpace sampler_color_space_;
 
-  gpu::AntialiasingMode anti_aliasing_mode_ = gpu::kAntialiasingModeNone;
+  AntialiasingMode anti_aliasing_mode_ = kAntialiasingModeNone;
 
   bool use_half_float_storage_ = false;
 

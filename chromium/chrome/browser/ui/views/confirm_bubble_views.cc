@@ -13,8 +13,10 @@
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/label.h"
@@ -27,7 +29,7 @@ ConfirmBubbleViews::ConfirmBubbleViews(
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
   views::GridLayout* layout =
-      SetLayoutManager(std::make_unique<views::GridLayout>(this));
+      SetLayoutManager(std::make_unique<views::GridLayout>());
 
   // Use a fixed maximum message width, so longer messages will wrap.
   const int kMaxMessageWidth = 400;
@@ -37,19 +39,13 @@ ConfirmBubbleViews::ConfirmBubbleViews(
                 kMaxMessageWidth, false);
 
   // Add the message label.
-  views::Label* label = new views::Label(model_->GetMessageText());
-  DCHECK(!label->text().empty());
+  auto label = std::make_unique<views::Label>(model_->GetMessageText());
+  DCHECK(!label->GetText().empty());
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SetMultiLine(true);
   label->SizeToFit(kMaxMessageWidth);
   layout->StartRow(views::GridLayout::kFixedSize, 0);
-  layout->AddView(label);
-
-  // Initialize the help button.
-  help_button_ = CreateVectorImageButton(this);
-  help_button_->SetFocusForPlatform();
-  help_button_->SetTooltipText(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
-  SetImageFromVectorIcon(help_button_, vector_icons::kHelpOutlineIcon);
+  label_ = layout->AddView(std::move(label));
 
   chrome::RecordDialogCreation(chrome::DialogIdentifier::CONFIRM_BUBBLE);
 }
@@ -82,8 +78,13 @@ bool ConfirmBubbleViews::IsDialogButtonEnabled(ui::DialogButton button) const {
   }
 }
 
-views::View* ConfirmBubbleViews::CreateExtraView() {
-  return help_button_;
+std::unique_ptr<views::View> ConfirmBubbleViews::CreateExtraView() {
+  auto help_button = CreateVectorImageButton(this);
+  help_button->SetFocusForPlatform();
+  help_button->SetTooltipText(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+  help_button_ = help_button.get();
+  SetImageFromVectorIcon(help_button_, vector_icons::kHelpOutlineIcon);
+  return help_button;
 }
 
 bool ConfirmBubbleViews::Cancel() {
@@ -114,6 +115,15 @@ void ConfirmBubbleViews::ButtonPressed(views::Button* sender,
     model_->OpenHelpPage();
     GetWidget()->Close();
   }
+}
+
+void ConfirmBubbleViews::ViewHierarchyChanged(
+    const views::ViewHierarchyChangedDetails& details) {
+  if (details.is_add && details.child == this && GetWidget()) {
+    GetWidget()->GetRootView()->GetViewAccessibility().OverrideDescribedBy(
+        label_);
+  }
+  DialogDelegateView::ViewHierarchyChanged(details);
 }
 
 namespace chrome {

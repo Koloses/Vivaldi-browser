@@ -31,10 +31,6 @@ class DataReductionProxyIOData;
 class DataStore;
 }  // namespace data_reduction_proxy
 
-namespace net {
-class URLRequestContextGetter;
-}
-
 namespace network {
 class SharedURLLoaderFactory;
 }
@@ -77,7 +73,6 @@ class DataReductionProxyChromeSettings
   void InitDataReductionProxySettings(
       data_reduction_proxy::DataReductionProxyIOData* io_data,
       PrefService* profile_prefs,
-      net::URLRequestContextGetter* request_context_getter,
       Profile* profile,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       std::unique_ptr<data_reduction_proxy::DataStore> store,
@@ -90,13 +85,6 @@ class DataReductionProxyChromeSettings
   // Public for testing.
   void MigrateDataReductionProxyOffProxyPrefs(PrefService* prefs);
 
-  // Override the default pref name for enabling the Data Reduction Proxy.
-  // Used in tests.
-  void set_data_reduction_proxy_enabled_pref_name_for_test(
-      const std::string& pref_name) {
-    data_reduction_proxy_enabled_pref_name_ = pref_name;
-  }
-
   void SetIgnoreLongTermBlackListRules(
       bool ignore_long_term_black_list_rules) override;
 
@@ -106,6 +94,11 @@ class DataReductionProxyChromeSettings
   CreateDataFromNavigationHandle(content::NavigationHandle* handle,
                                  const net::HttpResponseHeaders* headers);
 
+  // This data will be used on the next commit if it's HTTP/HTTPS and the page
+  // is not an error page..
+  void SetDataForNextCommitForTesting(
+      std::unique_ptr<data_reduction_proxy::DataReductionProxyData> data);
+
  private:
   // Helper method for migrating the Data Reduction Proxy away from using the
   // proxy pref. Returns the ProxyPrefMigrationResult value indicating the
@@ -113,10 +106,10 @@ class DataReductionProxyChromeSettings
   ProxyPrefMigrationResult MigrateDataReductionProxyOffProxyPrefsHelper(
       PrefService* prefs);
 
-  std::string data_reduction_proxy_enabled_pref_name_;
-
   // Null before InitDataReductionProxySettings is called.
   Profile* profile_;
+
+  std::unique_ptr<data_reduction_proxy::DataReductionProxyData> test_data_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyChromeSettings);
 };

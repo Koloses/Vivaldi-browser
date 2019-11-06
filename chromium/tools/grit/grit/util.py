@@ -5,6 +5,8 @@
 '''Utilities used by GRIT.
 '''
 
+from __future__ import print_function
+
 import codecs
 import htmlentitydefs
 import os
@@ -434,7 +436,7 @@ def LanguageToCodepage(lang):
   if lang in _LANG_TO_CODEPAGE:
     return _LANG_TO_CODEPAGE[lang]
   else:
-    print "Not sure which codepage to use for %s, assuming cp1252" % lang
+    print("Not sure which codepage to use for %s, assuming cp1252" % lang)
     return 1252
 
 def NewClassInstance(class_name, class_type):
@@ -641,7 +643,7 @@ class TempDir(object):
       dir_path = os.path.split(file_path)[0]
       if not os.path.exists(dir_path):
         os.makedirs(dir_path)
-      with open(file_path, 'w') as f:
+      with open(file_path, 'wb') as f:
         f.write(file_data[name])
 
   def __enter__(self):
@@ -682,7 +684,7 @@ class PathSearcher:
 
   @classmethod
   def LocatePath(cls, path, base_path=None):
-    path = normpath(path)
+    path = normpath(path).replace("\\", "/")
     if base_path:
       base_path= normpath(base_path)
     if os.path.isabs(path) or "${" in path:
@@ -704,6 +706,6 @@ class PathSearcher:
       candidate_path = os.path.join(p, path)
       if os.access(candidate_path, os.F_OK):
         if base_path:
-          candidate_path = os.path.relpath(candidate_path, base_path)
+          candidate_path = os.path.relpath(candidate_path, base_path).replace("\\", "/")
         return candidate_path
     return path

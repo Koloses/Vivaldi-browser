@@ -26,14 +26,13 @@ class MenuModel;
 }
 
 namespace views {
+class InstallableInkDrop;
 class MenuModelAdapter;
 class MenuRunner;
 }
 
 // This class provides basic drawing and mouse-over behavior for buttons
 // appearing in the toolbar.
-// TODO(cyan): Consider making ToolbarButton and AppMenuButton share a common
-// base class https://crbug.com/819854.
 class ToolbarButton : public views::LabelButton,
                       public views::ContextMenuController {
  public:
@@ -70,6 +69,7 @@ class ToolbarButton : public views::LabelButton,
   // views::LabelButton:
   void SetText(const base::string16& text) override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+  void OnThemeChanged() override;
   gfx::Rect GetAnchorBoundsInScreen() const override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
@@ -79,8 +79,10 @@ class ToolbarButton : public views::LabelButton,
   void OnMouseExited(const ui::MouseEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  std::unique_ptr<views::InkDrop> CreateInkDrop() override;
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
+  views::InkDrop* GetInkDrop() override;
   SkColor GetInkDropBaseColor() const override;
 
   // views::ContextMenuController:
@@ -113,6 +115,9 @@ class ToolbarButton : public views::LabelButton,
 
   // Sets |layout_inset_delta_|, see comment there.
   void SetLayoutInsetDelta(const gfx::Insets& insets);
+
+  static constexpr int kDefaultIconSize = 16;
+  static constexpr int kDefaultTouchableIconSize = 24;
 
  private:
   friend test::ToolbarButtonTestApi;
@@ -157,8 +162,12 @@ class ToolbarButton : public views::LabelButton,
   // default ToolbarButton ink drop.
   base::Optional<SkColor> highlight_color_;
 
+  // Used instead of the standard InkDrop implementation when
+  // |views::kInstallableInkDropFeature| is enabled.
+  std::unique_ptr<views::InstallableInkDrop> installable_ink_drop_;
+
   // A factory for tasks that show the dropdown context menu for the button.
-  base::WeakPtrFactory<ToolbarButton> show_menu_factory_;
+  base::WeakPtrFactory<ToolbarButton> show_menu_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ToolbarButton);
 };

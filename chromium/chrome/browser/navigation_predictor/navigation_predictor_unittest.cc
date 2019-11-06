@@ -12,6 +12,7 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
+#include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,12 +26,15 @@ class TestNavigationPredictor : public NavigationPredictor {
  public:
   explicit TestNavigationPredictor(
       mojo::InterfaceRequest<AnchorElementMetricsHost> request,
-      content::RenderFrameHost* render_frame_host)
+      content::RenderFrameHost* render_frame_host,
+      bool init_feature_list)
       : NavigationPredictor(render_frame_host), binding_(this) {
     binding_.Bind(std::move(request));
-    const std::vector<base::Feature> features = {
-        blink::features::kNavigationPredictor};
-    feature_list_.InitWithFeatures(features, {});
+    if (init_feature_list) {
+      const std::vector<base::Feature> features = {
+          blink::features::kNavigationPredictor};
+      feature_list_.InitWithFeatures(features, {});
+    }
   }
 
   ~TestNavigationPredictor() override {}
@@ -43,15 +47,22 @@ class TestNavigationPredictor : public NavigationPredictor {
 
   const std::map<GURL, int>& GetAreaRankMap() const { return area_rank_map_; }
 
+  bool prefetch_url_prefetched() const { return prefetch_url_prefetched_; }
+
+  int calls_to_prefetch() const { return calls_to_prefetch_; }
+
  private:
   double CalculateAnchorNavigationScore(
       const blink::mojom::AnchorElementMetrics& metrics,
       double document_engagement_score,
       double target_engagement_score,
-      int area_rank,
-      int number_of_anchors) const override {
+      int area_rank) const override {
     area_rank_map_.emplace(std::make_pair(metrics.target_url, area_rank));
     return 100 * metrics.ratio_area;
+  }
+
+  void Prefetch(prerender::PrerenderManager* prerender_manager) override {
+    calls_to_prefetch_ += 1;
   }
 
   // Maps from target URL to area rank of the anchor element.
@@ -61,6 +72,8 @@ class TestNavigationPredictor : public NavigationPredictor {
 
   // Used to bind Mojo interface
   mojo::Binding<AnchorElementMetricsHost> binding_;
+
+  int calls_to_prefetch_ = 0;
 };
 
 class NavigationPredictorTest : public ChromeRenderViewHostTestHarness {
@@ -80,6 +93,8 @@ class NavigationPredictorTest : public ChromeRenderViewHostTestHarness {
     return metrics;
   }
 
+  gfx::Size GetDefaultViewport() { return gfx::Size(600, 800); }
+
   blink::mojom::AnchorElementMetricsHost* predictor_service() const {
     return predictor_service_.get();
   }
@@ -96,15 +111,21 @@ class NavigationPredictorTest : public ChromeRenderViewHostTestHarness {
     return predictor_service_helper_->preconnect_origin();
   }
 
+  bool prefetch_url_prefetched() {
+    return predictor_service_helper_->prefetch_url_prefetched();
+  }
+
  protected:
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     predictor_service_helper_ = std::make_unique<TestNavigationPredictor>(
-        mojo::MakeRequest(&predictor_service_), main_rfh());
+        mojo::MakeRequest(&predictor_service_), main_rfh(),
+        !field_trial_initiated_);
   }
 
   void SetupFieldTrial(base::Optional<int> preconnect_origin_score_threshold,
-                       base::Optional<int> prefetch_url_score_threshold) {
+                       base::Optional<int> prefetch_url_score_threshold,
+                       base::Optional<bool> prefetch_after_preconnect) {
     if (field_trial_initiated_)
       return;
 
@@ -120,6 +141,10 @@ class NavigationPredictorTest : public ChromeRenderViewHostTestHarness {
     if (prefetch_url_score_threshold.has_value()) {
       params["prefetch_url_score_threshold"] =
           base::NumberToString(prefetch_url_score_threshold.value());
+    }
+    if (prefetch_after_preconnect.has_value()) {
+      params["prefetch_after_preconnect"] =
+          prefetch_after_preconnect.value() ? "true" : "false";
     }
     scoped_feature_list.InitAndEnableFeatureWithParameters(
         blink::features::kNavigationPredictor, params);
@@ -162,7 +187,7 @@ TEST_F(NavigationPredictorTest, ReportAnchorElementMetricsOnLoad) {
   std::vector<blink::mojom::AnchorElementMetricsPtr> metrics_vector;
   metrics_vector.push_back(std::move(metrics));
   predictor_service()->ReportAnchorElementMetricsOnLoad(
-      std::move(metrics_vector));
+      std::move(metrics_vector), GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectTotalCount(
@@ -195,7 +220,7 @@ TEST_F(NavigationPredictorTest,
   std::vector<blink::mojom::AnchorElementMetricsPtr> metrics_vector;
   metrics_vector.push_back(std::move(metrics));
   predictor_service()->ReportAnchorElementMetricsOnLoad(
-      std::move(metrics_vector));
+      std::move(metrics_vector), GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectTotalCount(
@@ -213,7 +238,7 @@ TEST_F(NavigationPredictorTest,
   std::vector<blink::mojom::AnchorElementMetricsPtr> metrics_vector;
   metrics_vector.push_back(std::move(metrics));
   predictor_service()->ReportAnchorElementMetricsOnLoad(
-      std::move(metrics_vector));
+      std::move(metrics_vector), GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectTotalCount(
@@ -231,7 +256,7 @@ TEST_F(NavigationPredictorTest,
   std::vector<blink::mojom::AnchorElementMetricsPtr> metrics_vector;
   metrics_vector.push_back(std::move(metrics));
   predictor_service()->ReportAnchorElementMetricsOnLoad(
-      std::move(metrics_vector));
+      std::move(metrics_vector), GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectTotalCount(
@@ -256,7 +281,8 @@ TEST_F(NavigationPredictorTest, Merge_UniqueAnchorElements) {
   metrics.push_back(CreateMetricsPtr(source, href_medium, 0.01));
 
   int number_of_metrics_sent = metrics.size();
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(
@@ -286,7 +312,8 @@ TEST_F(NavigationPredictorTest, Merge_DuplicateAnchorElements) {
   metrics.push_back(CreateMetricsPtr(source, href_query_ref, 0.01));
 
   int number_of_metrics_sent = metrics.size();
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(
@@ -317,7 +344,8 @@ TEST_F(NavigationPredictorTest, Merge_AnchorElementSameAsDocumentURL) {
   metrics.push_back(CreateMetricsPtr(source, href_query_ref, 0.01));
 
   int number_of_metrics_sent = metrics.size();
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(
@@ -352,7 +380,8 @@ TEST_F(NavigationPredictorTest, MultipleAnchorElementMetricsOnLoad) {
   metrics.push_back(CreateMetricsPtr(source, href_medium, 0.05));
 
   int number_of_metrics_sent = metrics.size();
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   const std::map<GURL, int>& area_rank_map =
@@ -383,7 +412,8 @@ TEST_F(NavigationPredictorTest, ActionTaken_NoSameHost_Prefetch) {
   metrics.push_back(CreateMetricsPtr(source, href_xlarge, 0.1));
 
   base::HistogramTester histogram_tester;
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(
@@ -405,7 +435,8 @@ TEST_F(NavigationPredictorTest, ActionTaken_SameOrigin_Prefetch) {
   metrics.push_back(CreateMetricsPtr(source, diff_origin_href_xsmall, 0.01));
 
   base::HistogramTester histogram_tester;
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(
@@ -439,7 +470,8 @@ TEST_F(NavigationPredictorTest, ActionTaken_SameOrigin_Prefetch_NotSameOrigin) {
   metrics.push_back(CreateMetricsPtr(source, diff_origin_href_xlarge, 10));
 
   base::HistogramTester histogram_tester;
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(
@@ -468,7 +500,8 @@ TEST_F(NavigationPredictorTest,
   metrics.push_back(CreateMetricsPtr(source, diff_origin_href_xlarge, 1));
 
   base::HistogramTester histogram_tester;
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(
@@ -477,19 +510,64 @@ TEST_F(NavigationPredictorTest,
   EXPECT_FALSE(prefetch_url().has_value());
 }
 
+class NavigationPredictorPrefetchAfterPreconnectEnabledTest
+    : public NavigationPredictorTest {
+ public:
+  NavigationPredictorPrefetchAfterPreconnectEnabledTest() {
+    SetupFieldTrial(base::nullopt, base::nullopt, true);
+  }
+
+  void SetUp() override {
+    ChromeRenderViewHostTestHarness::SetUp();
+    predictor_service_helper_ = std::make_unique<TestNavigationPredictor>(
+        mojo::MakeRequest(&predictor_service_), main_rfh(), false);
+  }
+};
+
+// Test that a prefetch after preconnect occurs only when the current tab is
+// in the foreground, and that it does not occur multiple times for the same
+// URL.
+TEST_F(NavigationPredictorPrefetchAfterPreconnectEnabledTest,
+       PrefetchWithTabs) {
+  const std::string source = "https://example.com";
+  const std::string same_origin_href_large = "https://example.com/large";
+  std::vector<blink::mojom::AnchorElementMetricsPtr> metrics;
+  metrics.push_back(CreateMetricsPtr(source, same_origin_href_large, 1));
+
+  // Hide the tab and load the page. The URL should not be prefetched.
+  web_contents()->WasHidden();
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(prefetch_url_prefetched());
+  EXPECT_EQ(predictor_service_helper_->calls_to_prefetch(), 0);
+
+  // Making the tab visible should start a prefetch.
+  web_contents()->WasShown();
+  EXPECT_TRUE(prefetch_url_prefetched());
+  EXPECT_EQ(predictor_service_helper_->calls_to_prefetch(), 1);
+
+  // Switching a tab from HIDDEN to VISIBLE should not start a prefetch
+  // if a prefetch already occurred for that URL.
+  web_contents()->WasHidden();
+  web_contents()->WasShown();
+  EXPECT_TRUE(prefetch_url_prefetched());
+  EXPECT_EQ(predictor_service_helper_->calls_to_prefetch(), 1);
+}
+
 // Framework for testing cases where prefetch is effectively
 // disabled by setting |prefetch_url_score_threshold| to too high.
 class NavigationPredictorPrefetchDisabledTest : public NavigationPredictorTest {
  public:
   NavigationPredictorPrefetchDisabledTest() {
     SetupFieldTrial(0 /* preconnect_origin_score_threshold */,
-                    101 /* prefetch_url_score_threshold */);
+                    101 /* prefetch_url_score_threshold */, base::nullopt);
   }
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     predictor_service_helper_ = std::make_unique<TestNavigationPredictor>(
-        mojo::MakeRequest(&predictor_service_), main_rfh());
+        mojo::MakeRequest(&predictor_service_), main_rfh(), false);
   }
 };
 
@@ -512,7 +590,8 @@ TEST_F(NavigationPredictorPrefetchDisabledTest,
   metrics.push_back(CreateMetricsPtr(source, diff_origin_href_xsmall, 0.0001));
 
   base::HistogramTester histogram_tester;
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(
@@ -553,7 +632,8 @@ TEST_F(NavigationPredictorPrefetchDisabledTest,
   metrics.push_back(CreateMetricsPtr(source, diff_origin_href_xlarge, 10));
 
   base::HistogramTester histogram_tester;
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(
@@ -579,13 +659,13 @@ class NavigationPredictorPreconnectPrefetchDisabledTest
  public:
   NavigationPredictorPreconnectPrefetchDisabledTest() {
     SetupFieldTrial(101 /* preconnect_origin_score_threshold */,
-                    101 /* prefetch_url_score_threshold */);
+                    101 /* prefetch_url_score_threshold */, base::nullopt);
   }
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     predictor_service_helper_ = std::make_unique<TestNavigationPredictor>(
-        mojo::MakeRequest(&predictor_service_), main_rfh());
+        mojo::MakeRequest(&predictor_service_), main_rfh(), false);
   }
 };
 
@@ -604,7 +684,8 @@ TEST_F(NavigationPredictorPreconnectPrefetchDisabledTest,
   metrics.push_back(CreateMetricsPtr(source, diff_origin_href_xsmall, 0.0001));
 
   base::HistogramTester histogram_tester;
-  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics));
+  predictor_service()->ReportAnchorElementMetricsOnLoad(std::move(metrics),
+                                                        GetDefaultViewport());
   base::RunLoop().RunUntilIdle();
 
   histogram_tester.ExpectUniqueSample(

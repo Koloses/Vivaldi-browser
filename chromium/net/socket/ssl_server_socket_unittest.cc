@@ -103,11 +103,7 @@ class MockCTPolicyEnforcer : public CTPolicyEnforcer {
 class FakeDataChannel {
  public:
   FakeDataChannel()
-      : read_buf_len_(0),
-        closed_(false),
-        write_called_after_close_(false),
-        weak_factory_(this) {
-  }
+      : read_buf_len_(0), closed_(false), write_called_after_close_(false) {}
 
   int Read(IOBuffer* buf, int buf_len, CompletionOnceCallback callback) {
     DCHECK(read_callback_.is_null());
@@ -175,7 +171,7 @@ class FakeDataChannel {
       return;
 
     int copied = PropagateData(read_buf_, read_buf_len_);
-    read_buf_ = NULL;
+    read_buf_ = nullptr;
     read_buf_len_ = 0;
     std::move(read_callback_).Run(copied);
   }
@@ -214,7 +210,7 @@ class FakeDataChannel {
   // asynchronously.
   bool write_called_after_close_;
 
-  base::WeakPtrFactory<FakeDataChannel> weak_factory_;
+  base::WeakPtrFactory<FakeDataChannel> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(FakeDataChannel);
 };
@@ -357,8 +353,7 @@ class SSLServerSocketTest : public PlatformTest,
                             public WithScopedTaskEnvironment {
  public:
   SSLServerSocketTest()
-      : socket_factory_(ClientSocketFactory::GetDefaultFactory()),
-        cert_verifier_(new MockCertVerifier()),
+      : cert_verifier_(new MockCertVerifier()),
         client_cert_verifier_(new MockClientCertVerifier()),
         transport_security_state_(new TransportSecurityState),
         ct_verifier_(new DoNothingCTVerifier),
@@ -384,11 +379,15 @@ class SSLServerSocketTest : public PlatformTest,
     server_ssl_private_key_ = WrapOpenSSLPrivateKey(bssl::UpRef(key->key()));
 
     client_ssl_config_.false_start_enabled = false;
-    client_ssl_config_.channel_id_enabled = false;
 
     // Certificate provided by the host doesn't need authority.
     client_ssl_config_.allowed_bad_certs.emplace_back(
         server_cert_, CERT_STATUS_AUTHORITY_INVALID);
+
+    client_context_ = std::make_unique<SSLClientContext>(
+        cert_verifier_.get(), transport_security_state_.get(),
+        ct_verifier_.get(), ct_policy_enforcer_.get(),
+        ssl_client_session_cache_.get());
   }
 
  protected:
@@ -397,7 +396,6 @@ class SSLServerSocketTest : public PlatformTest,
     server_socket_.reset();
     channel_1_.reset();
     channel_2_.reset();
-    server_context_.reset();
     server_context_ = CreateSSLServerContext(
         server_cert_.get(), *server_private_key_, server_ssl_config_);
   }
@@ -423,14 +421,9 @@ class SSLServerSocketTest : public PlatformTest,
         std::make_unique<FakeSocket>(channel_2_.get(), channel_1_.get());
 
     HostPortPair host_and_pair("unittest", 0);
-    SSLClientSocketContext context(
-        cert_verifier_.get(), nullptr, transport_security_state_.get(),
-        ct_verifier_.get(), ct_policy_enforcer_.get(),
-        ssl_client_session_cache_.get());
 
-    client_socket_ = socket_factory_->CreateSSLClientSocket(
-        std::move(client_connection), host_and_pair, client_ssl_config_,
-        context);
+    client_socket_ = client_context_->CreateSSLClientSocket(
+        std::move(client_connection), host_and_pair, client_ssl_config_);
     ASSERT_TRUE(client_socket_);
 
     server_socket_ =
@@ -516,16 +509,16 @@ class SSLServerSocketTest : public PlatformTest,
   std::unique_ptr<FakeDataChannel> channel_2_;
   SSLConfig client_ssl_config_;
   SSLServerConfig server_ssl_config_;
-  std::unique_ptr<SSLClientSocket> client_socket_;
-  std::unique_ptr<SSLServerSocket> server_socket_;
-  ClientSocketFactory* socket_factory_;
   std::unique_ptr<MockCertVerifier> cert_verifier_;
   std::unique_ptr<MockClientCertVerifier> client_cert_verifier_;
   std::unique_ptr<TransportSecurityState> transport_security_state_;
   std::unique_ptr<DoNothingCTVerifier> ct_verifier_;
   std::unique_ptr<MockCTPolicyEnforcer> ct_policy_enforcer_;
   std::unique_ptr<SSLClientSessionCache> ssl_client_session_cache_;
+  std::unique_ptr<SSLClientContext> client_context_;
   std::unique_ptr<SSLServerContext> server_context_;
+  std::unique_ptr<SSLClientSocket> client_socket_;
+  std::unique_ptr<SSLServerSocket> server_socket_;
   std::unique_ptr<crypto::RSAPrivateKey> server_private_key_;
   scoped_refptr<SSLPrivateKey> server_ssl_private_key_;
   scoped_refptr<X509Certificate> server_cert_;
@@ -792,7 +785,7 @@ TEST_F(SSLServerSocketTest, HandshakeWithClientCertRequiredNotSupplied) {
             connect_callback.GetResult(
                 client_socket_->Connect(connect_callback.callback())));
 
-  scoped_refptr<SSLCertRequestInfo> request_info = new SSLCertRequestInfo();
+  auto request_info = base::MakeRefCounted<SSLCertRequestInfo>();
   client_socket_->GetSSLCertRequestInfo(request_info.get());
 
   // Check that the authority name that arrived in the CertificateRequest
@@ -826,7 +819,7 @@ TEST_F(SSLServerSocketTest, HandshakeWithClientCertRequiredNotSuppliedCached) {
             connect_callback.GetResult(
                 client_socket_->Connect(connect_callback.callback())));
 
-  scoped_refptr<SSLCertRequestInfo> request_info = new SSLCertRequestInfo();
+  auto request_info = base::MakeRefCounted<SSLCertRequestInfo>();
   client_socket_->GetSSLCertRequestInfo(request_info.get());
 
   // Check that the authority name that arrived in the CertificateRequest
@@ -852,7 +845,7 @@ TEST_F(SSLServerSocketTest, HandshakeWithClientCertRequiredNotSuppliedCached) {
             connect_callback2.GetResult(
                 client_socket_->Connect(connect_callback2.callback())));
 
-  scoped_refptr<SSLCertRequestInfo> request_info2 = new SSLCertRequestInfo();
+  auto request_info2 = base::MakeRefCounted<SSLCertRequestInfo>();
   client_socket_->GetSSLCertRequestInfo(request_info2.get());
 
   // Check that the authority name that arrived in the CertificateRequest
@@ -1256,6 +1249,7 @@ TEST_F(SSLServerSocketTest, HandshakeServerSSLPrivateKeyRequireEcdhe) {
   };
   client_ssl_config_.disabled_cipher_suites.assign(
       kEcdheCiphers, kEcdheCiphers + base::size(kEcdheCiphers));
+
   // TLS 1.3 always works with SSLPrivateKey.
   client_ssl_config_.version_max = SSL_PROTOCOL_VERSION_TLS1_2;
 

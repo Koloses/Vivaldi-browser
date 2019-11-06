@@ -6,10 +6,11 @@
 
 #include <utility>
 
-#include "base/command_line.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/renderer/chrome_render_thread_observer.h"
+#include "content/public/common/resource_type.h"
 
 // static
 base::TimeDelta MergeSessionLoaderThrottle::GetMergeSessionTimeout() {
@@ -17,7 +18,7 @@ base::TimeDelta MergeSessionLoaderThrottle::GetMergeSessionTimeout() {
           switches::kShortMergeSessionTimeoutForTest)) {
     return base::TimeDelta::FromSeconds(1);
   } else {
-    return base::TimeDelta::FromSeconds(10);
+    return base::TimeDelta::FromSeconds(20);
   }
 }
 
@@ -42,7 +43,8 @@ bool MergeSessionLoaderThrottle::MaybeDeferForMergeSession(
 void MergeSessionLoaderThrottle::WillStartRequest(
     network::ResourceRequest* request,
     bool* defer) {
-  is_xhr_ = request->resource_type == content::RESOURCE_TYPE_XHR;
+  is_xhr_ =
+      request->resource_type == static_cast<int>(content::ResourceType::kXhr);
   if (is_xhr_ && request->url.SchemeIsHTTPOrHTTPS() &&
       MaybeDeferForMergeSession(
           request->url,

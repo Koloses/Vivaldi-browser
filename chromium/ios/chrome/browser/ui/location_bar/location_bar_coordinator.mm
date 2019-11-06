@@ -18,14 +18,17 @@
 #include "ios/chrome/browser/autocomplete/autocomplete_scheme_classifier_impl.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/geolocation/omnibox_geolocation_controller.h"
+#include "ios/chrome/browser/infobars/infobar_metrics_recorder.h"
 #import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
+#import "ios/chrome/browser/ui/badges/badge_mediator.h"
 #include "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/chrome/browser/ui/commands/load_query_commands.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_controller_factory.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_ui_updater.h"
+#import "ios/chrome/browser/ui/infobars/infobar_feature.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_constants.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_mediator.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_url_loader.h"
@@ -38,6 +41,7 @@
 #include "ios/chrome/browser/ui/omnibox/web_omnibox_edit_controller_impl.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_coordinator_delegate.h"
 #import "ios/chrome/browser/ui/util/pasteboard_util.h"
+#import "ios/chrome/browser/url_loading/url_loading_params.h"
 #import "ios/chrome/browser/url_loading/url_loading_service.h"
 #import "ios/chrome/browser/url_loading/url_loading_service_factory.h"
 #import "ios/chrome/browser/url_loading/url_loading_util.h"
@@ -45,8 +49,8 @@
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_provider.h"
-#import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/referrer.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/navigation/referrer.h"
 #import "ios/web/public/web_state/web_state.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "url/gurl.h"
@@ -60,7 +64,7 @@ namespace {
 const char* const kOmniboxQueryLocationAuthorizationStatusHistogram =
     "Omnibox.QueryIosLocationAuthorizationStatus";
 // The number of possible CLAuthorizationStatus values to report.
-const int kLocationAuthorizationStatusCount = 4;
+const int kLocationAuthorizationStatusCount = 5;
 }  // namespace
 
 @interface LocationBarCoordinator ()<LoadQueryCommands,
@@ -76,6 +80,8 @@ const int kLocationAuthorizationStatusCount = 4;
 @property(nonatomic, assign, getter=isStarted) BOOL started;
 // Coordinator for the omnibox popup.
 @property(nonatomic, strong) OmniboxPopupCoordinator* omniboxPopupCoordinator;
+// Mediator for the badges displayed in the LocationBar.
+@property(nonatomic, strong) BadgeMediator* badgeMediator;
 // Coordinator for the omnibox.
 @property(nonatomic, strong) OmniboxCoordinator* omniboxCoordinator;
 @property(nonatomic, strong) LocationBarMediator* mediator;
@@ -155,6 +161,13 @@ const int kLocationAuthorizationStatusCount = 4;
   self.omniboxPopupCoordinator.webStateList = self.webStateList;
   [self.omniboxPopupCoordinator start];
 
+  // Create BadgeMediator and set the viewController as its consumer.
+  if (IsInfobarUIRebootEnabled()) {
+    self.badgeMediator =
+        [[BadgeMediator alloc] initWithConsumer:self.viewController
+                                   webStateList:self.webStateList];
+  }
+
   self.mediator = [[LocationBarMediator alloc]
       initWithLocationBarModel:[self locationBarModel]];
   self.mediator.webStateList = self.webStateList;
@@ -178,6 +191,7 @@ const int kLocationAuthorizationStatusCount = 4;
   // The popup has to be destroyed before the location bar.
   [self.omniboxPopupCoordinator stop];
   [self.omniboxCoordinator stop];
+  [self.badgeMediator disconnect];
   _editController.reset();
 
   self.viewController = nil;
@@ -244,16 +258,16 @@ const int kLocationAuthorizationStatusCount = 4;
     // |loadURL|?  It doesn't seem to be causing major problems.  If we call
     // cancel before load, then any prerendered pages get destroyed before the
     // call to load.
-    web::NavigationManager::WebLoadParams params =
+    web::NavigationManager::WebLoadParams web_params =
         web_navigation_util::CreateWebLoadParams(url, transition, postContent);
     NSMutableDictionary* combinedExtraHeaders =
         [[self variationHeadersForURL:url] mutableCopy];
-    [combinedExtraHeaders addEntriesFromDictionary:params.extra_headers];
-    params.extra_headers = [combinedExtraHeaders copy];
-    ChromeLoadParams chromeParams(params);
-    chromeParams.disposition = disposition;
+    [combinedExtraHeaders addEntriesFromDictionary:web_params.extra_headers];
+    web_params.extra_headers = [combinedExtraHeaders copy];
+    UrlLoadParams params = UrlLoadParams::InCurrentTab(web_params);
+    params.disposition = disposition;
     UrlLoadingServiceFactory::GetForBrowserState(self.browserState)
-        ->LoadUrlInCurrentTab(chromeParams);
+        ->Load(params);
 
     if (google_util::IsGoogleSearchUrl(url)) {
       UMA_HISTOGRAM_ENUMERATION(
@@ -353,9 +367,9 @@ const int kLocationAuthorizationStatusCount = 4;
 
 #pragma mark - LocationBarConsumer
 
-- (void)updateLocationText:(NSString*)text {
+- (void)updateLocationText:(NSString*)text clipTail:(BOOL)clipTail {
   [self.omniboxCoordinator updateOmniboxState];
-  [self.viewController updateLocationText:text];
+  [self.viewController updateLocationText:text clipTail:clipTail];
   [self.viewController updateForNTP:NO];
 }
 
@@ -380,8 +394,19 @@ const int kLocationAuthorizationStatusCount = 4;
   self.viewController.searchByImageEnabled = searchByImageSupported;
 }
 
-- (void)displayInfobarBadge:(BOOL)display {
-  [self.viewController displayInfobarButton:display];
+- (void)displayInfobarBadge:(BOOL)display type:(InfobarType)infobarType {
+  InfobarMetricsRecorder* metricsRecorder;
+  // If the Badge will be displayed create a metrics recorder to log its
+  // interactions, if its hidden metrics recorder should be nil.
+  if (display)
+    metricsRecorder = [[InfobarMetricsRecorder alloc] initWithType:infobarType];
+
+  [self.viewController displayInfobarButton:display
+                            metricsRecorder:metricsRecorder];
+}
+
+- (void)activeInfobarBadge:(BOOL)active {
+  [self.viewController setInfobarButtonStyleActive:active];
 }
 
 #pragma mark - private
@@ -395,10 +420,13 @@ const int kLocationAuthorizationStatusCount = 4;
                                           : variations::InIncognito::kNo,
       &resource_request);
   NSMutableDictionary* result = [NSMutableDictionary dictionary];
-  if (!resource_request.client_data_header.empty()) {
-    NSString* name = base::SysUTF8ToNSString("X-Client-Data");
-    NSString* value =
-        base::SysUTF8ToNSString(resource_request.client_data_header);
+  // The variations header appears in cors_exempt_headers rather than in
+  // headers.
+  net::HttpRequestHeaders::Iterator header_iterator(
+      resource_request.cors_exempt_headers);
+  while (header_iterator.GetNext()) {
+    NSString* name = base::SysUTF8ToNSString(header_iterator.name());
+    NSString* value = base::SysUTF8ToNSString(header_iterator.value());
     result[name] = value;
   }
   return [result copy];
@@ -419,12 +447,11 @@ const int kLocationAuthorizationStatusCount = 4;
     // It is necessary to include PAGE_TRANSITION_FROM_ADDRESS_BAR in the
     // transition type is so that query-in-the-omnibox is triggered for the
     // URL.
-    web::NavigationManager::WebLoadParams params(searchURL);
-    params.transition_type = ui::PageTransitionFromInt(
+    UrlLoadParams params = UrlLoadParams::InCurrentTab(searchURL);
+    params.web_params.transition_type = ui::PageTransitionFromInt(
         ui::PAGE_TRANSITION_LINK | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
-    ChromeLoadParams chromeParams(params);
     UrlLoadingServiceFactory::GetForBrowserState(self.browserState)
-        ->LoadUrlInCurrentTab(chromeParams);
+        ->Load(params);
   }
 }
 

@@ -16,20 +16,20 @@
 #include "base/system/sys_info.h"
 #include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager/idle.pb.h"
-#include "chromeos/dbus/session_manager_client.h"
-#include "components/arc/arc_bridge_service.h"
+#include "chromeos/dbus/session_manager/session_manager_client.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
 #include "components/arc/arc_prefs.h"
 #include "components/arc/arc_util.h"
 #include "components/arc/metrics/arc_metrics_constants.h"
 #include "components/arc/metrics/stability_metrics_manager.h"
+#include "components/arc/session/arc_bridge_service.h"
 #include "components/exo/wm_helper.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_context.h"
+#include "ui/events/ozone/gamepad/gamepad_provider_ozone.h"
 
 namespace arc {
 
@@ -152,6 +152,7 @@ ArcMetricsService::ArcMetricsService(content::BrowserContext* context,
   arc_window_delegate_->RegisterActivationChangeObserver();
   session_manager::SessionManager::Get()->AddObserver(this);
   chromeos::PowerManagerClient::Get()->AddObserver(this);
+  ui::GamepadProviderOzone::GetInstance()->AddGamepadObserver(this);
 
   DCHECK(pref_service_);
   RestoreEngagementTimeFromPrefs();
@@ -173,6 +174,7 @@ ArcMetricsService::~ArcMetricsService() {
   UpdateEngagementTime();
   SaveEngagementTimeToPrefs();
 
+  ui::GamepadProviderOzone::GetInstance()->RemoveGamepadObserver(this);
   chromeos::PowerManagerClient::Get()->RemoveObserver(this);
   session_manager::SessionManager::Get()->RemoveObserver(this);
   arc_window_delegate_->UnregisterActivationChangeObserver();
@@ -292,9 +294,7 @@ void ArcMetricsService::ReportBootProgress(
   }
 
   // Retrieve ARC full container's start time from session manager.
-  chromeos::SessionManagerClient* session_manager_client =
-      chromeos::DBusThreadManager::Get()->GetSessionManagerClient();
-  session_manager_client->GetArcStartTime(base::BindOnce(
+  chromeos::SessionManagerClient::Get()->GetArcStartTime(base::BindOnce(
       &ArcMetricsService::OnArcStartTimeRetrieved,
       weak_ptr_factory_.GetWeakPtr(), std::move(events), boot_type));
 }
@@ -328,8 +328,10 @@ void ArcMetricsService::OnWindowActivated(
     aura::Window* lost_active) {
   UpdateEngagementTime();
   was_arc_window_active_ = arc_window_delegate_->IsArcAppWindow(gained_active);
-  if (!was_arc_window_active_)
+  if (!was_arc_window_active_) {
+    gamepad_interaction_recorded_ = false;
     return;
+  }
   UMA_HISTOGRAM_ENUMERATION(
       "Arc.UserInteraction",
       UserInteractionType::APP_CONTENT_WINDOW_INTERACTION);
@@ -346,6 +348,16 @@ void ArcMetricsService::ScreenIdleStateChanged(
     const power_manager::ScreenIdleState& proto) {
   UpdateEngagementTime();
   was_screen_dimmed_ = proto.dimmed();
+}
+
+void ArcMetricsService::OnGamepadEvent(const ui::GamepadEvent& event) {
+  if (!was_arc_window_active_)
+    return;
+  if (gamepad_interaction_recorded_)
+    return;
+  gamepad_interaction_recorded_ = true;
+  UMA_HISTOGRAM_ENUMERATION("Arc.UserInteraction",
+                            UserInteractionType::GAMEPAD_INTERACTION);
 }
 
 void ArcMetricsService::OnTaskCreated(int32_t task_id,

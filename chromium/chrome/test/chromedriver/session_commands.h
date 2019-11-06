@@ -34,6 +34,8 @@ struct InitSessionParams {
   DeviceManager* device_manager;
 };
 
+bool GetW3CSetting(const base::DictionaryValue& params);
+
 bool MergeCapabilities(const base::DictionaryValue* always_match,
                        const base::DictionaryValue* first_match,
                        base::DictionaryValue* merged);
@@ -154,29 +156,9 @@ Status ExecuteUploadFile(Session* session,
                          const base::DictionaryValue& params,
                          std::unique_ptr<base::Value>* value);
 
-Status ExecuteIsAutoReporting(Session* session,
-                              const base::DictionaryValue& params,
-                              std::unique_ptr<base::Value>* value);
-
-Status ExecuteSetAutoReporting(Session* session,
-                               const base::DictionaryValue& params,
-                               std::unique_ptr<base::Value>* value);
-
 Status ExecuteUnimplementedCommand(Session* session,
                                    const base::DictionaryValue& params,
                                    std::unique_ptr<base::Value>* value);
-
-Status ExecuteGetScreenOrientation(Session* session,
-                                  const base::DictionaryValue& params,
-                                  std::unique_ptr<base::Value>* value);
-
-Status ExecuteSetScreenOrientation(Session* session,
-                                   const base::DictionaryValue& params,
-                                   std::unique_ptr<base::Value>* value);
-
-Status ExecuteDeleteScreenOrientation(Session* session,
-                                      const base::DictionaryValue& params,
-                                      std::unique_ptr<base::Value>* value);
 
 Status ExecuteGenerateTestReport(Session* session,
                                  const base::DictionaryValue& params,

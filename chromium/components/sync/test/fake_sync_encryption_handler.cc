@@ -13,18 +13,18 @@ namespace syncer {
 FakeSyncEncryptionHandler::FakeSyncEncryptionHandler()
     : encrypted_types_(SensitiveTypes()),
       encrypt_everything_(false),
-      passphrase_type_(PassphraseType::IMPLICIT_PASSPHRASE),
-      cryptographer_(&encryptor_) {}
+      passphrase_type_(PassphraseType::IMPLICIT_PASSPHRASE) {}
 FakeSyncEncryptionHandler::~FakeSyncEncryptionHandler() {}
 
-void FakeSyncEncryptionHandler::Init() {
+bool FakeSyncEncryptionHandler::Init() {
   // Set up a basic cryptographer.
   KeyParams keystore_params = {KeyDerivationParams::CreateForPbkdf2(),
                                "keystore_key"};
   cryptographer_.AddKey(keystore_params);
+  return true;
 }
 
-void FakeSyncEncryptionHandler::ApplyNigoriUpdate(
+bool FakeSyncEncryptionHandler::ApplyNigoriUpdate(
     const sync_pb::NigoriSpecifics& nigori,
     syncable::BaseTransaction* const trans) {
   if (nigori.encrypt_everything())
@@ -54,6 +54,8 @@ void FakeSyncEncryptionHandler::ApplyNigoriUpdate(
                                     sync_pb::EncryptedData());
     }
   }
+
+  return true;
 }
 
 void FakeSyncEncryptionHandler::UpdateNigoriFromEncryptedTypes(
@@ -63,17 +65,15 @@ void FakeSyncEncryptionHandler::UpdateNigoriFromEncryptedTypes(
                                            encrypt_everything_, nigori);
 }
 
-bool FakeSyncEncryptionHandler::NeedKeystoreKey(
-    syncable::BaseTransaction* const trans) const {
+bool FakeSyncEncryptionHandler::NeedKeystoreKey() const {
   return keystore_key_.empty();
 }
 
 bool FakeSyncEncryptionHandler::SetKeystoreKeys(
-    const google::protobuf::RepeatedPtrField<google::protobuf::string>& keys,
-    syncable::BaseTransaction* const trans) {
-  if (keys.size() == 0)
+    const std::vector<std::string>& keys) {
+  if (keys.empty())
     return false;
-  std::string new_key = keys.Get(keys.size() - 1);
+  std::string new_key = keys.back();
   if (new_key.empty())
     return false;
   keystore_key_ = new_key;
@@ -124,6 +124,22 @@ bool FakeSyncEncryptionHandler::IsEncryptEverythingEnabled() const {
 PassphraseType FakeSyncEncryptionHandler::GetPassphraseType(
     syncable::BaseTransaction* const trans) const {
   return passphrase_type_;
+}
+
+base::Time FakeSyncEncryptionHandler::GetKeystoreMigrationTime() const {
+  return base::Time();
+}
+
+Cryptographer* FakeSyncEncryptionHandler::GetCryptographerUnsafe() {
+  return &cryptographer_;
+}
+
+KeystoreKeysHandler* FakeSyncEncryptionHandler::GetKeystoreKeysHandler() {
+  return this;
+}
+
+syncable::NigoriHandler* FakeSyncEncryptionHandler::GetNigoriHandler() {
+  return this;
 }
 
 }  // namespace syncer

@@ -28,11 +28,9 @@
 #include "components/invalidation/public/invalidation_service.h"
 #include "components/invalidation/public/invalidator_state.h"
 #include "components/invalidation/public/object_id_invalidation_map.h"
-#include "components/sync/base/experiments.h"
 #include "components/sync/base/invalidation_helper.h"
 #include "components/sync/base/sync_prefs.h"
 #include "components/sync/base/test_unrecoverable_error_handler.h"
-#include "components/sync/device_info/device_info.h"
 #include "components/sync/engine/cycle/commit_counters.h"
 #include "components/sync/engine/cycle/status_counters.h"
 #include "components/sync/engine/cycle/update_counters.h"
@@ -52,10 +50,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
-
-using ::testing::_;
-using ::testing::InvokeWithoutArgs;
-using ::testing::StrictMock;
 
 namespace syncer {
 
@@ -82,7 +76,6 @@ class TestSyncEngineHost : public SyncEngineHostStub {
   void OnEngineInitialized(ModelTypeSet initial_types,
                            const WeakHandle<JsBackend>&,
                            const WeakHandle<DataTypeDebugInfoListener>&,
-                           const std::string&,
                            const std::string&,
                            const std::string&,
                            const std::string&,
@@ -145,23 +138,6 @@ class FakeSyncManagerFactory : public SyncManagerFactory {
   FakeSyncManager** fake_manager_;
 };
 
-class NullEncryptionObserver : public SyncEncryptionHandler::Observer {
- public:
-  void OnPassphraseRequired(
-      PassphraseRequiredReason reason,
-      const KeyDerivationParams& key_derivation_params,
-      const sync_pb::EncryptedData& pending_keys) override {}
-  void OnPassphraseAccepted() override {}
-  void OnBootstrapTokenUpdated(const std::string& bootstrap_token,
-                               BootstrapTokenType type) override {}
-  void OnEncryptedTypesChanged(ModelTypeSet encrypted_types,
-                               bool encrypt_everything) override {}
-  void OnEncryptionComplete() override {}
-  void OnCryptographerStateChanged(Cryptographer* cryptographer) override {}
-  void OnPassphraseTypeChanged(PassphraseType type,
-                               base::Time passphrase_time) override {}
-};
-
 class MockInvalidationService : public invalidation::InvalidationService {
  public:
   MockInvalidationService() = default;
@@ -206,9 +182,6 @@ class SyncEngineImplTest : public testing::Test {
     backend_ = std::make_unique<SyncEngineImpl>(
         "dummyDebugName", &invalidator_, sync_prefs_->AsWeakPtr(),
         temp_dir_.GetPath().Append(base::FilePath(kTestSyncDir)));
-    credentials_.account_id = "user@example.com";
-    credentials_.email = "user@example.com";
-    credentials_.sync_token = "sync_token";
 
     fake_manager_factory_ = std::make_unique<FakeSyncManagerFactory>(
         &fake_manager_, network::TestNetworkConnectionTracker::GetInstance());
@@ -252,15 +225,12 @@ class SyncEngineImplTest : public testing::Test {
     params.host = &host_;
     params.registrar = std::make_unique<SyncBackendRegistrar>(
         std::string(), base::Bind(&CreateModelWorkerForGroup));
-    params.encryption_observer_proxy =
-        std::make_unique<NullEncryptionObserver>();
     params.http_factory_getter = std::move(http_post_provider_factory_getter);
-    params.credentials = credentials_;
+    params.authenticated_account_id = "user@example.com";
     params.sync_manager_factory = std::move(fake_manager_factory_);
     params.delete_sync_data_folder = true;
     params.unrecoverable_error_handler =
         MakeWeakHandle(test_unrecoverable_error_handler_.GetWeakPtr()),
-    params.saved_nigori_state = std::move(saved_nigori_state_);
     sync_prefs_->GetInvalidationVersions(&params.invalidation_versions);
 
     backend_->Initialize(std::move(params));
@@ -326,7 +296,6 @@ class SyncEngineImplTest : public testing::Test {
   sync_preferences::TestingPrefServiceSyncable pref_service_;
   base::Thread sync_thread_;
   TestSyncEngineHost host_;
-  SyncCredentials credentials_;
   TestUnrecoverableErrorHandler test_unrecoverable_error_handler_;
   std::unique_ptr<SyncPrefs> sync_prefs_;
   std::unique_ptr<SyncEngineImpl> backend_;
@@ -335,7 +304,6 @@ class SyncEngineImplTest : public testing::Test {
   ModelTypeSet engine_types_;
   ModelTypeSet enabled_types_;
   std::unique_ptr<NetworkResources> network_resources_;
-  std::unique_ptr<SyncEncryptionHandler::NigoriState> saved_nigori_state_;
   base::OnceClosure quit_loop_;
   testing::NiceMock<MockInvalidationService> invalidator_;
 };
@@ -659,7 +627,7 @@ TEST_F(SyncEngineImplTest, DownloadControlTypes) {
   // Set sync manager behavior before passing it down. Experiments and device
   // info are new types without progress markers or initial sync ended, while
   // all other types have been fully downloaded and applied.
-  ModelTypeSet new_types(EXPERIMENTS, NIGORI);
+  ModelTypeSet new_types(NIGORI);
   ModelTypeSet old_types = Difference(enabled_types_, new_types);
   fake_manager_factory_->set_progress_marker_types(old_types);
   fake_manager_factory_->set_initial_sync_ended_types(old_types);
@@ -720,7 +688,7 @@ TEST_F(SyncEngineImplTest, DownloadControlTypesRestart) {
             fake_manager_->GetAndResetConfigureReason());
 }
 
-// It is SyncBackendHostCore responsibility to cleanup Sync Data folder if sync
+// It is SyncEngineBackend's responsibility to cleanup Sync Data folder if sync
 // setup hasn't been completed. This test ensures that cleanup happens.
 TEST_F(SyncEngineImplTest, TestStartupWithOldSyncData) {
   const char* nonsense = "slon";
@@ -762,66 +730,6 @@ TEST_F(SyncEngineImplTest, DisableThenPurgeType) {
   EXPECT_EQ(Difference(enabled_types_, error_types), ready_types);
   EXPECT_FALSE(
       fake_manager_->GetTypesWithEmptyProgressMarkerToken(error_types).Empty());
-}
-
-// Ensure that redundant invalidations are ignored and that the most recent
-// set of invalidation version is persisted across restarts.
-TEST_F(SyncEngineImplTest, IgnoreOldInvalidations) {
-  // Set up some old persisted invalidations.
-  std::map<ModelType, int64_t> invalidation_versions;
-  invalidation_versions[BOOKMARKS] = 20;
-  sync_prefs_->UpdateInvalidationVersions(invalidation_versions);
-  InitializeBackend(true);
-  EXPECT_EQ(0, fake_manager_->GetInvalidationCount());
-
-  // Receiving an invalidation with an old version should do nothing.
-  ObjectIdInvalidationMap invalidation_map;
-  std::string notification_type;
-  RealModelTypeToNotificationType(BOOKMARKS, &notification_type);
-  invalidation_map.Insert(Invalidation::Init(
-      invalidation::ObjectId(0, notification_type), 10, "payload"));
-  backend_->OnIncomingInvalidation(invalidation_map);
-  fake_manager_->WaitForSyncThread();
-  EXPECT_EQ(0, fake_manager_->GetInvalidationCount());
-
-  // Invalidations with new versions should be acted upon.
-  invalidation_map.Insert(Invalidation::Init(
-      invalidation::ObjectId(0, notification_type), 30, "payload"));
-  backend_->OnIncomingInvalidation(invalidation_map);
-  fake_manager_->WaitForSyncThread();
-  EXPECT_EQ(1, fake_manager_->GetInvalidationCount());
-
-  // Invalidation for new data types should be acted on.
-  RealModelTypeToNotificationType(SESSIONS, &notification_type);
-  invalidation_map.Insert(Invalidation::Init(
-      invalidation::ObjectId(0, notification_type), 10, "payload"));
-  backend_->OnIncomingInvalidation(invalidation_map);
-  fake_manager_->WaitForSyncThread();
-  EXPECT_EQ(2, fake_manager_->GetInvalidationCount());
-
-  // But redelivering that same invalidation should be ignored.
-  backend_->OnIncomingInvalidation(invalidation_map);
-  fake_manager_->WaitForSyncThread();
-  EXPECT_EQ(2, fake_manager_->GetInvalidationCount());
-
-  // If an invalidation with an unknown version is received, it should be
-  // acted on, but should not affect the persisted versions.
-  invalidation_map.Insert(Invalidation::InitUnknownVersion(
-      invalidation::ObjectId(0, notification_type)));
-  backend_->OnIncomingInvalidation(invalidation_map);
-  fake_manager_->WaitForSyncThread();
-  EXPECT_EQ(3, fake_manager_->GetInvalidationCount());
-
-  // Verify that the invalidation versions were updated in the prefs.
-  invalidation_versions[BOOKMARKS] = 30;
-  invalidation_versions[SESSIONS] = 10;
-  std::map<ModelType, int64_t> persisted_invalidation_versions;
-  sync_prefs_->GetInvalidationVersions(&persisted_invalidation_versions);
-  EXPECT_EQ(invalidation_versions.size(),
-            persisted_invalidation_versions.size());
-  for (auto iter : persisted_invalidation_versions) {
-    EXPECT_EQ(invalidation_versions[iter.first], iter.second);
-  }
 }
 
 // Tests that SyncEngineImpl retains ModelTypeConnector after call to

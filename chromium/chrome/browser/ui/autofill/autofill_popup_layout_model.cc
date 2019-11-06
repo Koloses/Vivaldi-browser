@@ -10,11 +10,12 @@
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/browser/android/android_theme_resources.h"
 #include "chrome/browser/ui/autofill/autofill_popup_view.h"
 #include "chrome/browser/ui/autofill/popup_constants.h"
-#include "components/autofill/core/browser/credit_card.h"
-#include "components/autofill/core/browser/popup_item_ids.h"
-#include "components/autofill/core/browser/suggestion.h"
+#include "components/autofill/core/browser/data_model/credit_card.h"
+#include "components/autofill/core/browser/ui/popup_item_ids.h"
+#include "components/autofill/core/browser/ui/suggestion.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_util.h"
 #include "components/grit/components_scaled_resources.h"
@@ -69,15 +70,21 @@ const struct {
     {autofill::kMirCard, IDR_AUTOFILL_CC_MIR, IDS_AUTOFILL_CC_MIR},
     {autofill::kUnionPay, IDR_AUTOFILL_CC_UNIONPAY, IDS_AUTOFILL_CC_UNION_PAY},
     {autofill::kVisaCard, IDR_AUTOFILL_CC_VISA, IDS_AUTOFILL_CC_VISA},
+#if defined(OS_ANDROID)
+    {"httpWarning", IDR_ANDROID_AUTOFILL_HTTP_WARNING, kResourceNotFoundId},
+    {"httpsInvalid", IDR_ANDROID_AUTOFILL_HTTPS_INVALID_WARNING,
+     kResourceNotFoundId},
+    {"scanCreditCardIcon", IDR_ANDROID_AUTOFILL_CC_SCAN_NEW,
+     kResourceNotFoundId},
+    {"settings", IDR_ANDROID_AUTOFILL_SETTINGS, kResourceNotFoundId},
+    {"create", IDR_ANDROID_AUTOFILL_CREATE, kResourceNotFoundId},
+#if defined(GOOGLE_CHROME_BUILD)
+    {"googlePay", IDR_ANDROID_AUTOFILL_GOOGLE_PAY, kResourceNotFoundId},
+#endif  // GOOGLE_CHROME_BUILD
+#elif defined(GOOGLE_CHROME_BUILD)
     {"googlePay", IDR_AUTOFILL_GOOGLE_PAY, kResourceNotFoundId},
     {"googlePayDark", IDR_AUTOFILL_GOOGLE_PAY_DARK, kResourceNotFoundId},
-#if defined(OS_ANDROID)
-    {"httpWarning", IDR_AUTOFILL_HTTP_WARNING, kResourceNotFoundId},
-    {"httpsInvalid", IDR_AUTOFILL_HTTPS_INVALID_WARNING, kResourceNotFoundId},
-    {"scanCreditCardIcon", IDR_AUTOFILL_CC_SCAN_NEW, kResourceNotFoundId},
-    {"settings", IDR_AUTOFILL_SETTINGS, kResourceNotFoundId},
-    {"create", IDR_AUTOFILL_CREATE, kResourceNotFoundId},
-#endif
+#endif  // GOOGLE_CHROME_BUILD
 };
 
 int GetRowHeightFromId(int identifier) {
@@ -198,17 +205,6 @@ const gfx::FontList& AutofillPopupLayoutModel::GetLabelFontListForRow(
   return smaller_font_list_;
 }
 
-ui::NativeTheme::ColorId AutofillPopupLayoutModel::GetValueFontColorIDForRow(
-    size_t index) const {
-  std::vector<autofill::Suggestion> suggestions = delegate_->GetSuggestions();
-  switch (suggestions[index].frontend_id) {
-    case POPUP_ITEM_ID_INSECURE_CONTEXT_PAYMENT_DISABLED_MESSAGE:
-      return ui::NativeTheme::kColorId_ResultsTableDimmedText;
-    default:
-      return ui::NativeTheme::kColorId_ResultsTableNormalText;
-  }
-}
-
 gfx::ImageSkia AutofillPopupLayoutModel::GetIconImage(size_t index) const {
   std::vector<autofill::Suggestion> suggestions = delegate_->GetSuggestions();
   if (!suggestions[index].custom_icon.IsEmpty())
@@ -230,15 +226,26 @@ gfx::ImageSkia AutofillPopupLayoutModel::GetIconImage(size_t index) const {
     return gfx::CreateVectorIcon(omnibox::kHttpsInvalidIcon, kIconSize,
                                  gfx::kGoogleRed700);
   }
-  if (icon_str == "keyIcon")
+  if (icon_str == "keyIcon") {
     return gfx::CreateVectorIcon(kKeyIcon, kIconSize, gfx::kChromeIconGrey);
-  if (icon_str == "globeIcon")
+  }
+  if (icon_str == "globeIcon") {
     return gfx::CreateVectorIcon(kGlobeIcon, kIconSize, gfx::kChromeIconGrey);
+  }
   if (icon_str == "google") {
+#if defined(GOOGLE_CHROME_BUILD)
     return gfx::CreateVectorIcon(kGoogleGLogoIcon, kIconSize,
                                  gfx::kPlaceholderColor);
+#else
+    return gfx::ImageSkia();
+#endif
   }
 
+#if !defined(GOOGLE_CHROME_BUILD)
+  if (icon_str == "googlePay" || icon_str == "googlePayDark") {
+    return gfx::ImageSkia();
+  }
+#endif
   // For other suggestion entries, get icon from PNG files.
   int icon_id = GetIconResourceID(icon_str);
   DCHECK_NE(kResourceNotFoundId, icon_id);
@@ -276,6 +283,11 @@ gfx::Rect AutofillPopupLayoutModel::GetRowBounds(size_t index) const {
 
 int AutofillPopupLayoutModel::GetIconResourceID(
     const std::string& resource_name) const {
+#if !defined(GOOGLE_CHROME_BUILD)
+  if (resource_name == "googlePay" || resource_name == "googlePayDark") {
+    return 0;
+  }
+#endif
   int result = kResourceNotFoundId;
   for (size_t i = 0; i < base::size(kDataResources); ++i) {
     if (resource_name == kDataResources[i].name) {
@@ -301,7 +313,7 @@ void AutofillPopupLayoutModel::SetUpForTesting(
   view_common_ = std::move(view_common);
 }
 
-const gfx::Rect AutofillPopupLayoutModel::RoundedElementBounds() const {
+gfx::Rect AutofillPopupLayoutModel::RoundedElementBounds() const {
   return gfx::ToEnclosingRect(delegate_->element_bounds());
 }
 

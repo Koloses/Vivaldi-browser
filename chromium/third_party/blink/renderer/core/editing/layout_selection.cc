@@ -51,7 +51,7 @@ bool ShouldUseLayoutNGTextContent(const Node& node) {
   DCHECK(layout_object);
   if (layout_object->IsInline())
     return layout_object->ContainingNGBlockFlow();
-  if (LayoutBlockFlow* block_flow = ToLayoutBlockFlowOrNull(layout_object))
+  if (auto* block_flow = DynamicTo<LayoutBlockFlow>(layout_object))
     return NGBlockNode::CanUseNewLayout(*block_flow);
   return false;
 }
@@ -457,12 +457,13 @@ static base::Optional<unsigned> ComputeStartOffset(
 static base::Optional<unsigned> ComputeEndOffset(
     const Node& node,
     const PositionInFlatTree& selection_end) {
-  if (!node.IsTextNode())
+  auto* text_node = DynamicTo<Text>(node);
+  if (!text_node)
     return base::nullopt;
 
   if (&node == selection_end.AnchorNode())
     return selection_end.OffsetInContainerNode();
-  return ToText(node).length();
+  return text_node->length();
 }
 
 #if DCHECK_IS_ON()
@@ -571,7 +572,7 @@ static bool IsLastLineInInlineBlock(const NGPaintFragment& line) {
 }
 
 static bool IsBeforeSoftLineBreak(const NGPaintFragment& fragment) {
-  if (ToNGPhysicalTextFragmentOrDie(fragment.PhysicalFragment()).IsLineBreak())
+  if (To<NGPhysicalTextFragment>(fragment.PhysicalFragment()).IsLineBreak())
     return false;
 
   // TODO(yoichio): InlineBlock should not be container line box.
@@ -580,8 +581,8 @@ static bool IsBeforeSoftLineBreak(const NGPaintFragment& fragment) {
   DCHECK(container_line_box);
   if (IsLastLineInInlineBlock(*container_line_box))
     return false;
-  const NGPhysicalLineBoxFragment& physical_line_box =
-      ToNGPhysicalLineBoxFragment(container_line_box->PhysicalFragment());
+  const auto& physical_line_box =
+      To<NGPhysicalLineBoxFragment>(container_line_box->PhysicalFragment());
   const NGPhysicalFragment* last_leaf = physical_line_box.LastLogicalLeaf();
   DCHECK(last_leaf);
   if (&fragment.PhysicalFragment() != last_leaf)
@@ -597,7 +598,7 @@ static Text* AssociatedTextNode(const LayoutText& text) {
   if (const LayoutTextFragment* fragment = ToLayoutTextFragmentOrNull(text))
     return fragment->AssociatedTextNode();
   if (Node* node = text.GetNode())
-    return ToTextOrNull(node);
+    return DynamicTo<Text>(node);
   return nullptr;
 }
 
@@ -689,8 +690,8 @@ LayoutSelectionStatus LayoutSelection::ComputeSelectionStatus(
   Document& document = frame_selection_->GetDocument();
   DCHECK_GE(document.Lifecycle().GetState(), DocumentLifecycle::kLayoutClean);
   DCHECK(!document.IsSlotAssignmentOrLegacyDistributionDirty());
-  const NGPhysicalTextFragment& text_fragment =
-      ToNGPhysicalTextFragmentOrDie(fragment.PhysicalFragment());
+  const auto& text_fragment =
+      To<NGPhysicalTextFragment>(fragment.PhysicalFragment());
   // We don't paint selection on ellipsis.
   if (text_fragment.StyleVariant() == NGStyleVariant::kEllipsis)
     return {0, 0, SelectSoftLineBreak::kNotSelected};
@@ -840,12 +841,12 @@ void LayoutSelection::OnDocumentShutdown() {
   paint_range_->end_offset = base::nullopt;
 }
 
-static LayoutRect SelectionRectForLayoutObject(const LayoutObject* object) {
+static PhysicalRect SelectionRectForLayoutObject(const LayoutObject* object) {
   if (!object->IsRooted())
-    return LayoutRect();
+    return PhysicalRect();
 
   if (!object->CanUpdateSelectionOnRootLineBoxes())
-    return LayoutRect();
+    return PhysicalRect();
 
   return object->AbsoluteSelectionRect();
 }
@@ -876,7 +877,7 @@ IntRect LayoutSelection::AbsoluteSelectionBounds() {
     void Visit(LayoutObject* layout_object) {
       selected_rect.Unite(SelectionRectForLayoutObject(layout_object));
     }
-    LayoutRect selected_rect;
+    PhysicalRect selected_rect;
   } visitor;
   VisitSelectedInclusiveDescendantsOf(frame_selection_->GetDocument(),
                                       &visitor);
@@ -909,8 +910,8 @@ void PrintSelectionStatus(std::ostream& ostream, const Node& node) {
   ostream << (void*)&node;
   if (node.IsTextNode())
     ostream << "#text";
-  else if (const Element* element = ToElementOrNull(node))
-    ostream << element->tagName().Utf8().data();
+  else if (const auto* element = DynamicTo<Element>(node))
+    ostream << element->tagName().Utf8();
   LayoutObject* layout_object = node.GetLayoutObject();
   if (!layout_object) {
     ostream << " <null LayoutObject>";

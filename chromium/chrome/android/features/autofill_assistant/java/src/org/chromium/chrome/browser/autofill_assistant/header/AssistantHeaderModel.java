@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.autofill_assistant.header;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.chrome.browser.autofill_assistant.carousel.AssistantChip;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /**
@@ -18,12 +19,11 @@ public class AssistantHeaderModel extends PropertyModel {
     public static final WritableObjectPropertyKey<String> STATUS_MESSAGE =
             new WritableObjectPropertyKey<>();
 
-    // TODO(crbug.com/806868): Change visibility to package-private once this is only set through
-    // native calls.
-    public static final WritableBooleanPropertyKey FEEDBACK_VISIBLE =
-            new WritableBooleanPropertyKey();
+    public static final WritableObjectPropertyKey<String> BUBBLE_MESSAGE =
+            new WritableObjectPropertyKey<>();
 
-    static final WritableIntPropertyKey PROGRESS = new WritableIntPropertyKey();
+    @VisibleForTesting
+    public static final WritableIntPropertyKey PROGRESS = new WritableIntPropertyKey();
 
     @VisibleForTesting
     public static final WritableBooleanPropertyKey PROGRESS_VISIBLE =
@@ -31,17 +31,28 @@ public class AssistantHeaderModel extends PropertyModel {
 
     static final WritableBooleanPropertyKey SPIN_POODLE = new WritableBooleanPropertyKey();
 
-    static final WritableObjectPropertyKey<Runnable> FEEDBACK_BUTTON_CALLBACK =
+    @VisibleForTesting
+    public static final WritableObjectPropertyKey<Runnable> FEEDBACK_BUTTON_CALLBACK =
             new WritableObjectPropertyKey<>();
 
+    public static final WritableObjectPropertyKey<AssistantChip> CHIP =
+            new WritableObjectPropertyKey<>();
+
+    public static final WritableBooleanPropertyKey CHIP_VISIBLE = new WritableBooleanPropertyKey();
+
     public AssistantHeaderModel() {
-        super(STATUS_MESSAGE, FEEDBACK_VISIBLE, PROGRESS, PROGRESS_VISIBLE, SPIN_POODLE,
-                FEEDBACK_BUTTON_CALLBACK);
+        super(STATUS_MESSAGE, BUBBLE_MESSAGE, PROGRESS, PROGRESS_VISIBLE, SPIN_POODLE,
+                FEEDBACK_BUTTON_CALLBACK, CHIP, CHIP_VISIBLE);
     }
 
     @CalledByNative
     private void setStatusMessage(String statusMessage) {
         set(STATUS_MESSAGE, statusMessage);
+    }
+
+    @CalledByNative
+    private void setBubbleMessage(String bubbleMessage) {
+        set(BUBBLE_MESSAGE, bubbleMessage);
     }
 
     @CalledByNative

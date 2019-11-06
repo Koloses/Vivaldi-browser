@@ -633,6 +633,7 @@ void BindImageTexture(GLuint unit,
 void DispatchCompute(GLuint num_groups_x,
                      GLuint num_groups_y,
                      GLuint num_groups_z) override;
+void DispatchComputeIndirect(GLintptr offset) override;
 void GetProgramInterfaceiv(GLuint program,
                            GLenum program_interface,
                            GLenum pname,
@@ -780,10 +781,6 @@ void DiscardFramebufferEXT(GLenum target,
                            GLsizei count,
                            const GLenum* attachments) override;
 void LoseContextCHROMIUM(GLenum current, GLenum other) override;
-void GenSyncTokenCHROMIUM(GLbyte* sync_token) override;
-void GenUnverifiedSyncTokenCHROMIUM(GLbyte* sync_token) override;
-void VerifySyncTokensCHROMIUM(GLbyte** sync_tokens, GLsizei count) override;
-void WaitSyncTokenCHROMIUM(const GLbyte* sync_token) override;
 void UnpremultiplyAndDitherCopyCHROMIUM(GLuint source_id,
                                         GLuint dest_id,
                                         GLint x,
@@ -808,6 +805,7 @@ void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
 void ScheduleCALayerSharedStateCHROMIUM(GLfloat opacity,
                                         GLboolean is_clipped,
                                         const GLfloat* clip_rect,
+                                        const GLfloat* rounded_corner_bounds,
                                         GLint sorting_context_id,
                                         const GLfloat* transform) override;
 void ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
@@ -981,12 +979,12 @@ GLuint CreateClientGpuFenceCHROMIUM(ClientGpuFence source) override;
 void WaitGpuFenceCHROMIUM(GLuint gpu_fence_id) override;
 void DestroyGpuFenceCHROMIUM(GLuint gpu_fence_id) override;
 void InvalidateReadbackBufferShadowDataCHROMIUM(GLuint buffer_id) override;
-void FramebufferTextureMultiviewLayeredANGLE(GLenum target,
-                                             GLenum attachment,
-                                             GLuint texture,
-                                             GLint level,
-                                             GLint baseViewIndex,
-                                             GLsizei numViews) override;
+void FramebufferTextureMultiviewOVR(GLenum target,
+                                    GLenum attachment,
+                                    GLuint texture,
+                                    GLint level,
+                                    GLint baseViewIndex,
+                                    GLsizei numViews) override;
 void MaxShaderCompilerThreadsKHR(GLuint count) override;
 GLuint CreateAndTexStorage2DSharedImageCHROMIUM(const GLbyte* mailbox) override;
 GLuint CreateAndTexStorage2DSharedImageWithInternalFormatCHROMIUM(

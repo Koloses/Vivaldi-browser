@@ -167,7 +167,7 @@ void IPCMediaPipelineHostImpl::OnInitialized(
 
   success = success && bitrate >= 0;
 
-  base::ResetAndReturn(&init_callback_)
+  std::move(init_callback_)
       .Run(success, bitrate, time_info, audio_config, video_config);
 }
 
@@ -179,7 +179,7 @@ void IPCMediaPipelineHostImpl::OnRequestBufferForRawData(
     channel_->Send(new MediaPipelineMsg_BufferForRawDataReady(
         routing_id_,
         pipeline_data_.MappedSizeRaw(),
-        channel_->ShareToGpuProcess(pipeline_data_.HandleRaw())));
+        pipeline_data_.HandleRaw().Duplicate()));
   } else {
     channel_->Send(new MediaPipelineMsg_BufferForRawDataReady(
         routing_id_, 0, base::SharedMemoryHandle()));
@@ -202,7 +202,7 @@ void IPCMediaPipelineHostImpl::OnRequestBufferForDecodedData(
         routing_id_,
         type,
         pipeline_data_.MappedSizeDecoded(type),
-        channel_->ShareToGpuProcess(pipeline_data_.HandleDecoded(type))));
+        pipeline_data_.HandleDecoded(type).Duplicate()));
   } else {
     channel_->Send(new MediaPipelineMsg_BufferForDecodedDataReady(
         routing_id_, type, 0, base::SharedMemoryHandle()));
@@ -238,8 +238,9 @@ void IPCMediaPipelineHostImpl::OnSought(bool success) {
       << " PROPMEDIA(RENDERER) : " << __FUNCTION__
       << " PIPELINE_ERROR_ABORT";
 
-  base::ResetAndReturn(&seek_callback_)
-      .Run(success ? PipelineStatus::PIPELINE_OK : PipelineStatus::PIPELINE_ERROR_ABORT);
+  std::move(seek_callback_)
+      .Run(success ? PipelineStatus::PIPELINE_OK
+                   : PipelineStatus::PIPELINE_ERROR_ABORT);
 
   TRACE_EVENT_ASYNC_END0("IPC_MEDIA", "Seek", this);
 }
@@ -409,18 +410,18 @@ void IPCMediaPipelineHostImpl::OnDecodedDataReady(
       buffer->set_timestamp(params.timestamp);
       buffer->set_duration(params.duration);
 
-      base::ResetAndReturn(&decoded_data_read_callbacks_[params.type])
+      std::move(decoded_data_read_callbacks_[params.type])
           .Run(DemuxerStream::kOk, buffer);
       break;
     }
 
     case MediaDataStatus::kEOS:
-      base::ResetAndReturn(&decoded_data_read_callbacks_[params.type])
+      std::move(decoded_data_read_callbacks_[params.type])
           .Run(DemuxerStream::kOk, DecoderBuffer::CreateEOSBuffer());
       break;
 
     case MediaDataStatus::kConfigChanged:
-      base::ResetAndReturn(&decoded_data_read_callbacks_[params.type])
+      std::move(decoded_data_read_callbacks_[params.type])
           .Run(DemuxerStream::kConfigChanged, nullptr);
       break;
 
@@ -428,7 +429,7 @@ void IPCMediaPipelineHostImpl::OnDecodedDataReady(
       // Note that this is a decoder error rather than demuxer error.  Don't
       // return DemuxerStream::kAborted.  Instead, return an empty buffer so
       // that the decoder can signal a decoder error.
-      base::ResetAndReturn(&decoded_data_read_callbacks_[params.type])
+      std::move(decoded_data_read_callbacks_[params.type])
           .Run(DemuxerStream::kOk, new DecoderBuffer(0));
       break;
 

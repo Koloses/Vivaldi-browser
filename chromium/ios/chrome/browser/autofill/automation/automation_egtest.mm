@@ -9,30 +9,25 @@
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/json/json_reader.h"
-#include "base/values.h"
-#import "ios/chrome/browser/autofill/automation/automation_action.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
-#import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
-#import "ios/chrome/test/earl_grey/chrome_test_case.h"
-
-#include "base/guid.h"
 #include "base/mac/foundation_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
+#include "base/values.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/ios/browser/autofill_driver_ios.h"
+#import "ios/chrome/browser/autofill/automation/automation_action.h"
 #import "ios/chrome/browser/autofill/form_suggestion_label.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
+#import "ios/chrome/test/app/tab_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
+#import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/web/public/js_messaging/web_frames_manager.h"
 #import "ios/web/public/test/earl_grey/web_view_actions.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #include "ios/web/public/test/element_selector.h"
 #import "ios/web/public/test/js_test_util.h"
-#include "ios/web/public/web_state/web_frame_util.h"
-#import "ios/web/public/web_state/web_frames_manager.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -186,7 +181,8 @@ static const int kRecipeRetryLimit = 5;
 
   // Save the profile and credit card generated to the personal data manager.
   web::WebState* web_state = chrome_test_util::GetCurrentWebState();
-  web::WebFrame* main_frame = web::GetMainWebFrame(web_state);
+  web::WebFrame* main_frame =
+      web_state->GetWebFramesManager()->GetMainWebFrame();
   autofill::AutofillManager* autofill_manager =
       autofill::AutofillDriverIOS::FromWebStateAndWebFrame(web_state,
                                                            main_frame)
@@ -194,6 +190,7 @@ static const int kRecipeRetryLimit = 5;
   autofill::PersonalDataManager* personal_data_manager =
       autofill_manager->client()->GetPersonalDataManager();
 
+  personal_data_manager->ClearAllLocalData();
   personal_data_manager->AddCreditCard(credit_card);
   personal_data_manager->SaveImportedProfile(profile);
 }

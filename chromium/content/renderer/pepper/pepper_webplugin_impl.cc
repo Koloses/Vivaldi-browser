@@ -330,9 +330,9 @@ bool PepperWebPluginImpl::ExecuteEditCommand(const blink::WebString& name,
       markup = instance_->GetSelectedText(true);
       text = instance_->GetSelectedText(false);
     }
-    clipboard_->WriteHtml(ui::CLIPBOARD_TYPE_COPY_PASTE, markup, GURL());
-    clipboard_->WriteText(ui::CLIPBOARD_TYPE_COPY_PASTE, text);
-    clipboard_->CommitWrite(ui::CLIPBOARD_TYPE_COPY_PASTE);
+    clipboard_->WriteHtml(markup, GURL());
+    clipboard_->WriteText(text);
+    clipboard_->CommitWrite();
 
     instance_->ReplaceSelection("");
     return true;
@@ -351,7 +351,7 @@ bool PepperWebPluginImpl::ExecuteEditCommand(const blink::WebString& name,
           blink::Platform::Current()->GetBrowserServiceName(), &clipboard_);
     }
     base::string16 text;
-    clipboard_->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &text);
+    clipboard_->ReadText(ui::ClipboardType::kCopyPaste, &text);
 
     instance_->ReplaceSelection(base::UTF16ToUTF8(text));
     return true;

@@ -135,14 +135,14 @@ class TracingRenderWidgetHostFactory : public RenderWidgetHostFactory {
     RenderWidgetHostFactory::UnregisterFactory();
   }
 
-  RenderWidgetHostImpl* CreateRenderWidgetHost(
+  std::unique_ptr<RenderWidgetHostImpl> CreateRenderWidgetHost(
       RenderWidgetHostDelegate* delegate,
       RenderProcessHost* process,
       int32_t routing_id,
       mojom::WidgetPtr widget_interface,
       bool hidden) override {
-    return new TracingRenderWidgetHost(delegate, process, routing_id,
-                                       std::move(widget_interface), hidden);
+    return std::make_unique<TracingRenderWidgetHost>(
+        delegate, process, routing_id, std::move(widget_interface), hidden);
   }
 
  private:
@@ -390,7 +390,7 @@ IN_PROC_BROWSER_TEST_F(MouseLatencyBrowserTest,
 // (crbug.com/723618).
 // http://crbug.com/801629 : Flaky on Linux and Windows, and Mac with
 // --enable-features=VizDisplayCompositor
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_CoalescedMouseMovesCorrectlyTerminated \
   DISABLED_CoalescedMouseMovesCorrectlyTerminated
 #else

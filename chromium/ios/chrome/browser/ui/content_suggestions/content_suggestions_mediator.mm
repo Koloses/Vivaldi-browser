@@ -440,7 +440,16 @@ initWithContentService:(ntp_snippets::ContentSuggestionsService*)contentService
 
 - (void)contentSuggestionsServiceFullRefreshRequired:
     (ntp_snippets::ContentSuggestionsService*)suggestionsService {
-  [self.dataSink reloadAllData];
+  // The UICollectionView -reloadData method is a no-op if it is called at the
+  // same time as other collection updates. This full refresh command can come
+  // at the same time as other collection update commands. To make sure that it
+  // is taken into account, dispatch it with a delay. See
+  // http://crbug.com/945726.
+  dispatch_after(
+      dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
+      dispatch_get_main_queue(), ^{
+        [self.dataSink reloadAllData];
+      });
 }
 
 - (void)contentSuggestionsServiceShutdown:
@@ -448,7 +457,7 @@ initWithContentService:(ntp_snippets::ContentSuggestionsService*)contentService
   // Update dataSink.
 }
 
-#pragma mark - SuggestedContentDelegate
+#pragma mark - ContentSuggestionsItemDelegate
 
 - (void)loadImageForSuggestedItem:(ContentSuggestionsItem*)suggestedItem {
   __weak ContentSuggestionsMediator* weakSelf = self;
@@ -488,6 +497,7 @@ initWithContentService:(ntp_snippets::ContentSuggestionsService*)contentService
   for (const ntp_tiles::NTPTile& tile : mostVisited) {
     ContentSuggestionsMostVisitedItem* item =
         ConvertNTPTile(tile, self.mostVisitedSectionInfo);
+    item.commandHandler = self.commandHandler;
     [self.faviconMediator fetchFaviconForMostVisited:item];
     [self.freshMostVisitedItems addObject:item];
   }
@@ -658,6 +668,19 @@ initWithContentService:(ntp_snippets::ContentSuggestionsService*)contentService
     }
   }
   return _actionButtonItems;
+}
+
+- (void)setCommandHandler:
+    (id<ContentSuggestionsCommands, ContentSuggestionsGestureCommands>)
+        commandHandler {
+  if (_commandHandler == commandHandler)
+    return;
+
+  _commandHandler = commandHandler;
+
+  for (ContentSuggestionsMostVisitedItem* item in self.freshMostVisitedItems) {
+    item.commandHandler = commandHandler;
+  }
 }
 
 #pragma mark - ReadingListModelBridgeObserver

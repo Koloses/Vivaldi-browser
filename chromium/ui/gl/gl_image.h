@@ -135,8 +135,12 @@ class GL_EXPORT GLImage : public base::RefCounted<GLImage> {
 #endif
 
   // An identifier for subclasses. Necessary for safe downcasting.
-  enum class Type { NONE, MEMORY, IOSURFACE, DXGI_IMAGE };
+  enum class Type { NONE, MEMORY, IOSURFACE, DXGI_IMAGE, DXGI_SWAP_CHAIN };
   virtual Type GetType() const;
+
+  // Workaround for StreamTexture which must be re-copied on each access.
+  // TODO(ericrk): Remove this once SharedImage transition is complete.
+  virtual bool HasMutableState() const;
 
  protected:
   virtual ~GLImage() {}

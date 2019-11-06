@@ -16,10 +16,10 @@
 #include "chrome/browser/chromeos/power/ml/user_activity_event.pb.h"
 #include "chrome/browser/chromeos/power/ml/user_activity_ukm_logger.h"
 #include "chrome/browser/resource_coordinator/tab_metrics_event.pb.h"
+#include "chromeos/dbus/power/power_manager_client.h"
 #include "chromeos/dbus/power_manager/idle.pb.h"
 #include "chromeos/dbus/power_manager/policy.pb.h"
 #include "chromeos/dbus/power_manager/suspend.pb.h"
-#include "chromeos/dbus/power_manager_client.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/session_manager/core/session_manager_observer.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
@@ -74,13 +74,11 @@ enum class FinalResult { kReactivation = 0, kOff = 1, kMaxValue = kOff };
 // Logs user activity after an idle event is observed.
 // TODO(renjieliu): Add power-related activity as well.
 class UserActivityManager : public ui::UserActivityObserver,
-                            public IdleEventNotifier::Observer,
                             public PowerManagerClient::Observer,
                             public viz::mojom::VideoDetectorObserver,
                             public session_manager::SessionManagerObserver {
  public:
   UserActivityManager(UserActivityUkmLogger* ukm_logger,
-                      IdleEventNotifier* idle_event_notifier,
                       ui::UserActivityDetector* detector,
                       chromeos::PowerManagerClient* power_manager_client,
                       session_manager::SessionManager* session_manager,
@@ -108,15 +106,18 @@ class UserActivityManager : public ui::UserActivityObserver,
   void OnVideoActivityStarted() override;
   void OnVideoActivityEnded() override {}
 
-  // IdleEventNotifier::Observer overrides.
-  void OnIdleEventObserved(
-      const IdleEventNotifier::ActivityData& data) override;
+  // Called in UserActivityController::ShouldDeferScreenDim to make smart dim
+  // decision and response via |callback|.
+  void UpdateAndGetSmartDimDecision(const IdleEventNotifier::ActivityData& data,
+                                    base::OnceCallback<void(bool)> callback);
 
-  // Decides whether or not to instruct the power manager to dim the screen
-  // given a |prediction| from the Smart Dim predictor.
-  void ApplyDimDecision(UserActivityEvent::ModelPrediction prediction);
+  // Converts a Smart Dim model |prediction| into a yes/no decision about
+  // whether to defer the screen dim and provides the result via |callback|.
+  void HandleSmartDimDecision(base::OnceCallback<void(bool)> callback,
+                              UserActivityEvent::ModelPrediction prediction);
 
   // session_manager::SessionManagerObserver overrides:
+  void OnSessionManagerDestroyed() override;
   void OnSessionStateChanged() override;
 
  private:
@@ -193,8 +194,6 @@ class UserActivityManager : public ui::UserActivityObserver,
 
   SmartDimModel* const smart_dim_model_;
 
-  ScopedObserver<IdleEventNotifier, IdleEventNotifier::Observer>
-      idle_event_observer_;
   ScopedObserver<ui::UserActivityDetector, ui::UserActivityObserver>
       user_activity_observer_;
   ScopedObserver<chromeos::PowerManagerClient,
@@ -204,7 +203,7 @@ class UserActivityManager : public ui::UserActivityObserver,
                  session_manager::SessionManagerObserver>
       session_manager_observer_;
 
-  session_manager::SessionManager* const session_manager_;
+  session_manager::SessionManager* session_manager_ = nullptr;
 
   mojo::Binding<viz::mojom::VideoDetectorObserver> binding_;
 

@@ -8,8 +8,6 @@
 
 #include "ash/ash_export.h"
 #include "ash/root_window_controller.h"
-#include "ash/shell.h"
-#include "ash/wallpaper/wallpaper_controller.h"
 #include "base/scoped_observer.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
@@ -228,13 +226,10 @@ void WallpaperWidgetController::SetWallpaperBlur(float blur_sigma) {
     active_widget_->SetBlur(blur_sigma);
 }
 
-float WallpaperWidgetController::GetWallpaperBlur() const {
-  return active_widget_ ? active_widget_->blur_sigma() : 0.f;
-}
-
 void WallpaperWidgetController::ResetWidgetsForTesting() {
   animating_widget_.reset();
   active_widget_.reset();
+  wallpaper_view_ = nullptr;
 }
 
 void WallpaperWidgetController::WidgetHandlerReset(WidgetHandler* widget) {
@@ -265,7 +260,6 @@ void WallpaperWidgetController::SetAnimatingWidgetAsActive() {
 
   // Notify observers that animation finished.
   RunAnimationEndCallbacks();
-  Shell::Get()->wallpaper_controller()->OnWallpaperAnimationFinished();
 }
 
 void WallpaperWidgetController::RunAnimationEndCallbacks() {

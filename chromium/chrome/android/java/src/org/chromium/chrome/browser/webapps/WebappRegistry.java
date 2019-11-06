@@ -11,9 +11,11 @@ import android.text.format.DateUtils;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.PackageUtils;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.task.AsyncTask;
+import org.chromium.chrome.browser.browserservices.permissiondelegation.TrustedWebActivityPermissionStore;
 import org.chromium.chrome.browser.browsing_data.UrlFilter;
 import org.chromium.chrome.browser.browsing_data.UrlFilterBridge;
 import org.chromium.webapk.lib.common.WebApkConstants;
@@ -60,6 +62,7 @@ public class WebappRegistry {
 
     private HashMap<String, WebappDataStorage> mStorages;
     private SharedPreferences mPreferences;
+    private TrustedWebActivityPermissionStore mTrustedWebActivityPermissionStore;
 
     /**
      * Callback run when a WebappDataStorage object is registered for the first time. The storage
@@ -72,6 +75,7 @@ public class WebappRegistry {
     private WebappRegistry() {
         mPreferences = openSharedPreferences();
         mStorages = new HashMap<>();
+        mTrustedWebActivityPermissionStore = new TrustedWebActivityPermissionStore();
     }
 
     /**
@@ -172,6 +176,25 @@ public class WebappRegistry {
     }
 
     /**
+     * Returns true if a WebAPK is found whose scope matches the provided URL.
+     * @param url The URL to search a WebAPK for.
+     */
+    public boolean hasWebApkForUrl(String url) {
+        for (HashMap.Entry<String, WebappDataStorage> entry : mStorages.entrySet()) {
+            WebappDataStorage storage = entry.getValue();
+            if (!storage.getId().startsWith(WebApkConstants.WEBAPK_ID_PREFIX)) continue;
+
+            String scope = storage.getScope();
+
+            // Scope shouldn't be empty.
+            assert (!scope.isEmpty());
+
+            if (url.startsWith(scope)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Returns the list of WebAPK IDs with pending updates. Filters out WebAPKs which have been
      * uninstalled.
      * */
@@ -194,8 +217,8 @@ public class WebappRegistry {
     @VisibleForTesting
     public static Set<String> getRegisteredWebappIdsForTesting() {
         // Wrap with unmodifiableSet to ensure it's never modified. See crbug.com/568369.
-        return Collections.unmodifiableSet(openSharedPreferences().getStringSet(
-                KEY_WEBAPP_SET, Collections.<String>emptySet()));
+        return Collections.unmodifiableSet(
+                openSharedPreferences().getStringSet(KEY_WEBAPP_SET, Collections.emptySet()));
     }
 
     @VisibleForTesting
@@ -249,6 +272,10 @@ public class WebappRegistry {
                 .apply();
     }
 
+    public TrustedWebActivityPermissionStore getTrustedWebActivityPermissionStore() {
+        return mTrustedWebActivityPermissionStore;
+    }
+
     /**
      * Deletes the data of all web apps whose url matches |urlFilter|.
      * @param urlFilter The filter object to check URLs.
@@ -300,13 +327,17 @@ public class WebappRegistry {
     }
 
     private static SharedPreferences openSharedPreferences() {
-        return ContextUtils.getApplicationContext().getSharedPreferences(
-                REGISTRY_FILE_NAME, Context.MODE_PRIVATE);
+        // TODO(peconn): Don't open general WebappRegistry preferences when we just need the
+        // TrustedWebActivityPermissionStore.
+        // This is required to fix https://crbug.com/952841.
+        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
+            return ContextUtils.getApplicationContext().getSharedPreferences(
+                    REGISTRY_FILE_NAME, Context.MODE_PRIVATE);
+        }
     }
 
     private void initStorages(String idToInitialize, boolean replaceExisting) {
-        Set<String> webapps =
-                mPreferences.getStringSet(KEY_WEBAPP_SET, Collections.<String>emptySet());
+        Set<String> webapps = mPreferences.getStringSet(KEY_WEBAPP_SET, Collections.emptySet());
         boolean initAll = (idToInitialize == null || idToInitialize.isEmpty());
 
         // Don't overwrite any entry in mStorages unless replaceExisting is set to true.
@@ -316,6 +347,8 @@ public class WebappRegistry {
                     mStorages.put(id, WebappDataStorage.open(id));
                 }
             }
+
+            mTrustedWebActivityPermissionStore.initStorage();
         } else {
             if (webapps.contains(idToInitialize)
                     && (replaceExisting || !mStorages.containsKey(idToInitialize))) {

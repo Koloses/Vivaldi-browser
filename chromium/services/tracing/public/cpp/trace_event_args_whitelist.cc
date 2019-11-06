@@ -16,23 +16,30 @@ namespace {
 // Each whitelist entry is used to whitelist an array arguments for a
 // single or group of trace events.
 struct WhitelistEntry {
-  // Category name of the intertested trace event.
+  // Category name of the interested trace event.
   const char* category_name;
-  // Pattern to match the intertested trace event name.
+  // Pattern to match the interested trace event name.
   const char* event_name;
-  // List of patterns that match the whitelisted arguements.
+  // List of patterns that match the whitelisted arguments.
   const char* const* arg_name_filter;
 };
 
 const char* const kScopedBlockingCallAllowedArgs[] = {"file_name",
                                                       "function_name", nullptr};
+const char* const kGetFallbackFontsAllowedArgs[] = {"script", nullptr};
 const char* const kGPUAllowedArgs[] = {nullptr};
 const char* const kInputLatencyAllowedArgs[] = {"data", nullptr};
-const char* const kMemoryDumpAllowedArgs[] = {"dumps", nullptr};
+const char* const kMemoryDumpAllowedArgs[] = {"dumps", "top_queued_message_tag",
+                                              "count", nullptr};
 const char* const kRendererHostAllowedArgs[] = {
     "class",           "line", "should_background", "has_pending_views",
     "bytes_allocated", nullptr};
 const char* const kV8GCAllowedArgs[] = {"num_items", "num_tasks", nullptr};
+const char* const kTopLevelFlowAllowedArgs[] = {"task_queue_name", nullptr};
+const char* const kTopLevelIpcRunTaskAllowedArgs[] = {"ipc_hash", nullptr};
+const char* const kLifecyclesTaskPostedAllowedArgs[] = {
+    "task_queue_name", "time_since_disabled_ms", "ipc_hash", "location",
+    nullptr};
 
 const WhitelistEntry kEventArgsWhitelist[] = {
     {"__metadata", "thread_name", nullptr},
@@ -54,6 +61,7 @@ const WhitelistEntry kEventArgsWhitelist[] = {
     {"startup", "PrefProvider::PrefProvider", nullptr},
     {"task_scheduler", "*", nullptr},
     {"toplevel", "*", nullptr},
+    {"toplevel.ipc", "TaskAnnotator::RunTask", kTopLevelIpcRunTaskAllowedArgs},
     {TRACE_DISABLED_BY_DEFAULT("cpu_profiler"), "*", nullptr},
     // Redefined the string since MemoryDumpManager::kTraceCategory causes
     // static initialization of this struct.
@@ -61,8 +69,14 @@ const WhitelistEntry kEventArgsWhitelist[] = {
     {TRACE_DISABLED_BY_DEFAULT("system_stats"), "*", nullptr},
     {TRACE_DISABLED_BY_DEFAULT("v8.gc"), "*", kV8GCAllowedArgs},
     {"ui", "CachedFontLinkSettings::GetLinkedFonts", nullptr},
+    {"ui", "RenderTextHarfBuzz::GetFallbackFonts",
+     kGetFallbackFontsAllowedArgs},
     {"ui", "QueryLinkedFontsFromRegistry", nullptr},
     {"ui", "UserEvent", nullptr},
+    {TRACE_DISABLED_BY_DEFAULT("toplevel.flow"), "SequenceManager::PostTask",
+     kTopLevelFlowAllowedArgs},
+    {TRACE_DISABLED_BY_DEFAULT("lifecycles"), "task_posted_to_disabled_queue",
+     kLifecyclesTaskPostedAllowedArgs},
     {nullptr, nullptr, nullptr}};
 
 const char* kMetadataWhitelist[] = {"chrome-bitness",

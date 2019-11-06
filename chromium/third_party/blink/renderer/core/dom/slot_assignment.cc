@@ -154,12 +154,10 @@ void SlotAssignment::DidRemoveSlotInternal(
     if (FindHostChildBySlotName(slot_name)) {
       // |slot| lost assigned nodes
       if (slot_mutation_type == SlotMutationType::kRemoved) {
-        if (RuntimeEnabledFeatures::FastFlatTreeTraversalEnabled()) {
-          // |slot|'s previously assigned nodes' flat tree node data became
-          // dirty. Call SetNeedsAssignmentRecalc() to clear their flat tree
-          // node data surely in recalc timing.
-          SetNeedsAssignmentRecalc();
-        }
+        // |slot|'s previously assigned nodes' flat tree node data became
+        // dirty. Call SetNeedsAssignmentRecalc() to clear their flat tree
+        // node data surely in recalc timing.
+        SetNeedsAssignmentRecalc();
         slot.DidSlotChangeAfterRemovedFromShadowTree();
       } else {
         slot.DidSlotChangeAfterRenaming();
@@ -215,7 +213,7 @@ void SlotAssignment::DidChangeHostChildSlotName(const AtomicString& old_value,
 }
 
 SlotAssignment::SlotAssignment(ShadowRoot& owner)
-    : slot_map_(TreeOrderedMap::Create()),
+    : slot_map_(MakeGarbageCollected<TreeOrderedMap>()),
       owner_(&owner),
       needs_collect_slots_(false),
       slot_count_(0) {
@@ -288,8 +286,7 @@ void SlotAssignment::RecalcAssignment() {
     if (slot) {
       slot->AppendAssignedNode(child);
     } else {
-      if (RuntimeEnabledFeatures::FastFlatTreeTraversalEnabled())
-        child.ClearFlatTreeNodeData();
+      child.ClearFlatTreeNodeData();
       child.RemovedFromFlatTree();
     }
   }

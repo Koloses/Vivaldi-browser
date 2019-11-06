@@ -87,6 +87,10 @@ cr.define('history', function() {
       this.unlisten(this.$.checkbox, 'keydown', 'onCheckboxKeydown_');
     },
 
+    focusOnMenuButton: function() {
+      cr.ui.focusWithoutInk(this.$['menu-button']);
+    },
+
     /** @param {!KeyboardEvent} e */
     onCheckboxKeydown_: function(e) {
       if (e.shiftKey && e.key === 'Tab') {
@@ -104,7 +108,7 @@ cr.define('history', function() {
       for (let i = 0; i < e.path.length; i++) {
         const elem = e.path[i];
         if (elem.id != 'checkbox' &&
-            (elem.nodeName == 'A' || elem.nodeName == 'BUTTON')) {
+            (elem.nodeName == 'A' || elem.nodeName == 'CR-ICON-BUTTON')) {
           return;
         }
       }
@@ -189,7 +193,7 @@ cr.define('history', function() {
       }
 
       if (this.$$('#bookmark-star') == this.root.activeElement) {
-        this.$['menu-button'].focus();
+        cr.ui.focusWithoutInk(this.$['menu-button']);
       }
 
       const browserService = history.BrowserService.getInstance();
@@ -205,7 +209,7 @@ cr.define('history', function() {
      */
     onMenuButtonTap_: function(e) {
       this.fire('open-menu', {
-        target: Polymer.dom(e).localTarget,
+        target: e.target,
         index: this.index,
         item: this.item,
       });
@@ -250,7 +254,8 @@ cr.define('history', function() {
      * @private
      */
     itemChanged_: function() {
-      this.$.icon.style.backgroundImage = cr.icon.getFavicon(this.item.url);
+      this.$.icon.style.backgroundImage =
+          cr.icon.getFavicon(this.item.url, this.item.isUrlInRemoteUserData);
       this.listen(this.$['time-accessed'], 'mouseover', 'addTimeTitle_');
     },
 

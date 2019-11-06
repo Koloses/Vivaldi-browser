@@ -75,9 +75,6 @@ enum PolicyFetchStatus {
 
 }  // namespace dm_protocol
 
-// The header used to transmit the policy ID for this client.
-POLICY_EXPORT extern const char kChromePolicyHeader[];
-
 // Public half of the verification key that is used to verify that policy
 // signing keys are originating from DM server.
 POLICY_EXPORT std::string GetPolicyVerificationKey();
@@ -123,6 +120,8 @@ enum DeviceManagementStatus {
   DM_STATUS_SERVICE_DOMAIN_MISMATCH = 14,
   // Client error: Request could not be signed.
   DM_STATUS_CANNOT_SIGN_REQUEST = 15,
+  // Client error: Request body is too large.
+  DM_STATUS_REQUEST_TOO_LARGE = 16,
   // Service error: Policy not found. Error code defined by the DM folks.
   DM_STATUS_SERVICE_POLICY_NOT_FOUND = 902,
   // Service error: ARC is not enabled on this domain.
@@ -152,9 +151,12 @@ enum DeviceMode {
                                           // launch a kiosk webapp.
   DEVICE_MODE_DEMO,                       // The device is in demo mode. It was
                                           // either enrolled online or setup
-                                          // offline into demo mode domain
-                                          // cros-demo-mode.com.
+                                          // offline into demo mode domain -
+                                          // see kDemoModeDomain.
 };
+
+// Domain that demo mode devices are enrolled into: cros-demo-mode.com
+POLICY_EXPORT extern const char kDemoModeDomain[];
 
 // License types available for enrollment.
 enum class LicenseType {
@@ -170,6 +172,10 @@ enum class MarketSegment {
   EDUCATION,
   ENTERPRISE,
 };
+
+// Sender ID of FCM (Firebase Cloud Messaging)
+// Policy Invalidation sender coming from the Firebase console.
+extern const char kPolicyFCMInvalidationSenderID[];
 
 }  // namespace policy
 

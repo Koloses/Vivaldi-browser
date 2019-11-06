@@ -21,9 +21,6 @@ class FakeDisplayClient : public mojom::DisplayClient {
   mojom::DisplayClientPtr BindInterfacePtr();
 
   // mojom::DisplayClient implementation.
-  void DidSwapAfterSnapshotRequestReceived(
-      const std::vector<ui::LatencyInfo>&) override;
-
 #if defined(OS_MACOSX)
   void OnDisplayReceivedCALayerParams(
       const gfx::CALayerParams& ca_layer_params) override;
@@ -32,6 +29,10 @@ class FakeDisplayClient : public mojom::DisplayClient {
 #if defined(OS_WIN)
   void CreateLayeredWindowUpdater(
       mojom::LayeredWindowUpdaterRequest request) override;
+#endif
+
+#if defined(USE_X11)
+  void DidCompleteSwapWithNewSize(const gfx::Size& size) override;
 #endif
 
  private:

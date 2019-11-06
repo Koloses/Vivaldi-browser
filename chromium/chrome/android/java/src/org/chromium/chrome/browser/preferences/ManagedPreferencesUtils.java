@@ -5,11 +5,13 @@
 package org.chromium.chrome.browser.preferences;
 
 import android.content.Context;
-import android.preference.Preference;
+import android.graphics.drawable.Drawable;
 import android.support.annotation.Nullable;
 import android.support.annotation.StringRes;
+import android.support.v7.preference.Preference;
 import android.text.TextUtils;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import org.chromium.chrome.R;
@@ -35,6 +37,7 @@ public class ManagedPreferencesUtils {
                      Toast.LENGTH_LONG)
                 .show();
     }
+
     /**
      * Shows a toast indicating that the previous action is managed by the parent(s) of the
      * supervised user.
@@ -48,6 +51,18 @@ public class ManagedPreferencesUtils {
     }
 
     /**
+     * Shows a toast indicating that some of the preferences in the list of preferences to reset are
+     * managed by the system administrator.
+     *
+     * @param context The context where the Toast will be shown.
+     */
+    public static void showManagedSettingsCannotBeResetToast(Context context) {
+        Toast.makeText(context, context.getString(R.string.managed_settings_cannot_be_reset),
+                     Toast.LENGTH_LONG)
+                .show();
+    }
+
+    /**
      * @return The resource ID for the Managed By Enterprise icon.
      */
     public static int getManagedByEnterpriseIconId() {
@@ -55,8 +70,36 @@ public class ManagedPreferencesUtils {
     }
 
     /**
+     * @return The resource ID for the Managed by Custodian icon.
+     */
+    public static int getManagedByCustodianIconId() {
+        return R.drawable.ic_account_child_grey600_36dp;
+    }
+
+    /**
+     * @return The appropriate Drawable based on whether the preference is controlled by a policy or
+     *      a custodian.
+     */
+    public static Drawable getManagedIconDrawable(
+            @Nullable ManagedPreferenceDelegateCompat delegate, Preference preference) {
+        if (delegate == null) return preference.getIcon();
+
+        if (delegate.isPreferenceControlledByPolicy(preference)) {
+            return PreferenceUtils.getTintedIcon(
+                    preference.getContext(), getManagedByEnterpriseIconId());
+        } else if (delegate.isPreferenceControlledByCustodian(preference)) {
+            return PreferenceUtils.getTintedIcon(
+                    preference.getContext(), getManagedByCustodianIconId());
+        }
+
+        return preference.getIcon();
+    }
+
+    /**
      * Initializes the Preference based on the state of any policies that may affect it,
-     * e.g. by showing a managed icon or disabling clicks on the preference.
+     * e.g. by showing a managed icon or disabling clicks on the preference. If |preference| is an
+     * instance of ChromeImageViewPreference, the icon is not set since the ImageView widget will
+     * display the managed icons.
      *
      * This should be called once, before the preference is displayed.
      *
@@ -65,13 +108,11 @@ public class ManagedPreferencesUtils {
      * @param preference The Preference that is being initialized
      */
     public static void initPreference(
-            @Nullable ManagedPreferenceDelegate delegate, Preference preference) {
+            @Nullable ManagedPreferenceDelegateCompat delegate, Preference preference) {
         if (delegate == null) return;
 
-        if (delegate.isPreferenceControlledByPolicy(preference)) {
-            preference.setIcon(getManagedByEnterpriseIconId());
-        } else if (delegate.isPreferenceControlledByCustodian(preference)) {
-            preference.setIcon(R.drawable.ic_account_child_grey600_36dp);
+        if (!(preference instanceof ChromeImageViewPreferenceCompat)) {
+            preference.setIcon(getManagedIconDrawable(delegate, preference));
         }
 
         if (delegate.isPreferenceClickDisabledByPolicy(preference)) {
@@ -99,7 +140,7 @@ public class ManagedPreferencesUtils {
      * @param view The View that was bound to the Preference
      */
     public static void onBindViewToPreference(
-            @Nullable ManagedPreferenceDelegate delegate, Preference preference, View view) {
+            @Nullable ManagedPreferenceDelegateCompat delegate, Preference preference, View view) {
         if (delegate == null) return;
 
         if (delegate.isPreferenceClickDisabledByPolicy(preference)) {
@@ -118,6 +159,41 @@ public class ManagedPreferencesUtils {
     }
 
     /**
+     * Calls onBindViewToPreference() above. Then, if the ChromeImageViewPreference is managed, the
+     * widget ImageView is set to the appropriate managed icon, and its onClick listener is set to
+     * show the appropriate managed message toast.
+     *
+     * This should be called from the Preference's onBindView() method.
+     *
+     * @param delegate The delegate that controls whether the preference is managed. May be null,
+     *                 then this method does nothing.
+     * @param preference The ChromeImageViewPreference that owns the view.
+     * @param view The View that was bound to the ChromeImageViewPreference.
+     */
+    public static void onBindViewToImageViewPreference(
+            @Nullable ManagedPreferenceDelegateCompat delegate,
+            ChromeImageViewPreferenceCompat preference, View view) {
+        if (delegate == null) return;
+
+        onBindViewToPreference(delegate, preference, view);
+
+        if (!delegate.isPreferenceControlledByPolicy(preference)
+                && !delegate.isPreferenceControlledByCustodian(preference)) {
+            return;
+        }
+
+        ImageView button = view.findViewById(R.id.image_view_widget);
+        button.setImageDrawable(getManagedIconDrawable(delegate, preference));
+        button.setOnClickListener((View v) -> {
+            if (delegate.isPreferenceControlledByPolicy(preference)) {
+                showManagedByAdministratorToast(preference.getContext());
+            } else if (delegate.isPreferenceControlledByCustodian(preference)) {
+                showManagedByParentToast(preference.getContext());
+            }
+        });
+    }
+
+    /**
      * Intercepts the click event if the given Preference is managed and shows a toast in that case.
      *
      * This should be called from the Preference's onClick() method.
@@ -129,7 +205,7 @@ public class ManagedPreferencesUtils {
      *         propagated; false otherwise.
      */
     public static boolean onClickPreference(
-            @Nullable ManagedPreferenceDelegate delegate, Preference preference) {
+            @Nullable ManagedPreferenceDelegateCompat delegate, Preference preference) {
         if (delegate == null || !delegate.isPreferenceClickDisabledByPolicy(preference)) {
             return false;
         }
@@ -147,15 +223,17 @@ public class ManagedPreferencesUtils {
     }
 
     /**
-     * @param delegate The {@link ManagedPreferenceDelegate} that controls whether the preference is
+     * @param delegate The {@link ManagedPreferenceDelegateCompat} that controls whether the
+     *         preference is
      *        managed.
-     * @param preference The {@link Preference} that the summary should be used for.
+     * @param preference The {@link Preference} that the summary
+     *         should be used for.
      * @param summary The original summary without the managed information.
      * @return The summary appended with information about whether the specified preference is
      *         managed.
      */
     private static CharSequence getSummaryWithManagedInfo(
-            @Nullable ManagedPreferenceDelegate delegate, Preference preference,
+            @Nullable ManagedPreferenceDelegateCompat delegate, Preference preference,
             @Nullable CharSequence summary) {
         if (delegate == null) return summary;
 

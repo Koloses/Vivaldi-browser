@@ -5,7 +5,7 @@
 ## Android Instructions
 
 Please follow the instructions at
-[android_test_instructions.md](/docs/android_test_instructions.md).
+[android_test_instructions.md](/docs/testing/android_test_instructions.md).
 This guide is an extension with WebView-specific content.
 
 *** note
@@ -33,6 +33,26 @@ $ out/Default/bin/run_webview_instrumentation_test_apk -f AwContentsTest#*Succes
 *** aside
 You can optionally use `ClassName.methodName` instead of `ClassName#methodName`;
 the chromium test runner understands either syntax.
+***
+
+### Java unittests
+
+These tests live under `//android_webview/junit/` and use Robolectric.
+
+```sh
+# Build
+$ autoninja -C out/Default android_webview_junit_tests
+
+# Run tests (any of these commands):
+$ out/Default/bin/run_android_webview_junit_tests # All tests
+$ out/Default/bin/run_android_webview_junit_tests -f *FindAddressTest#* # Same glob patterns work here
+```
+
+*** note
+For junit tests, filter (`-f`) arguments require fully qualified class names
+(e.g. `org.chromium.android_webview.robolectric.FindAddressTest`), but replacing
+the package name with a glob wildcard (`*`), as in the example above, will work
+if the class name is unique.
 ***
 
 ### Native unittests

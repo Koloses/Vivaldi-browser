@@ -11,6 +11,8 @@
 #include "ui/gfx/buffer_types.h"
 #include "ui/gl/gl_image_ahardwarebuffer.h"
 
+namespace {}
+
 namespace device {
 
 FakeArCore::FakeArCore()
@@ -188,15 +190,8 @@ mojom::VRPosePtr FakeArCore::Update(bool* camera_updated) {
 
   // 1m up from the origin, neutral orientation facing forward.
   mojom::VRPosePtr pose = mojom::VRPose::New();
-  pose->orientation.emplace(4);
-  pose->position.emplace(3);
-  pose->position.value()[0] = 0;
-  pose->position.value()[1] = 1;
-  pose->position.value()[2] = 0;
-  pose->orientation.value()[0] = 0;
-  pose->orientation.value()[1] = 0;
-  pose->orientation.value()[2] = 0;
-  pose->orientation.value()[3] = 1;
+  pose->position = gfx::Point3F(0.0, 1.0, 0.0);
+  pose->orientation = gfx::Quaternion();
 
   return pose;
 }
@@ -205,15 +200,33 @@ bool FakeArCore::RequestHitTest(
     const mojom::XRRayPtr& ray,
     std::vector<mojom::XRHitResultPtr>* hit_results) {
   mojom::XRHitResultPtr hit = mojom::XRHitResult::New();
-  hit->hit_matrix.resize(16);
   // Identity matrix - no translation and default orientation.
-  hit->hit_matrix.data()[0] = 1;
-  hit->hit_matrix.data()[5] = 1;
-  hit->hit_matrix.data()[10] = 1;
-  hit->hit_matrix.data()[15] = 1;
+  hit->hit_matrix = gfx::Transform();
   hit_results->push_back(std::move(hit));
 
   return true;
+}
+
+mojom::XRPlaneDetectionDataPtr FakeArCore::GetDetectedPlanesData() {
+  std::vector<mojom::XRPlaneDataPtr> result;
+
+  // 1m ahead of the origin, neutral orientation facing forward.
+  mojom::VRPosePtr pose = mojom::VRPose::New();
+  pose->position = gfx::Point3F(0.0, 0.0, -1.0);
+  pose->orientation = gfx::Quaternion();
+
+  // some random triangle
+  std::vector<mojom::XRPlanePointDataPtr> vertices;
+  vertices.push_back(mojom::XRPlanePointData::New(-0.3, -0.3));
+  vertices.push_back(mojom::XRPlanePointData::New(0, 0.3));
+  vertices.push_back(mojom::XRPlanePointData::New(0.3, -0.3));
+
+  result.push_back(
+      mojom::XRPlaneData::New(1, device::mojom::XRPlaneOrientation::HORIZONTAL,
+                              std::move(pose), std::move(vertices)));
+
+  return mojom::XRPlaneDetectionData::New(std::vector<int32_t>{1},
+                                          std::move(result));
 }
 
 void FakeArCore::Pause() {

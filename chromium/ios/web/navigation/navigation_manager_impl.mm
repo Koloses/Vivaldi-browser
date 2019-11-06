@@ -31,6 +31,7 @@ NavigationManager::WebLoadParams::~WebLoadParams() {}
 
 NavigationManager::WebLoadParams::WebLoadParams(const WebLoadParams& other)
     : url(other.url),
+      virtual_url(other.virtual_url),
       referrer(other.referrer),
       transition_type(other.transition_type),
       user_agent_override_option(other.user_agent_override_option),
@@ -41,6 +42,7 @@ NavigationManager::WebLoadParams::WebLoadParams(const WebLoadParams& other)
 NavigationManager::WebLoadParams& NavigationManager::WebLoadParams::operator=(
     const WebLoadParams& other) {
   url = other.url;
+  virtual_url = other.virtual_url;
   referrer = other.referrer;
   is_renderer_initiated = other.is_renderer_initiated;
   transition_type = other.transition_type;
@@ -219,6 +221,7 @@ void NavigationManagerImpl::GoToIndex(int index,
     delegate_->RecordPageStateInNavigationItem();
   }
   delegate_->ClearTransientContent();
+  delegate_->ClearDialogs();
 
   // Notify delegate if the new navigation will use a different user agent.
   UserAgentType to_item_user_agent_type =
@@ -238,6 +241,15 @@ void NavigationManagerImpl::GoToIndex(int index,
 }
 
 void NavigationManagerImpl::GoToIndex(int index) {
+  // Silently return if still on a restore URL.  This state should only last a
+  // few moments, but may be triggered when a user mashes the back or forward
+  // button quickly.
+  if (web::GetWebClient()->IsSlimNavigationManagerEnabled()) {
+    NavigationItemImpl* item = GetLastCommittedItemInCurrentOrRestoredSession();
+    if (item && wk_navigation_util::IsRestoreSessionUrl(item->GetURL())) {
+      return;
+    }
+  }
   GoToIndex(index, NavigationInitiationType::BROWSER_INITIATED,
             /*has_user_gesture=*/true);
 }
@@ -279,6 +291,7 @@ void NavigationManagerImpl::LoadURLWithParams(
     const NavigationManager::WebLoadParams& params) {
   DCHECK(!(params.transition_type & ui::PAGE_TRANSITION_FORWARD_BACK));
   delegate_->ClearTransientContent();
+  delegate_->ClearDialogs();
   delegate_->RecordPageStateInNavigationItem();
 
   NavigationInitiationType initiation_type =
@@ -346,6 +359,8 @@ void NavigationManagerImpl::Reload(ReloadType reload_type,
 
   if (!GetTransientItem() && !GetPendingItem() && !GetLastCommittedItem())
     return;
+
+  delegate_->ClearDialogs();
 
   // Reload with ORIGINAL_REQUEST_URL type should reload with the original
   // request url of the transient item, or pending item if transient doesn't
@@ -500,9 +515,6 @@ NavigationManagerImpl::CreateNavigationItemWithRewriters(
   item->SetReferrer(referrer);
   item->SetTransitionType(transition);
   item->SetNavigationInitiationType(initiation_type);
-  if (!wk_navigation_util::URLNeedsUserAgentType(loaded_url)) {
-    item->SetUserAgentType(web::UserAgentType::NONE);
-  }
 
   return item;
 }
@@ -512,8 +524,10 @@ NavigationItem* NavigationManagerImpl::GetLastCommittedItemWithUserAgentType()
   for (int index = GetLastCommittedItemIndexInCurrentOrRestoredSession();
        index >= 0; index--) {
     NavigationItem* item = GetItemAtIndex(index);
-    if (wk_navigation_util::URLNeedsUserAgentType(item->GetURL()))
+    if (wk_navigation_util::URLNeedsUserAgentType(item->GetURL())) {
+      DCHECK_NE(item->GetUserAgentType(), UserAgentType::NONE);
       return item;
+    }
   }
   return nullptr;
 }

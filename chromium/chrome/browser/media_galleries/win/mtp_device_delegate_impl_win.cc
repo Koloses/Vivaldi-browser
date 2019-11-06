@@ -30,7 +30,7 @@
 #include "chrome/browser/media_galleries/win/mtp_device_operations_util.h"
 #include "chrome/browser/media_galleries/win/portable_device_map_service.h"
 #include "chrome/browser/media_galleries/win/snapshot_file_details.h"
-#include "components/services/filesystem/public/interfaces/types.mojom.h"
+#include "components/services/filesystem/public/mojom/types.mojom.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -320,7 +320,7 @@ void CreateMTPDeviceAsyncDelegate(
   DCHECK(!device_location.empty());
   base::string16* pnp_device_id = new base::string16;
   base::string16* storage_object_id = new base::string16;
-  base::PostTaskWithTraitsAndReplyWithResult<bool>(
+  base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {content::BrowserThread::UI},
       base::Bind(&GetStorageInfoOnUIThread, device_location,
                  base::Unretained(pnp_device_id),

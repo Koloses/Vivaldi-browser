@@ -64,7 +64,7 @@ void IPCDemuxerStream::Read(const ReadCB& read_cb) {
             << " Read from disabled stream, returning EOS";
     // Callback can be unset, see VB-51064.
     if (!read_cb_.is_null()) {
-      base::ResetAndReturn(&read_cb_).Run(kOk, DecoderBuffer::CreateEOSBuffer());
+      std::move(read_cb_).Run(kOk, DecoderBuffer::CreateEOSBuffer());
     }
     return;
   }
@@ -74,6 +74,10 @@ void IPCDemuxerStream::Read(const ReadCB& read_cb) {
   ipc_media_pipeline_host_->ReadDecodedData(
       DemuxerTypeToPlatformMediaDataType(type_),
       base::Bind(&IPCDemuxerStream::DataReady, weak_ptr_factory_.GetWeakPtr()));
+}
+
+bool IPCDemuxerStream::IsReadPending() const {
+  return !read_cb_.is_null();
 }
 
 bool IPCDemuxerStream::enabled() const {
@@ -88,7 +92,7 @@ void IPCDemuxerStream::set_enabled(bool enabled, base::TimeDelta timestamp) {
   if (!is_enabled_ && !read_cb_.is_null()) {
     VLOG(1) << " PROPMEDIA(RENDERER) : " << __FUNCTION__
             << " Read from disabled stream, returning EOS";
-    base::ResetAndReturn(&read_cb_).Run(kOk, DecoderBuffer::CreateEOSBuffer());
+    std::move(read_cb_).Run(kOk, DecoderBuffer::CreateEOSBuffer());
     return;
   }
 }
@@ -138,7 +142,7 @@ VideoDecoderConfig IPCDemuxerStream::video_decoder_config() {
   VideoDecoderConfig video_config;
   video_config.Initialize(
       VideoCodec::kCodecH264, VideoCodecProfile::H264PROFILE_MAIN,
-      VideoPixelFormat::PIXEL_FORMAT_YV12,
+      VideoDecoderConfig::AlphaMode::kIsOpaque,
       VideoColorSpace(VideoColorSpace::PrimaryID::UNSPECIFIED,
                       VideoColorSpace::TransferID::UNSPECIFIED,
                       VideoColorSpace::MatrixID::UNSPECIFIED,
@@ -152,9 +156,9 @@ VideoDecoderConfig IPCDemuxerStream::video_decoder_config() {
       Unencrypted());
 
   VLOG(1) << " PROPMEDIA(RENDERER) : " << __FUNCTION__
-          << " VideoCodecProfile : " << GetProfileName(video_config.profile())
-          << " VideoPixelFormat : "
-          << VideoPixelFormatToString(video_config.format());
+          << " VideoCodecProfile : " << GetProfileName(video_config.profile());
+       // << " VideoPixelFormat : "
+       // << VideoPixelFormatToString(video_config.format());
        // << " ColorSpace : " << video_config.color_space();
 
   return video_config;
@@ -183,8 +187,8 @@ void IPCDemuxerStream::Stop() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!read_cb_.is_null()) {
-    base::ResetAndReturn(&read_cb_)
-        .Run(DemuxerStream::kOk, DecoderBuffer::CreateEOSBuffer());
+    std::move(read_cb_).Run(DemuxerStream::kOk,
+                            DecoderBuffer::CreateEOSBuffer());
   }
 
   ipc_media_pipeline_host_ = NULL;
@@ -195,7 +199,7 @@ void IPCDemuxerStream::DataReady(Status status,
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!read_cb_.is_null())
-    base::ResetAndReturn(&read_cb_).Run(status, buffer);
+    std::move(read_cb_).Run(status, buffer);
 }
 
 }  // namespace media

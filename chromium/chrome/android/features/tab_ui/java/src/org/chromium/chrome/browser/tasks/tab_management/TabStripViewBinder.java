@@ -7,10 +7,12 @@ package org.chromium.chrome.browser.tasks.tab_management;
 import android.graphics.drawable.Drawable;
 import android.support.annotation.Nullable;
 import android.support.v4.content.res.ResourcesCompat;
+import android.support.v4.view.ViewCompat;
+import android.support.v7.content.res.AppCompatResources;
 import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.widget.FrameLayout;
 
-import org.chromium.chrome.R;
+import org.chromium.chrome.tab_ui.R;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -56,6 +58,9 @@ class TabStripViewBinder {
         } else if (TabProperties.FAVICON == propertyKey) {
             Drawable faviconDrawable = item.get(TabProperties.FAVICON);
             holder.button.setBackgroundResource(R.drawable.tabstrip_favicon_background);
+            ViewCompat.setBackgroundTintList(holder.button,
+                    AppCompatResources.getColorStateList(holder.button.getContext(),
+                            item.get(TabProperties.TABSTRIP_FAVICON_BACKGROUND_COLOR_ID)));
             if (faviconDrawable != null) {
                 holder.button.setImageDrawable(faviconDrawable);
             }

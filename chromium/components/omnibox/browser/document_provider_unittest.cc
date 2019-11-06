@@ -5,11 +5,14 @@
 #include "components/omnibox/browser/document_provider.h"
 
 #include "base/json/json_reader.h"
+#include "base/strings/string16.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time_to_iso8601.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "components/omnibox/browser/autocomplete_match_type.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/autocomplete_provider_listener.h"
 #include "components/omnibox/browser/mock_autocomplete_provider_client.h"
@@ -21,6 +24,13 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
+
+const std::string SAMPLE_ORIGINAL_URL =
+    "https://www.google.com/url?_placeholder_url=https://drive.google.com/a/"
+    "domain.tld/open?id%3D_0123_ID_4567_&_placeholder_";
+
+const std::string SAMPLE_STRIPPED_URL =
+    "https://drive.google.com/open?id=_0123_ID_4567_";
 
 using testing::Return;
 
@@ -227,24 +237,27 @@ TEST_F(DocumentProviderTest, IsInputLikelyURL) {
 }
 
 TEST_F(DocumentProviderTest, ParseDocumentSearchResults) {
-  const char kGoodJSONResponse[] = R"({
+  const std::string kGoodJSONResponse = base::StringPrintf(
+      R"({
       "results": [
         {
           "title": "Document 1",
           "url": "https://documentprovider.tld/doc?id=1",
           "score": 1234,
-          "originalUrl": "https://shortened.url"
+          "originalUrl": "%s"
         },
         {
           "title": "Document 2",
           "url": "https://documentprovider.tld/doc?id=2"
         }
       ]
-     })";
+     })",
+      SAMPLE_ORIGINAL_URL.c_str());
 
-  std::unique_ptr<base::DictionaryValue> response = base::DictionaryValue::From(
-      base::JSONReader::ReadDeprecated(kGoodJSONResponse));
-  ASSERT_TRUE(response != nullptr);
+  base::Optional<base::Value> response =
+      base::JSONReader::Read(kGoodJSONResponse);
+  ASSERT_TRUE(response);
+  ASSERT_TRUE(response->is_dict());
 
   ACMatches matches;
   provider_->ParseDocumentSearchResults(*response, &matches);
@@ -254,25 +267,95 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResults) {
   EXPECT_EQ(matches[0].destination_url,
             GURL("https://documentprovider.tld/doc?id=1"));
   EXPECT_EQ(matches[0].relevance, 1234);  // Server-specified.
-  EXPECT_EQ(matches[0].stripped_destination_url, GURL("https://shortened.url"));
+  EXPECT_EQ(matches[0].stripped_destination_url, GURL(SAMPLE_STRIPPED_URL));
 
   EXPECT_EQ(matches[1].contents, base::ASCIIToUTF16("Document 2"));
   EXPECT_EQ(matches[1].destination_url,
             GURL("https://documentprovider.tld/doc?id=2"));
-  EXPECT_EQ(matches[1].relevance, 700);  // From study default.
+  EXPECT_EQ(matches[1].relevance, 0);
   EXPECT_TRUE(matches[1].stripped_destination_url.is_empty());
 
   ASSERT_FALSE(provider_->backoff_for_session_);
 }
 
+TEST_F(DocumentProviderTest, ProductDescriptionStringsAndAccessibleLabels) {
+  // Dates are kept > 1 year in the past since
+  // See comments for GenerateLastModifiedString in this file for references.
+  const std::string kGoodJSONResponseWithMimeTypes = base::StringPrintf(
+      R"({
+      "results": [
+        {
+          "title": "My Google Doc",
+          "url": "https://documentprovider.tld/doc?id=1",
+          "score": 999,
+          "originalUrl": "%s",
+          "metadata": {
+            "mimeType": "application/vnd.google-apps.document",
+            "updateTime": "Mon, 15 Oct 2007 19:45:00 GMT"
+          }
+        },
+        {
+          "title": "My File in Drive",
+          "score": 998,
+          "url": "https://documentprovider.tld/doc?id=2",
+          "metadata": {
+            "mimeType": "application/vnd.foocorp.file",
+            "updateTime": "10 Oct 2010 19:45:00 GMT"
+          }
+        },
+        {
+          "title": "Shared Spreadsheet",
+          "score": 997,
+          "url": "https://documentprovider.tld/doc?id=3",
+          "metadata": {
+            "mimeType": "application/vnd.google-apps.spreadsheet"
+          }
+        }
+      ]
+     })",
+      SAMPLE_ORIGINAL_URL.c_str());
+
+  base::Optional<base::Value> response =
+      base::JSONReader::Read(kGoodJSONResponseWithMimeTypes);
+  ASSERT_TRUE(response);
+  ASSERT_TRUE(response->is_dict());
+
+  ACMatches matches;
+  provider_->ParseDocumentSearchResults(*response, &matches);
+  EXPECT_EQ(matches.size(), 3u);
+
+  // match.destination_url is used as the match's temporary text in the Omnibox.
+  EXPECT_EQ(
+      AutocompleteMatchType::ToAccessibilityLabel(
+          matches[0], base::ASCIIToUTF16(matches[0].destination_url.spec()), 1,
+          4, false),
+      base::ASCIIToUTF16("My Google Doc, 10/15/07 - Google Docs, "
+                         "https://documentprovider.tld/doc?id=1, 2 of 4"));
+  // Unhandled MIME Type falls back to "Google Drive" where the file was stored.
+  EXPECT_EQ(
+      AutocompleteMatchType::ToAccessibilityLabel(
+          matches[1], base::ASCIIToUTF16(matches[1].destination_url.spec()), 2,
+          4, false),
+      base::ASCIIToUTF16("My File in Drive, 10/10/10 - Google Drive, "
+                         "https://documentprovider.tld/doc?id=2, 3 of 4"));
+  // No modified time was specified for the last file.
+  EXPECT_EQ(
+      AutocompleteMatchType::ToAccessibilityLabel(
+          matches[2], base::ASCIIToUTF16(matches[2].destination_url.spec()), 3,
+          4, false),
+      base::ASCIIToUTF16("Shared Spreadsheet, Google Sheets, "
+                         "https://documentprovider.tld/doc?id=3, 4 of 4"));
+}
+
 TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTies) {
-  const char kGoodJSONResponseWithTies[] = R"({
+  const std::string kGoodJSONResponseWithTies = base::StringPrintf(
+      R"({
       "results": [
         {
           "title": "Document 1",
           "url": "https://documentprovider.tld/doc?id=1",
           "score": 1234,
-          "originalUrl": "https://shortened.url"
+          "originalUrl": "%s"
         },
         {
           "title": "Document 2",
@@ -285,11 +368,13 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTies) {
           "url": "https://documentprovider.tld/doc?id=3"
         }
       ]
-     })";
+     })",
+      SAMPLE_ORIGINAL_URL.c_str());
 
-  std::unique_ptr<base::DictionaryValue> response = base::DictionaryValue::From(
-      base::JSONReader::ReadDeprecated(kGoodJSONResponseWithTies));
-  ASSERT_TRUE(response != nullptr);
+  base::Optional<base::Value> response =
+      base::JSONReader::Read(kGoodJSONResponseWithTies);
+  ASSERT_TRUE(response);
+  ASSERT_TRUE(response->is_dict());
 
   ACMatches matches;
   provider_->ParseDocumentSearchResults(*response, &matches);
@@ -301,7 +386,7 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTies) {
   EXPECT_EQ(matches[0].destination_url,
             GURL("https://documentprovider.tld/doc?id=1"));
   EXPECT_EQ(matches[0].relevance, 1234);  // As the server specified.
-  EXPECT_EQ(matches[0].stripped_destination_url, GURL("https://shortened.url"));
+  EXPECT_EQ(matches[0].stripped_destination_url, GURL(SAMPLE_STRIPPED_URL));
 
   EXPECT_EQ(matches[1].contents, base::ASCIIToUTF16("Document 2"));
   EXPECT_EQ(matches[1].destination_url,
@@ -319,13 +404,14 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTies) {
 }
 
 TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTiesCascade) {
-  const char kGoodJSONResponseWithTies[] = R"({
+  const std::string kGoodJSONResponseWithTies = base::StringPrintf(
+      R"({
       "results": [
         {
           "title": "Document 1",
           "url": "https://documentprovider.tld/doc?id=1",
           "score": 1234,
-          "originalUrl": "https://shortened.url"
+          "originalUrl": "%s"
         },
         {
           "title": "Document 2",
@@ -338,11 +424,13 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTiesCascade) {
           "url": "https://documentprovider.tld/doc?id=3"
         }
       ]
-     })";
+     })",
+      SAMPLE_ORIGINAL_URL.c_str());
 
-  std::unique_ptr<base::DictionaryValue> response = base::DictionaryValue::From(
-      base::JSONReader::ReadDeprecated(kGoodJSONResponseWithTies));
-  ASSERT_TRUE(response != nullptr);
+  base::Optional<base::Value> response =
+      base::JSONReader::Read(kGoodJSONResponseWithTies);
+  ASSERT_TRUE(response);
+  ASSERT_TRUE(response->is_dict());
 
   ACMatches matches;
   provider_->ParseDocumentSearchResults(*response, &matches);
@@ -354,7 +442,7 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTiesCascade) {
   EXPECT_EQ(matches[0].destination_url,
             GURL("https://documentprovider.tld/doc?id=1"));
   EXPECT_EQ(matches[0].relevance, 1234);  // As the server specified.
-  EXPECT_EQ(matches[0].stripped_destination_url, GURL("https://shortened.url"));
+  EXPECT_EQ(matches[0].stripped_destination_url, GURL(SAMPLE_STRIPPED_URL));
 
   EXPECT_EQ(matches[1].contents, base::ASCIIToUTF16("Document 2"));
   EXPECT_EQ(matches[1].destination_url,
@@ -374,13 +462,14 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTiesCascade) {
 }
 
 TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTiesZeroLimit) {
-  const char kGoodJSONResponseWithTies[] = R"({
+  const std::string kGoodJSONResponseWithTies = base::StringPrintf(
+      R"({
       "results": [
         {
           "title": "Document 1",
           "url": "https://documentprovider.tld/doc?id=1",
           "score": 1,
-          "originalUrl": "https://shortened.url"
+          "originalUrl": "%s"
         },
         {
           "title": "Document 2",
@@ -393,11 +482,13 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTiesZeroLimit) {
           "url": "https://documentprovider.tld/doc?id=3"
         }
       ]
-     })";
+     })",
+      SAMPLE_ORIGINAL_URL.c_str());
 
-  std::unique_ptr<base::DictionaryValue> response = base::DictionaryValue::From(
-      base::JSONReader::ReadDeprecated(kGoodJSONResponseWithTies));
-  ASSERT_TRUE(response != nullptr);
+  base::Optional<base::Value> response =
+      base::JSONReader::Read(kGoodJSONResponseWithTies);
+  ASSERT_TRUE(response);
+  ASSERT_TRUE(response->is_dict());
 
   ACMatches matches;
   provider_->ParseDocumentSearchResults(*response, &matches);
@@ -409,7 +500,7 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsBreakTiesZeroLimit) {
   EXPECT_EQ(matches[0].destination_url,
             GURL("https://documentprovider.tld/doc?id=1"));
   EXPECT_EQ(matches[0].relevance, 1);  // As the server specified.
-  EXPECT_EQ(matches[0].stripped_destination_url, GURL("https://shortened.url"));
+  EXPECT_EQ(matches[0].stripped_destination_url, GURL(SAMPLE_STRIPPED_URL));
 
   EXPECT_EQ(matches[1].contents, base::ASCIIToUTF16("Document 2"));
   EXPECT_EQ(matches[1].destination_url,
@@ -444,10 +535,10 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsWithBackoff) {
     })";
 
   ASSERT_FALSE(provider_->backoff_for_session_);
-  std::unique_ptr<base::DictionaryValue> backoff_response =
-      base::DictionaryValue::From(base::JSONReader::ReadDeprecated(
-          kBackoffJSONResponse, base::JSON_ALLOW_TRAILING_COMMAS));
-  ASSERT_TRUE(backoff_response != nullptr);
+  base::Optional<base::Value> backoff_response = base::JSONReader::Read(
+      kBackoffJSONResponse, base::JSON_ALLOW_TRAILING_COMMAS);
+  ASSERT_TRUE(backoff_response);
+  ASSERT_TRUE(backoff_response->is_dict());
 
   ACMatches matches;
   provider_->ParseDocumentSearchResults(*backoff_response, &matches);
@@ -479,18 +570,18 @@ TEST_F(DocumentProviderTest, ParseDocumentSearchResultsWithIneligibleFlag) {
 
   // First, parse an invalid response - shouldn't prohibit future requests
   // from working but also shouldn't trigger backoff.
-  std::unique_ptr<base::DictionaryValue> bad_response =
-      base::DictionaryValue::From(base::JSONReader::ReadDeprecated(
-          kMismatchedMessageJSON, base::JSON_ALLOW_TRAILING_COMMAS));
-  ASSERT_TRUE(bad_response != nullptr);
+  base::Optional<base::Value> bad_response = base::JSONReader::Read(
+      kMismatchedMessageJSON, base::JSON_ALLOW_TRAILING_COMMAS);
+  ASSERT_TRUE(bad_response);
+  ASSERT_TRUE(bad_response->is_dict());
   provider_->ParseDocumentSearchResults(*bad_response, &matches);
   ASSERT_FALSE(provider_->backoff_for_session_);
 
   // Now parse a response that does trigger backoff.
-  std::unique_ptr<base::DictionaryValue> backoff_response =
-      base::DictionaryValue::From(base::JSONReader::ReadDeprecated(
-          kIneligibleJSONResponse, base::JSON_ALLOW_TRAILING_COMMAS));
-  ASSERT_TRUE(backoff_response != nullptr);
+  base::Optional<base::Value> backoff_response = base::JSONReader::Read(
+      kIneligibleJSONResponse, base::JSON_ALLOW_TRAILING_COMMAS);
+  ASSERT_TRUE(backoff_response);
+  ASSERT_TRUE(backoff_response->is_dict());
   provider_->ParseDocumentSearchResults(*backoff_response, &matches);
   ASSERT_TRUE(provider_->backoff_for_session_);
 }
@@ -546,6 +637,8 @@ TEST_F(DocumentProviderTest, GetURLForDeduping) {
 
   // URLs that represent documents:
   CheckDeduper("https://drive.google.com/open?id=the_doc-id", "the_doc-id");
+  CheckDeduper("https://drive.google.com/a/domain.com/open?x=3&id=the_doc-id",
+               "the_doc-id");
   CheckDeduper("https://docs.google.com/document/d/the_doc-id/edit",
                "the_doc-id");
   CheckDeduper(
@@ -553,6 +646,10 @@ TEST_F(DocumentProviderTest, GetURLForDeduping) {
       "the_doc-id");
   CheckDeduper(
       "https://docs.google.com/spreadsheets/d/the_doc-id/preview?x=1#y=2",
+      "the_doc-id");
+  CheckDeduper(
+      "https://docs.google.com/a/domain/spreadsheets/d/the_doc-id/"
+      "preview?x=1#y=2",
       "the_doc-id");
   CheckDeduper(
       "https://www.google.com/"
@@ -572,8 +669,14 @@ TEST_F(DocumentProviderTest, GetURLForDeduping) {
       "https://www.google.com/url?url=https://drive.google.com/"
       "open?id%3Dthe_doc_id",
       "the_doc_id");
+  CheckDeduper(
+      "https://www.google.com/url?url=https://drive.google.com/"
+      "open?id%3Dthe_doc_id%26Dusp%3Dchrome_omnibox",
+      "the_doc_id");
 
   // URLs that do not represent documents:
+  CheckDeduper("https://drive.google.com/b/domain.com/open?id=the_doc-id", "");
+  CheckDeduper("https://drive.google.com/b/domain.com/open?idx=the_doc-id", "");
   CheckDeduper("https://docs.google.com/help?id=d123", "");
   CheckDeduper("https://www.google.com", "");
   CheckDeduper("https://docs.google.com/kittens/d/d123/preview?x=1#y=2", "");
@@ -581,4 +684,108 @@ TEST_F(DocumentProviderTest, GetURLForDeduping) {
       "https://www.google.com/url?url=https://drive.google.com/homepage", "");
   CheckDeduper("https://www.google.com/url?url=https://www.youtube.com/view",
                "");
+}
+
+TEST_F(DocumentProviderTest, Scoring) {
+  auto CheckScoring = [this](
+                          const std::map<std::string, std::string> parameters,
+                          const std::string& response_str,
+                          const std::string& input_text,
+                          const std::vector<int> expected_scores) {
+    static int invocation = -1;
+    invocation++;
+
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndEnableFeatureWithParameters(omnibox::kDocumentProvider,
+                                                    parameters);
+    base::Optional<base::Value> response = base::JSONReader::Read(response_str);
+    provider_->input_.UpdateText(base::UTF8ToUTF16(input_text), 0, {});
+    ACMatches matches;
+    provider_->ParseDocumentSearchResults(*response, &matches);
+
+    EXPECT_EQ(matches.size(), expected_scores.size())
+        << "invocation " << invocation;
+    for (size_t i = 0; i < matches.size(); i++) {
+      EXPECT_EQ(matches[i].relevance, expected_scores[i])
+          << "Match " << i << " of invocation " << invocation;
+    }
+  };
+
+  // Server scoring should use server scores with possible demotion of ties.
+  CheckScoring(
+      {
+          {"DocumentUseServerScore", "true"},
+          {"DocumentUseClientScore", "false"},
+          {"DocumentCapScorePerRank", "false"},
+          {"DocumentBoostOwned", "false"},
+      },
+      R"({"results": [
+          {"title": "Document 1", "score": 1000, "url": "url"},
+          {"title": "Document 2", "score": 900, "url": "url"},
+          {"title": "Document 3", "score": 900, "url": "url"}
+        ]})",
+      "", {1000, 900, 899});
+
+  // Server scoring with rank caps.
+  CheckScoring(
+      {
+          {"DocumentUseServerScore", "true"},
+          {"DocumentUseClientScore", "false"},
+          {"DocumentCapScorePerRank", "true"},
+          {"DocumentBoostOwned", "false"},
+      },
+      R"({"results": [
+          {"title": "Document 1", "score": 1150, "url": "url"},
+          {"title": "Document 2", "score": 1150, "url": "url"},
+          {"title": "Document 3", "score": 1150, "url": "url"}
+        ]})",
+      "", {1150, 1100, 900});
+
+  // Server scoring with owner boosting.
+  CheckScoring(
+      {
+          {"DocumentUseServerScore", "true"},
+          {"DocumentUseClientScore", "false"},
+          {"DocumentCapScorePerRank", "false"},
+          {"DocumentBoostOwned", "true"},
+      },
+      R"({"results": [
+          {"title": "Document 1", "score": 1150, "url": "url",
+            "metadata": {"owner": {"emailAddresses": [{"emailAddress": ""}]}}},
+          {"title": "Document 2", "score": 1150, "url": "url"},
+          {"title": "Document 3", "score": 1150, "url": "url"}
+        ]})",
+      "", {1150, 950, 949});
+
+  // Client scoring should match each input word at most once.
+  CheckScoring(
+      {
+          {"DocumentUseServerScore", "false"},
+          {"DocumentUseClientScore", "true"},
+          {"DocumentCapScorePerRank", "false"},
+          {"DocumentBoostOwned", "false"},
+      },
+      R"({"results": [
+          {"title": "rainbow", "score": 1000, "url": "url"},
+          {"title": "rain bow", "score": 900, "url": "url"},
+          {"title": "rain bows bow bow", "score": 900, "url": "bow",
+            "snippet": {"snippet": "bow bow"}}
+        ]})",
+      "bow", {0, 540, 540});
+
+  // Client scoring should consider snippet but not URL matches
+  CheckScoring(
+      {
+          {"DocumentUseServerScore", "false"},
+          {"DocumentUseClientScore", "true"},
+          {"DocumentCapScorePerRank", "false"},
+          {"DocumentBoostOwned", "false"},
+      },
+      R"({"results": [
+          {"title": "rainbow", "score": 1000, "url": "url"},
+          {"title": "rainbow", "score": 900, "url": "bow"},
+          {"title": "rainbow", "score": 900, "url": "bow",
+            "snippet": {"snippet": "bow bow"}}
+        ]})",
+      "rain bow", {669, 669, 793});
 }

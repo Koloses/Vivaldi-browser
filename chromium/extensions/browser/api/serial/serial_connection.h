@@ -18,7 +18,7 @@
 #include "extensions/browser/api/api_resource.h"
 #include "extensions/browser/api/api_resource_manager.h"
 #include "extensions/common/api/serial.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "net/base/io_buffer.h"
@@ -91,10 +91,10 @@ class SerialConnection : public ApiResource,
   void set_send_timeout(int send_timeout);
   int send_timeout() const { return send_timeout_; }
 
-  void set_paused(bool paused);
+  void SetPaused(bool paused);
   bool paused() const { return paused_; }
 
-  void set_connection_error_handler(base::OnceClosure connection_error_handler);
+  void SetConnectionErrorHandler(base::OnceClosure connection_error_handler);
 
   // Initiates an asynchronous Open of the device. It is the caller's
   // responsibility to ensure that this SerialConnection stays alive
@@ -143,6 +143,9 @@ class SerialConnection : public ApiResource,
   // Returns result success or not via |callback|.
   void ClearBreak(ClearBreakCompleteCallback callback);
 
+  // Initiates an asynchronous close of the device.
+  void Close(base::OnceClosure callback);
+
   static const BrowserThread::ID kThreadId = BrowserThread::IO;
 
  private:
@@ -151,6 +154,13 @@ class SerialConnection : public ApiResource,
 
   // device::mojom::SerialPortClient override.
   void OnReadError(device::mojom::SerialReceiveError error) override;
+  void OnSendError(device::mojom::SerialSendError error) override;
+
+  void OnOpen(mojo::ScopedDataPipeConsumerHandle consumer,
+              mojo::ScopedDataPipeProducerHandle producer,
+              device::mojom::SerialPortClientRequest client_request,
+              OpenCompleteCallback callback,
+              bool success);
 
   // Read data from |receive_pipe_| when the data is ready or dispatch error
   // events in error cases.
@@ -158,7 +168,10 @@ class SerialConnection : public ApiResource,
                                   const mojo::HandleSignalsState& state);
   void OnReadPipeClosed();
 
-  void SetUpReceiveDataPipe(mojo::ScopedDataPipeProducerHandle* producer);
+  void CreatePipe(mojo::ScopedDataPipeProducerHandle* producer,
+                  mojo::ScopedDataPipeConsumerHandle* consumer);
+  void SetUpReceiveDataPipe(mojo::ScopedDataPipeConsumerHandle producer);
+  void SetUpSendDataPipe(mojo::ScopedDataPipeProducerHandle consumer);
 
   void SetTimeoutCallback();
 
@@ -168,9 +181,9 @@ class SerialConnection : public ApiResource,
   // Handles a send timeout.
   void OnSendTimeout();
 
-  // Receives write completion notification from the |serial_port_|.
-  void OnAsyncWriteComplete(uint32_t bytes_sent,
-                            device::mojom::SerialSendError error);
+  void OnSendPipeWritableOrClosed(MojoResult result,
+                                  const mojo::HandleSignalsState& state);
+  void OnSendPipeClosed();
 
   // Handles |serial_port_| connection error.
   void OnConnectionError();
@@ -185,7 +198,7 @@ class SerialConnection : public ApiResource,
   // User-specified connection name.
   std::string name_;
 
-  // Size of the receive buffer.
+  // Size of the receive and send buffer.
   int buffer_size_;
 
   // Amount of time (in ms) to wait for a Read to succeed before triggering a
@@ -206,6 +219,10 @@ class SerialConnection : public ApiResource,
 
   // Callback to handle the completion of a pending Send() request.
   SendCompleteCallback send_complete_;
+  size_t bytes_written_;
+
+  // The data needs to be sent.
+  std::vector<uint8_t> data_to_send_;
 
   // Closure which will trigger a receive timeout unless cancelled. Reset on
   // initialization and after every successful Receive().
@@ -221,13 +238,18 @@ class SerialConnection : public ApiResource,
   // Pipe for read.
   mojo::ScopedDataPipeConsumerHandle receive_pipe_;
   mojo::SimpleWatcher receive_pipe_watcher_;
-  mojo::AssociatedBinding<device::mojom::SerialPortClient> client_binding_;
+
+  // Pipe for send.
+  mojo::ScopedDataPipeProducerHandle send_pipe_;
+  mojo::SimpleWatcher send_pipe_watcher_;
+
+  mojo::Binding<device::mojom::SerialPortClient> client_binding_;
 
   // Closure which is set by client and will be called when |serial_port_|
   // connection encountered an error.
   base::OnceClosure connection_error_handler_;
 
-  base::WeakPtrFactory<SerialConnection> weak_factory_;
+  base::WeakPtrFactory<SerialConnection> weak_factory_{this};
 };
 
 }  // namespace extensions

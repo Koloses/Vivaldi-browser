@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "components/arc/arc_session.h"
-#include "components/arc/arc_stop_reason.h"
+#include "components/arc/session/arc_session.h"
+#include "components/arc/session/arc_stop_reason.h"
 
 namespace arc {
 
@@ -25,6 +25,7 @@ class FakeArcSession : public ArcSession {
   void Stop() override;
   bool IsStopRequested() override;
   void OnShutdown() override;
+  void SetUserIdHashForProfile(const std::string& hash) override;
 
   // To emulate unexpected stop, such as crash.
   void StopWithReason(ArcStopReason reason);

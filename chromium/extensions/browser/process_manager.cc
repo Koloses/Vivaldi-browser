@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/one_shot_event.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
@@ -49,7 +50,6 @@
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
-#include "extensions/common/one_shot_event.h"
 
 #include "app/vivaldi_apptools.h"
 
@@ -261,8 +261,7 @@ ProcessManager::ProcessManager(BrowserContext* context,
           {content::BrowserThread::IO})),
       startup_background_hosts_created_(false),
       last_background_close_sequence_id_(0),
-      process_observer_(this),
-      weak_ptr_factory_(this) {
+      process_observer_(this) {
   // ExtensionRegistry is shared between incognito and regular contexts.
   DCHECK_EQ(original_context, extension_registry_->browser_context());
   extension_registry_->AddObserver(this);

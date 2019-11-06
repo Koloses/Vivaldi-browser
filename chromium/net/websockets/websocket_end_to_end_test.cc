@@ -104,7 +104,7 @@ class ConnectTestingEventInterface : public WebSocketEventInterface {
                    scoped_refptr<IOBuffer> data,
                    size_t data_size) override;
 
-  void OnFlowControl(int64_t quota) override;
+  void OnSendFlowControlQuotaAdded(int64_t quota) override;
 
   void OnClosingHandshake() override;
 
@@ -123,10 +123,11 @@ class ConnectTestingEventInterface : public WebSocketEventInterface {
   void OnSSLCertificateError(
       std::unique_ptr<SSLErrorCallbacks> ssl_error_callbacks,
       const GURL& url,
+      int net_error,
       const SSLInfo& ssl_info,
       bool fatal) override;
 
-  int OnAuthRequired(scoped_refptr<AuthChallengeInfo> auth_info,
+  int OnAuthRequired(const AuthChallengeInfo& auth_info,
                      scoped_refptr<HttpResponseHeaders> response_headers,
                      const IPEndPoint& remote_endpoint,
                      base::OnceCallback<void(const AuthCredentials*)> callback,
@@ -177,7 +178,7 @@ void ConnectTestingEventInterface::OnDataFrame(bool fin,
                                                scoped_refptr<IOBuffer> data,
                                                size_t data_size) {}
 
-void ConnectTestingEventInterface::OnFlowControl(int64_t quota) {}
+void ConnectTestingEventInterface::OnSendFlowControlQuotaAdded(int64_t quota) {}
 
 void ConnectTestingEventInterface::OnClosingHandshake() {}
 
@@ -200,6 +201,7 @@ void ConnectTestingEventInterface::OnFinishOpeningHandshake(
 void ConnectTestingEventInterface::OnSSLCertificateError(
     std::unique_ptr<SSLErrorCallbacks> ssl_error_callbacks,
     const GURL& url,
+    int net_error,
     const SSLInfo& ssl_info,
     bool fatal) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -209,7 +211,7 @@ void ConnectTestingEventInterface::OnSSLCertificateError(
 }
 
 int ConnectTestingEventInterface::OnAuthRequired(
-    scoped_refptr<AuthChallengeInfo> auth_info,
+    const AuthChallengeInfo& auth_info,
     scoped_refptr<HttpResponseHeaders> response_headers,
     const IPEndPoint& remote_endpoint,
     base::OnceCallback<void(const AuthCredentials*)> callback,

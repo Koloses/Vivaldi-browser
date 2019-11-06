@@ -8,7 +8,6 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/extensions/convert_web_app.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -18,7 +17,6 @@
 #include "chrome/browser/web_applications/components/web_app_icon_downloader.h"
 #include "chrome/browser/web_applications/components/web_app_install_utils.h"
 #include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/manifest_handlers/app_theme_color_info.h"
 #include "chrome/test/base/testing_profile.h"
@@ -121,10 +119,10 @@ WebApplicationInfo::IconInfo CreateIconInfoWithBitmap(int size, SkColor color) {
 class TestBookmarkAppHelper : public BookmarkAppHelper {
  public:
   TestBookmarkAppHelper(ExtensionService* service,
-                        WebApplicationInfo web_app_info,
+                        const WebApplicationInfo& web_app_info,
                         content::WebContents* contents)
       : BookmarkAppHelper(service->profile(),
-                          web_app_info,
+                          std::make_unique<WebApplicationInfo>(web_app_info),
                           contents,
                           WebappInstallSource::MENU_BROWSER_TAB),
         bitmap_(CreateSquareBitmapWithColor(32, SK_ColorRED)) {}
@@ -136,18 +134,23 @@ class TestBookmarkAppHelper : public BookmarkAppHelper {
     extension_ = extension;
   }
 
-  void CompleteInstallableCheck(const char* manifest_url,
+  void CompleteInstallableCheck(const char* manifest_url_str,
                                 const blink::Manifest& manifest,
                                 ForInstallableSite for_installable_site) {
     bool installable = for_installable_site == ForInstallableSite::kYes;
+    GURL manifest_url(manifest_url_str);
+    GURL primary_icon_url(kAppIconURL1);
     InstallableData data = {
-        installable ? NO_ERROR_DETECTED : MANIFEST_DISPLAY_NOT_SUPPORTED,
-        GURL(manifest_url),
+        installable
+            ? std::vector<InstallableStatusCode>()
+            : std::vector<
+                  InstallableStatusCode>{MANIFEST_DISPLAY_NOT_SUPPORTED},
+        manifest_url,
         &manifest,
-        GURL(kAppIconURL1),
+        primary_icon_url,
         &bitmap_,
         false,
-        GURL(),
+        GURL::EmptyGURL(),
         nullptr,
         installable,
         installable,
@@ -157,7 +160,7 @@ class TestBookmarkAppHelper : public BookmarkAppHelper {
 
   void CompleteIconDownload(
       bool success,
-      const std::map<GURL, std::vector<SkBitmap> >& bitmaps) {
+      const std::map<GURL, std::vector<SkBitmap>>& bitmaps) {
     BookmarkAppHelper::OnIconsDownloaded(success, bitmaps);
   }
 
@@ -187,6 +190,8 @@ class TestBookmarkAppHelper : public BookmarkAppHelper {
 
 }  // namespace
 
+// Deprecated in favour of InstallManagerBookmarkAppTest.CreateBookmarkApp.
+// TODO(crbug.com/915043): Erase it.
 TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkApp) {
   WebApplicationInfo web_app_info;
   web_app_info.app_url = GURL(kAppUrl);
@@ -220,6 +225,9 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkApp) {
           .is_null());
 }
 
+// Deprecated in favour of
+// InstallManagerBookmarkAppTest.CreateBookmarkAppDefaultApp.
+// TODO(crbug.com/915043): Erase it.
 TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkAppDefaultApp) {
   WebApplicationInfo web_app_info;
   web_app_info.app_url = GURL(kAppUrl);
@@ -239,6 +247,9 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkAppDefaultApp) {
   EXPECT_FALSE(Manifest::IsPolicyLocation(helper.extension()->location()));
 }
 
+// Deprecated in favour of
+// InstallManagerBookmarkAppTest.CreateBookmarkAppPolicyInstalled.
+// TODO(crbug.com/915043): Erase it.
 TEST_F(BookmarkAppHelperExtensionServiceTest,
        CreateBookmarkAppPolicyInstalled) {
   WebApplicationInfo web_app_info;
@@ -270,6 +281,9 @@ class BookmarkAppHelperExtensionServiceInstallableSiteTest
       BookmarkAppHelperExtensionServiceInstallableSiteTest);
 };
 
+// Deprecated in favour of
+// InstallManagerBookmarkAppInstallableSiteTest.CreateBookmarkAppWithManifest.
+// TODO(crbug.com/915043): Erase it.
 TEST_P(BookmarkAppHelperExtensionServiceInstallableSiteTest,
        CreateBookmarkAppWithManifest) {
   WebApplicationInfo web_app_info;
@@ -285,7 +299,7 @@ TEST_P(BookmarkAppHelperExtensionServiceInstallableSiteTest,
   manifest.theme_color = SK_ColorBLUE;
   helper.CompleteInstallableCheck(kManifestUrl, manifest, GetParam());
 
-  std::map<GURL, std::vector<SkBitmap> > icon_map;
+  std::map<GURL, std::vector<SkBitmap>> icon_map;
   helper.CompleteIconDownload(true, icon_map);
 
   content::RunAllTasksUntilIdle();
@@ -311,6 +325,10 @@ TEST_P(BookmarkAppHelperExtensionServiceInstallableSiteTest,
   }
 }
 
+// Deprecated in favour of
+// InstallManagerBookmarkAppInstallableSiteTest
+// .CreateBookmarkAppWithManifestIcons.
+// TODO(crbug.com/915043): Erase it.
 TEST_P(BookmarkAppHelperExtensionServiceInstallableSiteTest,
        CreateBookmarkAppWithManifestIcons) {
   WebApplicationInfo web_app_info;
@@ -359,6 +377,10 @@ TEST_P(BookmarkAppHelperExtensionServiceInstallableSiteTest,
   }
 }
 
+// Deprecated in favour of
+// InstallManagerBookmarkAppInstallableSiteTest
+// .CreateBookmarkAppWithManifestNoScope.
+// TODO(crbug.com/915043): Erase it.
 TEST_P(BookmarkAppHelperExtensionServiceInstallableSiteTest,
        CreateBookmarkAppWithManifestNoScope) {
   WebApplicationInfo web_app_info;
@@ -369,6 +391,7 @@ TEST_P(BookmarkAppHelperExtensionServiceInstallableSiteTest,
 
   blink::Manifest manifest;
   manifest.start_url = GURL(kAppUrl);
+  manifest.scope = GURL(kAppDefaultScope);
   manifest.name = base::NullableString16(base::UTF8ToUTF16(kAppTitle), false);
   helper.CompleteInstallableCheck(kManifestUrl, manifest, GetParam());
 
@@ -391,11 +414,11 @@ INSTANTIATE_TEST_SUITE_P(/* no prefix */,
                          ::testing::Values(ForInstallableSite::kNo,
                                            ForInstallableSite::kYes));
 
+// Deprecated in favour of
+// InstallManagerBookmarkAppTest.CreateBookmarkAppDefaultLauncherContainers.
+// TODO(crbug.com/915043): Erase it.
 TEST_F(BookmarkAppHelperExtensionServiceTest,
        CreateBookmarkAppDefaultLauncherContainers) {
-  auto scoped_feature_list = std::make_unique<base::test::ScopedFeatureList>();
-  scoped_feature_list->InitAndEnableFeature(features::kDesktopPWAWindowing);
-
   std::map<GURL, std::vector<SkBitmap>> icon_map;
 
   blink::Manifest manifest;
@@ -418,19 +441,19 @@ TEST_F(BookmarkAppHelperExtensionServiceTest,
     const Extension* extension =
         service_->GetInstalledExtension(helper.extension()->id());
     EXPECT_TRUE(extension);
-    EXPECT_EQ(LAUNCH_CONTAINER_WINDOW,
+    EXPECT_EQ(LaunchContainer::kLaunchContainerWindow,
               GetLaunchContainer(ExtensionPrefs::Get(profile()), extension));
 
     // Mark the app as not locally installed and check that it now opens in a
     // tab.
     SetBookmarkAppIsLocallyInstalled(profile(), extension, false);
-    EXPECT_EQ(LAUNCH_CONTAINER_TAB,
+    EXPECT_EQ(LaunchContainer::kLaunchContainerTab,
               GetLaunchContainer(ExtensionPrefs::Get(profile()), extension));
 
     // Mark the app as locally installed and check that it now opens in a
     // window.
     SetBookmarkAppIsLocallyInstalled(profile(), extension, true);
-    EXPECT_EQ(LAUNCH_CONTAINER_WINDOW,
+    EXPECT_EQ(LaunchContainer::kLaunchContainerWindow,
               GetLaunchContainer(ExtensionPrefs::Get(profile()), extension));
   }
   {
@@ -449,16 +472,16 @@ TEST_F(BookmarkAppHelperExtensionServiceTest,
     const Extension* extension =
         service_->GetInstalledExtension(helper.extension()->id());
     EXPECT_TRUE(extension);
-    EXPECT_EQ(LAUNCH_CONTAINER_TAB,
+    EXPECT_EQ(LaunchContainer::kLaunchContainerTab,
               GetLaunchContainer(ExtensionPrefs::Get(profile()), extension));
   }
 }
 
+// Deprecated in favour of
+// InstallManagerBookmarkAppTest.CreateBookmarkAppForcedLauncherContainers.
+// TODO(crbug.com/915043): Erase it.
 TEST_F(BookmarkAppHelperExtensionServiceTest,
        CreateBookmarkAppForcedLauncherContainers) {
-  auto scoped_feature_list = std::make_unique<base::test::ScopedFeatureList>();
-  scoped_feature_list->InitAndEnableFeature(features::kDesktopPWAWindowing);
-
   WebApplicationInfo web_app_info;
   std::map<GURL, std::vector<SkBitmap>> icon_map;
 
@@ -479,7 +502,7 @@ TEST_F(BookmarkAppHelperExtensionServiceTest,
     content::RunAllTasksUntilIdle();
     ASSERT_TRUE(helper.extension());
     EXPECT_EQ(
-        LAUNCH_CONTAINER_TAB,
+        LaunchContainer::kLaunchContainerTab,
         GetLaunchContainer(ExtensionPrefs::Get(profile()), helper.extension()));
   }
   {
@@ -495,11 +518,14 @@ TEST_F(BookmarkAppHelperExtensionServiceTest,
     content::RunAllTasksUntilIdle();
     ASSERT_TRUE(helper.extension());
     EXPECT_EQ(
-        LAUNCH_CONTAINER_WINDOW,
+        LaunchContainer::kLaunchContainerWindow,
         GetLaunchContainer(ExtensionPrefs::Get(profile()), helper.extension()));
   }
 }
 
+// Deprecated in favour of
+// InstallManagerBookmarkAppTest.CreateBookmarkAppWithoutManifest.
+// TODO(crbug.com/915043): Erase it.
 TEST_F(BookmarkAppHelperExtensionServiceTest,
        CreateBookmarkAppWithoutManifest) {
   WebApplicationInfo web_app_info;
@@ -528,6 +554,8 @@ TEST_F(BookmarkAppHelperExtensionServiceTest,
   EXPECT_FALSE(AppThemeColorInfo::GetThemeColor(extension));
 }
 
+// Deprecated in favour of InstallManagerBookmarkAppTest.CreateWebAppFromInfo.
+// TODO(crbug.com/915043): Erase it.
 TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkAppNoContents) {
   WebApplicationInfo web_app_info;
   web_app_info.app_url = GURL(kAppUrl);
@@ -571,6 +599,9 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkAppNoContents) {
                                  ExtensionIconSet::MATCH_EXACTLY).empty());
 }
 
+// Deprecated in favour of
+// InstallManagerBookmarkAppTest.InstallOrUpdateWebAppFromSync.
+// TODO(crbug.com/915043): Erase it.
 TEST_F(BookmarkAppHelperExtensionServiceTest, CreateAndUpdateBookmarkApp) {
   EXPECT_EQ(0u, registry()->enabled_extensions().size());
   WebApplicationInfo web_app_info;

@@ -12,7 +12,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
-#include "components/google/core/common/google_util.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "net/base/url_util.h"
@@ -23,21 +22,7 @@
 
 namespace {
 
-using AMPViewType = AMPPageLoadMetricsObserver::AMPViewType;
-
 const char kHistogramPrefix[] = "PageLoad.Clients.AMP.";
-
-const char kHistogramAMPDOMContentLoadedEventFired[] =
-    "DocumentTiming.NavigationToDOMContentLoadedEventFired";
-const char kHistogramAMPFirstLayout[] =
-    "DocumentTiming.NavigationToFirstLayout";
-const char kHistogramAMPLoadEventFired[] =
-    "DocumentTiming.NavigationToLoadEventFired";
-const char kHistogramAMPFirstContentfulPaint[] =
-    "PaintTiming.NavigationToFirstContentfulPaint";
-const char kHistogramAMPParseStart[] = "ParseTiming.NavigationToParseStart";
-const char kHistogramAMPParseStartRedirect[] =
-    "ParseTiming.NavigationToParseStart.RedirectToNonAmpPage";
 
 const char kHistogramAMPSubframeNavigationToInput[] =
     "Experimental.PageTiming.NavigationToInput.Subframe";
@@ -49,51 +34,18 @@ const char kHistogramAMPSubframeFirstContentfulPaint[] =
     "PaintTiming.InputToFirstContentfulPaint.Subframe";
 const char kHistogramAMPSubframeFirstContentfulPaintFullNavigation[] =
     "PaintTiming.InputToFirstContentfulPaint.Subframe.FullNavigation";
-const char kHistogramAMPSubframeLargestContentPaint[] =
-    "PaintTiming.InputToLargestContentPaint.Subframe";
-const char kHistogramAMPSubframeLargestContentPaintFullNavigation[] =
-    "PaintTiming.InputToLargestContentPaint.Subframe.FullNavigation";
+const char kHistogramAMPSubframeLargestContentfulPaint[] =
+    "PaintTiming.InputToLargestContentfulPaint.Subframe";
+const char kHistogramAMPSubframeLargestContentfulPaintFullNavigation[] =
+    "PaintTiming.InputToLargestContentfulPaint.Subframe.FullNavigation";
 const char kHistogramAMPSubframeFirstInputDelay[] =
-    "InteractiveTiming.FirstInputDelay3.Subframe";
+    "InteractiveTiming.FirstInputDelay4.Subframe";
 const char kHistogramAMPSubframeFirstInputDelayFullNavigation[] =
-    "InteractiveTiming.FirstInputDelay3.Subframe.FullNavigation";
-const char kHistogramAMPSubframeLayoutStabilityJankScore[] =
-    "Experimental.LayoutStability.JankScore.Subframe";
-const char kHistogramAMPSubframeLayoutStabilityJankScoreFullNavigation[] =
-    "Experimental.LayoutStability.JankScore.Subframe.FullNavigation";
-
-// Host pattern for AMP Cache URLs.
-// See https://developers.google.com/amp/cache/overview#amp-cache-url-format
-// for a definition of the format of AMP Cache URLs.
-const char kAmpCacheHostSuffix[] = "cdn.ampproject.org";
-
-#define RECORD_HISTOGRAM_FOR_TYPE(name, amp_view_type, value)                 \
-  do {                                                                        \
-    PAGE_LOAD_HISTOGRAM(std::string(kHistogramPrefix).append(name), value);   \
-    switch (amp_view_type) {                                                  \
-      case AMPViewType::AMP_CACHE:                                            \
-        PAGE_LOAD_HISTOGRAM(                                                  \
-            std::string(kHistogramPrefix).append("AmpCache.").append(name),   \
-            value);                                                           \
-        break;                                                                \
-      case AMPViewType::GOOGLE_SEARCH_AMP_VIEWER:                             \
-        PAGE_LOAD_HISTOGRAM(std::string(kHistogramPrefix)                     \
-                                .append("GoogleSearch.")                      \
-                                .append(name),                                \
-                            value);                                           \
-        break;                                                                \
-      case AMPViewType::GOOGLE_NEWS_AMP_VIEWER:                               \
-        PAGE_LOAD_HISTOGRAM(                                                  \
-            std::string(kHistogramPrefix).append("GoogleNews.").append(name), \
-            value);                                                           \
-        break;                                                                \
-      case AMPViewType::NONE:                                                 \
-        NOTREACHED();                                                         \
-        break;                                                                \
-      case AMPViewType::AMP_VIEW_TYPE_LAST:                                   \
-        break;                                                                \
-    }                                                                         \
-  } while (false)
+    "InteractiveTiming.FirstInputDelay4.Subframe.FullNavigation";
+const char kHistogramAMPSubframeLayoutInstabilityShiftScore[] =
+    "LayoutInstability.CumulativeShiftScore.Subframe";
+const char kHistogramAMPSubframeLayoutInstabilityShiftScoreFullNavigation[] =
+    "LayoutInstability.CumulativeShiftScore.Subframe.FullNavigation";
 
 GURL GetCanonicalizedSameDocumentUrl(const GURL& url) {
   if (!url.has_ref())
@@ -106,8 +58,17 @@ GURL GetCanonicalizedSameDocumentUrl(const GURL& url) {
   return url.ReplaceComponents(replacements);
 }
 
-// Extracts the AMP viewer URL from an AMP cache URL, as encoded in a fragment
-// parameter.
+bool IsLikelyAmpCacheUrl(const GURL& url) {
+  // Our heuristic to identify AMP cache URLs is to check for the presence of
+  // the amp_js_v query param.
+  for (net::QueryIterator it(url); !it.IsAtEnd(); it.Advance()) {
+    if (it.GetKey() == "amp_js_v")
+      return true;
+  }
+  return false;
+}
+
+// Extracts the AMP viewer URL from a URL, as encoded in a fragment parameter.
 GURL GetViewerUrlFromCacheUrl(const GURL& url) {
   // The viewer URL is encoded in the fragment as a query string parameter
   // (&viewerURL=<URL>). net::QueryIterator only operates on the query string,
@@ -142,8 +103,7 @@ AMPPageLoadMetricsObserver::OnCommit(
     content::NavigationHandle* navigation_handle,
     ukm::SourceId source_id) {
   current_url_ = navigation_handle->GetURL();
-  view_type_ = GetAMPViewType(current_url_);
-  ProcessMainFrameNavigation(navigation_handle, view_type_);
+  ProcessMainFrameNavigation(navigation_handle);
   return CONTINUE_OBSERVING;
 }
 
@@ -160,17 +120,7 @@ void AMPPageLoadMetricsObserver::OnCommitSameDocumentNavigation(
   // document, if any.
   MaybeRecordAmpDocumentMetrics();
   current_main_frame_nav_info_ = nullptr;
-
-  AMPViewType same_document_view_type = GetAMPViewType(url);
-  if (same_document_view_type == AMPViewType::NONE)
-    return;
-
-  // Count how often AMP same-document navigations occur.
-  UMA_HISTOGRAM_ENUMERATION(
-      std::string(kHistogramPrefix).append("SameDocumentView"),
-      same_document_view_type, AMPViewType::AMP_VIEW_TYPE_LAST);
-
-  ProcessMainFrameNavigation(navigation_handle, same_document_view_type);
+  ProcessMainFrameNavigation(navigation_handle);
 }
 
 void AMPPageLoadMetricsObserver::OnDidFinishSubFrameNavigation(
@@ -188,30 +138,22 @@ void AMPPageLoadMetricsObserver::OnDidFinishSubFrameNavigation(
       navigation_handle->GetParentFrame()->GetParent() != nullptr)
     return;
 
-  // Only track frames that have AMP cache URLs.
-  if (GetAMPViewType(navigation_handle->GetURL()) != AMPViewType::AMP_CACHE)
+  // Only track frames that have AMP cache-like URLs.
+  if (!IsLikelyAmpCacheUrl(navigation_handle->GetURL()))
     return;
 
   GURL viewer_url = GetViewerUrlFromCacheUrl(navigation_handle->GetURL());
   if (viewer_url.is_empty())
     return;
 
-  // Record information about the AMP document loaded in this subframe, which we
-  // may use later to record metrics.
+  // Record information about the document loaded in this subframe, which we may
+  // use later to record metrics. Note that we don't yet know if the document in
+  // the subframe is an AMP document. That's determined in
+  // OnLoadingBehaviorObserved.
   auto& subframe_info =
       amp_subframe_info_[navigation_handle->GetRenderFrameHost()];
   subframe_info.viewer_url = viewer_url;
   subframe_info.navigation_start = navigation_handle->NavigationStart();
-
-  // If the current MainFrameNavigationInfo doesn't yet have a subframe
-  // RenderFrameHost, and its URL matches our viewer URL, then associate the
-  // MainFrameNavigationInfo with this frame.
-  if (current_main_frame_nav_info_ &&
-      current_main_frame_nav_info_->subframe_rfh == nullptr &&
-      subframe_info.viewer_url == current_main_frame_nav_info_->url) {
-    current_main_frame_nav_info_->subframe_rfh =
-        navigation_handle->GetRenderFrameHost();
-  }
 }
 
 void AMPPageLoadMetricsObserver::OnFrameDeleted(content::RenderFrameHost* rfh) {
@@ -222,92 +164,6 @@ void AMPPageLoadMetricsObserver::OnFrameDeleted(content::RenderFrameHost* rfh) {
   }
 
   amp_subframe_info_.erase(rfh);
-}
-
-void AMPPageLoadMetricsObserver::OnDomContentLoadedEventStart(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (view_type_ == AMPViewType::NONE)
-    return;
-
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.document_timing->dom_content_loaded_event_start, info)) {
-    return;
-  }
-  RECORD_HISTOGRAM_FOR_TYPE(
-      kHistogramAMPDOMContentLoadedEventFired, view_type_,
-      timing.document_timing->dom_content_loaded_event_start.value());
-}
-
-void AMPPageLoadMetricsObserver::OnLoadEventStart(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (view_type_ == AMPViewType::NONE)
-    return;
-
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.document_timing->load_event_start, info)) {
-    return;
-  }
-  RECORD_HISTOGRAM_FOR_TYPE(kHistogramAMPLoadEventFired, view_type_,
-                            timing.document_timing->load_event_start.value());
-}
-
-void AMPPageLoadMetricsObserver::OnFirstLayout(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (view_type_ == AMPViewType::NONE)
-    return;
-
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.document_timing->first_layout, info)) {
-    return;
-  }
-  RECORD_HISTOGRAM_FOR_TYPE(kHistogramAMPFirstLayout, view_type_,
-                            timing.document_timing->first_layout.value());
-}
-
-void AMPPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (view_type_ == AMPViewType::NONE)
-    return;
-
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.paint_timing->first_contentful_paint, info)) {
-    return;
-  }
-  RECORD_HISTOGRAM_FOR_TYPE(
-      kHistogramAMPFirstContentfulPaint, view_type_,
-      timing.paint_timing->first_contentful_paint.value());
-}
-
-void AMPPageLoadMetricsObserver::OnParseStart(
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.parse_timing->parse_start, info)) {
-    return;
-  }
-
-  if (view_type_ == AMPViewType::NONE) {
-    // If we ended up on a non-AMP document, but the initial URL matched an AMP
-    // document, record the time it took to get to this point. We encounter this
-    // case in the Google News AMP viewer, for example: when a user loads a news
-    // AMP URL in a non-same-document navigation context, the user is presented
-    // with a redirect prompt which they must click through to continue to the
-    // canonical document on the non-AMP origin.
-    AMPViewType initial_view_type = GetAMPViewType(info.start_url);
-    if (initial_view_type != AMPViewType::NONE) {
-      RECORD_HISTOGRAM_FOR_TYPE(kHistogramAMPParseStartRedirect,
-                                initial_view_type,
-                                timing.parse_timing->parse_start.value());
-    }
-    return;
-  }
-
-  RECORD_HISTOGRAM_FOR_TYPE(kHistogramAMPParseStart, view_type_,
-                            timing.parse_timing->parse_start.value());
 }
 
 void AMPPageLoadMetricsObserver::OnTimingUpdate(
@@ -326,7 +182,7 @@ void AMPPageLoadMetricsObserver::OnTimingUpdate(
 
 void AMPPageLoadMetricsObserver::OnSubFrameRenderDataUpdate(
     content::RenderFrameHost* subframe_rfh,
-    const page_load_metrics::mojom::PageRenderData& render_data,
+    const page_load_metrics::mojom::FrameRenderDataUpdate& render_data,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   if (subframe_rfh == nullptr)
     return;
@@ -335,7 +191,9 @@ void AMPPageLoadMetricsObserver::OnSubFrameRenderDataUpdate(
   if (it == amp_subframe_info_.end())
     return;
 
-  it->second.render_data = render_data.Clone();
+  it->second.render_data.layout_shift_score += render_data.layout_shift_delta;
+  it->second.render_data.layout_shift_score_before_input_or_scroll +=
+      render_data.layout_shift_delta_before_input_or_scroll;
 }
 
 void AMPPageLoadMetricsObserver::OnComplete(
@@ -346,15 +204,11 @@ void AMPPageLoadMetricsObserver::OnComplete(
 }
 
 void AMPPageLoadMetricsObserver::ProcessMainFrameNavigation(
-    content::NavigationHandle* navigation_handle,
-    AMPViewType view_type) {
-  if (view_type != AMPViewType::GOOGLE_SEARCH_AMP_VIEWER)
-    return;
-
+    content::NavigationHandle* navigation_handle) {
   // Find the subframe RenderFrameHost hosting the AMP document for this
   // navigation. Note that in some cases, the subframe may not exist yet, in
-  // which case logic in OnDidFinishSubFrameNavigation will associate the
-  // subframe with current_main_frame_nav_info_.
+  // which case logic in OnLoadingBehaviorObserved will associate the subframe
+  // with current_main_frame_nav_info_.
   content::RenderFrameHost* subframe_rfh = nullptr;
   for (const auto& kv : amp_subframe_info_) {
     if (navigation_handle->GetURL() == kv.second.viewer_url) {
@@ -371,6 +225,65 @@ void AMPPageLoadMetricsObserver::ProcessMainFrameNavigation(
       navigation_handle->IsSameDocument()});
 }
 
+void AMPPageLoadMetricsObserver::OnLoadingBehaviorObserved(
+    content::RenderFrameHost* subframe_rfh,
+    int behavior_flags,
+    const page_load_metrics::PageLoadExtraInfo& info) {
+  RecordLoadingBehaviorObserved(info);
+
+  if (subframe_rfh == nullptr)
+    return;
+
+  if ((behavior_flags &
+       blink::WebLoadingBehaviorFlag::kWebLoadingBehaviorAmpDocumentLoaded) ==
+      0)
+    return;
+
+  auto it = amp_subframe_info_.find(subframe_rfh);
+  if (it == amp_subframe_info_.end())
+    return;
+
+  SubFrameInfo& subframe_info = it->second;
+  if (subframe_info.amp_document_loaded)
+    return;
+
+  subframe_info.amp_document_loaded = true;
+
+  // If the current MainFrameNavigationInfo doesn't yet have a subframe
+  // RenderFrameHost, and its URL matches the AMP subframe's viewer URL, then
+  // associate the MainFrameNavigationInfo with this frame.
+  if (current_main_frame_nav_info_ &&
+      current_main_frame_nav_info_->subframe_rfh == nullptr &&
+      subframe_info.viewer_url == current_main_frame_nav_info_->url) {
+    current_main_frame_nav_info_->subframe_rfh = subframe_rfh;
+  }
+}
+
+void AMPPageLoadMetricsObserver::RecordLoadingBehaviorObserved(
+    const page_load_metrics::PageLoadExtraInfo& info) {
+  ukm::builders::AmpPageLoad builder(info.source_id);
+  bool should_record = false;
+  if (!observed_amp_main_frame_ &&
+      (info.main_frame_metadata.behavior_flags &
+       blink::WebLoadingBehaviorFlag::kWebLoadingBehaviorAmpDocumentLoaded) !=
+          0) {
+    builder.SetMainFrameAmpPageLoad(true);
+    observed_amp_main_frame_ = true;
+    should_record = true;
+  }
+
+  if (!observed_amp_sub_frame_ &&
+      (info.subframe_metadata.behavior_flags &
+       blink::WebLoadingBehaviorFlag::kWebLoadingBehaviorAmpDocumentLoaded) !=
+          0) {
+    builder.SetSubFrameAmpPageLoad(true);
+    observed_amp_sub_frame_ = true;
+    should_record = true;
+  }
+  if (should_record)
+    builder.Record(ukm::UkmRecorder::Get());
+}
+
 void AMPPageLoadMetricsObserver::MaybeRecordAmpDocumentMetrics() {
   if (current_main_frame_nav_info_ == nullptr ||
       current_main_frame_nav_info_->subframe_rfh == nullptr)
@@ -382,6 +295,9 @@ void AMPPageLoadMetricsObserver::MaybeRecordAmpDocumentMetrics() {
 
   const SubFrameInfo& subframe_info = it->second;
   if (subframe_info.viewer_url != current_main_frame_nav_info_->url)
+    return;
+
+  if (!subframe_info.amp_document_loaded)
     return;
 
   // TimeDeltas in subframe_info are relative to the navigation start in the AMP
@@ -458,7 +374,7 @@ void AMPPageLoadMetricsObserver::MaybeRecordAmpDocumentMetrics() {
     if (AssignTimeAndSizeForLargestContentfulPaint(
             subframe_info.timing->paint_timing, &largest_content_paint_time,
             &largest_content_paint_size, &largest_content_type)) {
-      builder.SetSubFrame_PaintTiming_NavigationToLargestContentPaint(
+      builder.SetSubFrame_PaintTiming_NavigationToLargestContentfulPaint(
           largest_content_paint_time.value().InMilliseconds());
 
       // Adjust by the navigation_input_delta.
@@ -467,19 +383,20 @@ void AMPPageLoadMetricsObserver::MaybeRecordAmpDocumentMetrics() {
       if (current_main_frame_nav_info_->is_same_document_navigation) {
         PAGE_LOAD_HISTOGRAM(
             std::string(kHistogramPrefix)
-                .append(kHistogramAMPSubframeLargestContentPaint),
+                .append(kHistogramAMPSubframeLargestContentfulPaint),
             largest_content_paint_time.value());
       } else {
         PAGE_LOAD_HISTOGRAM(
             std::string(kHistogramPrefix)
-                .append(kHistogramAMPSubframeLargestContentPaintFullNavigation),
+                .append(
+                    kHistogramAMPSubframeLargestContentfulPaintFullNavigation),
             largest_content_paint_time.value());
       }
     }
 
     if (subframe_info.timing->interactive_timing->first_input_delay
             .has_value()) {
-      builder.SetSubFrame_InteractiveTiming_FirstInputDelay3(
+      builder.SetSubFrame_InteractiveTiming_FirstInputDelay4(
           subframe_info.timing->interactive_timing->first_input_delay.value()
               .InMilliseconds());
 
@@ -501,60 +418,36 @@ void AMPPageLoadMetricsObserver::MaybeRecordAmpDocumentMetrics() {
     }
   }
 
-  if (!subframe_info.render_data.is_null()) {
-    // Clamp the score to a max of 10, which is equivalent to a frame with 10
-    // full-frame janks.
-    float clamped_jank_score =
-        std::min(subframe_info.render_data->layout_jank_score, 10.0f);
+  // Clamp the score to a max of 10, which is equivalent to a frame with 10
+  // full-frame layout shifts.
+  float clamped_shift_score =
+      std::min(subframe_info.render_data.layout_shift_score, 10.0f);
+  float clamped_shift_score_before_input_or_scroll = std::min(
+      subframe_info.render_data.layout_shift_score_before_input_or_scroll,
+      10.0f);
 
-    // For UKM, report (jank_score * 100) as an int in the range [0, 1000].
-    builder.SetSubFrame_LayoutStability_JankScore(
-        static_cast<int>(roundf(clamped_jank_score * 100.0f)));
+  // For UKM, report (shift_score * 100) as an int in the range [0, 1000].
+  builder
+      .SetSubFrame_LayoutInstability_CumulativeShiftScore(
+          static_cast<int>(roundf(clamped_shift_score * 100.0f)))
+      .SetSubFrame_LayoutInstability_CumulativeShiftScore_BeforeInputOrScroll(
+          static_cast<int>(
+              roundf(clamped_shift_score_before_input_or_scroll * 100.0f)));
 
-    // For UMA, report (jank_score * 10) an an int in the range [0,100].
-    int32_t uma_value = static_cast<int>(roundf(clamped_jank_score * 10.0f));
-    if (current_main_frame_nav_info_->is_same_document_navigation) {
-      UMA_HISTOGRAM_COUNTS_100(
-          std::string(kHistogramPrefix)
-              .append(kHistogramAMPSubframeLayoutStabilityJankScore),
-          uma_value);
-    } else {
-      UMA_HISTOGRAM_COUNTS_100(
-          std::string(kHistogramPrefix)
-              .append(
-                  kHistogramAMPSubframeLayoutStabilityJankScoreFullNavigation),
-          uma_value);
-    }
+  // For UMA, report (shift_score * 10) an an int in the range [0,100].
+  int32_t uma_value = static_cast<int>(roundf(clamped_shift_score * 10.0f));
+  if (current_main_frame_nav_info_->is_same_document_navigation) {
+    UMA_HISTOGRAM_COUNTS_100(
+        std::string(kHistogramPrefix)
+            .append(kHistogramAMPSubframeLayoutInstabilityShiftScore),
+        uma_value);
+  } else {
+    UMA_HISTOGRAM_COUNTS_100(
+        std::string(kHistogramPrefix)
+            .append(
+                kHistogramAMPSubframeLayoutInstabilityShiftScoreFullNavigation),
+        uma_value);
   }
 
   builder.Record(ukm::UkmRecorder::Get());
-}
-
-// static
-AMPPageLoadMetricsObserver::AMPViewType
-AMPPageLoadMetricsObserver::GetAMPViewType(const GURL& url) {
-  const char kAmpViewerUrlPrefix[] = "/amp/";
-
-  if (base::EndsWith(url.host(), kAmpCacheHostSuffix,
-                     base::CompareCase::INSENSITIVE_ASCII)) {
-    return AMPViewType::AMP_CACHE;
-  }
-
-  base::Optional<std::string> google_hostname_prefix =
-      page_load_metrics::GetGoogleHostnamePrefix(url);
-  if (!google_hostname_prefix.has_value())
-    return AMPViewType::NONE;
-
-  if (google_hostname_prefix.value() == "www" &&
-      base::StartsWith(url.path_piece(), kAmpViewerUrlPrefix,
-                       base::CompareCase::SENSITIVE) &&
-      url.path_piece().length() > strlen(kAmpViewerUrlPrefix)) {
-    return AMPViewType::GOOGLE_SEARCH_AMP_VIEWER;
-  }
-
-  if (google_hostname_prefix.value() == "news" &&
-      url.path_piece() == "/news/amp" && !url.query_piece().empty()) {
-    return AMPViewType::GOOGLE_NEWS_AMP_VIEWER;
-  }
-  return AMPViewType::NONE;
 }

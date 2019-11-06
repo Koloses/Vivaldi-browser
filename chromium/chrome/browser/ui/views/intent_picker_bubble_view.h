@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "chrome/browser/chromeos/apps/intent_helper/apps_navigation_types.h"
+#include "chrome/browser/apps/intent_helper/apps_navigation_types.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_bubble_delegate_view.h"
 #include "chrome/services/app_service/public/mojom/types.mojom.h"
@@ -58,17 +58,19 @@ class IntentPickerLabelButton;
 class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
                                public views::ButtonListener {
  public:
-  using AppInfo = chromeos::IntentPickerAppInfo;
+  using AppInfo = apps::IntentPickerAppInfo;
 
   ~IntentPickerBubbleView() override;
   static views::Widget* ShowBubble(views::View* anchor_view,
                                    content::WebContents* web_contents,
                                    std::vector<AppInfo> app_info,
-                                   bool disable_stay_in_chrome,
+                                   bool enable_stay_in_chrome,
+                                   bool show_persistence_options,
                                    IntentPickerResponse intent_picker_cb);
   static std::unique_ptr<IntentPickerBubbleView> CreateBubbleView(
       std::vector<AppInfo> app_info,
-      bool disable_stay_in_chrome,
+      bool enable_stay_in_chrome,
+      bool show_persistence_options,
       IntentPickerResponse intent_picker_cb,
       content::WebContents* web_contents);
   static IntentPickerBubbleView* intent_picker_bubble() {
@@ -83,10 +85,10 @@ class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
   bool Cancel() override;
   bool Close() override;
   bool ShouldShowCloseButton() const override;
+  int GetDialogButtons() const override;
 
  protected:
   // LocationBarBubbleDelegateView overrides:
-  void Init() override;
   base::string16 GetWindowTitle() const override;
   bool IsDialogButtonEnabled(ui::DialogButton button) const override;
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
@@ -106,7 +108,8 @@ class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
   IntentPickerBubbleView(std::vector<AppInfo> app_info,
                          IntentPickerResponse intent_picker_cb,
                          content::WebContents* web_contents,
-                         bool disable_display_in_chrome);
+                         bool enable_stay_in_chrome,
+                         bool show_persistence_options);
 
   // views::BubbleDialogDelegateView overrides:
   void OnWidgetDestroying(views::Widget* widget) override;
@@ -121,12 +124,14 @@ class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
   // ui::EventHandler overrides:
   void OnKeyEvent(ui::KeyEvent* event) override;
 
+  void Initialize();
+
   // Retrieves the IntentPickerLabelButton* contained at position |index| from
   // the internal ScrollView.
   IntentPickerLabelButton* GetIntentPickerLabelButtonAt(size_t index);
   void RunCallback(const std::string& launch_name,
                    apps::mojom::AppType app_type,
-                   chromeos::IntentPickerCloseReason close_reason,
+                   apps::IntentPickerCloseReason close_reason,
                    bool should_persist);
 
   // Returns true if this picker has candidates for the user to choose from, and
@@ -163,14 +168,18 @@ class IntentPickerBubbleView : public LocationBarBubbleDelegateView,
   // Pre-select the first app on the list.
   size_t selected_app_tag_ = 0;
 
-  views::ScrollView* scroll_view_;
+  views::ScrollView* scroll_view_ = nullptr;
 
   std::vector<AppInfo> app_info_;
 
-  views::Checkbox* remember_selection_checkbox_;
+  views::Checkbox* remember_selection_checkbox_ = nullptr;
 
   // Tells whether or not 'Stay in Chrome' should be enabled as an option.
-  const bool disable_stay_in_chrome_;
+  const bool enable_stay_in_chrome_;
+
+  // Whether 'Remember selection' checkbox and "Stay in chrome" button should be
+  // shown or hidden.
+  const bool show_persistence_options_;
 
   DISALLOW_COPY_AND_ASSIGN(IntentPickerBubbleView);
 };

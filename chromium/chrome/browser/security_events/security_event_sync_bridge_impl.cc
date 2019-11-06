@@ -35,8 +35,7 @@ std::string GetStorageKeyFromSpecifics(
 std::unique_ptr<syncer::EntityData> ToEntityData(
     sync_pb::SecurityEventSpecifics specifics) {
   auto entity_data = std::make_unique<syncer::EntityData>();
-  entity_data->non_unique_name =
-      base::NumberToString(specifics.event_time_usec());
+  entity_data->name = base::NumberToString(specifics.event_time_usec());
   entity_data->specifics.set_allocated_security_event(&specifics);
   return entity_data;
 }
@@ -46,8 +45,7 @@ std::unique_ptr<syncer::EntityData> ToEntityData(
 SecurityEventSyncBridgeImpl::SecurityEventSyncBridgeImpl(
     syncer::OnceModelTypeStoreFactory store_factory,
     std::unique_ptr<syncer::ModelTypeChangeProcessor> change_processor)
-    : syncer::ModelTypeSyncBridge(std::move(change_processor)),
-      weak_ptr_factory_(this) {
+    : syncer::ModelTypeSyncBridge(std::move(change_processor)) {
   std::move(store_factory)
       .Run(syncer::SECURITY_EVENTS,
            base::BindOnce(&SecurityEventSyncBridgeImpl::OnStoreCreated,
@@ -106,9 +104,9 @@ SecurityEventSyncBridgeImpl::ApplySyncChanges(
     syncer::EntityChangeList entity_changes) {
   std::unique_ptr<syncer::ModelTypeStore::WriteBatch> write_batch =
       store_->CreateWriteBatch();
-  for (syncer::EntityChange& change : entity_changes) {
-    DCHECK_EQ(syncer::EntityChange::ACTION_DELETE, change.type());
-    write_batch->DeleteData(change.storage_key());
+  for (const std::unique_ptr<syncer::EntityChange>& change : entity_changes) {
+    DCHECK_EQ(syncer::EntityChange::ACTION_DELETE, change->type());
+    write_batch->DeleteData(change->storage_key());
   }
 
   write_batch->TakeMetadataChangesFrom(std::move(metadata_change_list));

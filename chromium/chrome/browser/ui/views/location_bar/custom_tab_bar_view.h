@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_CUSTOM_TAB_BAR_VIEW_H_
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -15,6 +16,10 @@
 
 namespace gfx {
 class Rect;
+}
+
+namespace views {
+class FlexLayout;
 }
 
 class CustomTabBarTitleOriginView;
@@ -52,7 +57,7 @@ class CustomTabBarView : public views::AccessiblePaneView,
 
   // LocationIconView::Delegate:
   content::WebContents* GetWebContents() override;
-  bool IsEditingOrEmpty() override;
+  bool IsEditingOrEmpty() const override;
   void OnLocationIconPressed(const ui::MouseEvent& event) override;
   void OnLocationIconDragged(const ui::MouseEvent& event) override;
   SkColor GetSecurityChipColor(
@@ -71,12 +76,19 @@ class CustomTabBarView : public views::AccessiblePaneView,
   base::string16 location_for_testing() const { return last_location_; }
   views::Button* close_button_for_testing() const { return close_button_; }
   void GoBackToAppForTesting();
+  bool IsShowingOriginForTesting() const;
 
  private:
   // Takes the web contents for the custom tab bar back to the app scope.
   void GoBackToApp();
 
+  // Called when the AppInfo dialog closes to set the focus on the correct view
+  // within the browser.
+  void AppInfoClosedCallback(views::Widget::ClosedReason closed_reason,
+                             bool reload_prompt);
+
   SkColor title_bar_color_;
+  SkColor background_color_;
 
   base::string16 last_title_;
   base::string16 last_location_;
@@ -86,6 +98,10 @@ class CustomTabBarView : public views::AccessiblePaneView,
   LocationIconView* location_icon_view_ = nullptr;
   CustomTabBarTitleOriginView* title_origin_view_ = nullptr;
   ScopedObserver<TabStripModel, CustomTabBarView> tab_strip_model_observer_;
+
+  views::FlexLayout* layout_manager_;
+
+  base::WeakPtrFactory<CustomTabBarView> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CustomTabBarView);
 };

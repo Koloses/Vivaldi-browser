@@ -28,7 +28,7 @@ namespace syncer {
 // In order to track datatype association results, we need at least as many
 // entries as datatypes. Reserve additional space for other kinds of events that
 // are likely to happen during first sync or startup.
-const unsigned int kMaxEntries = MODEL_TYPE_COUNT + 10;
+const unsigned int kMaxEntries = ModelType::NUM_ENTRIES + 10;
 
 // Listens to events and records them in a queue. And passes the events to
 // syncer when requested.
@@ -46,8 +46,7 @@ class DebugInfoEventListener : public SyncManager::Observer,
   void OnInitializationComplete(
       const WeakHandle<JsBackend>& js_backend,
       const WeakHandle<DataTypeDebugInfoListener>& debug_listener,
-      bool success,
-      ModelTypeSet restored_types) override;
+      bool success) override;
   void OnConnectionStatusChange(ConnectionStatus connection_status) override;
   void OnActionableError(const SyncProtocolError& sync_error) override;
   void OnMigrationRequested(ModelTypeSet types) override;
@@ -109,7 +108,7 @@ class DebugInfoEventListener : public SyncManager::Observer,
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<DebugInfoEventListener> weak_ptr_factory_;
+  base::WeakPtrFactory<DebugInfoEventListener> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DebugInfoEventListener);
 };

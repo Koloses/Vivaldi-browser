@@ -25,6 +25,7 @@
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/picture_in_picture_window_controller.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
@@ -36,11 +37,11 @@
 #include "content/shell/browser/shell_devtools_frontend.h"
 #include "content/shell/browser/shell_javascript_dialog_manager.h"
 #include "content/shell/browser/web_test/blink_test_controller.h"
+#include "content/shell/browser/web_test/fake_bluetooth_scanning_prompt.h"
 #include "content/shell/browser/web_test/secondary_test_window_observer.h"
 #include "content/shell/browser/web_test/web_test_bluetooth_chooser_factory.h"
 #include "content/shell/browser/web_test/web_test_devtools_bindings.h"
 #include "content/shell/browser/web_test/web_test_javascript_dialog_manager.h"
-#include "content/shell/common/shell_messages.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/common/web_test/web_test_switches.h"
 #include "media/media_buildflags.h"
@@ -56,7 +57,7 @@ const int kDefaultTestWindowWidthDip = 800;
 const int kDefaultTestWindowHeightDip = 600;
 
 std::vector<Shell*> Shell::windows_;
-base::Callback<void(Shell*)> Shell::shell_created_callback_;
+base::OnceCallback<void(Shell*)> Shell::shell_created_callback_;
 
 class Shell::DevToolsWebContentsObserver : public WebContentsObserver {
  public:
@@ -92,10 +93,12 @@ Shell::Shell(std::unique_ptr<WebContents> web_contents,
     web_contents_->SetDelegate(this);
 
   if (switches::IsRunWebTestsSwitchPresent()) {
-    headless_ = true;
-    // In a headless shell, disable occlusion tracking. Otherwise, WebContents
-    // would always behave as if they were occluded, i.e. would not render
-    // frames and would not receive input events.
+    headless_ = !base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kDisableHeadlessMode);
+    // Disable occlusion tracking. In a headless shell WebContents would always
+    // behave as if they were occluded, i.e. would not render frames and would
+    // not receive input events. For non-headless mode we do not want tests
+    // running in parallel to trigger occlusion tracking.
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kDisableBackgroundingOccludedWindowsForTesting);
   }
@@ -106,10 +109,8 @@ Shell::Shell(std::unique_ptr<WebContents> web_contents,
 
   windows_.push_back(this);
 
-  if (!shell_created_callback_.is_null()) {
-    shell_created_callback_.Run(this);
-    shell_created_callback_.Reset();
-  }
+  if (shell_created_callback_)
+    std::move(shell_created_callback_).Run(this);
 }
 
 Shell::~Shell() {
@@ -196,16 +197,15 @@ void Shell::QuitMainMessageLoopForTesting() {
 }
 
 void Shell::SetShellCreatedCallback(
-    base::Callback<void(Shell*)> shell_created_callback) {
-  DCHECK(shell_created_callback_.is_null());
+    base::OnceCallback<void(Shell*)> shell_created_callback) {
+  DCHECK(!shell_created_callback_);
   shell_created_callback_ = std::move(shell_created_callback);
 }
 
-Shell* Shell::FromRenderViewHost(RenderViewHost* rvh) {
-  for (size_t i = 0; i < windows_.size(); ++i) {
-    if (windows_[i]->web_contents() &&
-        windows_[i]->web_contents()->GetRenderViewHost() == rvh) {
-      return windows_[i];
+Shell* Shell::FromWebContents(WebContents* web_contents) {
+  for (Shell* window : windows_) {
+    if (window->web_contents() && window->web_contents() == web_contents) {
+      return window;
     }
   }
   return nullptr;
@@ -489,8 +489,6 @@ void Shell::ToggleFullscreenModeForTab(WebContents* web_contents,
 #if defined(OS_ANDROID)
   PlatformToggleFullscreenModeForTab(web_contents, enter_fullscreen);
 #endif
-  if (!switches::IsRunWebTestsSwitchPresent())
-    return;
   if (is_fullscreen_ != enter_fullscreen) {
     is_fullscreen_ = enter_fullscreen;
     web_contents->GetRenderViewHost()
@@ -499,7 +497,7 @@ void Shell::ToggleFullscreenModeForTab(WebContents* web_contents,
   }
 }
 
-bool Shell::IsFullscreenForTabOrPending(const WebContents* web_contents) const {
+bool Shell::IsFullscreenForTabOrPending(const WebContents* web_contents) {
 #if defined(OS_ANDROID)
   return PlatformIsFullscreenForTabOrPending(web_contents);
 #else
@@ -507,8 +505,7 @@ bool Shell::IsFullscreenForTabOrPending(const WebContents* web_contents) const {
 #endif
 }
 
-blink::WebDisplayMode Shell::GetDisplayMode(
-    const WebContents* web_contents) const {
+blink::WebDisplayMode Shell::GetDisplayMode(const WebContents* web_contents) {
   // TODO: should return blink::WebDisplayModeFullscreen wherever user puts
   // a browser window into fullscreen (not only in case of renderer-initiated
   // fullscreen mode): crbug.com/476874.
@@ -527,7 +524,7 @@ void Shell::CloseContents(WebContents* source) {
   Close();
 }
 
-bool Shell::CanOverscrollContent() const {
+bool Shell::CanOverscrollContent() {
 #if defined(USE_AURA)
   return true;
 #else
@@ -558,8 +555,14 @@ std::unique_ptr<BluetoothChooser> Shell::RunBluetoothChooser(
   return nullptr;
 }
 
+std::unique_ptr<BluetoothScanningPrompt> Shell::ShowBluetoothScanningPrompt(
+    RenderFrameHost* frame,
+    const BluetoothScanningPrompt::EventHandler& event_handler) {
+  return std::make_unique<FakeBluetoothScanningPrompt>(event_handler);
+}
+
 bool Shell::DidAddMessageToConsole(WebContents* source,
-                                   int32_t level,
+                                   blink::mojom::ConsoleMessageLevel log_level,
                                    const base::string16& message,
                                    int32_t line_no,
                                    const base::string16& source_id) {
@@ -615,13 +618,15 @@ bool Shell::ShouldAllowRunningInsecureContent(
   return allowed_per_prefs || allowed_by_test;
 }
 
-gfx::Size Shell::EnterPictureInPicture(content::WebContents* web_contents,
-                                       const viz::SurfaceId& surface_id,
-                                       const gfx::Size& natural_size) {
-  // During tests, returning a fake window size (same aspect ratio) to pretend
-  // the window was created and allow tests to run accordingly.
-  return switches::IsRunWebTestsSwitchPresent() ? natural_size
-                                                : gfx::Size(0, 0);
+PictureInPictureResult Shell::EnterPictureInPicture(
+    content::WebContents* web_contents,
+    const viz::SurfaceId& surface_id,
+    const gfx::Size& natural_size) {
+  // During tests, returning success to pretend the window was created and allow
+  // tests to run accordingly.
+  if (!switches::IsRunWebTestsSwitchPresent())
+    return PictureInPictureResult::kNotSupported;
+  return PictureInPictureResult::kSuccess;
 }
 
 bool Shell::ShouldResumeRequestsForCreatedWindow() {

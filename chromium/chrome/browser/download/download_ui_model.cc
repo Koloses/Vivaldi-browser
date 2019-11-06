@@ -8,14 +8,21 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/download/offline_item_utils.h"
+#include "chrome/browser/safe_browsing/advanced_protection_status_manager.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/download/public/common/download_danger_type.h"
 #include "net/base/mime_util.h"
+#include "net/url_request/url_request_status.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
 #include "ui/base/text/bytes_formatting.h"
 #include "ui/gfx/text_elider.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/browser.h"
+#endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/note_taking_helper.h"
@@ -247,6 +254,7 @@ base::string16 DownloadUIModel::GetWarningText(const gfx::FontList& font_list,
   base::string16 elided_filename =
       gfx::ElideFilename(GetFileNameToReportUser(), font_list, base_width,
                          gfx::Typesetter::BROWSER);
+
   switch (GetDangerType()) {
     case download::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL: {
       return l10n_util::GetStringUTF16(IDS_PROMPT_MALICIOUS_DOWNLOAD_URL);
@@ -266,13 +274,23 @@ base::string16 DownloadUIModel::GetWarningText(const gfx::FontList& font_list,
                                         elided_filename);
     }
     case download::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT: {
-      return l10n_util::GetStringFUTF16(IDS_PROMPT_UNCOMMON_DOWNLOAD_CONTENT,
-                                        elided_filename);
+      bool request_ap_verdicts = false;
+#if defined(FULL_SAFE_BROWSING)
+      request_ap_verdicts = safe_browsing::AdvancedProtectionStatusManager::
+          RequestsAdvancedProtectionVerdicts(profile());
+#endif
+      return l10n_util::GetStringFUTF16(
+          request_ap_verdicts
+              ? IDS_PROMPT_UNCOMMON_DOWNLOAD_CONTENT_IN_ADVANCED_PROTECTION
+              : IDS_PROMPT_UNCOMMON_DOWNLOAD_CONTENT,
+          elided_filename);
     }
     case download::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED: {
       return l10n_util::GetStringFUTF16(IDS_PROMPT_DOWNLOAD_CHANGES_SETTINGS,
                                         elided_filename);
     }
+    case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED:
+    case download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING:
     case download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS:
     case download::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT:
     case download::DOWNLOAD_DANGER_TYPE_USER_VALIDATED:

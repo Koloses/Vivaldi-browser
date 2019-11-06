@@ -22,7 +22,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/post_task.h"
-#include "base/task/task_scheduler/task_scheduler.h"
+#include "base/task/thread_pool/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/app/mojo/mojo_init.h"
@@ -31,10 +31,10 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/system_connector.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/test/content_browser_test.h"
@@ -48,7 +48,6 @@
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "gpu/config/gpu_switches.h"
-#include "gpu/ipc/host/gpu_switches.h"
 #include "ipc/ipc.mojom.h"
 #include "ipc/ipc_channel_mojo.h"
 #include "mojo/core/embedder/embedder.h"
@@ -62,6 +61,7 @@
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/buffer_format_util.h"
+#include "ui/gfx/switches.h"
 
 #if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 // Need to disable IPC Audio for these tests, or the tests will hang
@@ -178,8 +178,7 @@ class RenderThreadImplBrowserTest : public testing::Test {
         service_manager::Identity(mojom::kRendererServiceName,
                                   service_manager::kSystemInstanceGroup,
                                   base::Token{}, base::Token::CreateRandom()),
-        &invitation, ServiceManagerConnection::GetForProcess()->GetConnector(),
-        io_task_runner);
+        &invitation, GetSystemConnector(), io_task_runner);
 
     mojo::MessagePipe pipe;
     child_connection_->BindInterface(IPC::mojom::ChannelBootstrap::Name_,
@@ -457,19 +456,14 @@ class RenderThreadImplGpuMemoryBufferBrowserTest
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSingleProcess);
     NativeBufferFlag native_buffer_flag = ::testing::get<0>(GetParam());
-    switch (native_buffer_flag) {
-      case kEnableNativeBuffers:
-        command_line->AppendSwitch(switches::kEnableNativeGpuMemoryBuffers);
-        break;
-      case kDisableNativeBuffers:
-        command_line->AppendSwitch(switches::kDisableNativeGpuMemoryBuffers);
-        break;
+    if (native_buffer_flag == kEnableNativeBuffers) {
+      command_line->AppendSwitch(switches::kEnableNativeGpuMemoryBuffers);
     }
   }
 
   void SetUpOnMainThread() override {
     NavigateToURL(shell(), GURL(url::kAboutBlankURL));
-    PostTaskToInProcessRendererAndWait(base::Bind(
+    PostTaskToInProcessRendererAndWait(base::BindOnce(
         &RenderThreadImplGpuMemoryBufferBrowserTest::SetUpOnRenderThread,
         base::Unretained(this)));
   }
@@ -496,7 +490,7 @@ IN_PROC_BROWSER_TEST_P(RenderThreadImplGpuMemoryBufferBrowserTest,
   ASSERT_TRUE(buffer->Map());
 
   // Write to buffer and check result.
-  size_t num_planes = gfx::NumberOfPlanesForBufferFormat(format);
+  size_t num_planes = gfx::NumberOfPlanesForLinearBufferFormat(format);
   for (size_t plane = 0; plane < num_planes; ++plane) {
     ASSERT_TRUE(buffer->memory(plane));
     ASSERT_TRUE(buffer->stride(plane));

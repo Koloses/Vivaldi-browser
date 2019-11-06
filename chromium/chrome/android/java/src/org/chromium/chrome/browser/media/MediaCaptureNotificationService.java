@@ -17,7 +17,6 @@ import android.util.SparseIntArray;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.notifications.ChromeNotification;
 import org.chromium.chrome.browser.notifications.ChromeNotificationBuilder;
 import org.chromium.chrome.browser.notifications.NotificationBuilderFactory;
@@ -210,16 +209,12 @@ public class MediaCaptureNotificationService extends Service {
             }
         }
 
-        boolean hideUserData = isIncognito
-                && ChromeFeatureList.isEnabled(
-                           ChromeFeatureList.HIDE_USER_DATA_FROM_INCOGNITO_NOTIFICATIONS);
-
         StringBuilder descriptionText =
-                new StringBuilder(getNotificationContentText(mediaType, url, hideUserData))
+                new StringBuilder(getNotificationContentText(mediaType, url, isIncognito))
                         .append('.');
 
         String contentText;
-        if (hideUserData) {
+        if (isIncognito) {
             builder.setSubText(ContextUtils.getApplicationContext().getResources().getString(
                     R.string.notification_incognito_tab));
             // App name is automatically added to the title from Android N,
@@ -408,13 +403,14 @@ public class MediaCaptureNotificationService extends Service {
     /**
      * Clear any previous media notifications.
      */
-    public static void clearMediaNotifications(Context context) {
+    public static void clearMediaNotifications() {
         SharedPreferences sharedPreferences =
                 ContextUtils.getAppSharedPreferences();
         Set<String> notificationIds =
                 sharedPreferences.getStringSet(WEBRTC_NOTIFICATION_IDS, null);
         if (notificationIds == null || notificationIds.isEmpty()) return;
 
+        Context context = ContextUtils.getApplicationContext();
         context.startService(new Intent(context, MediaCaptureNotificationService.class));
     }
 

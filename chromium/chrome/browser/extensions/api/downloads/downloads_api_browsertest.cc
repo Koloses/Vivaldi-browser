@@ -14,13 +14,13 @@
 #include "base/guid.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "base/test/bind_test_util.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_core_service.h"
 #include "chrome/browser/download/download_core_service_factory.h"
@@ -32,7 +32,6 @@
 #include "chrome/browser/extensions/api/downloads_internal/downloads_internal_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
-#include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/platform_util_internal.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -50,9 +49,11 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_download_http_response.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -74,6 +75,7 @@
 #include "storage/browser/fileapi/file_system_operation_runner.h"
 #include "storage/browser/fileapi/file_system_url.h"
 #include "ui/base/page_transition_types.h"
+#include "url/origin.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -347,6 +349,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
         current_browser(),
         extension_->GetResourceURL("empty.html"),
         ui::PAGE_TRANSITION_LINK);
+    EXPECT_TRUE(content::WaitForLoadStop(tab));
     EventRouter::Get(current_browser()->profile())
         ->AddEventListener(downloads::OnCreated::kEventName,
                            tab->GetMainFrame()->GetProcess(), GetExtensionId());
@@ -381,9 +384,6 @@ class DownloadExtensionTest : public ExtensionApiTest {
   // InProcessBrowserTest
   void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
-        base::BindOnce(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
     GoOnTheRecord();
     current_browser()->profile()->GetPrefs()->SetBoolean(
         prefs::kPromptForDownload, false);
@@ -492,7 +492,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
           base::GenerateGUID(), download::DownloadItem::kInvalidId + 1 + i,
           downloads_directory().Append(history_info[i].filename),
           downloads_directory().Append(history_info[i].filename), url_chain,
-          GURL(), GURL(), GURL(), GURL(), std::string(),
+          GURL(), GURL(), GURL(), GURL(), url::Origin(), std::string(),
           std::string(),  // mime_type, original_mime_type
           current,
           current,  // start_time, end_time
@@ -672,6 +672,8 @@ class DownloadExtensionTest : public ExtensionApiTest {
           current_browser(), url, ui::PAGE_TRANSITION_LINK);
       function->set_extension(extension_);
       function->SetRenderFrameHost(tab->GetMainFrame());
+      function->set_source_process_id(
+          tab->GetMainFrame()->GetProcess()->GetID());
     }
   }
 
@@ -1232,14 +1234,6 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 
   RunFunction(new DownloadsShowDefaultFolderFunction(),
               DownloadItemIdAsArgList(item.get()));
-}
-
-IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-                       DownloadsDragFunction) {
-  ScopedCancellingItem item(CreateFirstSlowTestDownload());
-  ASSERT_TRUE(item.get());
-
-  RunFunction(new DownloadsDragFunction(), DownloadItemIdAsArgList(item.get()));
 }
 #endif
 
@@ -1810,7 +1804,7 @@ class CustomResponse : public net::test_server::HttpResponse {
 
     if (first_request_) {
       *callback_ = std::move(done);
-      *task_runner_ = base::MessageLoopCurrent::Get()->task_runner().get();
+      *task_runner_ = base::ThreadTaskRunnerHandle::Get().get();
       send.Run(response, base::BindRepeating([]() {}));
     } else {
       send.Run(response, std::move(done));

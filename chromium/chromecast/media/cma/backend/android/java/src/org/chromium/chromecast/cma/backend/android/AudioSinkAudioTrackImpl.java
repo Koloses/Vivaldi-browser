@@ -13,6 +13,7 @@ import android.media.AudioTimestamp;
 import android.media.AudioTrack;
 import android.os.Build;
 import android.os.SystemClock;
+import android.support.annotation.IntDef;
 import android.util.SparseIntArray;
 
 import org.chromium.base.ContextUtils;
@@ -21,6 +22,8 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chromecast.media.AudioContentType;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
@@ -70,6 +73,16 @@ class AudioSinkAudioTrackImpl {
             append(AudioContentType.ALARM, AudioAttributes.CONTENT_TYPE_SONIFICATION);
             append(AudioContentType.COMMUNICATION, AudioAttributes.CONTENT_TYPE_SONIFICATION);
             append(AudioContentType.OTHER, AudioAttributes.CONTENT_TYPE_SPEECH);
+        }
+    };
+
+    /** See VolumeControl for this mapping. */
+    private static final SparseIntArray CAST_TYPE_TO_ANDROID_STREAM_TYPE = new SparseIntArray(4) {
+        {
+            append(AudioContentType.MEDIA, AudioManager.STREAM_MUSIC);
+            append(AudioContentType.ALARM, AudioManager.STREAM_ALARM);
+            append(AudioContentType.COMMUNICATION, AudioManager.STREAM_SYSTEM);
+            append(AudioContentType.OTHER, AudioManager.STREAM_VOICE_CALL);
         }
     };
 
@@ -134,19 +147,25 @@ class AudioSinkAudioTrackImpl {
     private ThrottledLog mUnderrunWarningLog;
     private ThrottledLog mTStampJitterWarningLog;
 
-    private enum ReferenceTimestampState {
-        STARTING_UP, // Starting up, no valid reference time yet.
-        STABLE, // Reference time exists and is updated regularly.
-        RESYNCING_AFTER_PAUSE, // Sync the timestamp after pause so that the renderer delay will be
-                               // correct.
-        RESYNCING_AFTER_UNDERRUN, // The AudioTrack hit an underrun and we need to find a new
-                                  // reference timestamp after the underrun point.
-        RESYNCING_AFTER_EXCESSIVE_TIMESTAMP_DRIFT, // We experienced excessive and consistent
-                                                   // jitters in the timestamps and we should find a
-                                                   // new reference timestamp.
+    @IntDef({ReferenceTimestampState.STARTING_UP, ReferenceTimestampState.STABLE,
+            ReferenceTimestampState.RESYNCING_AFTER_PAUSE,
+            ReferenceTimestampState.RESYNCING_AFTER_UNDERRUN,
+            ReferenceTimestampState.RESYNCING_AFTER_EXCESSIVE_TIMESTAMP_DRIFT})
+    @Retention(RetentionPolicy.SOURCE)
+    private @interface ReferenceTimestampState {
+        int STARTING_UP = 0; // Starting up, no valid reference time yet.
+        int STABLE = 1; // Reference time exists and is updated regularly.
+        int RESYNCING_AFTER_PAUSE = 2; // Sync the timestamp after pause so that the renderer delay
+                                       // will be correct.
+        int RESYNCING_AFTER_UNDERRUN = 3; // The AudioTrack hit an underrun and we need to find a
+                                          // new reference timestamp after the underrun point.
+        int RESYNCING_AFTER_EXCESSIVE_TIMESTAMP_DRIFT =
+                4; // We experienced excessive and consistent
+                   // jitters in the timestamps and we should find a
+                   // new reference timestamp.
     }
 
-    ReferenceTimestampState mReferenceTimestampState;
+    private @ReferenceTimestampState int mReferenceTimestampState;
 
     private boolean mIsInitialized;
 
@@ -322,21 +341,33 @@ class AudioSinkAudioTrackImpl {
                         + "ms) usageType=" + usageType + " contentType=" + contentType
                         + " with session-id=" + sessionId);
 
-        AudioTrack.Builder builder = new AudioTrack.Builder();
-        builder.setBufferSizeInBytes(bufferSizeInBytes)
-                .setTransferMode(AUDIO_MODE)
-                .setAudioAttributes(new AudioAttributes.Builder()
-                                            .setUsage(usageType)
-                                            .setContentType(contentType)
-                                            .build())
-                .setAudioFormat(new AudioFormat.Builder()
-                                        .setEncoding(AUDIO_FORMAT)
-                                        .setSampleRate(mSampleRateInHz)
-                                        .setChannelMask(CHANNEL_CONFIG)
-                                        .build());
-        if (sessionId != AudioManager.ERROR) builder.setSessionId(sessionId);
-
-        mAudioTrack = builder.build();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            AudioTrack.Builder builder = new AudioTrack.Builder();
+            builder.setBufferSizeInBytes(bufferSizeInBytes)
+                    .setTransferMode(AUDIO_MODE)
+                    .setAudioAttributes(new AudioAttributes.Builder()
+                                                .setUsage(usageType)
+                                                .setContentType(contentType)
+                                                .build())
+                    .setAudioFormat(new AudioFormat.Builder()
+                                            .setEncoding(AUDIO_FORMAT)
+                                            .setSampleRate(mSampleRateInHz)
+                                            .setChannelMask(CHANNEL_CONFIG)
+                                            .build());
+            if (sessionId != AudioManager.ERROR) builder.setSessionId(sessionId);
+            mAudioTrack = builder.build();
+        } else {
+            // Using pre-M API.
+            if (sessionId == AudioManager.ERROR) {
+                mAudioTrack = new AudioTrack(CAST_TYPE_TO_ANDROID_STREAM_TYPE.get(castContentType),
+                        mSampleRateInHz, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSizeInBytes,
+                        AudioTrack.MODE_STREAM);
+            } else {
+                mAudioTrack = new AudioTrack(CAST_TYPE_TO_ANDROID_STREAM_TYPE.get(castContentType),
+                        mSampleRateInHz, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSizeInBytes,
+                        AudioTrack.MODE_STREAM, sessionId);
+            }
+        }
 
         // Allocated shared buffers.
         mPcmBuffer = ByteBuffer.allocateDirect(bytesPerBuffer);
@@ -405,9 +436,14 @@ class AudioSinkAudioTrackImpl {
             playtimeLeftNsecs = lastPlayoutTimeNsecs - now;
         } else {
             // We have no timestamp to estimate how much is left to play, so assume the worst case.
-            long most_frames_left =
-                    Math.min(mTotalFramesWritten, mAudioTrack.getBufferSizeInFrames());
-            playtimeLeftNsecs = convertFramesToNanoTime(most_frames_left);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                long most_frames_left =
+                        Math.min(mTotalFramesWritten, mAudioTrack.getBufferSizeInFrames());
+                playtimeLeftNsecs = convertFramesToNanoTime(most_frames_left);
+            } else {
+                // Using pre-M API. Don't know how many frames there are, so assume the worst case.
+                playtimeLeftNsecs = 0;
+            }
         }
         return (playtimeLeftNsecs < 0) ? 0 : playtimeLeftNsecs / 1000; // return usecs
     }
@@ -440,7 +476,11 @@ class AudioSinkAudioTrackImpl {
     }
 
     int getUnderrunCount() {
-        return mAudioTrack.getUnderrunCount();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return mAudioTrack.getUnderrunCount();
+        }
+        // Using pre-N API.
+        return 0;
     }
 
     /** Writes the PCM data of the given size into the AudioTrack object. The
@@ -630,7 +670,7 @@ class AudioSinkAudioTrackImpl {
         }
     }
 
-    private void resyncTimestamp(ReferenceTimestampState reason) {
+    private void resyncTimestamp(@ReferenceTimestampState int reason) {
         mLastTimestampUpdateNsec = NO_TIMESTAMP;
         mTimestampStabilityCounter = 0;
         mReferenceTimestampState = reason;
@@ -687,7 +727,7 @@ class AudioSinkAudioTrackImpl {
 
         long prevRefNanoTimeAtFramePos0 = mRefNanoTimeAtFramePos0;
         switch (mReferenceTimestampState) {
-            case STARTING_UP:
+            case ReferenceTimestampState.STARTING_UP:
                 // The Audiotrack produces a few timestamps at the beginning of time that are widely
                 // inaccurate. Hence, we require several stable timestamps before setting a
                 // reference point.
@@ -701,11 +741,11 @@ class AudioSinkAudioTrackImpl {
                         "First stable timestamp [" + mTimestampStabilityCounter + "/"
                                 + elapsedNsec(mTimestampStabilityStartTimeNsec) / 1000000 + "ms]");
                 break;
-            case RESYNCING_AFTER_PAUSE:
+            case ReferenceTimestampState.RESYNCING_AFTER_PAUSE:
             // fall-through
-            case RESYNCING_AFTER_EXCESSIVE_TIMESTAMP_DRIFT:
+            case ReferenceTimestampState.RESYNCING_AFTER_EXCESSIVE_TIMESTAMP_DRIFT:
             // fall-through
-            case RESYNCING_AFTER_UNDERRUN:
+            case ReferenceTimestampState.RESYNCING_AFTER_UNDERRUN:
                 // Resyncing happens after we hit a pause, underrun or excessive drift in the
                 // AudioTrack. This causes the Android Audio stack to insert additional samples,
                 // which increases the reference timestamp (at framePosition=0) by thousands of
@@ -730,7 +770,7 @@ class AudioSinkAudioTrackImpl {
                                 + elapsedNsec(mTimestampStabilityStartTimeNsec) / 1000000 + "ms]");
                 break;
 
-            case STABLE:
+            case ReferenceTimestampState.STABLE:
                 // Timestamps can be jittery, and on some systems they are occasionally off by
                 // hundreds of usecs. Filter out timestamps that are too jittery and use a low-pass
                 // filter on the smaller ones.

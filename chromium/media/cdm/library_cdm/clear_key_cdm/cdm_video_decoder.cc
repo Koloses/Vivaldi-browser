@@ -54,9 +54,9 @@ media::VideoDecoderConfig ToClearMediaVideoDecoderConfig(
 
   VideoDecoderConfig media_config(
       ToMediaVideoCodec(config.codec), ToMediaVideoCodecProfile(config.profile),
-      ToMediaVideoFormat(config.format), ToMediaColorSpace(config.color_space),
-      VideoRotation::VIDEO_ROTATION_0, coded_size, gfx::Rect(coded_size),
-      coded_size,
+      VideoDecoderConfig::AlphaMode::kIsOpaque,
+      ToMediaColorSpace(config.color_space), kNoTransformation, coded_size,
+      gfx::Rect(coded_size), coded_size,
       std::vector<uint8_t>(config.extra_data,
                            config.extra_data + config.extra_data_size),
       Unencrypted());
@@ -163,8 +163,7 @@ class VideoDecoderAdapter : public CdmVideoDecoder {
   VideoDecoderAdapter(CdmHostProxy* cdm_host_proxy,
                       std::unique_ptr<VideoDecoder> video_decoder)
       : cdm_host_proxy_(cdm_host_proxy),
-        video_decoder_(std::move(video_decoder)),
-        weak_factory_(this) {
+        video_decoder_(std::move(video_decoder)) {
     DCHECK(cdm_host_proxy_);
   }
 
@@ -252,12 +251,12 @@ class VideoDecoderAdapter : public CdmVideoDecoder {
     std::move(quit_closure).Run();
   }
 
-  void OnVideoFrameReady(const scoped_refptr<VideoFrame>& video_frame) {
+  void OnVideoFrameReady(scoped_refptr<VideoFrame> video_frame) {
     // Do not queue EOS frames, which is not needed.
     if (video_frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM))
       return;
 
-    decoded_video_frames_.push(video_frame);
+    decoded_video_frames_.push(std::move(video_frame));
   }
 
   void OnReset(base::OnceClosure quit_closure) {
@@ -284,7 +283,7 @@ class VideoDecoderAdapter : public CdmVideoDecoder {
   using VideoFrameQueue = base::queue<scoped_refptr<VideoFrame>>;
   VideoFrameQueue decoded_video_frames_;
 
-  base::WeakPtrFactory<VideoDecoderAdapter> weak_factory_;
+  base::WeakPtrFactory<VideoDecoderAdapter> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(VideoDecoderAdapter);
 };

@@ -14,11 +14,12 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/consent_auditor/consent_auditor.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/user_manager/user_manager.h"
-#include "services/identity/public/cpp/identity_manager.h"
 
 namespace chromeos {
 namespace {
@@ -53,7 +54,8 @@ void SyncConsentScreen::MaybeLaunchSyncConsentSettings(Profile* profile) {
             [](Profile* profile) {
               profile->GetPrefs()->ClearPref(
                   prefs::kShowSyncSettingsOnSessionStart);
-              chrome::ShowSettingsSubPageForProfile(profile, "syncSetup");
+              chrome::ShowSettingsSubPageForProfile(profile,
+                                                    chrome::kSyncSetupSubPage);
             },
             base::Unretained(profile)),
         kSyncConsentSettingsShowDelay);
@@ -61,10 +63,9 @@ void SyncConsentScreen::MaybeLaunchSyncConsentSettings(Profile* profile) {
 }
 
 SyncConsentScreen::SyncConsentScreen(
-    BaseScreenDelegate* base_screen_delegate,
     SyncConsentScreenView* view,
     const base::RepeatingClosure& exit_callback)
-    : BaseScreen(base_screen_delegate, OobeScreen::SCREEN_SYNC_CONSENT),
+    : BaseScreen(SyncConsentScreenView::kScreenId),
       view_(view),
       exit_callback_(exit_callback) {
   DCHECK(view_);
@@ -90,7 +91,9 @@ void SyncConsentScreen::Show() {
   if (behavior_ != SyncScreenBehavior::SHOW) {
     // Wait for updates and set the loading throbber to be visible.
     view_->SetThrobberVisible(true /*visible*/);
-    GetSyncService(profile_)->AddObserver(this);
+    syncer::SyncService* service = GetSyncService(profile_);
+    if (service)
+      sync_service_observer_.Add(service);
   }
   // Show the entire screen.
   // If SyncScreenBehavior is show, this should show the sync consent screen.
@@ -100,7 +103,7 @@ void SyncConsentScreen::Show() {
 
 void SyncConsentScreen::Hide() {
   shown_ = false;
-  GetSyncService(profile_)->RemoveObserver(this);
+  sync_service_observer_.RemoveAll();
   view_->Hide();
 }
 

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import <EarlGrey/EarlGrey.h>
+
 #import "base/test/ios/wait_util.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/strings/grit/components_strings.h"
@@ -61,7 +63,7 @@ id<GREYMatcher> PriceCellMatcher(NSString* accessibilityLabel) {
 - (void)testBuyWithNoPromise {
   [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kShowPromisePage)];
 
-  [ChromeEarlGrey tapWebViewElementWithID:@"buyWithNoPromise"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buyWithNoPromise"];
 
   // Confirm that the Payment Request UI is showing.
   [[EarlGrey selectElementWithMatcher:chrome_test_util::PaymentRequestView()]
@@ -90,7 +92,7 @@ id<GREYMatcher> PriceCellMatcher(NSString* accessibilityLabel) {
           setValue:@NO
       forConfigKey:kGREYConfigKeySynchronizationEnabled];
 
-  [ChromeEarlGrey tapWebViewElementWithID:@"buyWithResolvingPromise"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buyWithResolvingPromise"];
 
   // Wait until the payment request view shows.
   ConditionBlock condition = ^{
@@ -142,7 +144,7 @@ id<GREYMatcher> PriceCellMatcher(NSString* accessibilityLabel) {
           setValue:@NO
       forConfigKey:kGREYConfigKeySynchronizationEnabled];
 
-  [ChromeEarlGrey tapWebViewElementWithID:@"buyWithRejectingPromise"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buyWithRejectingPromise"];
 
   // Wait until the payment request view shows.
   ConditionBlock condition = ^{

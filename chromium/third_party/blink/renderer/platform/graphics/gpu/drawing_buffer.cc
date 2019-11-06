@@ -34,6 +34,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/memory/read_only_shared_memory_region.h"
 #include "base/numerics/checked_math.h"
 #include "build/build_config.h"
 #include "cc/layers/texture_layer.h"
@@ -79,6 +80,7 @@ static bool g_should_fail_drawing_buffer_creation_for_testing = false;
 scoped_refptr<DrawingBuffer> DrawingBuffer::Create(
     std::unique_ptr<WebGraphicsContext3DProvider> context_provider,
     bool using_gpu_compositing,
+    bool using_swap_chain,
     Client* client,
     const IntSize& size,
     bool premultiplied_alpha,
@@ -136,7 +138,7 @@ scoped_refptr<DrawingBuffer> DrawingBuffer::Create(
 
   scoped_refptr<DrawingBuffer> drawing_buffer =
       base::AdoptRef(new DrawingBuffer(
-          std::move(context_provider), using_gpu_compositing,
+          std::move(context_provider), using_gpu_compositing, using_swap_chain,
           std::move(extensions_util), client, discard_framebuffer_supported,
           want_alpha_channel, premultiplied_alpha, preserve, webgl_version,
           want_depth_buffer, want_stencil_buffer, chromium_image_usage,
@@ -155,6 +157,7 @@ void DrawingBuffer::ForceNextDrawingBufferCreationToFail() {
 DrawingBuffer::DrawingBuffer(
     std::unique_ptr<WebGraphicsContext3DProvider> context_provider,
     bool using_gpu_compositing,
+    bool using_swap_chain,
     std::unique_ptr<Extensions3DUtil> extensions_util,
     Client* client,
     bool discard_framebuffer_supported,
@@ -177,6 +180,7 @@ DrawingBuffer::DrawingBuffer(
       want_alpha_channel_(want_alpha_channel),
       premultiplied_alpha_(premultiplied_alpha),
       using_gpu_compositing_(using_gpu_compositing),
+      using_swap_chain_(using_swap_chain),
       want_depth_(want_depth),
       want_stencil_(want_stencil),
       storage_color_space_(color_params.GetStorageGfxColorSpace()),
@@ -291,9 +295,8 @@ DrawingBuffer::RegisteredBitmap DrawingBuffer::CreateOrRecycleBitmap(
   viz::ResourceFormat format = viz::RGBA_8888;
   if (use_half_float_storage_)
     format = viz::RGBA_F16;
-  std::unique_ptr<base::SharedMemory> shm =
-      viz::bitmap_allocation::AllocateMappedBitmap(
-          static_cast<gfx::Size>(size_), format);
+  base::MappedReadOnlyRegion shm = viz::bitmap_allocation::AllocateSharedBitmap(
+      static_cast<gfx::Size>(size_), format);
   auto bitmap = base::MakeRefCounted<cc::CrossThreadSharedBitmap>(
       id, std::move(shm), static_cast<gfx::Size>(size_), format);
   RegisteredBitmap registered = {
@@ -358,8 +361,8 @@ void DrawingBuffer::FinishPrepareTransferableResourceSoftware(
 
   // Read the framebuffer into |bitmap|.
   {
-    unsigned char* pixels = static_cast<unsigned char*>(
-        registered.bitmap->shared_memory()->memory());
+    unsigned char* pixels =
+        static_cast<unsigned char*>(registered.bitmap->memory());
     DCHECK(pixels);
     bool need_premultiply = want_alpha_channel_ && !premultiplied_alpha_;
     WebGLImageConversion::AlphaOp op =
@@ -464,7 +467,7 @@ void DrawingBuffer::FinishPrepareTransferableResourceGpu(
   // Populate the output mailbox and callback.
   {
     bool is_overlay_candidate = !!color_buffer_for_mailbox->gpu_memory_buffer;
-    *out_resource = viz::TransferableResource::MakeGLOverlay(
+    *out_resource = viz::TransferableResource::MakeGL(
         color_buffer_for_mailbox->mailbox, GL_LINEAR, texture_target_,
         color_buffer_for_mailbox->produce_sync_token, gfx::Size(size_),
         is_overlay_candidate);
@@ -602,8 +605,7 @@ scoped_refptr<StaticBitmapImage> DrawingBuffer::TransferToStaticBitmapImage(
   // in DrawingBuffer.
   return AcceleratedStaticBitmapImage::CreateFromWebGLContextImage(
       sk_image_mailbox, sk_image_sync_token, texture_id,
-      context_provider_->GetWeakPtr(), size_,
-      AcceleratedStaticBitmapImage::MailboxType::kSharedImageId);
+      context_provider_->GetWeakPtr(), size_, opengl_flip_y_extension_);
 }
 
 scoped_refptr<DrawingBuffer::ColorBuffer>
@@ -639,10 +641,12 @@ DrawingBuffer::ScopedRGBEmulationForBlitFramebuffer::
 
 scoped_refptr<CanvasResource> DrawingBuffer::AsCanvasResource(
     base::WeakPtr<CanvasResourceProvider> resource_provider) {
+  scoped_refptr<ColorBuffer> canvas_resource_buffer =
+      using_swap_chain_ ? front_color_buffer_ : back_color_buffer_;
   return ExternalCanvasResource::Create(
-      back_color_buffer_->mailbox, back_color_buffer_->size, texture_target_,
-      CanvasColorParams(), context_provider_->GetWeakPtr(), resource_provider,
-      kLow_SkFilterQuality);
+      canvas_resource_buffer->mailbox, canvas_resource_buffer->size,
+      texture_target_, CanvasColorParams(), context_provider_->GetWeakPtr(),
+      resource_provider, kLow_SkFilterQuality);
 }
 
 DrawingBuffer::ColorBuffer::ColorBuffer(
@@ -706,31 +710,29 @@ bool DrawingBuffer::Initialize(const IntSize& size, bool use_multisampling) {
     gl_->GetIntegerv(GL_MAX_SAMPLES_ANGLE, &max_sample_count);
   }
 
-  auto webgl_preferences =
-      ContextProvider()->GetGpuFeatureInfo().webgl_preferences;
-  if (webgl_preferences.anti_aliasing_mode ==
-      gpu::kAntialiasingModeUnspecified) {
+  auto webgl_preferences = ContextProvider()->GetWebglPreferences();
+  if (webgl_preferences.anti_aliasing_mode == kAntialiasingModeUnspecified) {
     if (use_multisampling) {
-      anti_aliasing_mode_ = gpu::kAntialiasingModeMSAAExplicitResolve;
+      anti_aliasing_mode_ = kAntialiasingModeMSAAExplicitResolve;
       if (extensions_util_->SupportsExtension(
               "GL_EXT_multisampled_render_to_texture")) {
-        anti_aliasing_mode_ = gpu::kAntialiasingModeMSAAImplicitResolve;
+        anti_aliasing_mode_ = kAntialiasingModeMSAAImplicitResolve;
       } else if (extensions_util_->SupportsExtension(
                      "GL_CHROMIUM_screen_space_antialiasing") &&
-                 !ContextProvider()->GetGpuFeatureInfo().IsWorkaroundEnabled(
-                     gpu::DISABLE_FRAMEBUFFER_CMAA)) {
-        anti_aliasing_mode_ = gpu::kAntialiasingModeScreenSpaceAntialiasing;
+                 ContextProvider()->GetGpuFeatureInfo().IsWorkaroundEnabled(
+                     gpu::USE_FRAMEBUFFER_CMAA)) {
+        anti_aliasing_mode_ = kAntialiasingModeScreenSpaceAntialiasing;
       }
     } else {
-      anti_aliasing_mode_ = gpu::kAntialiasingModeNone;
+      anti_aliasing_mode_ = kAntialiasingModeNone;
     }
   } else {
     if ((webgl_preferences.anti_aliasing_mode ==
-             gpu::kAntialiasingModeMSAAImplicitResolve &&
+             kAntialiasingModeMSAAImplicitResolve &&
          !extensions_util_->SupportsExtension(
              "GL_EXT_multisampled_render_to_texture")) ||
         (webgl_preferences.anti_aliasing_mode ==
-             gpu::kAntialiasingModeScreenSpaceAntialiasing &&
+             kAntialiasingModeScreenSpaceAntialiasing &&
          !extensions_util_->SupportsExtension(
              "GL_CHROMIUM_screen_space_antialiasing"))) {
       DLOG(ERROR) << "Invalid anti-aliasing mode specified.";
@@ -747,7 +749,7 @@ bool DrawingBuffer::Initialize(const IntSize& size, bool use_multisampling) {
   storage_texture_supported_ =
       (webgl_version_ > kWebGL1 ||
        extensions_util_->SupportsExtension("GL_EXT_texture_storage")) &&
-      anti_aliasing_mode_ == gpu::kAntialiasingModeScreenSpaceAntialiasing;
+      anti_aliasing_mode_ == kAntialiasingModeScreenSpaceAntialiasing;
 
   sample_count_ = std::min(
       static_cast<int>(webgl_preferences.msaa_sample_count), max_sample_count);
@@ -841,6 +843,7 @@ bool DrawingBuffer::Initialize(const IntSize& size, bool use_multisampling) {
 bool DrawingBuffer::CopyToPlatformTexture(gpu::gles2::GLES2Interface* dst_gl,
                                           GLenum dst_texture_target,
                                           GLuint dst_texture,
+                                          GLint dst_level,
                                           bool premultiply_alpha,
                                           bool flip_y,
                                           const IntPoint& dst_texture_offset,
@@ -901,7 +904,7 @@ bool DrawingBuffer::CopyToPlatformTexture(gpu::gles2::GLES2Interface* dst_gl,
   dst_gl->BeginSharedImageAccessDirectCHROMIUM(
       src_texture, GL_SHARED_IMAGE_ACCESS_MODE_READ_CHROMIUM);
   dst_gl->CopySubTextureCHROMIUM(
-      src_texture, 0, dst_texture_target, dst_texture, 0,
+      src_texture, 0, dst_texture_target, dst_texture, dst_level,
       dst_texture_offset.X(), dst_texture_offset.Y(), src_sub_rectangle.X(),
       src_sub_rectangle.Y(), src_sub_rectangle.Width(),
       src_sub_rectangle.Height(), flip_y, unpack_premultiply_alpha_needed,
@@ -925,6 +928,7 @@ cc::Layer* DrawingBuffer::CcLayer() {
     layer_ = cc::TextureLayer::CreateForMailbox(this);
 
     layer_->SetIsDrawable(true);
+    layer_->SetHitTestable(true);
     layer_->SetContentsOpaque(!want_alpha_channel_);
     layer_->SetBlendBackgroundColor(want_alpha_channel_);
     // If premultiplied_alpha_false_texture_ exists, then premultiplied_alpha_
@@ -1088,12 +1092,11 @@ bool DrawingBuffer::ResizeDefaultFramebuffer(const IntSize& size) {
     if (!depth_stencil_buffer_)
       gl_->GenRenderbuffers(1, &depth_stencil_buffer_);
     gl_->BindRenderbuffer(GL_RENDERBUFFER, depth_stencil_buffer_);
-    if (anti_aliasing_mode_ == gpu::kAntialiasingModeMSAAImplicitResolve) {
+    if (anti_aliasing_mode_ == kAntialiasingModeMSAAImplicitResolve) {
       gl_->RenderbufferStorageMultisampleEXT(GL_RENDERBUFFER, sample_count_,
                                              GL_DEPTH24_STENCIL8_OES,
                                              size.Width(), size.Height());
-    } else if (anti_aliasing_mode_ ==
-               gpu::kAntialiasingModeMSAAExplicitResolve) {
+    } else if (anti_aliasing_mode_ == kAntialiasingModeMSAAExplicitResolve) {
       gl_->RenderbufferStorageMultisampleCHROMIUM(
           GL_RENDERBUFFER, sample_count_, GL_DEPTH24_STENCIL8_OES, size.Width(),
           size.Height());
@@ -1248,12 +1251,12 @@ void DrawingBuffer::ResolveMultisampleFramebufferInternal() {
   }
 
   gl_->BindFramebuffer(GL_FRAMEBUFFER, fbo_);
-  if (anti_aliasing_mode_ == gpu::kAntialiasingModeScreenSpaceAntialiasing)
+  if (anti_aliasing_mode_ == kAntialiasingModeScreenSpaceAntialiasing)
     gl_->ApplyScreenSpaceAntialiasingCHROMIUM();
 }
 
 void DrawingBuffer::ResolveIfNeeded() {
-  if (anti_aliasing_mode_ != gpu::kAntialiasingModeNone &&
+  if (anti_aliasing_mode_ != kAntialiasingModeNone &&
       !contents_change_resolved_)
     ResolveMultisampleFramebufferInternal();
   contents_change_resolved_ = true;
@@ -1275,7 +1278,7 @@ void DrawingBuffer::RestoreAllState() {
 }
 
 bool DrawingBuffer::Multisample() const {
-  return anti_aliasing_mode_ != gpu::kAntialiasingModeNone;
+  return anti_aliasing_mode_ != kAntialiasingModeNone;
 }
 
 void DrawingBuffer::Bind(GLenum target) {
@@ -1403,7 +1406,7 @@ void DrawingBuffer::FlipVertically(uint8_t* framebuffer,
       use_half_float_storage_) {
     row_bytes *= 2;
   }
-  std::vector<uint8_t> scanline(row_bytes);
+  Vector<uint8_t> scanline(row_bytes);
   unsigned count = height / 2;
   for (unsigned i = 0; i < count; i++) {
     uint8_t* row_a = framebuffer + i * row_bytes;
@@ -1412,6 +1415,21 @@ void DrawingBuffer::FlipVertically(uint8_t* framebuffer,
     memcpy(row_b, row_a, row_bytes);
     memcpy(row_a, scanline.data(), row_bytes);
   }
+}
+
+void DrawingBuffer::PresentSwapChain() {
+  if (!using_swap_chain_)
+    return;
+#if defined(OS_WIN)
+  gpu::SyncToken sync_token;
+  gl_->GenUnverifiedSyncTokenCHROMIUM(sync_token.GetData());
+  auto* sii = ContextProvider()->SharedImageInterface();
+  sii->PresentSwapChain(sync_token, back_color_buffer_->mailbox);
+  sync_token = sii->GenUnverifiedSyncToken();
+  gl_->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
+#else
+  NOTREACHED();
+#endif  // OS_WIN
 }
 
 scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
@@ -1424,68 +1442,83 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager =
       Platform::Current()->GetGpuMemoryBufferManager();
 
-  gpu::Mailbox mailbox;
+  gpu::Mailbox back_buffer_mailbox;
+  // Set only when using swap chains.
+  gpu::Mailbox front_buffer_mailbox;
   GLuint texture_id = 0;
   std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer;
+  uint32_t usage = gpu::SHARED_IMAGE_USAGE_GLES2 |
+                   gpu::SHARED_IMAGE_USAGE_GLES2_FRAMEBUFFER_HINT |
+                   gpu::SHARED_IMAGE_USAGE_DISPLAY;
 
-  if (ShouldUseChromiumImage()) {
-    gfx::BufferFormat buffer_format;
-    if (allocate_alpha_channel_) {
-      buffer_format = use_half_float_storage_ ? gfx::BufferFormat::RGBA_F16
-                                              : gfx::BufferFormat::RGBA_8888;
-    } else {
-      DCHECK(!use_half_float_storage_);
-      buffer_format = gfx::BufferFormat::RGBX_8888;
-      if (gpu::IsImageFromGpuMemoryBufferFormatSupported(
-              gfx::BufferFormat::BGRX_8888,
-              ContextProvider()->GetCapabilities())) {
-        buffer_format = gfx::BufferFormat::BGRX_8888;
+  viz::ResourceFormat format;
+  if (allocate_alpha_channel_) {
+    format = use_half_float_storage_ ? viz::RGBA_F16 : viz::RGBA_8888;
+  } else {
+    DCHECK(!use_half_float_storage_);
+    format = viz::RGBX_8888;
+  }
+
+  if (using_swap_chain_) {
+#if defined(OS_WIN)
+    gpu::SharedImageInterface::SwapChainMailboxes mailboxes =
+        sii->CreateSwapChain(format, static_cast<gfx::Size>(size),
+                             storage_color_space_,
+                             usage | gpu::SHARED_IMAGE_USAGE_SCANOUT);
+    back_buffer_mailbox = mailboxes.back_buffer;
+    front_buffer_mailbox = mailboxes.front_buffer;
+#endif  // OS_WIN
+  } else {
+    if (ShouldUseChromiumImage()) {
+      gfx::BufferFormat buffer_format;
+      if (allocate_alpha_channel_) {
+        buffer_format = use_half_float_storage_ ? gfx::BufferFormat::RGBA_F16
+                                                : gfx::BufferFormat::RGBA_8888;
+      } else {
+        DCHECK(!use_half_float_storage_);
+        buffer_format = gfx::BufferFormat::RGBX_8888;
+        if (gpu::IsImageFromGpuMemoryBufferFormatSupported(
+                gfx::BufferFormat::BGRX_8888,
+                ContextProvider()->GetCapabilities())) {
+          buffer_format = gfx::BufferFormat::BGRX_8888;
+        }
+      }
+      // TODO(crbug.com/911176): When RGB emulation is not needed, we should use
+      // the non-GMB CreateSharedImage with gpu::SHARED_IMAGE_USAGE_SCANOUT in
+      // order to allocate the GMB service-side and avoid a synchronous
+      // round-trip to the browser process here.
+      gpu_memory_buffer = gpu_memory_buffer_manager->CreateGpuMemoryBuffer(
+          gfx::Size(size), buffer_format, gfx::BufferUsage::SCANOUT,
+          gpu::kNullSurfaceHandle);
+
+      if (gpu_memory_buffer) {
+        back_buffer_mailbox = sii->CreateSharedImage(
+            gpu_memory_buffer.get(), gpu_memory_buffer_manager,
+            storage_color_space_, usage | gpu::SHARED_IMAGE_USAGE_SCANOUT);
       }
     }
-    // TODO(crbug.com/911176): When RGB emulation is not needed, we should use
-    // the non-GMB CreateSharedImage with gpu::SHARED_IMAGE_USAGE_SCANOUT in
-    // order to allocate the GMB service-side and avoid a synchronous round-trip
-    // to the browser process here.
-    gpu_memory_buffer = gpu_memory_buffer_manager->CreateGpuMemoryBuffer(
-        gfx::Size(size), buffer_format, gfx::BufferUsage::SCANOUT,
-        gpu::kNullSurfaceHandle);
 
-    if (gpu_memory_buffer) {
-      mailbox = sii->CreateSharedImage(
-          gpu_memory_buffer.get(), gpu_memory_buffer_manager,
-          storage_color_space_,
-          gpu::SHARED_IMAGE_USAGE_GLES2 |
-              gpu::SHARED_IMAGE_USAGE_GLES2_FRAMEBUFFER_HINT |
-              gpu::SHARED_IMAGE_USAGE_DISPLAY |
-              gpu::SHARED_IMAGE_USAGE_SCANOUT);
+    // Create a normal SharedImage if GpuMemoryBuffer is not needed or the
+    // allocation above failed.
+    if (!gpu_memory_buffer) {
+      back_buffer_mailbox = sii->CreateSharedImage(
+          format, static_cast<gfx::Size>(size), storage_color_space_, usage);
     }
   }
 
-  // Create a normal SharedImage if GpuMemoryBuffer is not needed or the
-  // allocation above failed.
-  if (!gpu_memory_buffer) {
-    viz::ResourceFormat format;
-    if (allocate_alpha_channel_) {
-      if (use_half_float_storage_)
-        format = viz::RGBA_F16;
-      else
-        format = viz::RGBA_8888;
-    } else {
-      DCHECK(!use_half_float_storage_);
-      format = viz::RGBX_8888;
-    }
-
-    mailbox = sii->CreateSharedImage(
-        format, static_cast<gfx::Size>(size), storage_color_space_,
-        gpu::SHARED_IMAGE_USAGE_GLES2 |
-            gpu::SHARED_IMAGE_USAGE_GLES2_FRAMEBUFFER_HINT |
-            gpu::SHARED_IMAGE_USAGE_DISPLAY);
-  }
-
-  // Import the allocated SharedImage into GL.
   gpu::SyncToken sync_token = sii->GenUnverifiedSyncToken();
   gl_->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
-  texture_id = gl_->CreateAndTexStorage2DSharedImageCHROMIUM(mailbox.name);
+  if (!front_buffer_mailbox.IsZero()) {
+    DCHECK(using_swap_chain_);
+    // Import frontbuffer of swap chain into GL.
+    texture_id = gl_->CreateAndTexStorage2DSharedImageCHROMIUM(
+        front_buffer_mailbox.name);
+    front_color_buffer_ = base::AdoptRef(
+        new ColorBuffer(this, size, texture_id, nullptr, front_buffer_mailbox));
+  }
+  // Import the backbuffer of swap chain or allocated SharedImage into GL.
+  texture_id =
+      gl_->CreateAndTexStorage2DSharedImageCHROMIUM(back_buffer_mailbox.name);
   gl_->BindTexture(texture_target_, texture_id);
   gl_->BeginSharedImageAccessDirectCHROMIUM(
       texture_id, GL_SHARED_IMAGE_ACCESS_MODE_READWRITE_CHROMIUM);
@@ -1510,7 +1543,8 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
   }
 
   return base::AdoptRef(new ColorBuffer(this, size, texture_id,
-                                        std::move(gpu_memory_buffer), mailbox));
+                                        std::move(gpu_memory_buffer),
+                                        back_buffer_mailbox));
 }
 
 void DrawingBuffer::AttachColorBufferToReadFramebuffer() {
@@ -1533,7 +1567,7 @@ void DrawingBuffer::AttachColorBufferToReadFramebuffer() {
 
   gl_->BindTexture(texture_target, id);
 
-  if (anti_aliasing_mode_ == gpu::kAntialiasingModeMSAAImplicitResolve) {
+  if (anti_aliasing_mode_ == kAntialiasingModeMSAAImplicitResolve) {
     gl_->FramebufferTexture2DMultisampleEXT(
         GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture_target, id, 0,
         sample_count_);
@@ -1544,7 +1578,7 @@ void DrawingBuffer::AttachColorBufferToReadFramebuffer() {
 }
 
 bool DrawingBuffer::WantExplicitResolve() {
-  return anti_aliasing_mode_ == gpu::kAntialiasingModeMSAAExplicitResolve;
+  return anti_aliasing_mode_ == kAntialiasingModeMSAAExplicitResolve;
 }
 
 bool DrawingBuffer::WantDepthOrStencil() {
@@ -1563,7 +1597,7 @@ bool DrawingBuffer::SetupRGBEmulationForBlitFramebuffer(
     return false;
   }
 
-  if (anti_aliasing_mode_ != gpu::kAntialiasingModeNone)
+  if (anti_aliasing_mode_ != kAntialiasingModeNone)
     return false;
 
   bool has_emulated_rgb = !allocate_alpha_channel_ && have_alpha_channel_;
@@ -1588,22 +1622,13 @@ bool DrawingBuffer::SetupRGBEmulationForBlitFramebuffer(
   GLuint rgb_texture = back_color_buffer_->rgb_workaround_texture_id;
   DCHECK_EQ(texture_target_, GC3D_TEXTURE_RECTANGLE_ARB);
   if (!rgb_texture) {
-    gpu::SharedImageInterface* sii = ContextProvider()->SharedImageInterface();
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager =
-        Platform::Current()->GetGpuMemoryBufferManager();
-    back_color_buffer_->rgb_workaround_mailbox = sii->CreateSharedImage(
-        back_color_buffer_->gpu_memory_buffer.get(), gpu_memory_buffer_manager,
-        storage_color_space_,
-        gpu::SHARED_IMAGE_USAGE_GLES2 |
-            gpu::SHARED_IMAGE_USAGE_GLES2_FRAMEBUFFER_HINT |
-            gpu::SHARED_IMAGE_USAGE_DISPLAY | gpu::SHARED_IMAGE_USAGE_SCANOUT |
-            gpu::SHARED_IMAGE_USAGE_RGB_EMULATION);
-    gl_->WaitSyncTokenCHROMIUM(sii->GenUnverifiedSyncToken().GetConstData());
-    rgb_texture = gl_->CreateAndTexStorage2DSharedImageCHROMIUM(
-        back_color_buffer_->rgb_workaround_mailbox.name);
+    rgb_texture =
+        gl_->CreateAndTexStorage2DSharedImageWithInternalFormatCHROMIUM(
+            back_color_buffer_->mailbox.name, GL_RGB);
     back_color_buffer_->rgb_workaround_texture_id = rgb_texture;
   }
 
+  gl_->EndSharedImageAccessDirectCHROMIUM(back_color_buffer_->texture_id);
   gl_->BeginSharedImageAccessDirectCHROMIUM(
       rgb_texture, GL_SHARED_IMAGE_ACCESS_MODE_READWRITE_CHROMIUM);
   gl_->FramebufferTexture2D(GL_DRAW_FRAMEBUFFER_ANGLE, GL_COLOR_ATTACHMENT0,
@@ -1618,6 +1643,9 @@ void DrawingBuffer::CleanupRGBEmulationForBlitFramebuffer() {
   DCHECK(back_color_buffer_->gpu_memory_buffer);
   gl_->EndSharedImageAccessDirectCHROMIUM(
       back_color_buffer_->rgb_workaround_texture_id);
+  gl_->BeginSharedImageAccessDirectCHROMIUM(
+      back_color_buffer_->texture_id,
+      GL_SHARED_IMAGE_ACCESS_MODE_READWRITE_CHROMIUM);
   gl_->FramebufferTexture2D(GL_DRAW_FRAMEBUFFER_ANGLE, GL_COLOR_ATTACHMENT0,
                             texture_target_, back_color_buffer_->texture_id, 0);
   // Clear the alpha channel.

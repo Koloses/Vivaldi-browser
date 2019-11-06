@@ -9,24 +9,29 @@
     <style>
       :host {
         --cr-icon-button-color: var(--google-grey-refresh-700);
-        --cr-icon-button-default-icon-padding: 8px;
+        --cr-icon-button-icon-start-offset: 0;
         --cr-icon-button-icon-size: 20px;
-        --cr-icon-button-ripple-color: var(--google-grey-900);
-        --cr-icon-button-ripple-size: calc(var(--cr-icon-button-icon-size) +
-            2 * var(--cr-icon-button-icon-padding,
-                    var(--cr-icon-button-default-icon-padding)));
-        --cr-icon-button-size: var(--cr-icon-button-ripple-size);
+        --cr-icon-button-size: 36px;
+        --cr-icon-button-height: var(--cr-icon-button-size);
+        --cr-icon-button-width: var(--cr-icon-button-size);
+        /* Copied from paper-fab.html. Prevents square touch highlight. */
+        -webkit-tap-highlight-color: transparent;
         background-position: center;
         background-repeat: no-repeat;
         background-size: var(--cr-icon-button-icon-size);
+        border-radius: 4px;
         color: var(--cr-icon-button-color);
         cursor: pointer;
-        height: var(--cr-icon-button-size);
-        margin-inline-end: var(--cr-icon-ripple-margin);
+        display: inline-flex;
+        flex-shrink: 0;
+        height: var(--cr-icon-button-height);
+        margin-inline-end: var(--cr-icon-button-margin-end,
+            var(--cr-icon-ripple-margin));
         margin-inline-start: var(--cr-icon-button-margin-start);
         outline: none;
         user-select: none;
-        width: var(--cr-icon-button-size);
+        vertical-align: middle;
+        width: var(--cr-icon-button-width);
       }
 
       :host([disabled]) {
@@ -39,32 +44,38 @@
         transform: scaleX(-1);  /* Invert X: flip on the Y axis (aka mirror). */
       }
 
-      :host-context([dark]) {
-        --cr-icon-button-color: var(--google-grey-refresh-500);
-        --cr-icon-button-ripple-color: var(--google-grey-refresh-500);
+      @media (prefers-color-scheme: dark) {
+        :host {
+          --cr-icon-button-color: var(--google-grey-refresh-500);
+        }
       }
 
       :host paper-ripple {
-        --paper-ripple-opacity: .15;
-        color: var(--cr-icon-button-ripple-color);
+        /* GG900 .15 is about GG700 .21 */
+        --paper-ripple-opacity: var(--cr-icon-button-ripple-opacity, .21);
       }
 
-      :host-context([dark]) paper-ripple {
-        --paper-ripple-opacity: .4;
+      @media (prefers-color-scheme: dark) {
+        :host paper-ripple {
+          --paper-ripple-opacity: var(--cr-icon-button-ripple-opacity, .4);
+        }
       }
 
       #icon {
-        height: var(--cr-icon-button-ripple-size);
+        align-items: center;
+        border-radius: 4px;
+        display: flex;
+        height: 100%;
+        justify-content: center;
+        padding-inline-start: var(--cr-icon-button-icon-start-offset);
         /* The |_rippleContainer| must be position relative. */
         position: relative;
-        width: var(--cr-icon-button-ripple-size);
+        width: 100%;
       }
 
       iron-icon {
         --iron-icon-height: var(--cr-icon-button-icon-size);
         --iron-icon-width: var(--cr-icon-button-icon-size);
-        padding: var(--cr-icon-button-icon-padding,
-                     var(--cr-icon-button-default-icon-padding));
       }
     </style>
     <div id="icon"></div>

@@ -11,10 +11,9 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/cast_messages.h"
-#include "components/net_log/chrome_net_log.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "media/cast/net/cast_transport.h"
 #include "media/cast/net/udp_transport_impl.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
@@ -110,11 +109,8 @@ class RtcpClient : public media::cast::RtcpObserver {
 void CastBindConnectorRequest(
     service_manager::mojom::ConnectorRequest connector_request) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(content::ServiceManagerConnection::GetForProcess());
-
-  content::ServiceManagerConnection::GetForProcess()
-      ->GetConnector()
-      ->BindConnectorRequest(std::move(connector_request));
+  content::GetSystemConnector()->BindConnectorRequest(
+      std::move(connector_request));
 }
 
 }  // namespace
@@ -122,7 +118,7 @@ void CastBindConnectorRequest(
 namespace cast {
 
 CastTransportHostFilter::CastTransportHostFilter()
-    : BrowserMessageFilter(CastMsgStart), weak_factory_(this) {}
+    : BrowserMessageFilter(CastMsgStart) {}
 
 CastTransportHostFilter::~CastTransportHostFilter() {}
 
@@ -175,8 +171,7 @@ void CastTransportHostFilter::OnNew(int32_t channel_id,
   }
 
   auto udp_transport = std::make_unique<media::cast::UdpTransportImpl>(
-      g_browser_process->net_log(), base::ThreadTaskRunnerHandle::Get(),
-      local_end_point, remote_end_point,
+      base::ThreadTaskRunnerHandle::Get(), local_end_point, remote_end_point,
       base::BindRepeating(&CastTransportHostFilter::OnStatusChanged,
                           weak_factory_.GetWeakPtr(), channel_id));
   udp_transport->SetUdpOptions(options);
@@ -405,8 +400,6 @@ device::mojom::WakeLock* CastTransportHostFilter::GetWakeLock() {
     return wake_lock_.get();
 
   device::mojom::WakeLockRequest request = mojo::MakeRequest(&wake_lock_);
-
-  DCHECK(content::ServiceManagerConnection::GetForProcess());
 
   service_manager::mojom::ConnectorRequest connector_request;
   auto connector = service_manager::Connector::Create(&connector_request);

@@ -14,7 +14,7 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
-#include "base/synchronization/cancellation_flag.h"
+#include "base/synchronization/atomic_flag.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
@@ -220,7 +220,7 @@ class Job : public base::RefCountedThreadSafe<Job>,
   CompletionOnceCallback callback_;
 
   // Flag to indicate whether the request has been cancelled.
-  base::CancellationFlag cancelled_;
+  base::AtomicFlag cancelled_;
 
   // The operation that this Job is running.
   // Initialized on origin thread and then accessed from both threads.
@@ -406,13 +406,18 @@ void Job::Cancel() {
 
   ReleaseCallback();
 
-  pending_dns_.reset();
+  // Note we only mutate |pending_dns_| if it is non-null. If it is null, the
+  // worker thread may be about to request a new DNS resolution. This avoids a
+  // race condition with the DCHECK in PostDnsOperationAndWait().
+  // See https://crbug.com/699562.
+  if (pending_dns_)
+    pending_dns_.reset();
 
   // The worker thread might be blocked waiting for DNS.
   event_.Signal();
 
   bindings_.reset();
-  owned_self_reference_ = NULL;
+  owned_self_reference_ = nullptr;
 }
 
 LoadState Job::GetLoadState() const {
@@ -452,7 +457,7 @@ void Job::ReleaseCallback() {
   callback_.Reset();
 
   // For good measure, clear this other user-owned pointer.
-  user_results_ = NULL;
+  user_results_ = nullptr;
 }
 
 ProxyResolverV8* Job::v8_resolver() {
@@ -499,7 +504,7 @@ void Job::NotifyCallerOnOriginLoop(int result) {
   std::move(callback).Run(result);
 
   bindings_.reset();
-  owned_self_reference_ = NULL;
+  owned_self_reference_ = nullptr;
 }
 
 void Job::Start(Operation op,
@@ -632,7 +637,7 @@ bool Job::ResolveDnsBlocking(const std::string& host,
     return false;
   }
 
-  if (!PostDnsOperationAndWait(host, op, NULL))
+  if (!PostDnsOperationAndWait(host, op, nullptr))
     return false;  // Was cancelled.
 
   CHECK(GetDnsFromLocalCache(host, op, output, &rv));
@@ -695,7 +700,9 @@ bool Job::ResolveDnsNonBlocking(const std::string& host,
 bool Job::PostDnsOperationAndWait(const std::string& host,
                                   ProxyResolveDnsOperation op,
                                   bool* completed_synchronously) {
-  // Post the DNS request to the origin thread.
+  // Post the DNS request to the origin thread. It is safe to mutate
+  // |pending_dns_host_| and |pending_dns_op_| because there cannot be another
+  // DNS operation in progress or scheduled.
   DCHECK(!pending_dns_);
   pending_dns_host_ = host;
   pending_dns_op_ = op;

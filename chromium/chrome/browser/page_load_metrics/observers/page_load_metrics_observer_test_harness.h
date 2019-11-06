@@ -80,14 +80,18 @@ class PageLoadMetricsObserverTestHarness
                             content::RenderFrameHost* rfh);
   void SimulateTimingAndMetadataUpdate(const mojom::PageLoadTiming& timing,
                                        const mojom::PageLoadMetadata& metadata);
+  void SimulateMetadataUpdate(const mojom::PageLoadMetadata& metadata,
+                              content::RenderFrameHost* rfh);
   void SimulateFeaturesUpdate(const mojom::PageLoadFeatures& new_features);
+  void SimulateCpuTimingUpdate(const mojom::CpuTiming& cpu_timing);
   void SimulateResourceDataUseUpdate(
       const std::vector<mojom::ResourceDataUpdatePtr>& resources);
   void SimulateResourceDataUseUpdate(
       const std::vector<mojom::ResourceDataUpdatePtr>& resources,
       content::RenderFrameHost* render_frame_host);
-  void SimulateRenderDataUpdate(const mojom::PageRenderData& render_data);
-  void SimulateRenderDataUpdate(const mojom::PageRenderData& render_data,
+  void SimulateRenderDataUpdate(
+      const mojom::FrameRenderDataUpdate& render_data);
+  void SimulateRenderDataUpdate(const mojom::FrameRenderDataUpdate& render_data,
                                 content::RenderFrameHost* rfh);
 
   // Simulates a loaded resource. Main frame resources must specify a
@@ -107,6 +111,18 @@ class PageLoadMetricsObserverTestHarness
 
   // Simulate playing a media element.
   void SimulateMediaPlayed();
+
+  // Simulate reading cookies.
+  void SimulateCookiesRead(const GURL& url,
+                           const GURL& first_party_url,
+                           const net::CookieList& cookie_list,
+                           bool blocked_by_policy);
+
+  // Simulate writing a cookie.
+  void SimulateCookieChange(const GURL& url,
+                            const GURL& first_party_url,
+                            const net::CanonicalCookie& cookie,
+                            bool blocked_by_policy);
 
   const base::HistogramTester& histogram_tester() const;
 

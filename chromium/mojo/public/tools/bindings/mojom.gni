@@ -18,7 +18,6 @@ import("//build/config/nacl/config.gni")
 import("//components/nacl/features.gni")
 import("//third_party/jinja2/jinja2.gni")
 import("//tools/ipc_fuzzer/ipc_fuzzer.gni")
-
 declare_args() {
   # Indicates whether typemapping should be supported in this build
   # configuration. This may be disabled when building external projects which
@@ -40,6 +39,10 @@ declare_args() {
   # where compilation is supported, any mojom target "foo" will also have a
   # corresponding "foo_js_library_for_compile" target generated.
   enable_mojom_closure_compile = closure_compile && optimize_webui
+
+  # Enable adding annotations to generated C++ headers that are used for
+  # cross-references in CodeSearch.
+  enable_kythe_annotations = false
 }
 
 # NOTE: We would like to avoid scrambling message IDs where it doesn't add
@@ -278,6 +281,10 @@ if (enable_mojom_typemapping) {
 #       generating JS lite bindings which assume they will be manually loaded in
 #       correct dependency order. Note that this only has an effect if
 #       the |enable_mojom_closure_compile| global arg is set to |true| as well.
+#
+#   use_old_js_lite_bindings_names (optional)
+#       Use old names i.e. FooProxy, Foo, getProxy(), etc. instead of the new
+#       names i.e. FooRemote, FooReceiver, getRemote(), etc.
 #
 # The following parameters are used to support the component build. They are
 # needed so that bindings which are linked with a component can use the same
@@ -679,6 +686,10 @@ template("mojom") {
           "base/component_export.h",
         ]
       }
+
+      if (enable_kythe_annotations) {
+        args += [ "--enable_kythe_annotations" ]
+      }
     }
   } else {
     group(generator_cpp_message_ids_target_name) {
@@ -909,6 +920,10 @@ template("mojom") {
         if (defined(invoker.support_lazy_serialization) &&
             invoker.support_lazy_serialization) {
           args += [ "--support_lazy_serialization" ]
+        }
+
+        if (enable_kythe_annotations) {
+          args += [ "--enable_kythe_annotations" ]
         }
       }
     }
@@ -1233,6 +1248,7 @@ template("mojom") {
             "$target_gen_dir/$source.js",
             "$target_gen_dir/$source.externs.js",
             "$target_gen_dir/$source-lite.js",
+            "$target_gen_dir/$source.html",
             "$target_gen_dir/$source-lite-for-compile.js",
           ]
         }
@@ -1254,6 +1270,11 @@ template("mojom") {
 
         if (generate_fuzzing) {
           args += [ "--generate_fuzzing" ]
+        }
+
+        if (defined(invoker.use_old_js_lite_bindings_names) &&
+            invoker.use_old_js_lite_bindings_names) {
+          args += [ "--use_old_js_lite_bindings_names" ]
         }
       }
     }

@@ -6,12 +6,13 @@
 
 #include <memory>
 
-#include "ash/magnifier/docked_magnifier_controller.h"
+#include "ash/magnifier/docked_magnifier_controller_impl.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/desks/desks_util.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "ui/aura/env.h"
@@ -231,14 +232,14 @@ TEST_F(ScreenUtilTest, FullscreenWindowBoundsWithDockedMagnifier) {
   UpdateDisplay("1366x768");
 
   std::unique_ptr<aura::Window> window = CreateToplevelTestWindow(
-      gfx::Rect(300, 300, 200, 150), kShellWindowId_DefaultContainer);
+      gfx::Rect(300, 300, 200, 150), desks_util::GetActiveDeskContainerId());
 
   auto* docked_magnifier_controller =
       Shell::Get()->docked_magnifier_controller();
   docked_magnifier_controller->SetEnabled(true);
 
-  const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
-  wm::GetWindowState(window.get())->OnWMEvent(&event);
+  const WMEvent event(WM_EVENT_TOGGLE_FULLSCREEN);
+  WindowState::Get(window.get())->OnWMEvent(&event);
 
   constexpr gfx::Rect kDisplayBounds{1366, 768};
   EXPECT_NE(window->bounds(), kDisplayBounds);

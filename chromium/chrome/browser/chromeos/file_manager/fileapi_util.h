@@ -15,6 +15,7 @@
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "storage/browser/fileapi/file_system_operation_runner.h"
+#include "storage/browser/fileapi/isolated_context.h"
 #include "third_party/blink/public/mojom/choosers/file_chooser.mojom.h"
 #include "url/gurl.h"
 
@@ -170,9 +171,17 @@ void GetMetadataForPath(
     int fields,
     storage::FileSystemOperationRunner::GetMetadataCallback callback);
 
+// Groups a FileSystemURL and a related ScopedFSHandle.
+//
+// The URL is guaranteed to be valid as long as the handle is valid.
+struct FileSystemURLAndHandle {
+  storage::FileSystemURL url;
+  storage::IsolatedContext::ScopedFSHandle handle;
+};
+
 // Obtains isolated file system URL from |virtual_path| pointing a file in the
 // external file system.
-storage::FileSystemURL CreateIsolatedURLFromVirtualPath(
+FileSystemURLAndHandle CreateIsolatedURLFromVirtualPath(
     const storage::FileSystemContext& context,
     const GURL& origin,
     const base::FilePath& virtual_path);

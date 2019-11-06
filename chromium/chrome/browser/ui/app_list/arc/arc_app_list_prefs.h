@@ -17,6 +17,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/optional.h"
@@ -26,7 +27,7 @@
 #include "chrome/browser/chromeos/arc/policy/arc_policy_bridge.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_icon_descriptor.h"
 #include "components/arc/common/app.mojom.h"
-#include "components/arc/connection_observer.h"
+#include "components/arc/session/connection_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "ui/base/layout.h"
 
@@ -39,6 +40,10 @@ class ArcPackageSyncableService;
 template <typename InstanceType, typename HostType>
 class ConnectionHolder;
 }  // namespace arc
+
+namespace base {
+class SequencedTaskRunner;
+}  // namespace base
 
 namespace content {
 class BrowserContext;
@@ -111,15 +116,15 @@ class ArcAppListPrefs : public KeyedService,
   };
 
   struct PackageInfo {
-    PackageInfo(
-        const std::string& package_name,
-        int32_t package_version,
-        int64_t last_backup_android_id,
-        int64_t last_backup_time,
-        bool should_sync,
-        bool system,
-        bool vpn_provider,
-        const base::flat_map<arc::mojom::AppPermission, bool>& permissions);
+    PackageInfo(const std::string& package_name,
+                int32_t package_version,
+                int64_t last_backup_android_id,
+                int64_t last_backup_time,
+                bool should_sync,
+                bool system,
+                bool vpn_provider,
+                base::flat_map<arc::mojom::AppPermission,
+                               arc::mojom::PermissionStatePtr> permissions);
     ~PackageInfo();
 
     std::string package_name;
@@ -129,8 +134,9 @@ class ArcAppListPrefs : public KeyedService,
     bool should_sync;
     bool system;
     bool vpn_provider;
-    // Maps app permission to boolean values
-    base::flat_map<arc::mojom::AppPermission, bool> permissions;
+    // Maps app permission to permission states
+    base::flat_map<arc::mojom::AppPermission, arc::mojom::PermissionStatePtr>
+        permissions;
   };
 
   class Observer {
@@ -169,7 +175,10 @@ class ArcAppListPrefs : public KeyedService,
 
     virtual void OnNotificationsEnabledChanged(
         const std::string& package_name, bool enabled) {}
-    // Notifies that package has been installed.
+    // Notifies that package has been installed. This may be called in two
+    // cases:
+    // a) the package is being newly installed
+    // b) the package is already installed, and is being updated
     virtual void OnPackageInstalled(
         const arc::mojom::ArcPackageInfo& package_info) {}
     // Notifies that package has been modified.
@@ -196,10 +205,11 @@ class ArcAppListPrefs : public KeyedService,
     virtual ~Observer() {}
   };
 
+  static ArcAppListPrefs* Create(Profile* profile);
   static ArcAppListPrefs* Create(
       Profile* profile,
       arc::ConnectionHolder<arc::mojom::AppInstance, arc::mojom::AppHost>*
-          app_connection_holder);
+          app_connection_holder_for_testing);
 
   // Convenience function to get the ArcAppListPrefs for a BrowserContext. It
   // will only return non-null pointer for the primary user.
@@ -294,9 +304,7 @@ class ArcAppListPrefs : public KeyedService,
   void RemoveApp(const std::string& app_id);
 
   arc::ConnectionHolder<arc::mojom::AppInstance, arc::mojom::AppHost>*
-  app_connection_holder() {
-    return app_connection_holder_;
-  }
+  app_connection_holder();
 
   bool package_list_initial_refreshed() const {
     return package_list_initial_refreshed_;
@@ -336,7 +344,7 @@ class ArcAppListPrefs : public KeyedService,
   ArcAppListPrefs(
       Profile* profile,
       arc::ConnectionHolder<arc::mojom::AppInstance, arc::mojom::AppHost>*
-          app_connection_holder);
+          app_connection_holder_for_testing);
 
   // arc::ConnectionObserver<arc::mojom::AppInstance>:
   void OnConnectionReady() override;
@@ -506,7 +514,7 @@ class ArcAppListPrefs : public KeyedService,
   PrefService* const prefs_;
 
   arc::ConnectionHolder<arc::mojom::AppInstance, arc::mojom::AppHost>* const
-      app_connection_holder_;
+      app_connection_holder_for_testing_;
 
   // List of observers.
   base::ObserverList<Observer>::Unchecked observer_list_;
@@ -547,6 +555,8 @@ class ArcAppListPrefs : public KeyedService,
   base::OneShotTimer detect_default_app_availability_timeout_;
   // Set of currently installing apps_.
   std::unordered_set<std::string> apps_installations_;
+  // To execute file operations in sequence.
+  scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
 
   arc::ArcPackageSyncableService* sync_service_ = nullptr;
 

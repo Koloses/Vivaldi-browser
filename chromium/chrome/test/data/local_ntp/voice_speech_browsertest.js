@@ -2,17 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
 /**
  * @fileoverview Tests the speech module of Voice Search on the local NTP.
  */
-
 
 /**
  * Voice Search Speech module's object for test and setup functions.
  */
 test.speech = {};
-
 
 /**
  * ID of the fakebox microphone icon.
@@ -20,13 +17,11 @@ test.speech = {};
  */
 test.speech.FAKEBOX_MICROPHONE_ID = 'fakebox-microphone';
 
-
 /**
  * A module configuration for the test.
  * @const
  */
 test.speech.TEST_BASE_URL = 'https://google.com/';
-
 
 /**
  * A module configuration for the test.
@@ -49,13 +44,11 @@ test.speech.TEST_STRINGS = {
   waiting: 'Waiting'
 };
 
-
 /**
  * Mock out the clock functions for testing timers.
  * @type {MockClock}
  */
 test.speech.clock = new MockClock();
-
 
 /**
  * Represents the URL of the opened tab.
@@ -69,13 +62,11 @@ test.speech.locationUrl = null;
  */
 test.speech.mockSearchBox = {};
 
-
 /**
  * Keeps track of the number of |speech.recognition_| activations.
  * @type {number}
  */
 test.speech.recognitionActiveCount = 0;
-
 
 /**
  * Utility to mock out parts of the DOM.
@@ -83,13 +74,11 @@ test.speech.recognitionActiveCount = 0;
  */
 test.speech.stubs = new Replacer();
 
-
 /**
  * Utility to mock out the Speech Recognition API.
  * @type {Replacer}
  */
 test.speech.recognitionStubs = new Replacer();
-
 
 /**
  * Keeps track of the number of view activations.
@@ -97,20 +86,17 @@ test.speech.recognitionStubs = new Replacer();
  */
 test.speech.viewActiveCount = 0;
 
-
 /**
  * Mocks the current view state.
  * @type {object}
  */
 test.speech.viewState = {};
 
-
 /**
  * Represents the target of the view's window click event.
  * @type {object}
  */
 test.speech.viewClickTarget = {};
-
 
 /**
  * Set up the text DOM and test environment.
@@ -139,6 +125,7 @@ test.speech.setUp = function() {
   // Mock view functions.
   test.speech.stubs.replace(view, 'hide', () => test.speech.viewActiveCount--);
   test.speech.stubs.replace(view, 'init', () => {});
+  test.speech.stubs.replace(view, 'setTitles', () => {});
   test.speech.stubs.replace(view, 'onWindowClick_', (event) => {
     test.speech.viewClickTarget = event.target;
   });
@@ -184,7 +171,6 @@ test.speech.setUp = function() {
       });
 };
 
-
 /**
  * Tests if the controller has the correct speech recognition settings.
  */
@@ -199,7 +185,6 @@ test.speech.testSpeechRecognitionInitSettings = function() {
   test.speech.validateInactive();
 };
 
-
 /**
  * Test that the initialization can only happen once.
  */
@@ -209,7 +194,6 @@ test.speech.testInitSuccessfullyChangesState = function() {
   assertEquals(speech.State_.READY, speech.currentState_);
   assertThrows('not in UNINITIALIZED', () => test.speech.initSpeech());
 };
-
 
 /**
  * Test that the module doesn't cope with the Web Speech API missing.
@@ -236,7 +220,6 @@ test.speech.testFakeboxClickStartsSpeechWithWorkingView = function() {
   assertTrue(test.speech.clock.isTimeoutSet(speech.idleTimer_));
   assertFalse(test.speech.clock.isTimeoutSet(speech.errorTimer_));
 };
-
 
 /**
  * Tests that with everything OK, focusing the Omnibox terminates speech.
@@ -277,7 +260,6 @@ test.speech.testOmniboxFocusWithKeyboardNavigationDoesNotAbort = function() {
   assertTrue(speech.isRecognizing());
 };
 
-
 /**
  * Tests that when the speech recognition interface is uninitialized,
  * clicking the speech input tool initializes it prior to starting the
@@ -295,7 +277,6 @@ test.speech.testClickHandlingWithUnitializedSpeechRecognition = function() {
   assert(!!speech.recognition_);
 };
 
-
 /**
  * Tests that the view is notified when the speech recognition interface
  * starts the audio driver.
@@ -310,7 +291,6 @@ test.speech.testHandleAudioStart = function() {
   assertEquals(1, test.speech.recognitionActiveCount);
   assertFalse(elementIsVisible($(test.speech.FAKEBOX_MICROPHONE_ID)));
 };
-
 
 /**
  * Tests that the view is notified when the speech recognition interface
@@ -327,7 +307,6 @@ test.speech.testHandleSpeechStart = function() {
   assertEquals(1, test.speech.recognitionActiveCount);
   assertFalse(elementIsVisible($(test.speech.FAKEBOX_MICROPHONE_ID)));
 };
-
 
 /**
  * Tests the handling of a response received from the speech recognition
@@ -352,7 +331,6 @@ test.speech.testHandleInterimSpeechResponse = function() {
   assertEquals(highConfidenceText, speech.finalResult_);
   assertEquals(viewText, speech.interimResult_);
 };
-
 
 /**
  * Tests the handling of a response received from the speech recognition
@@ -384,7 +362,6 @@ test.speech.testHandleFinalSpeechResponse = function() {
   assertEquals(highConfidenceText, test.speech.viewState.final);
   assertEquals(highConfidenceText, test.speech.viewState.interim);
 };
-
 
 /**
  * Tests the handling of user-interrupted speech recognition after an interim
@@ -420,7 +397,6 @@ test.speech.testInterruptSpeechInputAfterInterimResult = function() {
   assertEquals(0, test.speech.recognitionActiveCount);
 };
 
-
 /**
  * Tests the handling of user-interrupted speech recognition before any result
  * is received.
@@ -434,7 +410,6 @@ test.speech.testInterruptSpeechInputBeforeResult = function() {
 
   test.speech.validateInactive();
 };
-
 
 /**
  * Tests that speech gets inactivated after an error is received and
@@ -458,7 +433,6 @@ test.speech.testSpeechRecognitionErrorTimeout = function() {
   test.speech.validateInactive();
 };
 
-
 /**
  * Tests that the proper error message is shown when the input ends before
  * speech is recognized, and that it gets hidden after a timeout.
@@ -479,7 +453,6 @@ test.speech.testNoSpeechInput = function() {
   test.speech.clock.pendingTimeouts.shift().callback();
   test.speech.validateInactive();
 };
-
 
 /**
  * Tests that recognition handlers stay initialized across successive
@@ -535,7 +508,6 @@ test.speech.testRecognitionHandlersStayInitialized = function() {
   assertRecognitionHandlers(true);
 };
 
-
 /**
  * Tests starting and stopping the Speech Recognition API quickly
  * in succession.
@@ -569,7 +541,6 @@ test.speech.testStopStartErrorHandling = function() {
   test.speech.validateInactive();
 };
 
-
 /**
  * Tests starting and stopping the Speech Recognition API quickly
  * in succession using keyboard shortcuts.
@@ -600,7 +571,6 @@ test.speech.testStopStartKeyboardShortcutErrorHandling = function() {
   test.speech.validateInactive();
 };
 
-
 /**
  * Tests pressing Enter submits the speech query.
  */
@@ -624,7 +594,6 @@ test.speech.testEnterToSubmit = function() {
   assertEquals('', speech.finalResult_);
 };
 
-
 /**
  * Tests clicking to submit.
  */
@@ -646,7 +615,6 @@ test.speech.testClickToSubmit = function() {
   assertEquals('', speech.interimResult_);
   assertEquals('', speech.finalResult_);
 };
-
 
 /**
  * Tests speech recognition is initiated with <CTRL> + <SHIFT> + <.>.
@@ -671,7 +639,6 @@ test.speech.testKeyboardStartWithCtrl = function() {
   speech.onKeyDown(ctrlShiftPeriod);
   assertTrue(speech.isRecognizing());
 };
-
 
 /**
  * Tests speech recognition is initiated with <CMD> + <SHIFT> + <.> on Mac.
@@ -708,7 +675,6 @@ test.speech.testKeyboardStartWithCmd = function() {
   assertTrue(speech.isRecognizing());
 };
 
-
 /**
  * Tests click to abort.
  */
@@ -722,7 +688,6 @@ test.speech.testClickToAbort = function() {
 
   test.speech.validateInactive();
 };
-
 
 /**
  * Tests click to retry when the interface is stopped restarts recognition.
@@ -742,7 +707,6 @@ test.speech.testClickToRetryWhenStopped = function() {
   assertEquals(speech.State_.STARTED, speech.currentState_);
 };
 
-
 /**
  * Tests click to retry (clicking the pulsing microphone button) when
  * the interface is not stopped stops recognition and hides the view.
@@ -757,7 +721,6 @@ test.speech.testClickToRetryWhenNotStopped = function() {
 
   test.speech.validateInactive();
 };
-
 
 /**
  * Tests keyboard navigation on the support link.
@@ -775,7 +738,6 @@ test.speech.testKeyboardNavigationOnSupportLink = function() {
   assertEquals(text.SUPPORT_LINK_ID, test.speech.viewClickTarget.id);
 };
 
-
 /**
  * Tests keyboard navigation on the retry link.
  */
@@ -792,7 +754,6 @@ test.speech.testKeyboardNavigationOnRetryLink = function() {
   assertEquals(text.RETRY_LINK_ID, test.speech.viewClickTarget.id);
 };
 
-
 /**
  * Tests keyboard navigation on the close button.
  */
@@ -808,7 +769,6 @@ test.speech.testKeyboardNavigationOnCloseButton = function() {
   speech.onKeyDown(fakeKeyboardEvent);
   assertEquals(view.CLOSE_BUTTON_ID, test.speech.viewClickTarget.id);
 };
-
 
 /**
  * Tests that when the recognition API cannot match the input to text,
@@ -834,7 +794,6 @@ test.speech.testNoSpeechInputMatched = function() {
   test.speech.validateInactive();
 };
 
-
 /**
  * Tests showing the proper error when there is no network connectivity.
  */
@@ -855,7 +814,6 @@ test.speech.testNetworkError = function() {
   test.speech.clock.pendingTimeouts.shift().callback();
   test.speech.validateInactive();
 };
-
 
 /**
  * Tests showing the proper error when there is no network connectivity, after
@@ -887,7 +845,6 @@ test.speech.testNetworkErrorAfterInterimResults = function() {
   test.speech.validateInactive();
 };
 
-
 /**
  * Tests showing the proper error when microphone permission is denied.
  */
@@ -908,7 +865,6 @@ test.speech.testPermissionError = function() {
   test.speech.clock.pendingTimeouts.shift().callback();
   test.speech.validateInactive();
 };
-
 
 /**
  * Tests that if no interactions occurs for some time during speech recognition,
@@ -947,7 +903,6 @@ test.speech.testIdleTimeoutWithConfidentSpeechResults = function() {
   assertEquals(highConfidenceText, test.speech.viewState.final);
 };
 
-
 /**
  * Tests that if no interactions occurs for some time during speech recognition
  * and no high confidence results have been received, the interface closes.
@@ -984,7 +939,6 @@ test.speech.testIdleTimeoutWithNonConfidentSpeechResults = function() {
       !test.speech.locationUrl.href.startsWith(test.speech.TEST_BASE_URL));
 };
 
-
 /**
  * Tests that the query is properly encoded for use in a URL.
  */
@@ -1004,10 +958,8 @@ test.speech.testQueryEncoding = function() {
       test.speech.locationUrl.href);
 };
 
-
 // ***************************** HELPER FUNCTIONS *****************************
 // These are used by the tests above.
-
 
 /**
  * Utility function for initializing the speech module with mock objects
@@ -1018,7 +970,6 @@ test.speech.initSpeech = function() {
       test.speech.TEST_BASE_URL, test.speech.TEST_STRINGS,
       $(test.speech.FAKEBOX_MICROPHONE_ID), test.speech.mockSearchBox);
 };
-
 
 /**
  * Resets the internal state of Voice Search and disables the speech
@@ -1039,7 +990,6 @@ test.speech.unInitSpeech = function(fakeboxMicrophoneElem, searchboxApiHandle) {
   speech.recognition_ = null;
 };
 
-
 /**
  * Validates that speech is currently inactive and ready to start recognition.
  */
@@ -1052,7 +1002,6 @@ test.speech.validateInactive = function() {
   assertFalse(test.speech.clock.isTimeoutSet(speech.idleTimer_));
   assertFalse(test.speech.clock.isTimeoutSet(speech.errorTimer_));
 };
-
 
 /**
  * Generates a speech recognition response corresponding to one that is
@@ -1067,7 +1016,6 @@ test.speech.createFinalResponse = function(interimText, finalText) {
   response.results[response.resultIndex].isFinal = true;
   return response;
 };
-
 
 /**
  * Generates a speech recognition response corresponding to one that is
@@ -1090,7 +1038,6 @@ test.speech.createInterimResponse = function(interimText, finalText) {
   return response;
 };
 
-
 /**
  * Generates a |SpeechRecognitionAlternative| that stores a speech
  * transcription and confidence level.
@@ -1106,7 +1053,6 @@ test.speech.createSpeechRecognitionAlternative = function(text, confidence) {
   return alt;
 };
 
-
 /**
  * Mock of the |SpeechRecognitionResult| that stores
  * |SpeechRecognitionAlternative|-s and a boolean |isFinal| that indicates
@@ -1116,7 +1062,6 @@ test.speech.createSpeechRecognitionAlternative = function(text, confidence) {
 test.speech.SpeechRecognitionResult = function() {
   this.isFinal = false;
 };
-
 
 /**
  * Mock of the |SpeechRecognitionAlternative| that stores server-generated

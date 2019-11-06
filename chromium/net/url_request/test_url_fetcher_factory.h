@@ -140,7 +140,6 @@ class TestURLFetcher : public URLFetcher {
   HttpResponseHeaders* GetResponseHeaders() const override;
   IPEndPoint GetSocketAddress() const override;
   const ProxyServer& ProxyServerUsed() const override;
-  bool WasFetchedViaProxy() const override;
   bool WasCached() const override;
   // Only valid when the response was set via SetResponseString().
   int64_t GetReceivedResponseContentLength() const override;
@@ -235,7 +234,6 @@ class TestURLFetcher : public URLFetcher {
   base::FilePath fake_response_file_path_;
   bool write_response_file_;
   ProxyServer fake_proxy_server_;
-  bool fake_was_fetched_via_proxy_;
   bool fake_was_cached_;
   int64_t fake_response_bytes_;
   scoped_refptr<HttpResponseHeaders> fake_response_headers_;
@@ -328,7 +326,7 @@ class FakeURLFetcher : public TestURLFetcher {
   void RunDelegate();
 
   int64_t response_bytes_;
-  base::WeakPtrFactory<FakeURLFetcher> weak_factory_;
+  base::WeakPtrFactory<FakeURLFetcher> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(FakeURLFetcher);
 };

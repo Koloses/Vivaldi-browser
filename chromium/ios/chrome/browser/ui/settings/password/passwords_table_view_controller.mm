@@ -48,6 +48,8 @@
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -170,9 +172,6 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   // A helper object for passing data about saved passwords from a finished
   // password store request to the PasswordsTableViewController.
   std::unique_ptr<ios::SavePasswordsConsumer> savedPasswordsConsumer_;
-  // A helper object for passing data about blacklisted sites from a finished
-  // password store request to the PasswordsTableViewController.
-  std::unique_ptr<ios::SavePasswordsConsumer> blacklistPasswordsConsumer_;
   // The list of the user's saved passwords.
   std::vector<std::unique_ptr<autofill::PasswordForm>> savedForms_;
   // The list of the user's blacklisted sites.
@@ -245,7 +244,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
                    prefName:password_manager::prefs::kCredentialsEnableService];
     [passwordManagerEnabled_ setObserver:self];
     [self getLoginsFromPasswordStore];
-    [self updateEditButton];
+    [self updateUIForEditState];
     [self updateExportPasswordsButton];
   }
   return self;
@@ -266,7 +265,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   searchController.obscuresBackgroundDuringPresentation = NO;
   searchController.delegate = self;
   searchController.searchBar.delegate = self;
-  searchController.searchBar.backgroundColor = [UIColor clearColor];
+  searchController.searchBar.backgroundColor = UIColor.clearColor;
   searchController.searchBar.accessibilityIdentifier = kPasswordsSearchBarId;
   // Center search bar and cancel button vertically so it looks centered
   // in the header when searching.
@@ -285,9 +284,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 
   self.scrimView = [[UIControl alloc] init];
   self.scrimView.alpha = 0.0f;
-  self.scrimView.backgroundColor =
-      [UIColor colorWithWhite:0
-                        alpha:kTableViewNavigationWhiteAlphaForSearchScrim];
+  self.scrimView.backgroundColor = [UIColor colorNamed:kScrimBackgroundColor];
   self.scrimView.translatesAutoresizingMaskIntoConstraints = NO;
   self.scrimView.accessibilityIdentifier = kPasswordsScrimViewId;
   [self.scrimView addTarget:self
@@ -404,6 +401,17 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   return !savedForms_.empty() || !blacklistedForms_.empty();
 }
 
+#pragma mark - SettingsControllerProtocol
+
+- (void)settingsWillBeDismissed {
+  // Dismiss the search bar if presented, otherwise the VC will be retained by
+  // UIKit thus cause a memory leak.
+  // TODO(crbug.com/947417): Remove this once the memory leak issue is fixed.
+  if (self.navigationItem.searchController.active == YES) {
+    self.navigationItem.searchController.active = NO;
+  }
+}
+
 #pragma mark - Items
 
 - (TableViewLinkHeaderFooterItem*)manageAccountLinkItem {
@@ -430,7 +438,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   TableViewTextItem* exportPasswordsItem =
       [[TableViewTextItem alloc] initWithType:ItemTypeExportPasswordsButton];
   exportPasswordsItem.text = l10n_util::GetNSString(IDS_IOS_EXPORT_PASSWORDS);
-  exportPasswordsItem.textColor = UIColorFromRGB(kTableViewTextLabelColorBlue);
+  exportPasswordsItem.textColor = [UIColor colorNamed:kTintColor];
   exportPasswordsItem.accessibilityIdentifier = @"exportPasswordsItem_button";
   exportPasswordsItem.accessibilityTraits = UIAccessibilityTraitButton;
   return exportPasswordsItem;
@@ -469,8 +477,12 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   // Update the item.
   savePasswordsItem_.on = [passwordManagerEnabled_ value];
 
-  // Update the cell.
-  [self reconfigureCellsForItems:@[ savePasswordsItem_ ]];
+  // Update the cell if it's not removed by presenting search controller.
+  if ([self.tableViewModel
+          hasItemForItemType:ItemTypeSavePasswordsSwitch
+           sectionIdentifier:SectionIdentifierSavePasswordsSwitch]) {
+    [self reconfigureCellsForItems:@[ savePasswordsItem_ ]];
+  }
 }
 
 #pragma mark - Actions
@@ -486,13 +498,11 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 #pragma mark - SavePasswordsConsumerDelegate
 
 - (void)onGetPasswordStoreResults:
-    (std::vector<std::unique_ptr<autofill::PasswordForm>>&)result {
-  if (result.empty()) {
+    (std::vector<std::unique_ptr<autofill::PasswordForm>>)results {
+  if (results.empty()) {
     return;
   }
-  for (auto it = result.begin(); it != result.end(); ++it) {
-    // PasswordForm is needed when user wants to delete the site/password.
-    auto form = std::make_unique<autofill::PasswordForm>(**it);
+  for (auto& form : results) {
     if (form->blacklisted_by_user)
       blacklistedForms_.push_back(std::move(form));
     else
@@ -504,7 +514,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   password_manager::SortEntriesAndHideDuplicates(
       &blacklistedForms_, &blacklistedPasswordDuplicates_);
 
-  [self updateEditButton];
+  [self updateUIForEditState];
   [self reloadData];
 }
 
@@ -703,9 +713,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 // Starts requests for saved and blacklisted passwords to the store.
 - (void)getLoginsFromPasswordStore {
   savedPasswordsConsumer_.reset(new ios::SavePasswordsConsumer(self));
-  passwordStore_->GetAutofillableLogins(savedPasswordsConsumer_.get());
-  blacklistPasswordsConsumer_.reset(new ios::SavePasswordsConsumer(self));
-  passwordStore_->GetBlacklistLogins(blacklistPasswordsConsumer_.get());
+  passwordStore_->GetAllLogins(savedPasswordsConsumer_.get());
 }
 
 - (void)updateExportPasswordsButton {
@@ -726,12 +734,10 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
 - (void)setExportPasswordsButtonEnabled:(BOOL)enabled {
   if (enabled) {
     DCHECK(exportReady_ && !self.editing);
-    exportPasswordsItem_.textColor =
-        UIColorFromRGB(kTableViewTextLabelColorBlue);
+    exportPasswordsItem_.textColor = [UIColor colorNamed:kTintColor];
     exportPasswordsItem_.accessibilityTraits &= ~UIAccessibilityTraitNotEnabled;
   } else {
-    exportPasswordsItem_.textColor =
-        UIColorFromRGB(kTableViewTextLabelColorLightGrey);
+    exportPasswordsItem_.textColor = UIColor.cr_labelColor;
     exportPasswordsItem_.accessibilityTraits |= UIAccessibilityTraitNotEnabled;
   }
   [self reconfigureCellsForItems:@[ exportPasswordsItem_ ]];
@@ -750,13 +756,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
       [UIAlertAction actionWithTitle:l10n_util::GetNSString(
                                          IDS_IOS_EXPORT_PASSWORDS_CANCEL_BUTTON)
                                style:UIAlertActionStyleCancel
-                             handler:^(UIAlertAction* action) {
-                               UMA_HISTOGRAM_ENUMERATION(
-                                   "PasswordManager.ExportPasswordsToCSVResult",
-                                   password_manager::metrics_util::
-                                       ExportPasswordsResult::USER_ABORTED,
-                                   password_manager::metrics_util::
-                                       ExportPasswordsResult::COUNT);
+                             handler:^(UIAlertAction* action){
                              }];
   [exportConfirmation addAction:cancelAction];
 
@@ -885,7 +885,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
         if (strongSelf->savedForms_.empty() &&
             strongSelf->blacklistedForms_.empty())
           [strongSelf setEditing:NO animated:YES];
-        [strongSelf updateEditButton];
+        [strongSelf updateUIForEditState];
         [strongSelf updateExportPasswordsButton];
       }];
 }
@@ -1018,7 +1018,7 @@ std::vector<std::unique_ptr<autofill::PasswordForm>> CopyOf(
   }
   duplicates.erase(key);
 
-  [self updateEditButton];
+  [self updateUIForEditState];
   [self reloadData];
   [self.navigationController popViewControllerAnimated:YES];
 }

@@ -7,6 +7,8 @@
 
 #include <stddef.h>
 
+#include <vector>
+
 #include "base/gtest_prod_util.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/weak_ptr.h"
@@ -16,10 +18,10 @@
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
 #include "chrome/browser/ui/autofill/autofill_popup_layout_model.h"
 #include "chrome/browser/ui/autofill/popup_controller_common.h"
+#include "components/autofill/core/browser/ui/popup_types.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
-#include "ui/native_theme/native_theme.h"
 
 namespace content {
 struct NativeWebKeyboardEvent;
@@ -49,8 +51,9 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
       base::i18n::TextDirection text_direction);
 
   // Shows the popup, or updates the existing popup with the given values.
-  virtual void Show(const std::vector<autofill::Suggestion>& suggestions,
-                    bool autoselect_first_suggestion);
+  virtual void Show(const std::vector<Suggestion>& suggestions,
+                    bool autoselect_first_suggestion,
+                    PopupType popup_type);
 
   // Updates the data list values currently shown with the popup.
   virtual void UpdateDataListValues(const std::vector<base::string16>& values,
@@ -89,7 +92,7 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   const gfx::RectF& element_bounds() const override;
   void SetElementBounds(const gfx::RectF& bounds);
   bool IsRTL() const override;
-  const std::vector<autofill::Suggestion> GetSuggestions() override;
+  const std::vector<Suggestion> GetSuggestions() override;
 #if !defined(OS_ANDROID)
   void SetTypesetter(gfx::Typesetter typesetter) override;
   int GetElidedValueWidthForRow(int row) override;
@@ -100,14 +103,13 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   void OnSuggestionsChanged() override;
   void AcceptSuggestion(int index) override;
   int GetLineCount() const override;
-  const autofill::Suggestion& GetSuggestionAt(int row) const override;
+  const Suggestion& GetSuggestionAt(int row) const override;
   const base::string16& GetElidedValueAt(int row) const override;
   const base::string16& GetElidedLabelAt(int row) const override;
   bool GetRemovalConfirmationText(int list_index,
                                   base::string16* title,
                                   base::string16* body) override;
   bool RemoveSuggestion(int list_index) override;
-  ui::NativeTheme::ColorId GetBackgroundColorIDForRow(int index) const override;
   void SetSelectedLine(base::Optional<int> selected_line) override;
   base::Optional<int> selected_line() const override;
   const AutofillPopupLayoutModel& layout_model() const override;
@@ -129,13 +131,18 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
 
   // Set the Autofill entry values. Exposed to allow tests to set these values
   // without showing the popup.
-  void SetValues(const std::vector<autofill::Suggestion>& suggestions);
+  void SetValues(const std::vector<Suggestion>& suggestions);
 
   AutofillPopupView* view() { return view_; }
 
   base::WeakPtr<AutofillPopupControllerImpl> GetWeakPtr();
 
   AutofillPopupLayoutModel& LayoutModelForTesting() { return layout_model_; }
+
+  // Raise an accessibility event to indicate the controls relation of the
+  // form control of the popup and popup itself has changed based on the popup's
+  // show or hide action.
+  void FireControlsChangedEvent(bool is_show);
 
  private:
 #if !defined(OS_ANDROID)
@@ -154,6 +161,7 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   void HideViewAndDie();
 
   friend class AutofillPopupControllerUnitTest;
+  friend class AutofillPopupControllerAccessibilityUnitTest;
   void SetViewForTesting(AutofillPopupView* view) { view_ = view; }
 
   PopupControllerCommon controller_common_;
@@ -166,7 +174,7 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   base::i18n::TextDirection text_direction_;
 
   // The current Autofill query values.
-  std::vector<autofill::Suggestion> suggestions_;
+  std::vector<Suggestion> suggestions_;
 
   // Elided values and labels corresponding to the suggestions_ vector to
   // ensure that it fits on the screen.

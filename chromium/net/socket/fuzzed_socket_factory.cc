@@ -5,7 +5,6 @@
 #include "net/socket/fuzzed_socket_factory.h"
 
 #include "base/logging.h"
-#include "base/test/fuzzed_data_provider.h"
 #include "net/base/address_list.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
@@ -16,6 +15,7 @@
 #include "net/socket/fuzzed_socket.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "third_party/libFuzzer/src/utils/FuzzedDataProvider.h"
 
 namespace net {
 
@@ -85,16 +85,6 @@ class FailingSSLClientSocket : public SSLClientSocket {
   void GetSSLCertRequestInfo(
       SSLCertRequestInfo* cert_request_info) const override {}
 
-  ChannelIDService* GetChannelIDService() const override {
-    NOTREACHED();
-    return nullptr;
-  }
-
-  crypto::ECPrivateKey* GetChannelIDKey() const override {
-    NOTREACHED();
-    return nullptr;
-  }
-
   void ApplySocketTag(const net::SocketTag& tag) override {}
 
   // SSLSocket implementation:
@@ -115,8 +105,7 @@ class FailingSSLClientSocket : public SSLClientSocket {
 
 }  // namespace
 
-FuzzedSocketFactory::FuzzedSocketFactory(
-    base::FuzzedDataProvider* data_provider)
+FuzzedSocketFactory::FuzzedSocketFactory(FuzzedDataProvider* data_provider)
     : data_provider_(data_provider), fuzz_connect_result_(true) {}
 
 FuzzedSocketFactory::~FuzzedSocketFactory() = default;
@@ -144,10 +133,10 @@ FuzzedSocketFactory::CreateTransportClientSocket(
 }
 
 std::unique_ptr<SSLClientSocket> FuzzedSocketFactory::CreateSSLClientSocket(
+    SSLClientContext* context,
     std::unique_ptr<StreamSocket> stream_socket,
     const HostPortPair& host_and_port,
-    const SSLConfig& ssl_config,
-    const SSLClientSocketContext& context) {
+    const SSLConfig& ssl_config) {
   return std::make_unique<FailingSSLClientSocket>();
 }
 
@@ -161,7 +150,6 @@ std::unique_ptr<ProxyClientSocket> FuzzedSocketFactory::CreateProxyClientSocket(
     bool using_spdy,
     NextProto negotiated_protocol,
     ProxyDelegate* proxy_delegate,
-    bool is_https_proxy,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
   NOTIMPLEMENTED();
   return nullptr;

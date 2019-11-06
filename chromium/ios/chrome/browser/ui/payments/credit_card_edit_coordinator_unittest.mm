@@ -10,7 +10,7 @@
 #include "base/mac/foundation_util.h"
 #include "base/strings/utf_string_conversions.h"
 #import "base/test/ios/wait_util.h"
-#include "components/autofill/core/browser/credit_card.h"
+#include "components/autofill/core/browser/data_model/credit_card.h"
 #include "components/autofill/core/browser/test_personal_data_manager.h"
 #include "components/payments/core/autofill_payment_instrument.h"
 #include "components/payments/core/payment_instrument.h"
@@ -121,6 +121,7 @@ class PaymentRequestCreditCardEditCoordinatorTest
 
   // PlatformTest:
   void SetUp() override {
+    PlatformTest::SetUp();
     DoSetUp();
 
     payment_request_ = std::make_unique<MockPaymentRequest>(
@@ -129,7 +130,10 @@ class PaymentRequestCreditCardEditCoordinatorTest
   }
 
   // PlatformTest:
-  void TearDown() override { DoTearDown(); }
+  void TearDown() override {
+    DoTearDown();
+    PlatformTest::TearDown();
+  }
 
   autofill::TestPersonalDataManager personal_data_manager_;
   std::unique_ptr<MockPaymentRequest> payment_request_;

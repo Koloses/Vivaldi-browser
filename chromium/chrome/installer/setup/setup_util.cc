@@ -38,6 +38,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/version.h"
 #include "base/win/registry.h"
+#include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "build/build_config.h"
 #include "chrome/install_static/install_details.h"
@@ -98,6 +99,43 @@ void RemoveLegacyIExecuteCommandKey(const InstallerState& installer_state) {
                             success);
     }
   }
+}
+
+// Remove the registration of profile statistics. This used to be reported to
+// Omaha, but no more.
+void RemoveProfileStatistics(const InstallerState& installer_state) {
+  const HKEY root = installer_state.root_key();
+  bool found = false;
+  bool deleted = true;
+  if (installer_state.system_install()) {
+    for (base::string16 key : {L"_NumAccounts", L"_NumSignedIn"}) {
+      base::string16 path(install_static::GetClientStateMediumKeyPath() +
+                          L"\\" + key);
+      if (base::win::RegKey(root, path.c_str(),
+                            KEY_QUERY_VALUE | KEY_WOW64_32KEY)
+              .Valid()) {
+        found = true;
+        if (!InstallUtil::DeleteRegistryKey(root, path, KEY_WOW64_32KEY))
+          deleted = false;
+      }
+    }
+  } else {
+    base::win::RegKey client_state;
+    if (client_state.Open(root, install_static::GetClientStateKeyPath().c_str(),
+                          KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_32KEY) ==
+        ERROR_SUCCESS) {
+      for (const base::char16* value : {STRING16_LITERAL("_NumAccounts"),
+                                        STRING16_LITERAL("_NumSignedIn"})) {
+          if (!client_state.HasValue(value))
+            continue;
+          found = true;
+          if (client_state.DeleteValue(value) != ERROR_SUCCESS)
+            deleted = false;
+        }
+    }
+  }
+  if (found)
+    UMA_HISTOGRAM_BOOLEAN("Setup.Install.RemoveProfileStatistics", deleted);
 }
 
 #if !defined(VIVALDI_BUILD)
@@ -775,6 +813,7 @@ void DoLegacyCleanups(const InstallerState& installer_state,
 
   // Cleanups that apply to any install mode.
   RemoveLegacyIExecuteCommandKey(installer_state);
+  RemoveProfileStatistics(installer_state);
 
   // The cleanups below only apply to normal Chrome, not side-by-side (canary).
   if (!install_static::InstallDetails::Get().is_primary_mode())
@@ -883,8 +922,7 @@ base::FilePath GetElevationServicePath(const base::FilePath& target_path,
 }
 
 base::string16 GetElevationServiceGuid(base::StringPiece16 prefix) {
-  base::string16 result =
-      InstallUtil::String16FromGUID(install_static::GetElevatorClsid());
+  auto result = base::win::String16FromGUID(install_static::GetElevatorClsid());
   result.insert(0, prefix.data(), prefix.size());
   return result;
 }
@@ -898,8 +936,7 @@ base::string16 GetElevationServiceAppidRegistryPath() {
 }
 
 base::string16 GetElevationServiceIid(base::StringPiece16 prefix) {
-  base::string16 result =
-      InstallUtil::String16FromGUID(install_static::GetElevatorIid());
+  auto result = base::win::String16FromGUID(install_static::GetElevatorIid());
   result.insert(0, prefix.data(), prefix.size());
   return result;
 }

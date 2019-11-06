@@ -13,9 +13,11 @@
 #include "base/feature_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/crostini/crostini_util.h"
+#include "chrome/browser/chromeos/plugin_vm/plugin_vm_util.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_features.h"
+#include "components/arc/arc_features.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -90,14 +92,6 @@ void ChromeFeaturesServiceProvider::Start(
                           weak_ptr_factory_.GetWeakPtr()),
       base::BindRepeating(&ChromeFeaturesServiceProvider::OnExported,
                           weak_ptr_factory_.GetWeakPtr()));
-  exported_object->ExportMethod(
-      kChromeFeaturesServiceInterface,
-      kChromeFeaturesServiceIsShillSandboxingEnabledMethod,
-      base::BindRepeating(
-          &ChromeFeaturesServiceProvider::IsShillSandboxingEnabled,
-          weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&ChromeFeaturesServiceProvider::OnExported,
-                          weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ChromeFeaturesServiceProvider::OnExported(
@@ -113,8 +107,14 @@ void ChromeFeaturesServiceProvider::IsFeatureEnabled(
     dbus::MethodCall* method_call,
     dbus::ExportedObject::ResponseSender response_sender) {
   static const base::Feature constexpr* kFeatureLookup[] = {
-      &features::kUsbbouncer, &features::kUsbguard,
-      &features::kShillSandboxing};
+      &features::kUsbbouncer,
+      &features::kUsbguard,
+      &arc::kBootCompletedBroadcastFeature,
+      &arc::kCustomTabsExperimentFeature,
+      &arc::kFilePickerExperimentFeature,
+      &arc::kNativeBridgeExperimentFeature,
+      &arc::kPrintSpoolerExperimentFeature,
+  };
 
   dbus::MessageReader reader(method_call);
   std::string feature_name;
@@ -154,10 +154,10 @@ void ChromeFeaturesServiceProvider::IsCrostiniEnabled(
 void ChromeFeaturesServiceProvider::IsPluginVmEnabled(
     dbus::MethodCall* method_call,
     dbus::ExportedObject::ResponseSender response_sender) {
-  // TODO(dtor): extend the check to include device capabilities
-  // and device/user policies.
-  SendResponse(method_call, response_sender,
-               base::FeatureList::IsEnabled(features::kPluginVm));
+  Profile* profile = GetSenderProfile(method_call, response_sender);
+  SendResponse(
+      method_call, response_sender,
+      profile ? plugin_vm::IsPluginVmAllowedForProfile(profile) : false);
 }
 
 void ChromeFeaturesServiceProvider::IsUsbguardEnabled(
@@ -167,10 +167,4 @@ void ChromeFeaturesServiceProvider::IsUsbguardEnabled(
                base::FeatureList::IsEnabled(features::kUsbguard));
 }
 
-void ChromeFeaturesServiceProvider::IsShillSandboxingEnabled(
-    dbus::MethodCall* method_call,
-    dbus::ExportedObject::ResponseSender response_sender) {
-  SendResponse(method_call, response_sender,
-               base::FeatureList::IsEnabled(features::kShillSandboxing));
-}
 }  // namespace chromeos

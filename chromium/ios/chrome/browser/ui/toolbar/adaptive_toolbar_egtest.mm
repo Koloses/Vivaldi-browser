@@ -10,7 +10,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
 #import "ios/chrome/browser/ui/infobars/test_infobar_delegate.h"
-#import "ios/chrome/browser/ui/tab_grid/tab_grid_egtest_util.h"
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_button.h"
 #import "ios/chrome/browser/ui/toolbar/primary_toolbar_view.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
@@ -20,7 +19,6 @@
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
-#include "ios/chrome/test/app/bookmarks_test_util.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/app/tab_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
@@ -38,8 +36,6 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-using web::test::ElementSelector;
 
 namespace {
 
@@ -117,7 +113,7 @@ id<GREYMatcher> CancelButton() {
 
 // Returns a matcher for the search button.
 id<GREYMatcher> SearchButton() {
-  return grey_accessibilityID(kToolbarOmniboxButtonIdentifier);
+  return grey_accessibilityID(kToolbarSearchButtonIdentifier);
 }
 
 // Returns a matcher for the tab grid button.
@@ -206,7 +202,7 @@ UITraitCollection* RotateOrChangeTraitCollection(
     UIViewController* topViewController) {
   // Change the orientation or the trait collection.
   UITraitCollection* secondTraitCollection = nil;
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     // Simulate a multitasking by overriding the trait collections of the view
     // controllers. The rotation doesn't work on iPad.
     UITraitCollection* horizontalCompact = [UITraitCollection
@@ -367,7 +363,7 @@ void CheckCurrentURLContainsString(std::string string) {
     [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
         assertWithMatcher:chrome_test_util::OmniboxContainingText(string)];
 
-    if (IsIPadIdiom()) {
+    if ([ChromeEarlGrey isIPadIdiom]) {
       // Defocus omnibox by tapping the typing shield.
       [[EarlGrey
           selectElementWithMatcher:grey_accessibilityID(@"Typing Shield")]
@@ -410,8 +406,7 @@ void FocusOmnibox() {
 
   // Setup the bookmarks.
   [ChromeEarlGrey waitForBookmarksToFinishLoading];
-  GREYAssert(chrome_test_util::ClearBookmarks(),
-             @"Not all bookmarks were removed.");
+  [ChromeEarlGrey clearBookmarks];
 
   // Setup the server.
   self.testServer->RegisterRequestHandler(
@@ -442,8 +437,7 @@ void FocusOmnibox() {
       assertWithMatcher:Spotlighted()];
 
   // Clean the bookmarks
-  GREYAssert(chrome_test_util::ClearBookmarks(),
-             @"Not all bookmarks were removed.");
+  [ChromeEarlGrey clearBookmarks];
 }
 
 // Tests that tapping a button cancels the focus on the omnibox.
@@ -486,7 +480,7 @@ void FocusOmnibox() {
   CheckToolbarButtonVisibility(secondTraitCollection, YES);
 
   // Revert the orientation/trait collection to the original.
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     // Remove the override.
     for (UIViewController* child in topViewController.childViewControllers) {
       [topViewController setOverrideTraitCollection:originalTraitCollection
@@ -526,7 +520,7 @@ void FocusOmnibox() {
   // Check the visiblity after a size class change.
   CheckToolbarButtonVisibility(secondTraitCollection, YES);
 
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     // Remove the override.
     for (UIViewController* child in topViewController.childViewControllers) {
       [topViewController setOverrideTraitCollection:originalTraitCollection
@@ -674,7 +668,7 @@ void FocusOmnibox() {
       selectElementWithMatcher:web::WebViewInWebState(
                                    chrome_test_util::GetCurrentWebState())]
       performAction:chrome_test_util::LongPressElementForContextMenu(
-                        ElementSelector::ElementSelectorId(kLinkID),
+                        [ElementSelector selectorWithElementID:kLinkID],
                         true /* menu should appear */)];
   [[EarlGrey selectElementWithMatcher:
                  chrome_test_util::StaticTextWithAccessibilityLabelId(
@@ -695,7 +689,7 @@ void FocusOmnibox() {
   }
 
   [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          kToolbarOmniboxButtonIdentifier)]
+                                          kToolbarSearchButtonIdentifier)]
       performAction:grey_tap()];
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
       assertWithMatcher:firstResponder()];
@@ -703,7 +697,7 @@ void FocusOmnibox() {
 
 // Tests share button is enabled only on pages that can be shared.
 - (void)testShareButton {
-  if (!IsIPadIdiom()) {
+  if (![ChromeEarlGrey isIPadIdiom]) {
     // If this test is run on an iPhone, rotate it to have the unsplit toolbar.
     [EarlGrey rotateDeviceToOrientation:UIDeviceOrientationLandscapeLeft
                              errorOrNil:nil];
@@ -720,7 +714,7 @@ void FocusOmnibox() {
   [[EarlGrey selectElementWithMatcher:ShareButton()]
       assertWithMatcher:grey_interactable()];
 
-  if (!IsIPadIdiom()) {
+  if (![ChromeEarlGrey isIPadIdiom]) {
     // Cancel rotation.
     [EarlGrey rotateDeviceToOrientation:UIDeviceOrientationPortrait
                              errorOrNil:nil];
@@ -777,7 +771,7 @@ void FocusOmnibox() {
   // Check the visiblity after a size class change.
   CheckToolbarButtonVisibility(secondTraitCollection, NO);
 
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     // Remove the override.
     for (UIViewController* child in topViewController.childViewControllers) {
       [topViewController setOverrideTraitCollection:originalTraitCollection

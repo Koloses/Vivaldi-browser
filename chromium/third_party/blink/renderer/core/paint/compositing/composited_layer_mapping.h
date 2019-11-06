@@ -36,7 +36,7 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer_client.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -48,13 +48,13 @@ struct GraphicsLayerPaintInfo {
   DISALLOW_NEW();
   PaintLayer* paint_layer;
 
-  LayoutRect composited_bounds;
+  PhysicalRect composited_bounds;
 
   // The clip rect to apply, in the local coordinate space of the squashed
   // layer, when painting it.
   ClipRect local_clip_rect_for_squashed_layer;
   PaintLayer* local_clip_rect_root;
-  LayoutPoint offset_from_clip_rect_root;
+  PhysicalOffset offset_from_clip_rect_root;
 
   // Offset describing where this squashed Layer paints into the shared
   // GraphicsLayer backing.
@@ -99,7 +99,8 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
   void UpdateGraphicsLayerGeometry(
       const PaintLayer* compositing_container,
       const PaintLayer* compositing_stacking_context,
-      Vector<PaintLayer*>& layers_needing_paint_invalidation);
+      Vector<PaintLayer*>& layers_needing_paint_invalidation,
+      GraphicsLayerUpdater::UpdateContext& update_context);
 
   // Update whether background paints onto scrolling contents layer.
   // Returns (through the reference params) what invalidations are needed.
@@ -181,7 +182,7 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
   // Notification from the layoutObject that its content changed.
   void ContentChanged(ContentChangeType);
 
-  LayoutRect CompositedBounds() const { return composited_bounds_; }
+  PhysicalRect CompositedBounds() const { return composited_bounds_; }
 
   void PositionOverflowControlsLayers();
 
@@ -213,15 +214,19 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
                      GraphicsLayerPaintingPhase,
                      const IntRect& interest_rect) const override;
   bool ShouldThrottleRendering() const override;
+  bool IsUnderSVGHiddenContainer() const override;
   bool IsTrackingRasterInvalidations() const override;
   void SetOverlayScrollbarsHidden(bool) override;
-  void SetPaintArtifactCompositorNeedsUpdate() const override;
+  void GraphicsLayersDidChange() override;
+  bool PaintBlockedByDisplayLockIncludingAncestors(
+      DisplayLockContextLifecycleTarget) const override;
+  void NotifyDisplayLockNeedsGraphicsLayerCollection() override;
 
 #if DCHECK_IS_ON()
   void VerifyNotPainting() override;
 #endif
 
-  LayoutRect ContentsBox() const;
+  PhysicalRect ContentsBox() const;
 
   GraphicsLayer* LayerForHorizontalScrollbar() const {
     return layer_for_horizontal_scrollbar_.get();
@@ -244,6 +249,9 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
   // so that it can be inserted as a sibling to this CLM without changing
   // position.
   GraphicsLayer* DetachLayerForOverflowControls();
+
+  // We may similarly need to reattach the layer for outlines and decorations.
+  GraphicsLayer* DetachLayerForDecorationOutline();
 
   void UpdateFilters();
   void UpdateBackdropFilters();
@@ -276,7 +284,7 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
   const ScrollableArea* GetScrollableAreaForTesting(
       const GraphicsLayer*) const override;
 
-  LayoutSize ContentOffsetInCompositingLayer() const;
+  PhysicalOffset ContentOffsetInCompositingLayer() const;
 
   // If there is a squashed layer painting into this CLM that is an ancestor of
   // the given LayoutObject, return it. Otherwise return nullptr.
@@ -353,7 +361,8 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
   void UpdateMainGraphicsLayerGeometry(
       const IntRect& relative_compositing_bounds,
       const IntRect& local_compositing_bounds,
-      const IntPoint& graphics_layer_parent_location);
+      const IntPoint& graphics_layer_parent_location,
+      GraphicsLayerUpdater::UpdateContext& update_context);
   void UpdateAncestorClippingLayerGeometry(
       const PaintLayer* compositing_container,
       const IntPoint& snapped_offset_from_composited_ancestor,
@@ -427,7 +436,7 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
       const PaintLayer* composited_ancestor,
       IntRect& local_compositing_bounds,
       IntRect& compositing_bounds_relative_to_composited_ancestor,
-      LayoutPoint& offset_from_composited_ancestor,
+      PhysicalOffset& offset_from_composited_ancestor,
       IntPoint& snapped_offset_from_composited_ancestor);
 
   GraphicsLayerPaintingPhase PaintingPhaseForPrimaryLayer() const;
@@ -435,7 +444,6 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
   // Result is transform origin in pixels.
   FloatPoint3D ComputeTransformOrigin(const IntRect& border_box) const;
 
-  void UpdateHitTestableWithoutDrawsContent(const bool&);
   void UpdateOpacity(const ComputedStyle&);
   void UpdateTransform(const ComputedStyle&);
   void UpdateLayerBlendMode(const ComputedStyle&);
@@ -661,11 +669,12 @@ class CORE_EXPORT CompositedLayerMapping final : public GraphicsLayerClient {
   Vector<GraphicsLayerPaintInfo> squashed_layers_;
   IntSize squashing_layer_offset_from_layout_object_;
 
-  LayoutRect composited_bounds_;
+  PhysicalRect composited_bounds_;
 
   // We keep track of the scrolling contents offset, so that when it changes we
   // can notify the ScrollingCoordinator, which passes on main-thread scrolling
   // updates to the compositor.
+  // TODO(bokan): scrolling_contents_offset_ can be removed when BGPT ships.
   DoubleSize scrolling_contents_offset_;
 
   const PaintLayer* clip_inheritance_ancestor_;

@@ -41,8 +41,7 @@ using content::WebContents;
 namespace {
 
 std::string PathWithoutParams(const std::string& path) {
-  return GURL(std::string("chrome-devtools://devtools/") + path)
-      .path().substr(1);
+  return GURL(std::string("devtools://devtools/") + path).path().substr(1);
 }
 
 scoped_refptr<base::RefCountedMemory> CreateNotFoundResponse() {
@@ -79,7 +78,7 @@ std::string GetMimeTypeForPath(const std::string& path) {
   return "text/html";
 }
 
-// An URLDataSource implementation that handles chrome-devtools://devtools/
+// An URLDataSource implementation that handles devtools://devtools/
 // requests. Three types of requests could be handled based on the URL path:
 // 1. /bundled/: bundled DevTools frontend is served.
 // 2. /remote/: remote DevTools frontend is served from App Engine.
@@ -95,7 +94,7 @@ class DevToolsDataSource : public content::URLDataSource {
   ~DevToolsDataSource() override = default;
 
   // content::URLDataSource implementation.
-  std::string GetSource() const override;
+  std::string GetSource() override;
 
   void StartDataRequest(
       const std::string& path,
@@ -106,10 +105,10 @@ class DevToolsDataSource : public content::URLDataSource {
   struct PendingRequest;
 
   // content::URLDataSource overrides.
-  std::string GetMimeType(const std::string& path) const override;
-  bool ShouldAddContentSecurityPolicy() const override;
-  bool ShouldDenyXFrameOptions() const override;
-  bool ShouldServeMimeTypeAsContentTypeHeader() const override;
+  std::string GetMimeType(const std::string& path) override;
+  bool ShouldAddContentSecurityPolicy() override;
+  bool ShouldDenyXFrameOptions() override;
+  bool ShouldServeMimeTypeAsContentTypeHeader() override;
 
   void OnLoadComplete(std::list<PendingRequest>::iterator request_iter,
                       std::unique_ptr<std::string> response_body);
@@ -159,7 +158,7 @@ class DevToolsDataSource : public content::URLDataSource {
   DISALLOW_COPY_AND_ASSIGN(DevToolsDataSource);
 };
 
-std::string DevToolsDataSource::GetSource() const {
+std::string DevToolsDataSource::GetSource() {
   return chrome::kChromeUIDevToolsHost;
 }
 
@@ -236,19 +235,19 @@ void DevToolsDataSource::StartDataRequest(
   callback.Run(NULL);
 }
 
-std::string DevToolsDataSource::GetMimeType(const std::string& path) const {
+std::string DevToolsDataSource::GetMimeType(const std::string& path) {
   return GetMimeTypeForPath(path);
 }
 
-bool DevToolsDataSource::ShouldAddContentSecurityPolicy() const {
+bool DevToolsDataSource::ShouldAddContentSecurityPolicy() {
   return false;
 }
 
-bool DevToolsDataSource::ShouldDenyXFrameOptions() const {
+bool DevToolsDataSource::ShouldDenyXFrameOptions() {
   return false;
 }
 
-bool DevToolsDataSource::ShouldServeMimeTypeAsContentTypeHeader() const {
+bool DevToolsDataSource::ShouldServeMimeTypeAsContentTypeHeader() {
   return true;
 }
 

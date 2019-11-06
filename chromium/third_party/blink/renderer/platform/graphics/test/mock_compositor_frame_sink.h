@@ -5,11 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_TEST_MOCK_COMPOSITOR_FRAME_SINK_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_TEST_MOCK_COMPOSITOR_FRAME_SINK_H_
 
+#include "base/memory/read_only_shared_memory_region.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "gpu/ipc/common/mailbox.mojom-blink.h"
 #include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom-blink.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "third_party/blink/public/platform/modules/frame_sinks/embedded_frame_sink.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame_sinks/embedded_frame_sink.mojom-blink.h"
 
 namespace blink {
 
@@ -49,9 +50,10 @@ class MockCompositorFrameSink : public viz::mojom::blink::CompositorFrameSink {
   MOCK_METHOD1(SubmitCompositorFrameSync_, void(viz::CompositorFrame*));
   MOCK_METHOD1(DidNotProduceFrame, void(const viz::BeginFrameAck&));
   MOCK_METHOD2(DidAllocateSharedBitmap,
-               void(mojo::ScopedSharedBufferHandle,
+               void(base::ReadOnlySharedMemoryRegion,
                     gpu::mojom::blink::MailboxPtr));
   MOCK_METHOD1(DidDeleteSharedBitmap, void(gpu::mojom::blink::MailboxPtr));
+  MOCK_METHOD1(SetPreferredFrameInterval, void(base::TimeDelta));
 
  private:
   mojo::Binding<viz::mojom::blink::CompositorFrameSink> binding_;

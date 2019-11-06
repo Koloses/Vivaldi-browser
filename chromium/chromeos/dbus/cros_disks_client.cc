@@ -25,7 +25,6 @@
 #include "base/task_runner_util.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chromeos/dbus/fake_cros_disks_client.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_path.h"
@@ -223,16 +222,20 @@ class CrosDisksClientImpl : public CrosDisksClient {
   // CrosDisksClient override.
   void Format(const std::string& device_path,
               const std::string& filesystem,
+              const std::string& label,
               VoidDBusMethodCallback callback) override {
+    format_start_time_[device_path] = base::TimeTicks::Now();
     dbus::MethodCall method_call(cros_disks::kCrosDisksInterface,
                                  cros_disks::kFormat);
     dbus::MessageWriter writer(&method_call);
     writer.AppendString(device_path);
     writer.AppendString(filesystem);
-    // No format option is currently specified, but we can later use this
-    // argument to specify options for the format operation.
+
     std::vector<std::string> format_options;
+    format_options.push_back(cros_disks::kFormatLabelOption);
+    format_options.push_back(label);
     writer.AppendArrayOfStrings(format_options);
+
     proxy_->CallMethod(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
         base::BindOnce(&CrosDisksClientImpl::OnVoidMethod,
@@ -479,6 +482,17 @@ class CrosDisksClientImpl : public CrosDisksClient {
       return;
     }
 
+    if (base::Contains(format_start_time_, device_path)) {
+      base::UmaHistogramMediumTimes(
+          "CrosDisksClient.FormatTime",
+          base::TimeTicks::Now() - format_start_time_[device_path]);
+      format_start_time_.erase(device_path);
+    }
+
+    base::UmaHistogramEnumeration("CrosDisksClient.FormatCompletedError",
+                                  static_cast<FormatError>(error_code),
+                                  FORMAT_ERROR_COUNT);
+
     for (auto& observer : observer_list_) {
       observer.OnFormatCompleted(static_cast<FormatError>(error_code),
                                  device_path);
@@ -512,6 +526,8 @@ class CrosDisksClientImpl : public CrosDisksClient {
   dbus::ObjectProxy* proxy_;
 
   base::ObserverList<Observer>::Unchecked observer_list_;
+
+  std::unordered_map<std::string, base::TimeTicks> format_start_time_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
@@ -636,7 +652,7 @@ DiskInfo::~DiskInfo() = default;
 //     variant       string ""
 //   }
 //   dict entry {
-//     string "NativePath"
+//     string "StorageDevicePath"
 //     variant       string "/sys/devices/pci0000:00/0000:00:1d.7/usb1/1-4/...
 //   }
 //   dict entry {
@@ -667,8 +683,8 @@ void DiskInfo::InitializeFromResponse(dbus::Response* response) {
                                              &is_virtual_);
   properties->GetBooleanWithoutPathExpansion(cros_disks::kIsAutoMountable,
                                              &is_auto_mountable_);
-  properties->GetStringWithoutPathExpansion(
-      cros_disks::kNativePath, &system_path_);
+  properties->GetStringWithoutPathExpansion(cros_disks::kStorageDevicePath,
+                                            &storage_device_path_);
   properties->GetStringWithoutPathExpansion(
       cros_disks::kDeviceFile, &file_path_);
   properties->GetStringWithoutPathExpansion(cros_disks::kVendorId, &vendor_id_);
@@ -714,11 +730,8 @@ CrosDisksClient::CrosDisksClient() = default;
 CrosDisksClient::~CrosDisksClient() = default;
 
 // static
-CrosDisksClient* CrosDisksClient::Create(DBusClientImplementationType type) {
-  if (type == REAL_DBUS_CLIENT_IMPLEMENTATION)
-    return new CrosDisksClientImpl();
-  DCHECK_EQ(FAKE_DBUS_CLIENT_IMPLEMENTATION, type);
-  return new FakeCrosDisksClient();
+std::unique_ptr<CrosDisksClient> CrosDisksClient::Create() {
+  return std::make_unique<CrosDisksClientImpl>();
 }
 
 // static

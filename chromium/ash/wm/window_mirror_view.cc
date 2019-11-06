@@ -7,10 +7,8 @@
 #include <algorithm>
 #include <memory>
 
-#include "ash/wm/non_client_frame_controller.h"
-#include "ash/wm/widget_finder.h"
+#include "ash/wm/desks/desks_util.h"
 #include "ash/wm/window_state.h"
-#include "services/ws/top_level_proxy_window.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -21,35 +19,14 @@
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
-namespace wm {
 namespace {
 
 void EnsureAllChildrenAreVisible(ui::Layer* layer) {
-  std::list<ui::Layer*> layers;
-  layers.push_back(layer);
-  while (!layers.empty()) {
-    for (auto* child : layers.front()->children())
-      layers.push_back(child);
-    layers.front()->SetVisible(true);
-    layers.pop_front();
-  }
-}
+  for (auto* child : layer->children())
+    EnsureAllChildrenAreVisible(child);
 
-// Removes 1 instance of an element from a multiset.
-void EraseFromList(std::vector<aura::Window*>* targets, aura::Window* target) {
-  auto it = std::find(targets->begin(), targets->end(), target);
-  if (it != targets->end())
-    targets->erase(it);
-}
-
-void RemoveTargetWindowFromSource(aura::Window* target, aura::Window* source) {
-  if (!target || !source)
-    return;
-  std::vector<aura::Window*>* target_window_list =
-      source->GetProperty(aura::client::kMirrorWindowList);
-  if (!target_window_list)
-    return;
-  EraseFromList(target_window_list, target);
+  layer->SetVisible(true);
+  layer->SetOpacity(1);
 }
 
 }  // namespace
@@ -58,13 +35,16 @@ WindowMirrorView::WindowMirrorView(aura::Window* source,
                                    bool trilinear_filtering_on_init)
     : source_(source),
       trilinear_filtering_on_init_(trilinear_filtering_on_init) {
+  source_->AddObserver(this);
   DCHECK(source);
 }
 
 WindowMirrorView::~WindowMirrorView() {
   // Make sure |source_| has outlived |this|. See crbug.com/681207
-  DCHECK(source_->layer());
-  RemoveTargetWindowFromSource(target_, source_);
+  if (source_) {
+    DCHECK(source_->layer());
+    source_->RemoveObserver(this);
+  }
 }
 
 void WindowMirrorView::RecreateMirrorLayers() {
@@ -74,13 +54,21 @@ void WindowMirrorView::RecreateMirrorLayers() {
   InitLayerOwner();
 }
 
+void WindowMirrorView::OnWindowDestroying(aura::Window* window) {
+  DCHECK_EQ(source_, window);
+  if (source_ == window) {
+    source_->RemoveObserver(this);
+    source_ = nullptr;
+  }
+}
+
 gfx::Size WindowMirrorView::CalculatePreferredSize() const {
   return GetClientAreaBounds().size();
 }
 
 void WindowMirrorView::Layout() {
   // If |layer_owner_| hasn't been initialized (|this| isn't on screen), no-op.
-  if (!layer_owner_)
+  if (!layer_owner_ || !source_)
     return;
 
   // Position at 0, 0.
@@ -88,11 +76,13 @@ void WindowMirrorView::Layout() {
 
   gfx::Transform transform;
   gfx::Rect client_area_bounds = GetClientAreaBounds();
-  // Scale down if necessary.
+  // Scale if necessary.
   if (size() != source_->bounds().size()) {
-    const float scale =
+    const float scale_x =
         width() / static_cast<float>(client_area_bounds.width());
-    transform.Scale(scale, scale);
+    const float scale_y =
+        height() / static_cast<float>(client_area_bounds.height());
+    transform.Scale(scale_x, scale_y);
   }
   // Reposition such that the client area is the only part visible.
   transform.Translate(-client_area_bounds.x(), -client_area_bounds.y());
@@ -108,65 +98,23 @@ void WindowMirrorView::OnVisibleBoundsChanged() {
     InitLayerOwner();
 }
 
-void WindowMirrorView::NativeViewHierarchyChanged() {
-  View::NativeViewHierarchyChanged();
-  DCHECK(GetWidget());
-  UpdateSourceWindowProperty();
-}
-
 void WindowMirrorView::AddedToWidget() {
-  UpdateSourceWindowProperty();
-}
-
-void WindowMirrorView::RemovedFromWidget() {
-  RemoveTargetWindowFromSource(target_, source_);
-  target_ = nullptr;
-}
-
-void WindowMirrorView::UpdateSourceWindowProperty() {
-  DCHECK(GetWidget());
-  std::vector<aura::Window*>* target_window_list =
-      source_->GetProperty(aura::client::kMirrorWindowList);
-
-  // Remove 1 instance of |target_| from the list.
-  if (target_ && target_window_list)
-    EraseFromList(target_window_list, target_);
-
   // Set and insert the new target window associated with this mirror view.
   target_ = GetWidget()->GetNativeWindow();
   target_->TrackOcclusionState();
 
-  force_occlusion_tracker_visible_.reset();
-  force_proxy_window_visible_.reset();
-  env_observer_.RemoveAll();
-
-  // Allocate new memory for |target_window_list| here because as soon as a
-  // call is made to SetProperty, the previous memory will be deallocated.
-  auto temp_list =
-      target_window_list
-          ? std::make_unique<std::vector<aura::Window*>>(*target_window_list)
-          : std::make_unique<std::vector<aura::Window*>>();
-
-  temp_list->push_back(target_);
-
-  // Set the property to trigger a call to OnWindowPropertyChanged() on all the
-  // window observer.
-  // NOTE: This will deallocate the current property value so make sure new
-  // memory has been allocated for the property value.
-  source_->SetProperty(aura::client::kMirrorWindowList, temp_list.release());
-
-  // If |source_| represents a remote client, it needs to be made visible,
-  // otherwise it won't produce frames.
-  if (target_ && NonClientFrameController::Get(source_)) {
-    // Wait for window-occlusion tracker to be running before forcing
-    // visibility. This is done to minimize the amount of work during the
-    // initial animation when entering overview. In particular, telling the
-    // remote client it is visible is likely to result in a fair amount of work.
-    if (source_->env()->GetWindowOcclusionTracker()->IsPaused())
-      env_observer_.Add(target_->env());
-    else
-      ForceVisibilityAndOcclusionForProxyWindow();
+  if (source_) {
+    // Force the occlusion tracker to treat the source as visible.
+    force_occlusion_tracker_visible_ =
+        std::make_unique<aura::WindowOcclusionTracker::ScopedForceVisible>(
+            source_);
+  } else {
+    force_occlusion_tracker_visible_.reset();
   }
+}
+
+void WindowMirrorView::RemovedFromWidget() {
+  target_ = nullptr;
 }
 
 void WindowMirrorView::InitLayerOwner() {
@@ -179,9 +127,10 @@ void WindowMirrorView::InitLayerOwner() {
   // This causes us to clip the non-client areas of the window.
   layer()->SetMasksToBounds(true);
 
-  // Some extra work is needed when the source window is minimized.
-  if (wm::GetWindowState(source_)->IsMinimized()) {
-    mirror_layer->SetOpacity(1);
+  // Some extra work is needed when the source window is minimized or is on an
+  // inactive desk.
+  if (WindowState::Get(source_)->IsMinimized() ||
+      !desks_util::BelongsToActiveDesk(source_)) {
     EnsureAllChildrenAreVisible(mirror_layer);
   }
 
@@ -212,27 +161,4 @@ gfx::Rect WindowMirrorView::GetClientAreaBounds() const {
   return client_view->ConvertRectToWidget(client_view->GetLocalBounds());
 }
 
-void WindowMirrorView::ForceVisibilityAndOcclusionForProxyWindow() {
-  NonClientFrameController* frame_controller =
-      NonClientFrameController::Get(source_);
-  // Earlier checks ensure we only get here if there is a
-  // NonClientFrameController.
-  DCHECK(frame_controller);
-  // In order for the remote client to produce frames the client needs to think
-  // the window is visible. It may not actually be visible now, so force it.
-  force_proxy_window_visible_ =
-      frame_controller->top_level_proxy_window()->ForceVisible();
-
-  // Similarly, force the occlusion tracker to treat the source as visible.
-  force_occlusion_tracker_visible_ =
-      std::make_unique<aura::WindowOcclusionTracker::ScopedForceVisible>(
-          source_);
-}
-
-void WindowMirrorView::OnWindowOcclusionTrackingResumed() {
-  ForceVisibilityAndOcclusionForProxyWindow();
-  env_observer_.RemoveAll();
-}
-
-}  // namespace wm
 }  // namespace ash

@@ -37,8 +37,8 @@
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
 #include "third_party/blink/renderer/modules/webaudio/realtime_audio_destination_node.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
 
@@ -216,8 +216,8 @@ void ScriptProcessorHandler::Process(uint32_t frames_to_process) {
         // index.
         PostCrossThreadTask(
             *task_runner_, FROM_HERE,
-            CrossThreadBind(&ScriptProcessorHandler::FireProcessEvent,
-                            WrapRefCounted(this), double_buffer_index_));
+            CrossThreadBindOnce(&ScriptProcessorHandler::FireProcessEvent,
+                                WrapRefCounted(this), double_buffer_index_));
       } else {
         // If this node is in the offline audio context, use the
         // waitable event to synchronize to the offline rendering thread.
@@ -226,7 +226,7 @@ void ScriptProcessorHandler::Process(uint32_t frames_to_process) {
 
         PostCrossThreadTask(
             *task_runner_, FROM_HERE,
-            CrossThreadBind(
+            CrossThreadBindOnce(
                 &ScriptProcessorHandler::FireProcessEventForOfflineAudioContext,
                 WrapRefCounted(this), double_buffer_index_,
                 CrossThreadUnretained(waitable_event.get())));
@@ -494,9 +494,6 @@ ScriptProcessorNode* ScriptProcessorNode::Create(
 
   if (!node)
     return nullptr;
-
-  // context keeps reference until we stop making javascript rendering callbacks
-  context.NotifySourceNodeStartedProcessing(node);
 
   return node;
 }

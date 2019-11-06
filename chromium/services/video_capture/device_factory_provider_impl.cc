@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/task/post_task.h"
+#include "build/build_config.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "media/capture/video/create_video_capture_device_factory.h"
 #include "media/capture/video/fake_video_capture_device_factory.h"
@@ -17,7 +18,11 @@
 #include "services/video_capture/device_factory_media_to_mojo_adapter.h"
 #include "services/video_capture/video_source_provider_impl.h"
 #include "services/video_capture/virtual_device_enabled_device_factory.h"
-#include "services/ws/public/cpp/gpu/gpu.h"
+#include "services/viz/public/cpp/gpu/gpu.h"
+
+#if defined(OS_MACOSX)
+#include "media/capture/video/mac/video_capture_device_factory_mac.h"
+#endif
 
 namespace video_capture {
 
@@ -45,6 +50,7 @@ class DeviceFactoryProviderImpl::GpuDependenciesContext {
     return gpu_io_task_runner_;
   }
 
+#if defined(OS_CHROMEOS)
   void InjectGpuDependencies(
       mojom::AcceleratorFactoryPtrInfo accelerator_factory_info) {
     DCHECK(gpu_io_task_runner_->RunsTasksInCurrentSequence());
@@ -52,12 +58,13 @@ class DeviceFactoryProviderImpl::GpuDependenciesContext {
   }
 
   void CreateJpegDecodeAccelerator(
-      media::mojom::JpegDecodeAcceleratorRequest request) {
+      chromeos_camera::mojom::MjpegDecodeAcceleratorRequest request) {
     DCHECK(gpu_io_task_runner_->RunsTasksInCurrentSequence());
     if (!accelerator_factory_)
       return;
     accelerator_factory_->CreateJpegDecodeAccelerator(std::move(request));
   }
+#endif  // defined(OS_CHROMEOS)
 
  private:
   // Task runner for operating |accelerator_factory_| and
@@ -67,7 +74,11 @@ class DeviceFactoryProviderImpl::GpuDependenciesContext {
   // will try to post the release of the jpeg decoder to the thread it is
   // operated on.
   scoped_refptr<base::SequencedTaskRunner> gpu_io_task_runner_;
+
+#if defined(OS_CHROMEOS)
   mojom::AcceleratorFactoryPtr accelerator_factory_;
+#endif  // defined(OS_CHROMEOS)
+
   base::WeakPtrFactory<GpuDependenciesContext> weak_factory_for_gpu_io_thread_;
 };
 
@@ -97,6 +108,7 @@ void DeviceFactoryProviderImpl::SetServiceRef(
   service_ref_ = std::move(service_ref);
 }
 
+#if defined(OS_CHROMEOS)
 void DeviceFactoryProviderImpl::InjectGpuDependencies(
     mojom::AcceleratorFactoryPtr accelerator_factory) {
   LazyInitializeGpuDependenciesContext();
@@ -105,6 +117,7 @@ void DeviceFactoryProviderImpl::InjectGpuDependencies(
                                 gpu_dependencies_context_->GetWeakPtr(),
                                 accelerator_factory.PassInterface()));
 }
+#endif  // defined(OS_CHROMEOS)
 
 void DeviceFactoryProviderImpl::ConnectToDeviceFactory(
     mojom::DeviceFactoryRequest request) {
@@ -122,6 +135,12 @@ void DeviceFactoryProviderImpl::ConnectToVideoSourceProvider(
 void DeviceFactoryProviderImpl::ShutdownServiceAsap() {
   if (request_service_quit_asap_cb_)
     std::move(request_service_quit_asap_cb_).Run();
+}
+
+void DeviceFactoryProviderImpl::SetRetryCount(int32_t count) {
+#if defined(OS_MACOSX)
+  media::VideoCaptureDeviceFactoryMac::SetGetDeviceDescriptorsRetryCount(count);
+#endif
 }
 
 void DeviceFactoryProviderImpl::LazyInitializeGpuDependenciesContext() {
@@ -153,6 +172,7 @@ void DeviceFactoryProviderImpl::LazyInitializeDeviceFactory() {
   auto video_capture_system = std::make_unique<media::VideoCaptureSystemImpl>(
       std::move(media_device_factory));
 
+#if defined(OS_CHROMEOS)
   device_factory_ = std::make_unique<VirtualDeviceEnabledDeviceFactory>(
       std::make_unique<DeviceFactoryMediaToMojoAdapter>(
           std::move(video_capture_system),
@@ -160,6 +180,12 @@ void DeviceFactoryProviderImpl::LazyInitializeDeviceFactory() {
               &GpuDependenciesContext::CreateJpegDecodeAccelerator,
               gpu_dependencies_context_->GetWeakPtr()),
           gpu_dependencies_context_->GetTaskRunner()));
+#else
+  device_factory_ = std::make_unique<VirtualDeviceEnabledDeviceFactory>(
+      std::make_unique<DeviceFactoryMediaToMojoAdapter>(
+          std::move(video_capture_system)));
+#endif  // defined(OS_CHROMEOS)
+
   device_factory_->SetServiceRef(service_ref_->Clone());
 }
 

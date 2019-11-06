@@ -43,7 +43,9 @@ static const int kInvalidSessionId = -1;
 // SpeechRecognizerDelegate via a weak pointer that is only ever referenced from
 // the UI thread.
 class SpeechRecognizer::EventListener
-    : public base::RefCountedThreadSafe<SpeechRecognizer::EventListener>,
+    : public base::RefCountedThreadSafe<
+          SpeechRecognizer::EventListener,
+          content::BrowserThread::DeleteOnIOThread>,
       public content::SpeechRecognitionEventListener {
  public:
   EventListener(const base::WeakPtr<SpeechRecognizerDelegate>& delegate,
@@ -59,7 +61,9 @@ class SpeechRecognizer::EventListener
   void StopOnIOThread();
 
  private:
-  friend class base::RefCountedThreadSafe<SpeechRecognizer::EventListener>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::IO>;
+  friend class base::DeleteHelper<SpeechRecognizer::EventListener>;
   ~EventListener() override;
 
   void NotifyRecognitionStateChanged(SpeechRecognizerStatus new_state);
@@ -104,7 +108,7 @@ class SpeechRecognizer::EventListener
   int session_;
   base::string16 last_result_str_;
 
-  base::WeakPtrFactory<EventListener> weak_factory_;
+  base::WeakPtrFactory<EventListener> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(EventListener);
 };
@@ -120,8 +124,7 @@ SpeechRecognizer::EventListener::EventListener(
           std::move(shared_url_loader_factory_info)),
       accept_language_(accept_language),
       locale_(locale),
-      session_(kInvalidSessionId),
-      weak_factory_(this) {
+      session_(kInvalidSessionId) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 

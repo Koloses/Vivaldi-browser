@@ -55,6 +55,7 @@ class UrlBarViewBinder {
             UrlBarTextState state = model.get(UrlBarProperties.TEXT_STATE);
             view.setIgnoreTextChangesForAutocomplete(true);
             view.setText(state.text);
+            view.setTextForAutofillServices(state.textForAutofillServices);
             view.setScrollState(state.scrollType, state.scrollToIndex);
             view.setIgnoreTextChangesForAutocomplete(false);
 
@@ -96,12 +97,11 @@ class UrlBarViewBinder {
                     ApiCompatibilityUtils.getColor(resources, R.color.locationbar_dark_hint_text);
             highlightColor = originalHighlightColor;
         } else {
-            textColor = ApiCompatibilityUtils.getColor(
-                    resources, R.color.url_emphasis_light_default_text);
+            textColor = ApiCompatibilityUtils.getColor(resources, R.color.default_text_color_light);
             hintColor =
                     ApiCompatibilityUtils.getColor(resources, R.color.locationbar_light_hint_text);
             highlightColor = ApiCompatibilityUtils.getColor(
-                    resources, R.color.locationbar_light_selection_color);
+                    resources, R.color.highlight_color_on_light_text);
         }
 
         view.setTextColor(textColor);

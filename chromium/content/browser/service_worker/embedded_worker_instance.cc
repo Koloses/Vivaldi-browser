@@ -17,28 +17,29 @@
 #include "base/task/post_task.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/bad_message.h"
+#include "content/browser/data_url_loader_factory.h"
+#include "content/browser/devtools/devtools_instrumentation.h"
 #include "content/browser/devtools/service_worker_devtools_manager.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
+#include "content/browser/service_worker/service_worker_consts.h"
 #include "content/browser/service_worker/service_worker_content_settings_proxy_impl.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
+#include "content/browser/service_worker/service_worker_script_loader_factory.h"
 #include "content/browser/url_loader_factory_getter.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/renderer.mojom.h"
-#include "content/common/service_worker/service_worker_types.h"
 #include "content/common/url_schemes.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "ipc/ipc_message.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/network/public/cpp/features.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
 #include "third_party/blink/public/mojom/loader/url_loader_factory_bundle.mojom.h"
 #include "third_party/blink/public/mojom/renderer_preference_watcher.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_object.mojom.h"
@@ -48,10 +49,10 @@ namespace content {
 
 namespace {
 
-base::Optional<EmbeddedWorkerInstance::CreateNetworkFactoryCallback>&
+EmbeddedWorkerInstance::CreateNetworkFactoryCallback&
 GetNetworkFactoryCallbackForTest() {
   static base::NoDestructor<
-      base::Optional<EmbeddedWorkerInstance::CreateNetworkFactoryCallback>>
+      EmbeddedWorkerInstance::CreateNetworkFactoryCallback>
       callback;
   return *callback;
 }
@@ -95,84 +96,24 @@ void NotifyWorkerVersionDoomedOnUI(int worker_process_id, int worker_route_id) {
       worker_process_id, worker_route_id);
 }
 
-// Returns a factory bundle for doing loads on behalf of the specified |rph| and
-// |origin|. The returned bundle has a default factory that goes to network and
-// it may also include scheme-specific factories that don't go to network.
-//
-// The network factory does not support reconnection to the network service.
-std::unique_ptr<blink::URLLoaderFactoryBundleInfo> CreateFactoryBundle(
-    RenderProcessHost* rph,
-    const url::Origin& origin) {
-  auto factory_bundle = std::make_unique<blink::URLLoaderFactoryBundleInfo>();
-  network::mojom::URLLoaderFactoryRequest default_factory_request =
-      mojo::MakeRequest(&factory_bundle->default_factory_info());
-  network::mojom::TrustedURLLoaderHeaderClientPtrInfo default_header_client;
-  bool bypass_redirect_checks = false;
-
-  if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
-    // See if the default factory needs to be tweaked by the embedder.
-    GetContentClient()->browser()->WillCreateURLLoaderFactory(
-        rph->GetBrowserContext(), nullptr /* frame_host */, rph->GetID(),
-        false /* is_navigation */, false /* is_download */, origin,
-        &default_factory_request, &default_header_client,
-        &bypass_redirect_checks);
-  }
-
-  if (!GetNetworkFactoryCallbackForTest()) {
-    rph->CreateURLLoaderFactory(origin, std::move(default_header_client),
-                                std::move(default_factory_request));
-  } else {
-    network::mojom::URLLoaderFactoryPtr original_factory;
-    rph->CreateURLLoaderFactory(origin, std::move(default_header_client),
-                                mojo::MakeRequest(&original_factory));
-    GetNetworkFactoryCallbackForTest()->Run(std::move(default_factory_request),
-                                            rph->GetID(),
-                                            original_factory.PassInterface());
-  }
-
-  factory_bundle->set_bypass_redirect_checks(bypass_redirect_checks);
-
-  ContentBrowserClient::NonNetworkURLLoaderFactoryMap non_network_factories;
-  GetContentClient()
-      ->browser()
-      ->RegisterNonNetworkSubresourceURLLoaderFactories(
-          rph->GetID(), MSG_ROUTING_NONE, &non_network_factories);
-
-  for (auto& pair : non_network_factories) {
-    const std::string& scheme = pair.first;
-    std::unique_ptr<network::mojom::URLLoaderFactory> factory =
-        std::move(pair.second);
-
-    // To be safe, ignore schemes that aren't allowed to register service
-    // workers. We assume that importScripts and fetch() should fail on such
-    // schemes.
-    if (!base::ContainsValue(GetServiceWorkerSchemes(), scheme))
-      continue;
-    network::mojom::URLLoaderFactoryPtr factory_ptr;
-    mojo::MakeStrongBinding(std::move(factory),
-                            mojo::MakeRequest(&factory_ptr));
-    factory_bundle->scheme_specific_factory_infos().emplace(
-        scheme, factory_ptr.PassInterface());
-  }
-  return factory_bundle;
-}
-
 using SetupProcessCallback = base::OnceCallback<void(
     blink::ServiceWorkerStatusCode,
     blink::mojom::EmbeddedWorkerStartParamsPtr,
     std::unique_ptr<ServiceWorkerProcessManager::AllocatedProcessInfo>,
     std::unique_ptr<EmbeddedWorkerInstance::DevToolsProxy>,
     std::unique_ptr<
-        blink::URLLoaderFactoryBundleInfo> /* factory_bundle_for_browser */,
+        blink::URLLoaderFactoryBundleInfo> /* factory_bundle_for_new_scripts */,
     std::unique_ptr<
         blink::URLLoaderFactoryBundleInfo> /* factory_bundle_for_renderer */,
-    blink::mojom::CacheStoragePtrInfo)>;
+    blink::mojom::CacheStoragePtrInfo,
+    base::TimeDelta thread_hop_time,
+    base::Time ui_post_time)>;
 
 // Allocates a renderer process for starting a worker and does setup like
 // registering with DevTools. Called on the UI thread. Calls |callback| on the
 // IO thread. |context| and |weak_context| are only for passing to DevTools and
 // must not be dereferenced here on the UI thread.
-// S13nServiceWorker:
+//
 // This also sets up two URLLoaderFactoryBundles, one for
 // ServiceWorkerScriptLoaderFactory and the other is for passing to the
 // renderer. These bundles include factories for non-network URLs like
@@ -184,12 +125,15 @@ void SetupOnUIThread(int embedded_worker_id,
                      blink::mojom::EmbeddedWorkerInstanceClientRequest request,
                      ServiceWorkerContextCore* context,
                      base::WeakPtr<ServiceWorkerContextCore> weak_context,
+                     base::Time io_post_time,
                      SetupProcessCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  base::TimeDelta thread_hop_time = base::Time::Now() - io_post_time;
   auto process_info =
       std::make_unique<ServiceWorkerProcessManager::AllocatedProcessInfo>();
   std::unique_ptr<EmbeddedWorkerInstance::DevToolsProxy> devtools_proxy;
-  std::unique_ptr<blink::URLLoaderFactoryBundleInfo> factory_bundle_for_browser;
+  std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+      factory_bundle_for_new_scripts;
   std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
       factory_bundle_for_renderer;
 
@@ -199,9 +143,10 @@ void SetupOnUIThread(int embedded_worker_id,
         base::BindOnce(
             std::move(callback), blink::ServiceWorkerStatusCode::kErrorAbort,
             std::move(params), std::move(process_info),
-            std::move(devtools_proxy), std::move(factory_bundle_for_browser),
-            std::move(factory_bundle_for_renderer),
-            nullptr /* cache_storage */));
+            std::move(devtools_proxy),
+            std::move(factory_bundle_for_new_scripts),
+            std::move(factory_bundle_for_renderer), nullptr /* cache_storage */,
+            thread_hop_time, base::Time::Now()));
     return;
   }
 
@@ -215,9 +160,10 @@ void SetupOnUIThread(int embedded_worker_id,
         FROM_HERE, {BrowserThread::IO},
         base::BindOnce(std::move(callback), status, std::move(params),
                        std::move(process_info), std::move(devtools_proxy),
-                       std::move(factory_bundle_for_browser),
+                       std::move(factory_bundle_for_new_scripts),
                        std::move(factory_bundle_for_renderer),
-                       nullptr /* cache_storage */));
+                       nullptr /* cache_storage */, thread_hop_time,
+                       base::Time::Now()));
     return;
   }
   const int process_id = process_info->process_id;
@@ -248,28 +194,6 @@ void SetupOnUIThread(int embedded_worker_id,
         std::move(request));
   }
 
-  // S13nServiceWorker: Create factory bundles for this worker to do loading.
-  // These bundles don't support reconnection to the network service, see
-  // below comments.
-  if (blink::ServiceWorkerUtils::IsServicificationEnabled()) {
-    const url::Origin origin = url::Origin::Create(params->script_url);
-
-    // The bundle for the browser is passed to ServiceWorkerScriptLoaderFactory
-    // and used to request non-installed service worker scripts. It's OK to not
-    // support reconnection to then network service because it can only used
-    // until the service worker reaches the 'installed' state.
-    //
-    // TODO(falken): Only make this bundle for non-installed service workers.
-    factory_bundle_for_browser = CreateFactoryBundle(rph, origin);
-
-    // The bundle for the renderer is passed to the service worker, and
-    // used for subresource loading from the service worker (i.e., fetch()).
-    // It's OK to not support reconnection to the network service because the
-    // service worker terminates itself when the connection breaks, so a new
-    // instance can be started.
-    factory_bundle_for_renderer = CreateFactoryBundle(rph, origin);
-  }
-
   // Register to DevTools and update params accordingly.
   // TODO(dgozman): we can now remove this routing id and use something else
   // as id when talking to ServiceWorkerDevToolsManager.
@@ -284,6 +208,29 @@ void SetupOnUIThread(int embedded_worker_id,
   // balanced by DevToolsProxy's destructor calling WorkerDestroyed().
   devtools_proxy = std::make_unique<EmbeddedWorkerInstance::DevToolsProxy>(
       process_id, routing_id);
+
+  // Create factory bundles for this worker to do loading. These bundles don't
+  // support reconnection to the network service, see below comments.
+  const url::Origin origin = url::Origin::Create(params->script_url);
+
+  // The bundle for new scripts is passed to ServiceWorkerScriptLoaderFactory
+  // and used to request non-installed service worker scripts. It's only needed
+  // for non-installed workers. It's OK to not support reconnection to the
+  // network service because it can only used until the service worker reaches
+  // the 'installed' state.
+  if (!params->is_installed) {
+    factory_bundle_for_new_scripts =
+        EmbeddedWorkerInstance::CreateFactoryBundleOnUI(rph, routing_id,
+                                                        origin);
+  }
+
+  // The bundle for the renderer is passed to the service worker, and
+  // used for subresource loading from the service worker (i.e., fetch()).
+  // It's OK to not support reconnection to the network service because the
+  // service worker terminates itself when the connection breaks, so a new
+  // instance can be started.
+  factory_bundle_for_renderer =
+      EmbeddedWorkerInstance::CreateFactoryBundleOnUI(rph, routing_id, origin);
 
   // TODO(crbug.com/862854): Support changes to
   // blink::mojom::RendererPreferences while the worker is running.
@@ -303,9 +250,10 @@ void SetupOnUIThread(int embedded_worker_id,
       FROM_HERE, {BrowserThread::IO},
       base::BindOnce(std::move(callback), status, std::move(params),
                      std::move(process_info), std::move(devtools_proxy),
-                     std::move(factory_bundle_for_browser),
+                     std::move(factory_bundle_for_new_scripts),
                      std::move(factory_bundle_for_renderer),
-                     cache_storage.PassInterface()));
+                     cache_storage.PassInterface(), thread_hop_time,
+                     base::Time::Now()));
 }
 
 bool HasSentStartWorker(EmbeddedWorkerInstance::StartingPhase phase) {
@@ -329,8 +277,6 @@ bool HasSentStartWorker(EmbeddedWorkerInstance::StartingPhase phase) {
 
 void NotifyForegroundServiceWorkerOnUIThread(bool added, int process_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(
-      base::FeatureList::IsEnabled(features::kServiceWorkerForegroundPriority));
 
   RenderProcessHost* rph = RenderProcessHost::FromID(process_id);
   if (!rph)
@@ -350,21 +296,23 @@ class EmbeddedWorkerInstance::DevToolsProxy {
  public:
   DevToolsProxy(int process_id, int agent_route_id)
       : process_id_(process_id),
-        agent_route_id_(agent_route_id) {}
+        agent_route_id_(agent_route_id),
+        ui_task_runner_(
+            base::CreateSequencedTaskRunnerWithTraits({BrowserThread::UI})) {}
 
   ~DevToolsProxy() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                             base::BindOnce(NotifyWorkerDestroyedOnUI,
-                                            process_id_, agent_route_id_));
+    ui_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(NotifyWorkerDestroyedOnUI, process_id_,
+                                  agent_route_id_));
   }
 
   void NotifyWorkerReadyForInspection(
       blink::mojom::DevToolsAgentHostAssociatedRequest host_request,
       blink::mojom::DevToolsAgentAssociatedPtrInfo devtools_agent_ptr_info) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
+    ui_task_runner_->PostTask(
+        FROM_HERE,
         base::BindOnce(NotifyWorkerReadyForInspectionOnUI, process_id_,
                        agent_route_id_, std::move(host_request),
                        std::move(devtools_agent_ptr_info)));
@@ -372,16 +320,16 @@ class EmbeddedWorkerInstance::DevToolsProxy {
 
   void NotifyWorkerVersionInstalled() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                             base::BindOnce(NotifyWorkerVersionInstalledOnUI,
-                                            process_id_, agent_route_id_));
+    ui_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(NotifyWorkerVersionInstalledOnUI, process_id_,
+                                  agent_route_id_));
   }
 
   void NotifyWorkerVersionDoomed() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                             base::BindOnce(NotifyWorkerVersionDoomedOnUI,
-                                            process_id_, agent_route_id_));
+    ui_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(NotifyWorkerVersionDoomedOnUI, process_id_,
+                                  agent_route_id_));
   }
 
   bool ShouldNotifyWorkerStopIgnored() const {
@@ -395,6 +343,7 @@ class EmbeddedWorkerInstance::DevToolsProxy {
  private:
   const int process_id_;
   const int agent_route_id_;
+  const scoped_refptr<base::TaskRunner> ui_task_runner_;
   bool worker_stop_ignored_notified_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsProxy);
@@ -429,18 +378,20 @@ class EmbeddedWorkerInstance::WorkerProcessHandle {
   WorkerProcessHandle(
       const base::WeakPtr<ServiceWorkerProcessManager>& process_manager,
       int embedded_worker_id,
-      int process_id)
+      int process_id,
+      scoped_refptr<base::SequencedTaskRunner> ui_task_runner)
       : process_manager_(process_manager),
         embedded_worker_id_(embedded_worker_id),
-        process_id_(process_id) {
+        process_id_(process_id),
+        ui_task_runner_(std::move(ui_task_runner)) {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
     DCHECK_NE(ChildProcessHost::kInvalidUniqueID, process_id_);
   }
 
   ~WorkerProcessHandle() {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
+    ui_task_runner_->PostTask(
+        FROM_HERE,
         base::BindOnce(&ServiceWorkerProcessManager::ReleaseWorkerProcess,
                        process_manager_, embedded_worker_id_));
   }
@@ -453,6 +404,7 @@ class EmbeddedWorkerInstance::WorkerProcessHandle {
 
   const int embedded_worker_id_;
   const int process_id_;
+  const scoped_refptr<base::SequencedTaskRunner> ui_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkerProcessHandle);
 };
@@ -477,8 +429,7 @@ class EmbeddedWorkerInstance::StartTask {
         is_installed_(false),
         started_during_browser_startup_(false),
         skip_recording_startup_time_(instance_->devtools_attached()),
-        start_time_(start_time),
-        weak_factory_(this) {
+        start_time_(start_time) {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
     TRACE_EVENT_NESTABLE_ASYNC_BEGIN1("ServiceWorker",
                                       "EmbeddedWorkerInstance::Start", this,
@@ -504,8 +455,8 @@ class EmbeddedWorkerInstance::StartTask {
         break;
       case ProcessAllocationState::ALLOCATING:
         // Abort half-baked process allocation on the UI thread.
-        base::PostTaskWithTraits(
-            FROM_HERE, {BrowserThread::UI},
+        instance_->ui_task_runner_->PostTask(
+            FROM_HERE,
             base::BindOnce(&ServiceWorkerProcessManager::ReleaseWorkerProcess,
                            instance_->context_->process_manager()->AsWeakPtr(),
                            instance_->embedded_worker_id()));
@@ -534,6 +485,7 @@ class EmbeddedWorkerInstance::StartTask {
   base::TimeTicks start_worker_sent_time() const {
     return start_worker_sent_time_;
   }
+  base::TimeDelta thread_hop_time() const { return thread_hop_time_; }
 
   void set_skip_recording_startup_time() {
     skip_recording_startup_time_ = true;
@@ -564,12 +516,12 @@ class EmbeddedWorkerInstance::StartTask {
 
     // Hop to the UI thread for process allocation and setup. We will continue
     // on the IO thread in StartTask::OnSetupCompleted().
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
+    instance_->ui_task_runner_->PostTask(
+        FROM_HERE,
         base::BindOnce(
             &SetupOnUIThread, instance_->embedded_worker_id(), process_manager,
             can_use_existing_process, std::move(params), std::move(request_),
-            context.get(), context,
+            context.get(), context, base::Time::Now(),
             base::BindOnce(&StartTask::OnSetupCompleted,
                            weak_factory_.GetWeakPtr(), process_manager)));
   }
@@ -585,11 +537,15 @@ class EmbeddedWorkerInstance::StartTask {
           process_info,
       std::unique_ptr<EmbeddedWorkerInstance::DevToolsProxy> devtools_proxy,
       std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
-          factory_bundle_for_browser,
+          factory_bundle_for_new_scripts,
       std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
           factory_bundle_for_renderer,
-      blink::mojom::CacheStoragePtrInfo cache_storage) {
+      blink::mojom::CacheStoragePtrInfo cache_storage,
+      base::TimeDelta thread_hop_time,
+      base::Time ui_post_time) {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+    thread_hop_time_ = thread_hop_time + (base::Time::Now() - ui_post_time);
 
     std::unique_ptr<WorkerProcessHandle> process_handle;
     if (status == blink::ServiceWorkerStatusCode::kOk) {
@@ -597,7 +553,7 @@ class EmbeddedWorkerInstance::StartTask {
       // returning to ensure the process is eventually released.
       process_handle = std::make_unique<WorkerProcessHandle>(
           process_manager, instance_->embedded_worker_id(),
-          process_info->process_id);
+          process_info->process_id, instance_->ui_task_runner_);
 
       if (!instance_->context_)
         status = blink::ServiceWorkerStatusCode::kErrorAbort;
@@ -633,24 +589,24 @@ class EmbeddedWorkerInstance::StartTask {
     instance_->OnRegisteredToDevToolsManager(std::move(devtools_proxy),
                                              params->wait_for_debugger);
 
-    // S13nServiceWorker: Build the URLLoaderFactory for loading new scripts.
-    scoped_refptr<network::SharedURLLoaderFactory> factory_for_new_scripts;
-    if (blink::ServiceWorkerUtils::IsServicificationEnabled()) {
-      DCHECK(factory_bundle_for_browser);
-      factory_for_new_scripts =
-          base::MakeRefCounted<blink::URLLoaderFactoryBundle>(
-              std::move(factory_bundle_for_browser));
+    // Send the factory bundle for subresource loading from the service worker
+    // (i.e. fetch()).
+    DCHECK(factory_bundle_for_renderer);
+    params->subresource_loader_factories =
+        std::move(factory_bundle_for_renderer);
 
-      // Send the factory bundle for subresource loading from the service worker
-      // (i.e. fetch()).
-      DCHECK(factory_bundle_for_renderer);
-      params->subresource_loader_factories =
-          std::move(factory_bundle_for_renderer);
+    // Build the URLLoaderFactory for loading new scripts, it's only needed if
+    // this is a non-installed service worker.
+    DCHECK(factory_bundle_for_new_scripts || is_installed_);
+    if (factory_bundle_for_new_scripts) {
+      params->provider_info->script_loader_factory_ptr_info =
+          instance_->MakeScriptLoaderFactoryPtrInfo(
+              std::move(factory_bundle_for_new_scripts));
     }
 
-    instance_->SendStartWorker(std::move(params),
-                               std::move(factory_for_new_scripts),
-                               std::move(cache_storage));
+    params->provider_info->cache_storage = std::move(cache_storage);
+
+    instance_->SendStartWorker(std::move(params));
     std::move(sent_start_callback_).Run(blink::ServiceWorkerStatusCode::kOk);
 
     TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("ServiceWorker",
@@ -676,8 +632,9 @@ class EmbeddedWorkerInstance::StartTask {
   bool skip_recording_startup_time_;
   base::TimeTicks start_time_;
   base::TimeTicks start_worker_sent_time_;
+  base::TimeDelta thread_hop_time_;
 
-  base::WeakPtrFactory<StartTask> weak_factory_;
+  base::WeakPtrFactory<StartTask> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(StartTask);
 };
@@ -710,6 +667,9 @@ void EmbeddedWorkerInstance::Start(
   params->worker_devtools_agent_route_id = MSG_ROUTING_NONE;
   params->wait_for_debugger = false;
   params->v8_cache_options = GetV8CacheOptions();
+
+  params->subresource_loader_updater =
+      subresource_loader_updater_.BindNewPipeAndPassReceiver();
 
   blink::mojom::EmbeddedWorkerInstanceClientRequest request =
       mojo::MakeRequest(&client_);
@@ -777,12 +737,13 @@ EmbeddedWorkerInstance::EmbeddedWorkerInstance(
       status_(EmbeddedWorkerStatus::STOPPED),
       starting_phase_(NOT_STARTING),
       restart_count_(0),
-      thread_id_(kInvalidEmbeddedWorkerThreadId),
+      thread_id_(ServiceWorkerConsts::kInvalidEmbeddedWorkerThreadId),
       instance_host_binding_(this),
       devtools_attached_(false),
       network_accessed_for_script_(false),
       foreground_notified_(false),
-      weak_factory_(this) {
+      ui_task_runner_(
+          base::CreateSequencedTaskRunnerWithTraits({BrowserThread::UI})) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(context_);
 }
@@ -816,16 +777,14 @@ void EmbeddedWorkerInstance::OnRegisteredToDevToolsManager(
 }
 
 void EmbeddedWorkerInstance::SendStartWorker(
-    blink::mojom::EmbeddedWorkerStartParamsPtr params,
-    scoped_refptr<network::SharedURLLoaderFactory> factory,
-    blink::mojom::CacheStoragePtrInfo cache_storage) {
+    blink::mojom::EmbeddedWorkerStartParamsPtr params) {
   DCHECK(context_);
   DCHECK(params->service_worker_request.is_pending());
-  DCHECK(params->controller_request.is_pending());
+  DCHECK(params->controller_receiver.is_valid());
   DCHECK(!instance_host_binding_.is_bound());
+
   instance_host_binding_.Bind(mojo::MakeRequest(&params->instance_host));
 
-  blink::mojom::WorkerContentSettingsProxyPtr content_settings_proxy_ptr_info;
   content_settings_ = std::make_unique<ServiceWorkerContentSettingsProxyImpl>(
       params->script_url, context_,
       mojo::MakeRequest(&params->content_settings_proxy));
@@ -834,12 +793,8 @@ void EmbeddedWorkerInstance::SendStartWorker(
   inflight_start_task_->set_start_worker_sent_time(base::TimeTicks::Now());
 
   // The host must be alive as long as |params->provider_info| is alive.
-  DCHECK(owner_version_->provider_host());
-  params->provider_info =
-      owner_version_->provider_host()->CompleteStartWorkerPreparation(
-          process_id(), std::move(factory), std::move(params->provider_info));
-  params->provider_info->cache_storage = std::move(cache_storage);
-
+  owner_version_->provider_host()->CompleteStartWorkerPreparation(
+      process_id(), MakeRequest(&params->provider_info->interface_provider));
   client_->StartWorker(std::move(params));
 
   starting_phase_ = is_script_streaming ? SCRIPT_STREAMING : SENT_START_WORKER;
@@ -849,14 +804,6 @@ void EmbeddedWorkerInstance::SendStartWorker(
 
 void EmbeddedWorkerInstance::RequestTermination(
     RequestTerminationCallback callback) {
-  if (!blink::ServiceWorkerUtils::IsServicificationEnabled()) {
-    mojo::ReportBadMessage(
-        "Invalid termination request: RequestTermination() was called but "
-        "S13nServiceWorker is not enabled");
-    std::move(callback).Run(true /* will_be_terminated */);
-    return;
-  }
-
   if (status() != EmbeddedWorkerStatus::RUNNING &&
       status() != EmbeddedWorkerStatus::STOPPING) {
     mojo::ReportBadMessage(
@@ -957,6 +904,7 @@ void EmbeddedWorkerInstance::OnStarted(
     times.remote_script_evaluation_end =
         start_timing->script_evaluation_end_time;
     times.local_end = base::TimeTicks::Now();
+    times.thread_hop_time = inflight_start_task_->thread_hop_time();
 
     ServiceWorkerMetrics::RecordStartWorkerTiming(times, start_situation_);
   }
@@ -1000,8 +948,98 @@ void EmbeddedWorkerInstance::UpdateForegroundPriority() {
   }
 }
 
+void EmbeddedWorkerInstance::UpdateLoaderFactories(
+    std::unique_ptr<blink::URLLoaderFactoryBundleInfo> script_bundle,
+    std::unique_ptr<blink::URLLoaderFactoryBundleInfo> subresource_bundle) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(subresource_loader_updater_.is_bound());
+
+  subresource_loader_updater_->UpdateSubresourceLoaderFactories(
+      std::move(subresource_bundle));
+
+  if (script_loader_factory_) {
+    static_cast<ServiceWorkerScriptLoaderFactory*>(
+        script_loader_factory_->impl())
+        ->Update(base::MakeRefCounted<blink::URLLoaderFactoryBundle>(
+            std::move(script_bundle)));
+  }
+}
+
 base::WeakPtr<EmbeddedWorkerInstance> EmbeddedWorkerInstance::AsWeakPtr() {
   return weak_factory_.GetWeakPtr();
+}
+
+// Returns a factory bundle for doing loads on behalf of the specified |rph| and
+// |origin|. The returned bundle has a default factory that goes to network and
+// it may also include scheme-specific factories that don't go to network.
+//
+// The network factory does not support reconnection to the network service.
+std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+EmbeddedWorkerInstance::CreateFactoryBundleOnUI(RenderProcessHost* rph,
+                                                int routing_id,
+                                                const url::Origin& origin) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  auto factory_bundle = std::make_unique<blink::URLLoaderFactoryBundleInfo>();
+  mojo::PendingReceiver<network::mojom::URLLoaderFactory>
+      default_factory_receiver = factory_bundle->pending_default_factory()
+                                     .InitWithNewPipeAndPassReceiver();
+  network::mojom::TrustedURLLoaderHeaderClientPtrInfo default_header_client;
+  bool bypass_redirect_checks = false;
+
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+    // See if the default factory needs to be tweaked by the embedder.
+    GetContentClient()->browser()->WillCreateURLLoaderFactory(
+        rph->GetBrowserContext(), nullptr /* frame_host */, rph->GetID(),
+        false /* is_navigation */, false /* is_download */, origin,
+        &default_factory_receiver, &default_header_client,
+        &bypass_redirect_checks);
+    devtools_instrumentation::WillCreateURLLoaderFactoryForServiceWorker(
+        rph, routing_id, &default_factory_receiver);
+  }
+
+  if (GetNetworkFactoryCallbackForTest().is_null()) {
+    rph->CreateURLLoaderFactory(origin, nullptr /* preferences */,
+                                net::NetworkIsolationKey(origin, origin),
+                                std::move(default_header_client),
+                                std::move(default_factory_receiver));
+  } else {
+    network::mojom::URLLoaderFactoryPtr original_factory;
+    rph->CreateURLLoaderFactory(origin, nullptr /* preferences */,
+                                net::NetworkIsolationKey(origin, origin),
+                                std::move(default_header_client),
+                                mojo::MakeRequest(&original_factory));
+    GetNetworkFactoryCallbackForTest().Run(std::move(default_factory_receiver),
+                                           rph->GetID(),
+                                           original_factory.PassInterface());
+  }
+
+  factory_bundle->set_bypass_redirect_checks(bypass_redirect_checks);
+
+  ContentBrowserClient::NonNetworkURLLoaderFactoryMap non_network_factories;
+  non_network_factories[url::kDataScheme] =
+      std::make_unique<DataURLLoaderFactory>();
+  GetContentClient()
+      ->browser()
+      ->RegisterNonNetworkSubresourceURLLoaderFactories(
+          rph->GetID(), MSG_ROUTING_NONE, &non_network_factories);
+
+  for (auto& pair : non_network_factories) {
+    const std::string& scheme = pair.first;
+    std::unique_ptr<network::mojom::URLLoaderFactory> factory =
+        std::move(pair.second);
+
+    // To be safe, ignore schemes that aren't allowed to register service
+    // workers. We assume that importScripts and fetch() should fail on such
+    // schemes.
+    if (!base::Contains(GetServiceWorkerSchemes(), scheme))
+      continue;
+    network::mojom::URLLoaderFactoryPtr factory_ptr;
+    mojo::MakeStrongBinding(std::move(factory),
+                            mojo::MakeRequest(&factory_ptr));
+    factory_bundle->pending_scheme_specific_factories().emplace(
+        scheme, factory_ptr.PassInterface());
+  }
+  return factory_bundle;
 }
 
 void EmbeddedWorkerInstance::OnReportException(
@@ -1016,14 +1054,14 @@ void EmbeddedWorkerInstance::OnReportException(
 }
 
 void EmbeddedWorkerInstance::OnReportConsoleMessage(
-    int source_identifier,
+    blink::mojom::ConsoleMessageSource source,
     blink::mojom::ConsoleMessageLevel message_level,
     const base::string16& message,
     int line_number,
     const GURL& source_url) {
   for (auto& observer : listener_list_) {
-    observer.OnReportConsoleMessage(source_identifier, message_level, message,
-                                    line_number, source_url);
+    observer.OnReportConsoleMessage(source, message_level, message, line_number,
+                                    source_url);
   }
 }
 
@@ -1078,9 +1116,10 @@ void EmbeddedWorkerInstance::ReleaseProcess() {
   devtools_proxy_.reset();
   process_handle_.reset();
   lifetime_tracker_.reset();
+  subresource_loader_updater_.reset();
   status_ = EmbeddedWorkerStatus::STOPPED;
   starting_phase_ = NOT_STARTING;
-  thread_id_ = kInvalidEmbeddedWorkerThreadId;
+  thread_id_ = ServiceWorkerConsts::kInvalidEmbeddedWorkerThreadId;
 }
 
 void EmbeddedWorkerInstance::OnSetupFailed(
@@ -1158,35 +1197,45 @@ void EmbeddedWorkerInstance::SetNetworkFactoryForTesting(
 
 void EmbeddedWorkerInstance::NotifyForegroundServiceWorkerAdded() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(
-      base::FeatureList::IsEnabled(features::kServiceWorkerForegroundPriority));
 
   if (!process_handle_ || foreground_notified_)
     return;
 
   foreground_notified_ = true;
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&NotifyForegroundServiceWorkerOnUIThread, true /* added */,
-                     process_id()));
+  ui_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&NotifyForegroundServiceWorkerOnUIThread,
+                                true /* added */, process_id()));
 }
 
 void EmbeddedWorkerInstance::NotifyForegroundServiceWorkerRemoved() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(
-      !foreground_notified_ ||
-      base::FeatureList::IsEnabled(features::kServiceWorkerForegroundPriority));
 
   if (!process_handle_ || !foreground_notified_)
     return;
 
   foreground_notified_ = false;
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&NotifyForegroundServiceWorkerOnUIThread,
-                     false /* added */, process_id()));
+  ui_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&NotifyForegroundServiceWorkerOnUIThread,
+                                false /* added */, process_id()));
+}
+
+network::mojom::URLLoaderFactoryPtrInfo
+EmbeddedWorkerInstance::MakeScriptLoaderFactoryPtrInfo(
+    std::unique_ptr<blink::URLLoaderFactoryBundleInfo> script_bundle) {
+  network::mojom::URLLoaderFactoryPtrInfo script_loader_factory_ptr_info;
+
+  auto script_bundle_factory =
+      base::MakeRefCounted<blink::URLLoaderFactoryBundle>(
+          std::move(script_bundle));
+  script_loader_factory_ = mojo::MakeStrongBinding(
+      std::make_unique<ServiceWorkerScriptLoaderFactory>(
+          context_, owner_version_->provider_host()->AsWeakPtr(),
+          std::move(script_bundle_factory)),
+      mojo::MakeRequest(&script_loader_factory_ptr_info));
+
+  return script_loader_factory_ptr_info;
 }
 
 }  // namespace content

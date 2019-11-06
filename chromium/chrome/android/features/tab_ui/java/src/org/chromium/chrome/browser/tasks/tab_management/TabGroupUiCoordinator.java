@@ -4,21 +4,27 @@
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
+import static org.chromium.chrome.browser.tasks.tab_management.TabManagementModuleProvider.SYNTHETIC_TRIAL_POSTFIX;
+
 import android.content.Context;
 import android.view.ViewGroup;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.ThemeColorProvider;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
-import org.chromium.chrome.browser.init.ActivityLifecycleDispatcher;
+import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.PauseResumeWithNativeObserver;
+import org.chromium.chrome.browser.metrics.UmaSessionStats;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelFilterProvider;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.tasks.tabgroup.TabGroupModelFilter;
+import org.chromium.chrome.browser.tasks.tab_groups.TabGroupModelFilter;
+import org.chromium.chrome.browser.tasks.tab_groups.TabGroupUtils;
 import org.chromium.chrome.browser.toolbar.bottom.BottomControlsCoordinator;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.List;
@@ -30,11 +36,12 @@ import java.util.List;
  */
 public class TabGroupUiCoordinator
         implements TabGroupUiMediator.ResetHandler, TabGroupUi, PauseResumeWithNativeObserver {
-    public final static String COMPONENT_NAME = "TabStrip";
+    final static String COMPONENT_NAME = "TabStrip";
     private final Context mContext;
     private final PropertyModel mTabStripToolbarModel;
     private final ThemeColorProvider mThemeColorProvider;
     private TabGridSheetCoordinator mTabGridSheetCoordinator;
+    private TabGridDialogCoordinator mTabGridDialogCoordinator;
     private TabListCoordinator mTabStripCoordinator;
     private TabGroupUiMediator mMediator;
     private TabStripToolbarCoordinator mTabStripToolbarCoordinator;
@@ -59,29 +66,48 @@ public class TabGroupUiCoordinator
     @Override
     public void initializeWithNative(ChromeActivity activity,
             BottomControlsCoordinator.BottomControlsVisibilityController visibilityController) {
+        if (UmaSessionStats.isMetricsServiceAvailable()) {
+            UmaSessionStats.registerSyntheticFieldTrial(
+                    ChromeFeatureList.TAB_GROUPS_ANDROID + SYNTHETIC_TRIAL_POSTFIX,
+                    "Downloaded_Enabled");
+        }
         assert activity instanceof ChromeTabbedActivity;
         mActivity = activity;
         TabModelSelector tabModelSelector = activity.getTabModelSelector();
         TabContentManager tabContentManager = activity.getTabContentManager();
 
         mTabStripCoordinator = new TabListCoordinator(TabListCoordinator.TabListMode.STRIP,
-                mContext, tabModelSelector, null, null, false, null,
-                mTabStripToolbarCoordinator.getTabListContainerView(), true, COMPONENT_NAME);
+                mContext, tabModelSelector, null, null, false, null, null, null, null, null,
+                mTabStripToolbarCoordinator.getTabListContainerView(), null, true, COMPONENT_NAME);
 
-        mTabGridSheetCoordinator =
-                new TabGridSheetCoordinator(mContext, activity.getBottomSheetController(),
-                        tabModelSelector, tabContentManager, activity, mThemeColorProvider);
+        if (FeatureUtilities.isTabGroupsAndroidUiImprovementsEnabled()) {
+            // TODO(yuezhanggg): find a way to enable interactions between grid tab switcher and the
+            // dialog here.
+            mTabGridSheetCoordinator = null;
+
+            mTabGridDialogCoordinator =
+                    new TabGridDialogCoordinator(mContext, tabModelSelector, tabContentManager,
+                            activity, activity.getCompositorViewHolder(), null, null, null);
+        } else {
+            mTabGridSheetCoordinator =
+                    new TabGridSheetCoordinator(mContext, activity.getBottomSheetController(),
+                            tabModelSelector, tabContentManager, activity, mThemeColorProvider);
+
+            mTabGridDialogCoordinator = null;
+        }
 
         mMediator = new TabGroupUiMediator(visibilityController, this, mTabStripToolbarModel,
                 tabModelSelector, activity,
                 ((ChromeTabbedActivity) activity).getOverviewModeBehavior(), mThemeColorProvider);
         mActivityLifecycleDispatcher = activity.getLifecycleDispatcher();
         mActivityLifecycleDispatcher.register(this);
+
+        TabGroupUtils.startObservingForCreationIPH();
     }
 
     /**
      * Handles a reset event originated from {@link TabGroupUiMediator}
-     * when the bottom sheet is collapsed.
+     * when the bottom sheet is collapsed or the dialog is hidden.
      *
      * @param tabs List of Tabs to reset.
      */
@@ -92,13 +118,17 @@ public class TabGroupUiCoordinator
 
     /**
      * Handles a reset event originated from {@link TabGroupUiMediator}
-     * when the bottom sheet is expanded.
+     * when the bottom sheet is expanded or the dialog is shown.
      *
      * @param tabs List of Tabs to reset.
      */
     @Override
-    public void resetSheetWithListOfTabs(List<Tab> tabs) {
-        mTabGridSheetCoordinator.resetWithListOfTabs(tabs);
+    public void resetGridWithListOfTabs(List<Tab> tabs) {
+        if (mTabGridDialogCoordinator == null) {
+            mTabGridSheetCoordinator.resetWithListOfTabs(tabs);
+        } else {
+            mTabGridDialogCoordinator.resetWithListOfTabs(tabs);
+        }
     }
 
     /**
@@ -106,8 +136,16 @@ public class TabGroupUiCoordinator
      */
     @Override
     public void destroy() {
+        // Early return if the component hasn't initialized yet.
+        if (mActivity == null) return;
+
         mTabStripCoordinator.destroy();
-        mTabGridSheetCoordinator.destroy();
+        if (mTabGridSheetCoordinator != null) {
+            mTabGridSheetCoordinator.destroy();
+        }
+        if (mTabGridDialogCoordinator != null) {
+            mTabGridDialogCoordinator.destroy();
+        }
         mMediator.destroy();
         mActivityLifecycleDispatcher.unregister(this);
     }
@@ -126,6 +164,21 @@ public class TabGroupUiCoordinator
                 ((TabGroupModelFilter) provider.getTabModelFilter(true)).getTabGroupCount();
         groupCount += ((TabGroupModelFilter) provider.getTabModelFilter(false)).getTabGroupCount();
         RecordHistogram.recordCountHistogram("TabGroups.UserGroupCount", groupCount);
+
+        recordSessionCount();
+    }
+
+    private void recordSessionCount() {
+        if (mActivity.getOverviewModeBehavior() != null
+                && mActivity.getOverviewModeBehavior().overviewVisible()) {
+            return;
+        }
+
+        Tab currentTab = mActivity.getTabModelSelector().getCurrentTab();
+        if (currentTab == null) return;
+        TabModelFilterProvider provider =
+                mActivity.getTabModelSelector().getTabModelFilterProvider();
+        ((TabGroupModelFilter) provider.getCurrentTabModelFilter()).recordSessionsCount(currentTab);
     }
 
     @Override

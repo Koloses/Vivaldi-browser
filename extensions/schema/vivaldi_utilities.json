@@ -99,6 +99,32 @@
         }
       },
       {
+        "id": "SelectFileDialogType",
+        "type": "string",
+        "description": "The type of selectfile dialog to show.",
+        "enum": [
+          {
+            "name": "file",
+            "description": "This is a file select dialog."
+          },
+          {
+            "name": "folder",
+            "description": "This is a folder select dialog."
+          }
+        ]
+      },
+      {
+        "id": "SelectLocalImageParams",
+        "type": "object",
+        "description": "Option object for selectLocalImage.",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title for the file selection dialog."
+          }
+        }
+      },
+      {
         "id": "SharedDataValue",
         "type": "object",
         "description": "Data key+value pair.",
@@ -208,7 +234,7 @@
         "parameters": [
           {
             "name": "tabId",
-            "type": "string",
+            "type": "integer",
             "description": "The tab id to check if part of the session"
           },
           {
@@ -253,7 +279,7 @@
         "parameters": [
           {
             "name": "tabId",
-            "type": "string",
+            "type": "integer",
             "description": "The page to examine"
           },
           {
@@ -263,52 +289,6 @@
               {
                 "name": "text",
                 "type": "string"
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "name": "createUrlMapping",
-        "type": "function",
-        "description": "Creates a mapping to a local file so it can be accessed using the chrome://vivaldi-data/local-image/ protocol.",
-        "parameters": [
-          {
-            "type": "string",
-            "description": "The local path to the image file.",
-            "name": "localPath"
-          },
-          {
-            "type": "function",
-            "name": "callback",
-            "parameters": [
-              {
-                "type": "string",
-                "description": "The generated url for the file using for accessing it as chrome://vivaldi-data/local-image/<id>",
-                "name": "generatedUrl"
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "name": "removeUrlMapping",
-        "type": "function",
-        "description": "Remove the given url mapping, if it exists.",
-        "parameters": [
-          {
-            "type": "string",
-            "description": "The url mapping to remove.",
-            "name": "url"
-          },
-          {
-            "type": "function",
-            "name": "callback",
-            "parameters": [
-              {
-                "type": "boolean",
-                "description": "true if the given mapping was found and removed, otherwise false.",
-                "name": "success"
               }
             ]
           }
@@ -333,6 +313,11 @@
             "optional": true
           },
           {
+            "name": "type",
+            "$ref": "SelectFileDialogType",
+            "description": "Type of file select dialog, defaults to 'file'."
+          },
+          {
             "type": "function",
             "name": "callback",
             "parameters": [
@@ -340,6 +325,28 @@
                 "type": "string",
                 "description": "Full path to the selected file.",
                 "name": "path"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "selectLocalImage",
+        "type": "function",
+        "description": "Ask the user to select an image file and return as a data mapping URL",
+        "parameters": [
+          {
+            "name": "params",
+            "$ref": "SelectLocalImageParams"
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "parameters": [
+              {
+                "name": "url",
+                "type": "string",
+                "description": "data mapping url for the selected image or empty if the user canceled the selection."
               }
             ]
           }

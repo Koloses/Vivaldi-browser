@@ -39,13 +39,13 @@ DevToolsURLRequestInterceptor::MaybeCreate(BrowserContext* browser_context) {
 // static
 bool DevToolsURLRequestInterceptor::IsNavigationRequest(
     ResourceType resource_type) {
-  return resource_type == RESOURCE_TYPE_MAIN_FRAME ||
-         resource_type == RESOURCE_TYPE_SUB_FRAME;
+  return resource_type == ResourceType::kMainFrame ||
+         resource_type == ResourceType::kSubFrame;
 }
 
 DevToolsURLRequestInterceptor::DevToolsURLRequestInterceptor(
     BrowserContext* browser_context)
-    : next_id_(0), weak_factory_(this) {
+    : next_id_(0) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   auto target_registry = std::make_unique<DevToolsTargetRegistry>(
       base::CreateSingleThreadTaskRunnerWithTraits(

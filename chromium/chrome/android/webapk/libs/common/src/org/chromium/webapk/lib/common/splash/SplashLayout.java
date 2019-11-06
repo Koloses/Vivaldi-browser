@@ -33,6 +33,10 @@ public class SplashLayout {
         int LARGE = 2;
     }
 
+    public static int getDefaultBackgroundColor(Context appContext) {
+        return getColorCompatibility(appContext.getResources(), R.color.webapp_default_bg);
+    }
+
     /**
      * Classifies the icon based on:
      * - Whether it is appropriate to display on the splash screen.
@@ -64,7 +68,6 @@ public class SplashLayout {
             case IconClassification.INVALID:
                 return R.layout.webapp_splash_screen_no_icon;
             case IconClassification.SMALL:
-                return R.layout.webapp_splash_screen_small;
             case IconClassification.LARGE:
             default:
                 return R.layout.webapp_splash_screen_large;

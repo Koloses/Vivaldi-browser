@@ -9,9 +9,6 @@ namespace viz {
 FakeDisplayClient::FakeDisplayClient() : binding_(this) {}
 FakeDisplayClient::~FakeDisplayClient() = default;
 
-void FakeDisplayClient::DidSwapAfterSnapshotRequestReceived(
-    const std::vector<ui::LatencyInfo>&) {}
-
 mojom::DisplayClientPtr FakeDisplayClient::BindInterfacePtr() {
   mojom::DisplayClientPtr ptr;
   binding_.Bind(MakeRequest(&ptr));
@@ -26,6 +23,10 @@ void FakeDisplayClient::OnDisplayReceivedCALayerParams(
 #if defined(OS_WIN)
 void FakeDisplayClient::CreateLayeredWindowUpdater(
     mojom::LayeredWindowUpdaterRequest request) {}
+#endif
+
+#if defined(USE_X11)
+void FakeDisplayClient::DidCompleteSwapWithNewSize(const gfx::Size& size) {}
 #endif
 
 }  // namespace viz

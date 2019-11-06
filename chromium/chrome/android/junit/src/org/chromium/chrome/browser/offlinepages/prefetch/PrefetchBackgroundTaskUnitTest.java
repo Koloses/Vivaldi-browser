@@ -127,9 +127,8 @@ public class PrefetchBackgroundTaskUnitTest {
             }
         })
                 .when(mPrefetchBackgroundTask)
-                .nativeStartPrefetchTask(any());
+                .nativeStartPrefetchTask();
         doReturn(true).when(mPrefetchBackgroundTask).nativeOnStopTask(1);
-        doReturn(null).when(mPrefetchBackgroundTask).getProfile();
 
         mFakeTaskScheduler = new FakeBackgroundTaskScheduler();
         BackgroundTaskSchedulerFactory.setSchedulerForTesting(mFakeTaskScheduler);
@@ -161,7 +160,9 @@ public class PrefetchBackgroundTaskUnitTest {
         TaskInfo scheduledTask =
                 mFakeTaskScheduler.getTaskInfo(TaskIds.OFFLINE_PAGES_PREFETCH_JOB_ID);
         assertNotNull(scheduledTask);
-        assertEquals(TimeUnit.SECONDS.toMillis(additionalDelaySeconds),
+        assertEquals(TimeUnit.SECONDS.toMillis(
+                             PrefetchBackgroundTaskScheduler.LIMITLESS_START_DELAY_SECONDS
+                             + additionalDelaySeconds),
                 scheduledTask.getOneOffInfo().getWindowStartTimeMs());
         assertEquals(true, scheduledTask.isPersisted());
         assertEquals(TaskInfo.NetworkType.ANY, scheduledTask.getRequiredNetworkType());

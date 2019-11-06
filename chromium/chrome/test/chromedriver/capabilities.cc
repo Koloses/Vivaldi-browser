@@ -225,12 +225,20 @@ Status ParseTimeouts(const base::Value& option, Capabilities* capabilities) {
     return Status(kInvalidArgument, "'timeouts' must be a JSON object");
   for (const auto& it : timeouts->DictItems()) {
     int64_t timeout_ms_int64 = -1;
-    if (!GetOptionalSafeInt(timeouts, it.first, &timeout_ms_int64)
-        || timeout_ms_int64 < 0)
-      return Status(kInvalidArgument, "value must be a non-negative integer");
-    base::TimeDelta timeout =
-                          base::TimeDelta::FromMilliseconds(timeout_ms_int64);
+    base::TimeDelta timeout;
     const std::string& type = it.first;
+    if (it.second.is_none()) {
+      if (type == "script")
+        timeout = base::TimeDelta::Max();
+      else
+        return Status(kInvalidArgument, "timeout can not be null");
+    } else {
+      if (!GetOptionalSafeInt(timeouts, it.first, &timeout_ms_int64) ||
+          timeout_ms_int64 < 0)
+        return Status(kInvalidArgument, "value must be a non-negative integer");
+      else
+        timeout = base::TimeDelta::FromMilliseconds(timeout_ms_int64);
+    }
     if (type == "script") {
       capabilities->script_timeout = timeout;
     } else if (type == "pageLoad") {
@@ -383,6 +391,8 @@ Status ParseExcludeSwitches(const base::Value& option,
       return Status(kInvalidArgument,
                     "each switch to be removed must be a string");
     }
+    if (switch_name.substr(0, 2) == "--")
+      switch_name = switch_name.substr(2);
     capabilities->exclude_switches.insert(switch_name);
   }
   return Status(kOk);
@@ -556,8 +566,6 @@ Status ParseChromeOptions(
     parser_map["extensions"] = base::Bind(&ParseExtensions);
     parser_map["extensionLoadTimeout"] =
         base::Bind(&ParseTimeDelta, &capabilities->extension_load_timeout);
-    parser_map["forceDevToolsScreenshot"] = base::Bind(
-        &ParseBoolean, &capabilities->force_devtools_screenshot);
     parser_map["loadAsync"] = base::Bind(&IgnoreDeprecatedOption, "loadAsync");
     parser_map["localState"] =
         base::Bind(&ParseDict, &capabilities->local_state);
@@ -583,6 +591,25 @@ Status ParseChromeOptions(
   return Status(kOk);
 }
 
+Status ParseSeleniumOptions(
+    const base::Value& capability,
+    Capabilities* capabilities) {
+  const base::DictionaryValue* selenium_options = NULL;
+  if (!capability.GetAsDictionary(&selenium_options))
+    return Status(kInvalidArgument, "must be a dictionary");
+  std::map<std::string, Parser> parser_map;
+  parser_map["loggingPrefs"] = base::Bind(&ParseLoggingPrefs);
+
+  for (base::DictionaryValue::Iterator it(*selenium_options); !it.IsAtEnd();
+       it.Advance()) {
+    if (parser_map.find(it.key()) == parser_map.end())
+      continue;
+    Status status = parser_map[it.key()].Run(it.value(), capabilities);
+    if (status.IsError())
+      return Status(kInvalidArgument, "cannot parse " + it.key(), status);
+  }
+  return Status(kOk);
+}
 }  // namespace
 
 Switches::Switches() {}
@@ -706,7 +733,6 @@ Capabilities::Capabilities()
       android_use_running_app(false),
       detach(false),
       extension_load_timeout(base::TimeDelta::FromSeconds(10)),
-      force_devtools_screenshot(true),
       network_emulation_enabled(false),
       use_automation_extension(true) {}
 
@@ -756,7 +782,16 @@ Status Capabilities::Parse(const base::DictionaryValue& desired_caps,
   } else {
     parser_map["chromeOptions"] = base::BindRepeating(&ParseChromeOptions);
   }
-  parser_map["loggingPrefs"] = base::BindRepeating(&ParseLoggingPrefs);
+  // se:options.loggingPrefs and goog:loggingPrefs is spec-compliant name,
+  // but loggingPrefs is still supported in legacy mode.
+  if (desired_caps.GetDictionary("se:options.loggingPrefs", nullptr)) {
+    parser_map["se:options"] = base::BindRepeating(&ParseSeleniumOptions);
+  } else if (w3c_compliant ||
+             desired_caps.GetDictionary("goog:loggingPrefs", nullptr)) {
+    parser_map["goog:loggingPrefs"] = base::BindRepeating(&ParseLoggingPrefs);
+  } else {
+    parser_map["loggingPrefs"] = base::BindRepeating(&ParseLoggingPrefs);
+  }
   // Network emulation requires device mode, which is only enabled when
   // mobile emulation is on.
   if (desired_caps.GetDictionary("goog:chromeOptions.mobileEmulation",
@@ -812,18 +847,5 @@ Status Capabilities::Parse(const base::DictionaryValue& desired_caps,
                     "but devtools events logging was not enabled");
     }
   }
-  return Status(kOk);
-}
-
-Status Capabilities::CheckSupport() const {
-  // TODO(https://crbug.com/chromedriver/1902): pageLoadStrategy=eager not yet
-  // supported.
-  if (page_load_strategy.length() > 0 &&
-      page_load_strategy != PageLoadStrategy::kNormal &&
-      page_load_strategy != PageLoadStrategy::kNone) {
-    return Status(kInvalidArgument, "'pageLoadStrategy=" + page_load_strategy +
-                                        "' not yet supported");
-  }
-
   return Status(kOk);
 }

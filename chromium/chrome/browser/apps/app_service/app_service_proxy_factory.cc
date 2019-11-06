@@ -12,6 +12,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/crostini/crostini_registry_service_factory.h"
+#include "extensions/browser/extension_prefs_factory.h"
 #include "extensions/browser/extension_registry_factory.h"
 #endif  // OS_CHROMEOS
 
@@ -39,6 +40,7 @@ AppServiceProxyFactory* AppServiceProxyFactory::GetInstance() {
 // static
 bool AppServiceProxyFactory::IsEnabled() {
   return base::FeatureList::IsEnabled(features::kAppServiceAsh) ||
+         base::FeatureList::IsEnabled(features::kAppServiceServer) ||
          base::FeatureList::IsEnabled(features::kAppManagement);
 }
 
@@ -48,6 +50,7 @@ AppServiceProxyFactory::AppServiceProxyFactory()
           BrowserContextDependencyManager::GetInstance()) {
 #if defined(OS_CHROMEOS)
   DependsOn(crostini::CrostiniRegistryServiceFactory::GetInstance());
+  DependsOn(extensions::ExtensionPrefsFactory::GetInstance());
   DependsOn(extensions::ExtensionRegistryFactory::GetInstance());
 #endif  // OS_CHROMEOS
 }

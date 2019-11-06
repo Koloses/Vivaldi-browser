@@ -6,12 +6,14 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump.h"
+#include "base/task/single_thread_task_executor.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/tests/gl_test_utils.h"
+#include "mojo/core/embedder/embedder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 #if defined(OS_MACOSX)
@@ -23,9 +25,9 @@ namespace {
 int RunHelper(base::TestSuite* testSuite) {
   base::FeatureList::InitializeInstance(std::string(), std::string());
 #if defined(USE_OZONE)
-  base::MessageLoopForUI main_loop;
+  base::SingleThreadTaskExecutor executor(base::MessagePump::Type::UI);
 #else
-  base::MessageLoopForIO message_loop;
+  base::SingleThreadTaskExecutor executor(base::MessagePump::Type::IO);
 #endif
   gpu::GLTestHelper::InitializeGLDefault();
 
@@ -38,6 +40,9 @@ int RunHelper(base::TestSuite* testSuite) {
 int main(int argc, char** argv) {
   base::TestSuite test_suite(argc, argv);
   base::CommandLine::Init(argc, argv);
+
+  mojo::core::Init();
+
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool pool;
 #endif

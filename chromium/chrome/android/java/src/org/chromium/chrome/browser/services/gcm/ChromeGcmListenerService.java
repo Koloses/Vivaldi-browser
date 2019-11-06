@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.services.gcm;
 
 import android.content.Context;
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
@@ -19,6 +20,7 @@ import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.metrics.CachedMetrics;
+import org.chromium.base.task.PostTask;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.init.ProcessInitializationHandler;
 import org.chromium.components.background_task_scheduler.BackgroundTaskSchedulerFactory;
@@ -27,12 +29,14 @@ import org.chromium.components.background_task_scheduler.TaskInfo;
 import org.chromium.components.gcm_driver.GCMDriver;
 import org.chromium.components.gcm_driver.GCMMessage;
 import org.chromium.components.gcm_driver.LazySubscriptionsManager;
+import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 /**
  * Receives Downstream messages and status of upstream messages from GCM.
  */
 public class ChromeGcmListenerService extends GcmListenerService {
     private static final String TAG = "ChromeGcmListener";
+    private static final String SHARING_APP_ID = "com.google.chrome.sharing.fcm";
 
     @Override
     public void onCreate() {
@@ -52,19 +56,16 @@ public class ChromeGcmListenerService extends GcmListenerService {
         }
 
         // Dispatch the message to the GCM Driver for native features.
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                GCMMessage message = null;
-                try {
-                    message = new GCMMessage(from, data);
-                } catch (IllegalArgumentException e) {
-                    Log.e(TAG, "Received an invalid GCM Message", e);
-                    return;
-                }
-
-                scheduleOrDispatchMessageToDriver(message);
+        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
+            GCMMessage message = null;
+            try {
+                message = new GCMMessage(from, data);
+            } catch (IllegalArgumentException e) {
+                Log.e(TAG, "Received an invalid GCM Message", e);
+                return;
             }
+
+            scheduleOrDispatchMessageToDriver(message);
         });
     }
 
@@ -91,6 +92,35 @@ public class ChromeGcmListenerService extends GcmListenerService {
     }
 
     /**
+     * Returns if we deliver the GCMMessage with a background service by calling
+     * Context#startService. This will only work if Android has put us in a whitelist to allow
+     * background services to be started.
+     */
+    private static boolean maybeBypassScheduler(GCMMessage message) {
+        // Android only puts us on a whitelist for high priority messages.
+        if (message.getOriginalPriority() != GCMMessage.Priority.HIGH
+                || !SHARING_APP_ID.equals(message.getAppId())) {
+            return false;
+        }
+
+        // Receiving a high priority push message should put us in a whitelist to start
+        // background services.
+        try {
+            Context context = ContextUtils.getApplicationContext();
+            Intent intent = new Intent(context, GCMBackgroundService.class);
+            intent.putExtras(message.toBundle());
+            context.startService(intent);
+            return true;
+        } catch (IllegalStateException e) {
+            // Failed to start service, maybe we're not whitelisted? Fallback to using
+            // BackgroundTaskScheduler to start Chrome.
+            // TODO(knollr): Add metrics for this.
+            Log.e(TAG, "Could not start background service", e);
+            return false;
+        }
+    }
+
+    /**
      * If Chrome is backgrounded, messages coming from lazy subscriptions are
      * persisted on disk and replayed next time Chrome is forgrounded. If Chrome is forgrounded or
      * if the message isn't coming from a lazy subscription, this method either schedules |message|
@@ -106,7 +136,9 @@ public class ChromeGcmListenerService extends GcmListenerService {
         if (!ApplicationStatus.hasVisibleActivities()) {
             boolean isSubscriptionLazy = false;
             long time = SystemClock.elapsedRealtime();
-            if (LazySubscriptionsManager.isSubscriptionLazy(subscriptionId)) {
+            // TODO(crbug.com/945402): Add metrics for the new high priority message logic.
+            if (LazySubscriptionsManager.isSubscriptionLazy(subscriptionId)
+                    && message.getOriginalPriority() != GCMMessage.Priority.HIGH) {
                 isSubscriptionLazy = true;
                 LazySubscriptionsManager.persistMessage(subscriptionId, message);
             }
@@ -122,6 +154,11 @@ public class ChromeGcmListenerService extends GcmListenerService {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            if (maybeBypassScheduler(message)) {
+                // We've bypassed the scheduler, so nothing to do here.
+                return;
+            }
+
             Bundle extras = message.toBundle();
 
             // TODO(peter): Add UMA for measuring latency introduced by the BackgroundTaskScheduler.

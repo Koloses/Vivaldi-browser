@@ -7,8 +7,6 @@
 
 #include <stdint.h>
 
-#include <vector>
-
 #include "base/gtest_prod_util.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value.h"
@@ -31,8 +29,9 @@ class MODULES_EXPORT WebIDBCursorImpl : public WebIDBCursor {
                       const IDBKey* primary_key,
                       WebIDBCallbacks* callback) override;
   void CursorContinueCallback(std::unique_ptr<WebIDBCallbacks> callbacks,
-                              mojom::blink::IDBErrorPtr error,
-                              mojom::blink::IDBCursorValuePtr value);
+                              mojom::blink::IDBCursorResultPtr result);
+  void PrefetchCallback(std::unique_ptr<WebIDBCallbacks> callbacks,
+                        mojom::blink::IDBCursorResultPtr result);
 
   void PostSuccessHandlerCallback() override;
 
@@ -40,7 +39,7 @@ class MODULES_EXPORT WebIDBCursorImpl : public WebIDBCursor {
                        Vector<std::unique_ptr<IDBKey>> primary_keys,
                        Vector<std::unique_ptr<IDBValue>> values);
 
-  void CachedAdvance(unsigned long count, WebIDBCallbacks* callbacks);
+  void CachedAdvance(uint32_t count, WebIDBCallbacks* callbacks);
   void CachedContinue(WebIDBCallbacks* callbacks);
 
   // This method is virtual so it can be overridden in unit tests.
@@ -50,8 +49,7 @@ class MODULES_EXPORT WebIDBCursorImpl : public WebIDBCursor {
 
  private:
   void AdvanceCallback(std::unique_ptr<WebIDBCallbacks> callbacks,
-                       mojom::blink::IDBErrorPtr error,
-                       mojom::blink::IDBCursorValuePtr value);
+                       mojom::blink::IDBCursorResultPtr result);
   mojom::blink::IDBCallbacksAssociatedPtrInfo GetCallbacksProxy(
       std::unique_ptr<WebIDBCallbacks> callbacks);
 
@@ -90,7 +88,7 @@ class MODULES_EXPORT WebIDBCursorImpl : public WebIDBCursor {
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
-  base::WeakPtrFactory<WebIDBCursorImpl> weak_factory_;
+  base::WeakPtrFactory<WebIDBCursorImpl> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WebIDBCursorImpl);
 };

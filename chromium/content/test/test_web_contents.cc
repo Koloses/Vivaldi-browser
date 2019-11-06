@@ -22,7 +22,6 @@
 #include "content/common/frame_messages.h"
 #include "content/common/render_message_filter.mojom.h"
 #include "content/common/view_messages.h"
-#include "content/public/browser/navigation_data.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -38,7 +37,7 @@ namespace content {
 
 namespace {
 
-const RenderProcessHostFactory* GetMockProcessFactory() {
+RenderProcessHostFactory* GetMockProcessFactory() {
   static base::NoDestructor<MockRenderProcessHostFactory> factory;
   return factory.get();
 }
@@ -83,11 +82,17 @@ TestWebContents::~TestWebContents() {
 }
 
 TestRenderFrameHost* TestWebContents::GetMainFrame() {
-  return static_cast<TestRenderFrameHost*>(WebContentsImpl::GetMainFrame());
+  auto* instance = WebContentsImpl::GetMainFrame();
+  DCHECK(instance->IsTestRenderFrameHost())
+      << "You may want to instantiate RenderViewHostTestEnabler.";
+  return static_cast<TestRenderFrameHost*>(instance);
 }
 
 TestRenderViewHost* TestWebContents::GetRenderViewHost() {
-  return static_cast<TestRenderViewHost*>(WebContentsImpl::GetRenderViewHost());
+  auto* instance = WebContentsImpl::GetRenderViewHost();
+  DCHECK(instance->IsTestRenderViewHost())
+      << "You may want to instantiate RenderViewHostTestEnabler.";
+  return static_cast<TestRenderViewHost*>(instance);
 }
 
 TestRenderFrameHost* TestWebContents::GetPendingMainFrame() {
@@ -185,11 +190,11 @@ void TestWebContents::TestDidNavigateWithSequenceNumber(
   rfh->SendNavigateWithParams(&params, was_within_same_document);
 }
 
-const std::string& TestWebContents::GetSaveFrameHeaders() const {
+const std::string& TestWebContents::GetSaveFrameHeaders() {
   return save_frame_headers_;
 }
 
-const base::string16& TestWebContents::GetSuggestedFileName() const {
+const base::string16& TestWebContents::GetSuggestedFileName() {
   return suggested_filename_;
 }
 
@@ -250,8 +255,7 @@ void TestWebContents::TestDidFailLoadWithError(
     const GURL& url,
     int error_code,
     const base::string16& error_description) {
-  FrameHostMsg_DidFailLoadWithError msg(0, url, error_code, error_description);
-  frame_tree_.root()->current_frame_host()->OnMessageReceived(msg);
+  GetMainFrame()->DidFailLoadWithError(url, error_code, error_description);
 }
 
 bool TestWebContents::CrossProcessNavigationPending() {
@@ -278,7 +282,8 @@ std::unique_ptr<WebContents> TestWebContents::Clone() {
   return contents;
 }
 
-void TestWebContents::NavigateAndCommit(const GURL& url) {
+void TestWebContents::NavigateAndCommit(const GURL& url,
+                                        ui::PageTransition transition) {
   std::unique_ptr<NavigationSimulator> navigation =
       NavigationSimulator::CreateBrowserInitiated(url, this);
   // TODO(clamy): Browser-initiated navigations should not have a transition of
@@ -286,7 +291,8 @@ void TestWebContents::NavigateAndCommit(const GURL& url) {
   // should be rewritten to simulate renderer-initiated navigations in these
   // cases. Once that's done, the transtion can be set to
   // ui::PAGE_TRANSITION_TYPED which makes more sense in this context.
-  navigation->SetTransition(ui::PAGE_TRANSITION_LINK);
+  // ui::PAGE_TRANSITION_TYPED is the default value for transition
+  navigation->SetTransition(transition);
   navigation->Commit();
 }
 
@@ -362,13 +368,6 @@ void TestWebContents::SetHistoryOffsetAndLength(int history_offset,
             history_offset);
   EXPECT_EQ(expect_set_history_offset_and_length_history_length_,
             history_length);
-}
-
-void TestWebContents::SetNavigationData(
-    NavigationHandle* navigation_handle,
-    std::unique_ptr<NavigationData> navigation_data) {
-  static_cast<NavigationHandleImpl*>(navigation_handle)
-      ->set_navigation_data(std::move(navigation_data));
 }
 
 void TestWebContents::SetHttpResponseHeaders(

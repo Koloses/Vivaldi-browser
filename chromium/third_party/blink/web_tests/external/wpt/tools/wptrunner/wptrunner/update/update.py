@@ -1,16 +1,16 @@
 import os
 import sys
 
-from metadata import MetadataUpdateRunner
-from sync import SyncFromUpstreamRunner
-from tree import GitTree, HgTree, NoVCSTree
+from .metadata import MetadataUpdateRunner
+from .sync import SyncFromUpstreamRunner
+from .tree import GitTree, HgTree, NoVCSTree
 
-from base import Step, StepRunner, exit_clean, exit_unclean
-from state import SavedState, UnsavedState
+from .base import Step, StepRunner, exit_clean, exit_unclean
+from .state import SavedState, UnsavedState
 
 def setup_paths(sync_path):
     sys.path.insert(0, os.path.abspath(sync_path))
-    from tools import localpaths  # noqa: flake8
+    from tools import localpaths  # noqa: F401
 
 class LoadConfig(Step):
     """Step for loading configuration from the ini file and kwargs."""

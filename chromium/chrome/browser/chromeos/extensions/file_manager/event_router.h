@@ -15,7 +15,6 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path_watcher.h"
 #include "base/macros.h"
-#include "chrome/browser/chromeos/crostini/crostini_share_path.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/extensions/file_manager/device_event_router.h"
 #include "chrome/browser/chromeos/extensions/file_manager/drivefs_event_router.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager_observer.h"
+#include "chrome/browser/chromeos/guest_os/guest_os_share_path.h"
 #include "chrome/common/extensions/api/file_manager_private.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "chromeos/settings/timezone_settings.h"
@@ -58,7 +58,7 @@ class EventRouter
       public VolumeManagerObserver,
       public arc::ArcIntentHelperObserver,
       public drive::DriveIntegrationServiceObserver,
-      public crostini::CrostiniSharePath::Observer {
+      public guest_os::GuestOsSharePath::Observer {
  public:
   typedef base::Callback<void(const base::FilePath& virtual_path,
                               const drive::FileChange* list,
@@ -75,7 +75,7 @@ class EventRouter
   // KeyedService overrides.
   void Shutdown() override;
 
-  typedef base::Callback<void(bool success)> BoolCallback;
+  using BoolCallback = base::OnceCallback<void(bool success)>;
 
   // Adds a file watch at |local_path|, associated with |virtual_path|, for
   // an extension with |extension_id|.
@@ -88,7 +88,7 @@ class EventRouter
   void AddFileWatch(const base::FilePath& local_path,
                     const base::FilePath& virtual_path,
                     const std::string& extension_id,
-                    const BoolCallback& callback);
+                    BoolCallback callback);
 
   // Removes a file watch at |local_path| for an extension with |extension_id|.
   //
@@ -151,8 +151,9 @@ class EventRouter
   // DriveIntegrationServiceObserver override.
   void OnFileSystemMountFailed() override;
 
-  // crostini::CrostiniSharePath::Observer overrides
-  void OnUnshare(const base::FilePath& path) override;
+  // guest_os::GuestOsSharePath::Observer overrides
+  void OnUnshare(const std::string& vm_name,
+                 const base::FilePath& path) override;
 
   // Returns a weak pointer for the event router.
   base::WeakPtr<EventRouter> GetWeakPtr();
@@ -202,6 +203,7 @@ class EventRouter
   // Populate the path unshared event.
   static void PopulateCrostiniUnshareEvent(
       extensions::api::file_manager_private::CrostiniEvent& event,
+      const std::string& vm_name,
       const std::string& extension_id,
       const std::string& mount_name,
       const std::string& file_system_name,

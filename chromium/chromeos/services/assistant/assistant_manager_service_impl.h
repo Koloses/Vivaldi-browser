@@ -9,10 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "ash/public/cpp/assistant/default_voice_interaction_observer.h"
-#include "ash/public/interfaces/ash_message_center_controller.mojom.h"
 #include "ash/public/interfaces/assistant_controller.mojom.h"
-#include "ash/public/interfaces/voice_interaction_controller.mojom.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "chromeos/assistant/internal/action/cros_action_module.h"
@@ -26,7 +23,13 @@
 #include "libassistant/shared/internal_api/assistant_manager_delegate.h"
 #include "libassistant/shared/public/conversation_state_listener.h"
 #include "libassistant/shared/public/device_state_listener.h"
+#include "libassistant/shared/public/media_manager.h"
+#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/interface_ptr_set.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "services/device/public/mojom/battery_monitor.mojom.h"
+#include "services/media_session/public/mojom/media_controller.mojom.h"
+#include "services/media_session/public/mojom/media_session.mojom.h"
 #include "ui/accessibility/ax_assistant_structure.h"
 #include "ui/accessibility/mojom/ax_assistant_structure.mojom.h"
 
@@ -73,7 +76,7 @@ enum class AssistantQueryResponseType {
 };
 
 // Implementation of AssistantManagerService based on LibAssistant.
-// This is the main class that ineracts with LibAssistant.
+// This is the main class that interacts with LibAssistant.
 // Since LibAssistant is a standalone library, all callbacks come from it
 // running on threads not owned by Chrome. Thus we need to post the callbacks
 // onto the main thread.
@@ -83,14 +86,16 @@ class AssistantManagerServiceImpl
       public AssistantEventObserver,
       public assistant_client::ConversationStateListener,
       public assistant_client::AssistantManagerDelegate,
-      public assistant_client::DeviceStateListener {
+      public assistant_client::DeviceStateListener,
+      public assistant_client::MediaManager::Listener,
+      public media_session::mojom::MediaControllerObserver,
+      public mojom::AppListEventSubscriber {
  public:
   // |service| owns this class and must outlive this class.
   AssistantManagerServiceImpl(
       service_manager::Connector* connector,
       device::mojom::BatteryMonitorPtr battery_monitor,
       Service* service,
-      network::NetworkConnectionTracker* network_connection_tracker,
       std::unique_ptr<network::SharedURLLoaderFactoryInfo>
           url_loader_factory_info);
 
@@ -105,10 +110,12 @@ class AssistantManagerServiceImpl
   void SetAccessToken(const std::string& access_token) override;
   void EnableListening(bool enable) override;
   void EnableHotword(bool enable) override;
+  void SetArcPlayStoreEnabled(bool enable) override;
   AssistantSettingsManager* GetAssistantSettingsManager() override;
 
   // mojom::Assistant overrides:
   void StartCachedScreenContextInteraction() override;
+  void StartEditReminderInteraction(const std::string& client_id) override;
   void StartMetalayerInteraction(const gfx::Rect& region) override;
   void StartTextInteraction(const std::string& query, bool allow_tts) override;
   void StartVoiceInteraction() override;
@@ -126,15 +133,20 @@ class AssistantManagerServiceImpl
   void OnAccessibilityStatusChanged(bool spoken_feedback_enabled) override;
   void SendAssistantFeedback(
       mojom::AssistantFeedbackPtr assistant_feedback) override;
+  void StopAlarmTimerRinging() override;
+  void CreateTimer(base::TimeDelta duration) override;
 
   // AssistantActionObserver overrides:
+  void OnScheduleWait(int id, int time_ms) override;
   void OnShowContextualQueryFallback() override;
   void OnShowHtml(const std::string& html,
                   const std::string& fallback) override;
   void OnShowSuggestions(
       const std::vector<action::Suggestion>& suggestions) override;
   void OnShowText(const std::string& text) override;
-  void OnOpenUrl(const std::string& url) override;
+  void OnOpenUrl(const std::string& url, bool in_background) override;
+  void OnPlaybackStateChange(
+      const assistant_client::MediaStatus& status) override;
   void OnShowNotification(const action::Notification& notification) override;
   void OnOpenAndroidApp(const action::AndroidAppInfo& app_info,
                         const action::InteractionInfo& interaction) override;
@@ -170,6 +182,10 @@ class AssistantManagerServiceImpl
   void OnTimerSoundingStarted() override;
   void OnTimerSoundingFinished() override;
 
+  // mojom::AppListEventSubscriber overrides:
+  void OnAndroidAppListRefreshed(
+      std::vector<mojom::AndroidAppInfoPtr> apps_info) override;
+
   void UpdateInternalOptions(
       assistant_client::AssistantManagerInternal* assistant_manager_internal);
 
@@ -179,6 +195,22 @@ class AssistantManagerServiceImpl
   assistant_client::AssistantManagerInternal* assistant_manager_internal() {
     return assistant_manager_internal_;
   }
+
+  // media_session::mojom::MediaControllerObserver overrides:
+  void MediaSessionInfoChanged(
+      media_session::mojom::MediaSessionInfoPtr info) override;
+  void MediaSessionMetadataChanged(
+      const base::Optional<media_session::MediaMetadata>& metadata) override;
+  void MediaSessionActionsChanged(
+      const std::vector<media_session::mojom::MediaSessionAction>& action)
+      override {}
+  void MediaSessionChanged(
+      const base::Optional<base::UnguessableToken>& request_id) override;
+  void MediaSessionPositionChanged(
+      const base::Optional<media_session::MediaPosition>& position) override {}
+
+  void UpdateInternalMediaPlayerStatus(
+      media_session::mojom::MediaSessionAction action);
 
  private:
   void StartAssistantInternal(const base::Optional<std::string>& access_token);
@@ -196,6 +228,8 @@ class AssistantManagerServiceImpl
       const action::InteractionInfo& interaction,
       std::vector<mojom::AndroidAppInfoPtr> apps_info);
 
+  void HandleLaunchMediaIntentResponse(bool app_opened);
+
   void OnConversationTurnStartedOnMainThread(bool is_mic_open);
   void OnConversationTurnFinishedOnMainThread(
       assistant_client::ConversationStateListener::Resolution resolution);
@@ -204,7 +238,7 @@ class AssistantManagerServiceImpl
   void OnShowSuggestionsOnMainThread(
       const std::vector<mojom::AssistantSuggestionPtr>& suggestions);
   void OnShowTextOnMainThread(const std::string& text);
-  void OnOpenUrlOnMainThread(const std::string& url);
+  void OnOpenUrlOnMainThread(const std::string& url, bool in_background);
   void OnShowNotificationOnMainThread(
       const mojom::AssistantNotificationPtr& notification);
   void OnNotificationRemovedOnMainThread(const std::string& grouping_id);
@@ -215,9 +249,18 @@ class AssistantManagerServiceImpl
           recognition_result);
   void OnRespondingStartedOnMainThread(bool is_error_response);
   void OnSpeechLevelUpdatedOnMainThread(const float speech_level);
+  void OnAlarmTimerStateChangedOnMainThread();
   void OnModifySettingsAction(const std::string& modify_setting_args_proto);
+  void OnOpenMediaAndroidIntentOnMainThread(
+      const std::string play_media_args_proto,
+      action::AndroidAppInfo* android_app_info);
+  void OnPlayMedia(const std::string play_media_args_proto);
+  void OnMediaControlAction(const std::string& action_name,
+                            const std::string& media_action_args_proto);
 
   void RegisterFallbackMediaHandler();
+  void AddMediaControllerObserver();
+  void RegisterAlarmsTimersListener();
 
   void CacheAssistantStructure(
       base::OnceClosure on_done,
@@ -244,6 +287,8 @@ class AssistantManagerServiceImpl
   // be sent back in the second round (recorded as kDeviceAction).
   void RecordQueryResponseTypeUMA();
 
+  void UpdateMediaState();
+
   State state_ = State::STOPPED;
   std::unique_ptr<AssistantMediaSession> media_session_;
   std::unique_ptr<PlatformApiImpl> platform_api_;
@@ -263,7 +308,7 @@ class AssistantManagerServiceImpl
       nullptr;
   mojo::InterfacePtrSet<mojom::AssistantInteractionSubscriber>
       interaction_subscribers_;
-  ash::mojom::AshMessageCenterControllerPtr ash_message_center_controller_;
+  media_session::mojom::MediaControllerPtr media_controller_;
 
   Service* service_;  // unowned.
 
@@ -283,6 +328,22 @@ class AssistantManagerServiceImpl
   std::string receive_url_response_;
 
   bool is_first_client_discourse_context_query_ = true;
+
+  mojo::Receiver<media_session::mojom::MediaControllerObserver>
+      media_controller_observer_receiver_{this};
+
+  // Info associated to the active media session.
+  media_session::mojom::MediaSessionInfoPtr media_session_info_ptr_;
+  // The metadata for the active media session. It can be null to be reset, e.g.
+  // the media that was being played has been stopped.
+  base::Optional<media_session::MediaMetadata> media_metadata_ = base::nullopt;
+
+  base::UnguessableToken media_session_audio_focus_id_ =
+      base::UnguessableToken::Null();
+
+  bool start_finished_ = false;
+
+  mojo::Binding<mojom::AppListEventSubscriber> app_list_subscriber_binding_;
 
   base::WeakPtrFactory<AssistantManagerServiceImpl> weak_factory_;
 

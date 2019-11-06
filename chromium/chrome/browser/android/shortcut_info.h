@@ -38,18 +38,9 @@ struct ShareTargetParams {
 
 // https://wicg.github.io/web-share-target/#dom-sharetarget
 struct ShareTarget {
-  // This enum is used to indicate the HTTP method used by the share target.
-  // kGet stands for GET request, and kPost stands for POST request.
-  enum Method { kGet = 0, kPost = 1 };
-
-  // This enum is used to indicate the HTTP enctype used by the share target.
-  // kApplication stands for application/x-www-form-urlencoded enctype, and
-  // kMultipart stands for multipart/form-data enctype.
-  enum Enctype { kApplication = 0, kMultipart = 1 };
-
   GURL action;
-  Method method;
-  Enctype enctype;
+  blink::Manifest::ShareTarget::Method method;
+  blink::Manifest::ShareTarget::Enctype enctype;
   ShareTargetParams params;
   ShareTarget();
   ~ShareTarget();
@@ -96,7 +87,7 @@ struct ShortcutInfo {
     // Used for Trusted Web Activities launched from third party Android apps.
     SOURCE_TRUSTED_WEB_ACTIVITY = 12,
 
-    // Used for WebAPK intents received as a result of share events.
+    // Used for WebAPK intents received as a result of text sharing events.
     SOURCE_WEBAPK_SHARE_TARGET = 13,
 
     // Used for WebAPKs launched via an external intent from this Chrome APK.
@@ -104,7 +95,11 @@ struct ShortcutInfo {
     // report SOURCE_EXTERNAL_INTENT.
     SOURCE_EXTERNAL_INTENT_FROM_CHROME = 14,
 
-    SOURCE_COUNT = 15
+    // Used for WebAPK intents received as a result of binary file sharing
+    // events.
+    SOURCE_WEBAPK_SHARE_TARGET_FILE = 15,
+
+    SOURCE_COUNT = 16
   };
 
   explicit ShortcutInfo(const GURL& shortcut_url);
@@ -128,7 +123,6 @@ struct ShortcutInfo {
   Source source;
   base::Optional<SkColor> theme_color;
   base::Optional<SkColor> background_color;
-  GURL splash_screen_url;
   int ideal_splash_image_size_in_px;
   int minimum_splash_image_size_in_px;
   GURL splash_image_url;

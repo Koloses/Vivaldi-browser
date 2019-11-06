@@ -51,7 +51,7 @@ const BASIC_LOCAL_ENTRY_SET = [
   ENTRIES.world,
   ENTRIES.desktop,
   ENTRIES.beautiful,
-  ENTRIES.photos
+  ENTRIES.photos,
 ];
 
 /**
@@ -74,7 +74,7 @@ const BASIC_DRIVE_ENTRY_SET = [
   ENTRIES.photos,
   ENTRIES.unsupported,
   ENTRIES.testDocument,
-  ENTRIES.testSharedDocument
+  ENTRIES.testSharedDocument,
 ];
 
 /**
@@ -101,6 +101,18 @@ const COMPLEX_DRIVE_ENTRY_SET = [
 ];
 
 /**
+ * More complex entry set for DocumentsProvider that includes entries with
+ * arying permissions (such as read-only entries).
+ *
+ * @type {Array<TestEntryInfo>}
+ * @const
+ */
+const COMPLEX_DOCUMENTS_PROVIDER_ENTRY_SET = [
+  ENTRIES.hello, ENTRIES.photos, ENTRIES.readOnlyFolder, ENTRIES.readOnlyFile,
+  ENTRIES.deletableFile, ENTRIES.renamableFile
+];
+
+/**
  * Nested entry set (directories inside each other).
  *
  * @type {Array<TestEntryInfo>}
@@ -109,7 +121,7 @@ const COMPLEX_DRIVE_ENTRY_SET = [
 const NESTED_ENTRY_SET = [
   ENTRIES.directoryA,
   ENTRIES.directoryB,
-  ENTRIES.directoryC
+  ENTRIES.directoryC,
 ];
 
 /**
@@ -121,7 +133,7 @@ const NESTED_ENTRY_SET = [
  */
 const BASIC_FAKE_ENTRY_SET = [
   ENTRIES.hello,
-  ENTRIES.directoryA
+  ENTRIES.directoryA,
 ];
 
 /**
@@ -146,7 +158,7 @@ const RECENT_ENTRY_SET = [
  */
 const OFFLINE_ENTRY_SET = [
   ENTRIES.testDocument,
-  ENTRIES.testSharedDocument
+  ENTRIES.testSharedDocument,
 ];
 
 /**
@@ -157,19 +169,19 @@ const OFFLINE_ENTRY_SET = [
  * @const
  */
 const SHARED_WITH_ME_ENTRY_SET = [
-  ENTRIES.testSharedDocument
+  ENTRIES.testSharedDocument,
 ];
 
 /**
  * Entry set for Drive that includes team drives of various permissions and
  * nested files with various permissions.
  *
- * TODO(sashab): Add support for capabilities of Team Drive roots.
+ * TODO(sashab): Add support for capabilities of Shared Drive roots.
  *
  * @type {Array<TestEntryInfo>}
  * @const
  */
-const TEAM_DRIVE_ENTRY_SET = [
+const SHARED_DRIVE_ENTRY_SET = [
   ENTRIES.hello,
   ENTRIES.teamDriveA,
   ENTRIES.teamDriveAFile,
@@ -177,6 +189,7 @@ const TEAM_DRIVE_ENTRY_SET = [
   ENTRIES.teamDriveAHostedFile,
   ENTRIES.teamDriveB,
   ENTRIES.teamDriveBFile,
+  ENTRIES.teamDriveBDirectory,
 ];
 
 /**
@@ -440,17 +453,15 @@ async function createShortcut(appId, directoryName) {
   chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
       'fakeMouseRightClick', appId, ['.table-row[selected]']));
 
-
   await remoteCall.waitForElement(appId, '#file-context-menu:not([hidden])');
   await remoteCall.waitForElement(
-      appId,
-      '[command="#create-folder-shortcut"]:not([hidden]):not([disabled])');
+      appId, '[command="#pin-folder"]:not([hidden]):not([disabled])');
   chrome.test.assertTrue(await remoteCall.callRemoteTestUtil(
       'fakeMouseClick', appId,
-      ['[command="#create-folder-shortcut"]:not([hidden]):not([disabled])']));
+      ['[command="#pin-folder"]:not([hidden]):not([disabled])']));
 
   await remoteCall.waitForElement(
-      appId, `.tree-item[label="${directoryName}"]`);
+      appId, `.tree-item[entry-label="${directoryName}"]`);
 }
 
 /**

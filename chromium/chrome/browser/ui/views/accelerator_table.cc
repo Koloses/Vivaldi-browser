@@ -8,6 +8,7 @@
 
 #include "base/no_destructor.h"
 #include "base/stl_util.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "printing/buildflags/buildflags.h"
@@ -28,7 +29,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
     //   2) Update GetShortcutsNotPresentInMainMenu() in
     //      global_keyboard_shortcuts_mac.mm.
     {ui::VKEY_F12, ui::EF_NONE, IDC_DEV_TOOLS_TOGGLE},
-    {ui::VKEY_ESCAPE, ui::EF_NONE, IDC_STOP},
+    {ui::VKEY_ESCAPE, ui::EF_NONE, IDC_CLOSE_FIND_OR_STOP},
 
 #if !defined(OS_MACOSX)
     {ui::VKEY_D, ui::EF_PLATFORM_ACCELERATOR, IDC_BOOKMARK_PAGE},
@@ -120,6 +121,8 @@ const AcceleratorMapping kAcceleratorMap[] = {
     {ui::VKEY_F6, ui::EF_SHIFT_DOWN, IDC_FOCUS_PREVIOUS_PANE},
     {ui::VKEY_F10, ui::EF_NONE, IDC_FOCUS_MENU_BAR},
     {ui::VKEY_F11, ui::EF_NONE, IDC_FULLSCREEN},
+    {ui::VKEY_M, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
+     IDC_SHOW_AVATAR_MENU},
 
   // Platform-specific key maps.
 #if defined(OS_LINUX)
@@ -150,11 +153,9 @@ const AcceleratorMapping kAcceleratorMap[] = {
     // On Windows, all VKEY_BROWSER_* keys except VKEY_BROWSER_SEARCH are
     // handled via WM_APPCOMMAND.
     {ui::VKEY_BROWSER_SEARCH, ui::EF_NONE, IDC_FOCUS_SEARCH},
-    {ui::VKEY_M, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,
-     IDC_SHOW_AVATAR_MENU},
 #endif  // !OS_CHROMEOS
 
-#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_MACOSX)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && !defined(OS_MACOSX)
     {ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FEEDBACK},
 #endif  // GOOGLE_CHROME_BUILD && !OS_MACOSX
     {ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_PLATFORM_ACCELERATOR,

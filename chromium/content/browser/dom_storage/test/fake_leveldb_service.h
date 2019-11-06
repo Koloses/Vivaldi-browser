@@ -10,7 +10,7 @@
 
 #include "base/callback.h"
 #include "base/optional.h"
-#include "components/services/leveldb/public/interfaces/leveldb.mojom.h"
+#include "components/services/leveldb/public/mojom/leveldb.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/file/public/mojom/file_system.mojom.h"
 #include "services/service_manager/public/cpp/bind_source_info.h"
@@ -82,9 +82,8 @@ class FakeLevelDBService : public leveldb::mojom::LevelDBService {
     on_open_callback_ = std::move(on_open_callback);
   }
 
-  void Bind(const std::string& interface_name,
-            mojo::ScopedMessagePipeHandle interface_pipe,
-            const service_manager::BindSourceInfo& source_info);
+  void Bind(const service_manager::Identity& remote_identity,
+            mojo::PendingReceiver<leveldb::mojom::LevelDBService> receiver);
 
   void FlushBindingsForTesting();
 

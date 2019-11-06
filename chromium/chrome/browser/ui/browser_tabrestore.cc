@@ -15,6 +15,7 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/tabs/tab_group_id.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
 #include "components/sessions/content/content_serialized_navigation_builder.h"
@@ -23,15 +24,14 @@
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
 
+#include "app/vivaldi_apptools.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
-
-#include "app/vivaldi_apptools.h"
 #include "ui/lazy_load_service.h"
 
+using content::NavigationEntry;
 using content::RestoreType;
 using content::WebContents;
-using content::NavigationEntry;
 using sessions::ContentSerializedNavigationBuilder;
 using sessions::SerializedNavigationEntry;
 
@@ -80,8 +80,7 @@ std::unique_ptr<WebContents> CreateRestoredTab(
   WebContents* base_web_contents =
       browser->tab_strip_model()->GetActiveWebContents();
   if (base_web_contents) {
-    create_params.initial_size =
-        base_web_contents->GetContainerBounds().size();
+    create_params.initial_size = base_web_contents->GetContainerBounds().size();
   }
   std::unique_ptr<WebContents> web_contents =
       WebContents::CreateWithSessionStorage(create_params,
@@ -112,6 +111,7 @@ WebContents* AddRestoredTab(
     int tab_index,
     int selected_navigation,
     const std::string& extension_app_id,
+    base::Optional<base::Token> raw_group_id,
     bool select,
     bool pin,
     bool from_last_session,
@@ -129,16 +129,22 @@ WebContents* AddRestoredTab(
     web_contents->SetUserData(&vivaldi::LazyLoadService::kLazyLoadIsSafe,
                               std::make_unique<base::SupportsUserData::Data>());
 
-  int add_types = select ? TabStripModel::ADD_ACTIVE
-                         : TabStripModel::ADD_NONE;
+  int add_types = select ? TabStripModel::ADD_ACTIVE : TabStripModel::ADD_NONE;
   if (pin) {
     tab_index = std::min(
         tab_index, browser->tab_strip_model()->IndexOfFirstNonPinnedTab());
     add_types |= TabStripModel::ADD_PINNED;
   }
+
   WebContents* raw_web_contents = web_contents.get();
-  browser->tab_strip_model()->InsertWebContentsAt(
+  const int actual_index = browser->tab_strip_model()->InsertWebContentsAt(
       tab_index, std::move(web_contents), add_types);
+
+  if (raw_group_id.has_value()) {
+    auto group_id = TabGroupId::FromRawToken(raw_group_id.value());
+    browser->tab_strip_model()->AddToGroupForRestore({actual_index}, group_id);
+  }
+
   if (select) {
     if (!browser->window()->IsMinimized())
       browser->window()->Activate();

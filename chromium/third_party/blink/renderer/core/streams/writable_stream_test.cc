@@ -60,12 +60,6 @@ TEST_P(WritableStreamTest, GetWriter) {
 }
 
 TEST_P(WritableStreamTest, Serialize) {
-  // Disable the test when StreamsNative is enabled as WritableStreamNative
-  // doesn't support serialization yet.
-  // TODO(ricea): Re-enable this test when serialization is supported.
-  if (GetParam())
-    return;
-
   ScopedTransferableStreamsForTest enable_transferable_streams(true);
 
   V8TestingScope scope;
@@ -86,7 +80,8 @@ underlying_sink)JS";
                                         ASSERT_NO_EXCEPTION);
   ASSERT_TRUE(stream);
 
-  MessageChannel* channel = MessageChannel::Create(scope.GetExecutionContext());
+  auto* channel =
+      MakeGarbageCollected<MessageChannel>(scope.GetExecutionContext());
 
   stream->Serialize(script_state, channel->port1(), ASSERT_NO_EXCEPTION);
   EXPECT_TRUE(stream->locked(script_state, ASSERT_NO_EXCEPTION));

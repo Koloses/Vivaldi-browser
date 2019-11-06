@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -25,7 +26,7 @@
 namespace {
 const int kTestConnectionId = 42;
 const int kInitialConnectTimeoutMs = 250;
-const int kConnectionTimeoutErrorDeltaMs = 100;
+const int kConnectionTimeoutErrorDeltaMs = 250;
 const int kLargeResponseTimeoutMs = 500;
 const int kLargeMessageSizeBytes = 256 * 1024;
 }  // namespace
@@ -457,6 +458,15 @@ TEST_F(SecurityKeyIpcServerTest, SendResponseTimeout) {
 }
 
 TEST_F(SecurityKeyIpcServerTest, CleanupPendingConnection) {
+#if defined(OS_MACOSX)
+  // Named servers when using ChannelMac are an exclusive resources, and it is
+  // not possible to create an instance of a server endpoint while another one
+  // exists. Creating the servers in a loop below will flakily fail because the
+  // channel shutdown is a series of asynchronous tasks posted on the IO
+  // thread, and there is not a way to synchronize it with the test main thread.
+  return;
+#endif  // defined(OS_MACOSX)
+
   // Test that servers correctly close pending OS connections on
   // |server_name|. If multiple servers do remain, the client may happen to
   // connect to the correct server, so create and delete many servers.

@@ -85,10 +85,12 @@ class VivaldiUtilitiesAPI : public BrowserContextKeyedAPI,
   void OnPasswordIconStatusChanged(int window_id, bool show);
 
   // Close all app windows generating thumbnails.
-  void CloseAllThumbnailWindows();
+  static void CloseAllThumbnailWindows(
+      content::BrowserContext* browser_context);
 
-  // Trigger the OS authentication dialog, if needed.
-  bool AuthenticateUser(gfx::NativeWindow window);
+  // Trigger the OS authentication dialog, if needed. web_contents can be null.
+  static bool AuthenticateUser(content::BrowserContext* browser_context,
+                               content::WebContents* web_contents);
 
   // Is the Razer Chroma API available on this machine
   bool IsRazerChromaAvailable();
@@ -238,6 +240,7 @@ class UtilitiesIsUrlValidFunction : public UIThreadExtensionFunction {
 
  private:
   bool prompt_user_ = false;
+  GURL url_;
   vivaldi::utilities::UrlValidResults result_;
 
   DISALLOW_COPY_AND_ASSIGN(UtilitiesIsUrlValidFunction);
@@ -259,60 +262,41 @@ class UtilitiesGetSelectedTextFunction : public UIThreadExtensionFunction {
   DISALLOW_COPY_AND_ASSIGN(UtilitiesGetSelectedTextFunction);
 };
 
-class UtilitiesCreateUrlMappingFunction : public UIThreadExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("utilities.createUrlMapping",
-                             UTILITIES_CREATEURLMAPPING)
-  UtilitiesCreateUrlMappingFunction() = default;
-
- protected:
-  ~UtilitiesCreateUrlMappingFunction() override = default;
-
-  // ExtensionFunction:
-  ResponseAction Run() override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(UtilitiesCreateUrlMappingFunction);
-};
-
-class UtilitiesRemoveUrlMappingFunction : public UIThreadExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("utilities.removeUrlMapping",
-                             UTILITIES_REMOVEURLMAPPING)
-  UtilitiesRemoveUrlMappingFunction() = default;
-
- protected:
-  ~UtilitiesRemoveUrlMappingFunction() override = default;
-
-  // ExtensionFunction:
-  ResponseAction Run() override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(UtilitiesRemoveUrlMappingFunction);
-};
-
-class UtilitiesSelectFileFunction : public UIThreadExtensionFunction,
-                                    public ui::SelectFileDialog::Listener {
+class UtilitiesSelectFileFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("utilities.selectFile", UTILITIES_SELECTFILE)
-  UtilitiesSelectFileFunction();
+  UtilitiesSelectFileFunction() = default;
 
- protected:
-  ~UtilitiesSelectFileFunction() override;
+ private:
+  ~UtilitiesSelectFileFunction() override = default;
 
   // ExtensionFunction:
   ResponseAction Run() override;
 
-  // ui::SelectFileDialog::Listener:
-  void FileSelected(const base::FilePath& path,
-                    int index,
-                    void* params) override;
-  void FileSelectionCanceled(void* params) override;
-
- private:
-  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+  void OnFileSelected(base::FilePath path);
 
   DISALLOW_COPY_AND_ASSIGN(UtilitiesSelectFileFunction);
+};
+
+class UtilitiesSelectLocalImageFunction : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("utilities.selectLocalImage",
+                             UTILITIES_SELECTLOCALIMAGE)
+  UtilitiesSelectLocalImageFunction() = default;
+
+ private:
+  ~UtilitiesSelectLocalImageFunction() override = default;
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+
+  void OnFileSelected(base::FilePath path);
+
+  void OnAddMappingFinished(Profile* profile,
+                            bool success,
+                            std::string data_mapping_url);
+
+  DISALLOW_COPY_AND_ASSIGN(UtilitiesSelectLocalImageFunction);
 };
 
 class UtilitiesGetVersionFunction : public UIThreadExtensionFunction {

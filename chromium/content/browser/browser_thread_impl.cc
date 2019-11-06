@@ -21,6 +21,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "content/browser/scheduler/browser_task_executor.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/content_browser_client.h"
 
@@ -162,15 +163,6 @@ const char* BrowserThreadImpl::GetThreadName(BrowserThread::ID thread) {
 }
 
 // static
-void BrowserThread::PostAfterStartupTask(
-    const base::Location& from_here,
-    const scoped_refptr<base::TaskRunner>& task_runner,
-    base::OnceClosure task) {
-  GetContentClient()->browser()->PostAfterStartupTask(from_here, task_runner,
-                                                      std::move(task));
-}
-
-// static
 bool BrowserThread::IsThreadInitialized(ID identifier) {
   DCHECK_GE(identifier, 0);
   DCHECK_LT(identifier, ID_COUNT);
@@ -252,6 +244,22 @@ BrowserThread::GetTaskRunnerForThread(ID identifier) {
   DCHECK(globals.task_runners[identifier]);
 
   return globals.task_runners[identifier];
+}
+
+// static
+void BrowserThread::RunAllPendingTasksOnThreadForTesting(ID identifier) {
+  BrowserTaskExecutor::RunAllPendingTasksOnThreadForTesting(identifier);
+}
+
+// static
+void BrowserThread::PostBestEffortTask(
+    const base::Location& from_here,
+    scoped_refptr<base::TaskRunner> task_runner,
+    base::OnceClosure task) {
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO, base::TaskPriority::BEST_EFFORT},
+      base::BindOnce(base::IgnoreResult(&base::TaskRunner::PostTask),
+                     std::move(task_runner), from_here, std::move(task)));
 }
 
 }  // namespace content

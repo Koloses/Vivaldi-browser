@@ -11,8 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "ash/public/interfaces/accessibility_controller.mojom.h"
-#include "ash/public/interfaces/accessibility_focus_ring_controller.mojom.h"
 #include "base/callback_forward.h"
 #include "base/callback_list.h"
 #include "base/macros.h"
@@ -36,6 +34,11 @@
 class Browser;
 class Profile;
 class SwitchAccessEventHandlerDelegate;
+
+namespace ash {
+struct AccessibilityFocusRingInfo;
+enum class SelectToSpeakState;
+}  // namespace ash
 
 namespace gfx {
 class Rect;
@@ -150,6 +153,10 @@ class AccessibilityManager
   // Returns true if autoclick is enabled.
   bool IsAutoclickEnabled() const;
 
+  // Requests the Autoclick extension find the bounds of the nearest scrollable
+  // ancestor to the point in the screen, as given in screen coordinates.
+  void RequestAutoclickScrollableBoundsForPoint(gfx::Point& point_in_screen);
+
   // Enables or disables the virtual keyboard.
   void EnableVirtualKeyboard(bool enabled);
   // Returns true if the virtual keyboard is enabled, otherwise false.
@@ -200,7 +207,7 @@ class AccessibilityManager
   void RequestSelectToSpeakStateChange();
 
   // Called when the Select-to-Speak extension state has changed.
-  void OnSelectToSpeakStateChanged(ash::mojom::SelectToSpeakState state);
+  void OnSelectToSpeakStateChanged(ash::SelectToSpeakState state);
 
   // Invoked to enable or disable switch access.
   void SetSwitchAccessEnabled(bool enabled);
@@ -284,23 +291,16 @@ class AccessibilityManager
   // Shows the Switch Access menu.
   void ShowSwitchAccessMenu(const gfx::Rect& element_bounds,
                             int menu_width,
-                            int menu_height);
+                            int menu_height,
+                            bool back_button_only = false);
 
   // Starts or stops dictation (type what you speak).
   bool ToggleDictation();
 
-  // Sets the focus ring color.
-  void SetFocusRingColor(SkColor color, std::string caller_id);
-
-  // Resets the focus ring color back to the default.
-  void ResetFocusRingColor(std::string caller_id);
-
-  // Draws a focus ring around the given set of rects in screen coordinates. Use
-  // |focus_ring_behavior| to specify whether the focus ring should persist or
-  // fade out.
-  void SetFocusRing(const std::vector<gfx::Rect>& rects_in_screen,
-                    ash::mojom::FocusRingBehavior focus_ring_behavior,
-                    std::string caller_id);
+  // Sets the focus ring with the given ID based on |focus_ring|.
+  void SetFocusRing(
+      std::string focus_ring_id,
+      std::unique_ptr<ash::AccessibilityFocusRingInfo> focus_ring);
 
   // Hides focus ring on screen.
   void HideFocusRing(std::string caller_id);
@@ -345,7 +345,6 @@ class AccessibilityManager
   void SetProfileForTest(Profile* profile);
   static void SetBrailleControllerForTest(
       extensions::api::braille_display_private::BrailleController* controller);
-  void FlushForTesting();
   void SetFocusRingObserverForTest(base::RepeatingCallback<void()> observer);
   void SetSelectToSpeakStateObserverForTest(
       base::RepeatingCallback<void()> observer);
@@ -367,6 +366,9 @@ class AccessibilityManager
   void PostLoadSwitchAccess();
   void PostUnloadSwitchAccess();
 
+  void PostLoadAutoclick();
+  void PostUnloadAutoclick();
+
   void UpdateAlwaysShowMenuFromPref();
   void OnLargeCursorChanged();
   void OnStickyKeysChanged();
@@ -380,6 +382,7 @@ class AccessibilityManager
   void OnTapDraggingChanged();
   void OnSelectToSpeakChanged();
   void UpdateSwitchAccessFromPref();
+  void OnAutoclickChanged();
 
   void CheckBrailleState();
   void ReceiveBrailleDisplayState(
@@ -390,6 +393,8 @@ class AccessibilityManager
   void SetProfile(Profile* profile);
 
   void UpdateChromeOSAccessibilityHistograms();
+
+  void PlayVolumeAdjustSound();
 
   // content::NotificationObserver
   void Observe(int type,
@@ -430,6 +435,7 @@ class AccessibilityManager
   bool spoken_feedback_enabled_;
   bool select_to_speak_enabled_;
   bool switch_access_enabled_;
+  bool autoclick_enabled_;
 
   AccessibilityStatusCallbackList callback_list_;
 
@@ -456,6 +462,8 @@ class AccessibilityManager
                  extensions::ExtensionRegistryObserver>
       extension_registry_observer_;
 
+  std::unique_ptr<AccessibilityExtensionLoader> autoclick_extension_loader_;
+
   std::unique_ptr<AccessibilityExtensionLoader> chromevox_loader_;
 
   std::unique_ptr<AccessibilityExtensionLoader> select_to_speak_loader_;
@@ -467,14 +475,6 @@ class AccessibilityManager
 
   std::unique_ptr<SwitchAccessEventHandlerDelegate>
       switch_access_event_handler_delegate_;
-
-  // Ash's mojom::AccessibilityController used to request Ash's a11y feature.
-  ash::mojom::AccessibilityControllerPtr accessibility_controller_;
-
-  // Ash's mojom::AccessibilityFocusRingController used to request Ash's a11y
-  // focus ring feature.
-  ash::mojom::AccessibilityFocusRingControllerPtr
-      accessibility_focus_ring_controller_;
 
   std::map<std::string, std::set<std::string>>
       focus_ring_names_for_extension_id_;

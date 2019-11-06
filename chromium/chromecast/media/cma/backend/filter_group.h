@@ -13,8 +13,9 @@
 
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
-#include "base/memory/aligned_memory.h"
 #include "base/values.h"
+#include "chromecast/media/base/aligned_buffer.h"
+#include "chromecast/public/media/audio_post_processor2_shlib.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "chromecast/public/volume_control.h"
 
@@ -50,8 +51,13 @@ class FilterGroup {
   // than one FilterGroup will result in incorrect behavior.
   void AddMixedInput(FilterGroup* input);
 
-  // Sets the sample rate of the post-processors.
-  void Initialize(int output_samples_per_second);
+  // Recursively sets the sample rate of the post-processors and FilterGroups.
+  // This should only be called externally on the output node of the FilterGroup
+  // tree.
+  // Groups that feed this group may receive different values due to resampling.
+  // After calling Initialize(), input_samples_per_second() and
+  // input_frames_per_write() may be called to determine the input rate/size.
+  void Initialize(const AudioPostProcessor2::Config& output_config);
 
   // Adds/removes |input| from |active_inputs_|.
   void AddInput(MixerInput* input);
@@ -85,7 +91,10 @@ class FilterGroup {
   std::string name() const { return name_; }
 
   // Returns number of audio output channels from the filter group.
-  int GetOutputChannelCount();
+  int GetOutputChannelCount() const;
+
+  // Returns the expected sample rate for inputs to this group.
+  int GetInputSampleRate() const { return input_samples_per_second_; }
 
   // Sends configuration string |config| to all post processors with the given
   // |name|.
@@ -101,24 +110,32 @@ class FilterGroup {
   // Recursively print the layout of the pipeline.
   void PrintTopology() const;
 
+  // Add |stream_type| to the list of streams this processor handles.
+  void AddStreamType(const std::string& stream_type);
+
+  int input_frames_per_write() const { return input_frames_per_write_; }
+  int input_samples_per_second() const { return input_samples_per_second_; }
+
  private:
-  // Resizes temp_ and mixed_ if they are too small to hold |num_frames| frames.
-  // Returns |true| if |num_frames| is larger than all previous |num_frames|.
-  bool ResizeBuffersIfNecessary(int num_frames);
+  // Resizes temp_buffers_ and mixed_.
+  void ResizeBuffers();
   void AddTempBuffer(int num_channels, int num_frames);
 
   const int num_channels_;
   const std::string name_;
   std::vector<FilterGroup*> mixed_inputs_;
+  std::vector<std::string> stream_types_;
   base::flat_set<MixerInput*> active_inputs_;
 
-  int playout_channel_selection_;
-  int output_samples_per_second_;
-  int frames_zeroed_;
-  float last_volume_;
-  int64_t delay_frames_;
+  int playout_channel_selection_ = kChannelAll;
+  AudioPostProcessor2::Config output_config_;
+  int input_samples_per_second_ = 0;
+  int input_frames_per_write_ = 0;
+  int frames_zeroed_ = 0;
+  float last_volume_ = 0.0;
+  double delay_seconds_ = 0;
   MediaPipelineBackend::AudioDecoder::RenderingDelay rendering_delay_to_output_;
-  AudioContentType content_type_;
+  AudioContentType content_type_ = AudioContentType::kMedia;
 
   // Buffers that hold audio data while it is mixed.
   // These are kept as members of this class to minimize copies and
@@ -127,7 +144,7 @@ class FilterGroup {
   std::unique_ptr<::media::AudioBus> mixed_;
 
   // Interleaved data must be aligned to 16 bytes.
-  std::unique_ptr<float, base::AlignedFreeDeleter> interleaved_;
+  AlignedBuffer<float> interleaved_;
 
   std::unique_ptr<PostProcessingPipeline> post_processing_pipeline_;
 

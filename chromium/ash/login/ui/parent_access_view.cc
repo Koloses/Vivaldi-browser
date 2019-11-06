@@ -12,10 +12,13 @@
 #include "ash/login/ui/arrow_button_view.h"
 #include "ash/login/ui/login_button.h"
 #include "ash/login/ui/login_pin_view.h"
+#include "ash/login/ui/non_accessible_view.h"
+#include "ash/public/cpp/login_types.h"
 #include "ash/resources/vector_icons/vector_icons.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/wallpaper/wallpaper_controller.h"
+#include "ash/wallpaper/wallpaper_controller_impl.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/optional.h"
@@ -23,6 +26,8 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -32,6 +37,7 @@
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/font_list.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/label_button.h"
@@ -45,8 +51,6 @@ namespace ash {
 
 namespace {
 
-constexpr const char kParentAccessViewClassName[] = "ParentAccessView";
-
 // Identifier of parent access input views group used for focus traversal.
 constexpr int kParentAccessInputGroup = 1;
 
@@ -57,8 +61,8 @@ constexpr int kParentAccessViewWidthDp = 340;
 constexpr int kParentAccessViewHeightDp = 340;
 constexpr int kParentAccessViewTabletModeHeightDp = 580;
 constexpr int kParentAccessViewRoundedCornerRadiusDp = 8;
-constexpr int kParentAccessViewVerticalInsetDp = 16;
-constexpr int kParentAccessViewHorizontalInsetDp = 26;
+constexpr int kParentAccessViewVerticalInsetDp = 24;
+constexpr int kParentAccessViewHorizontalInsetDp = 36;
 
 constexpr int kLockIconSizeDp = 24;
 
@@ -66,6 +70,8 @@ constexpr int kIconToTitleDistanceDp = 28;
 constexpr int kTitleToDescriptionDistanceDp = 14;
 constexpr int kDescriptionToAccessCodeDistanceDp = 28;
 constexpr int kAccessCodeToPinKeyboardDistanceDp = 5;
+constexpr int kPinKeyboardToFooterDistanceDp = 57;
+constexpr int kPinKeyboardToFooterTabletModeDistanceDp = 17;
 constexpr int kSubmitButtonBottomMarginDp = 8;
 
 constexpr int kTitleFontSizeDeltaDp = 3;
@@ -85,9 +91,52 @@ constexpr SkColor kErrorColor = SkColorSetARGB(0xFF, 0xF2, 0x8B, 0x82);
 constexpr SkColor kArrowButtonColor = SkColorSetARGB(0x57, 0xFF, 0xFF, 0xFF);
 
 bool IsTabletMode() {
-  return Shell::Get()
-      ->tablet_mode_controller()
-      ->IsTabletModeWindowManagerEnabled();
+  return Shell::Get()->tablet_mode_controller()->InTabletMode();
+}
+
+gfx::Size GetPinKeyboardToFooterSpacerSize() {
+  return gfx::Size(0, IsTabletMode() ? kPinKeyboardToFooterTabletModeDistanceDp
+                                     : kPinKeyboardToFooterDistanceDp);
+}
+
+gfx::Size GetParentAccessViewSize() {
+  return gfx::Size(kParentAccessViewWidthDp,
+                   IsTabletMode() ? kParentAccessViewTabletModeHeightDp
+                                  : kParentAccessViewHeightDp);
+}
+
+base::string16 GetTitle(ParentAccessRequestReason reason) {
+  int title_id;
+  switch (reason) {
+    case ParentAccessRequestReason::kUnlockTimeLimits:
+      title_id = IDS_ASH_LOGIN_PARENT_ACCESS_TITLE;
+      break;
+    case ParentAccessRequestReason::kChangeTime:
+      title_id = IDS_ASH_LOGIN_PARENT_ACCESS_TITLE_CHANGE_TIME;
+      break;
+    case ParentAccessRequestReason::kChangeTimezone:
+      title_id = IDS_ASH_LOGIN_PARENT_ACCESS_TITLE_CHANGE_TIMEZONE;
+      break;
+  }
+  return l10n_util::GetStringUTF16(title_id);
+}
+
+base::string16 GetDescription(ParentAccessRequestReason reason) {
+  int description_id;
+  switch (reason) {
+    case ParentAccessRequestReason::kUnlockTimeLimits:
+      description_id = IDS_ASH_LOGIN_PARENT_ACCESS_DESCRIPTION;
+      break;
+    case ParentAccessRequestReason::kChangeTime:
+    case ParentAccessRequestReason::kChangeTimezone:
+      description_id = IDS_ASH_LOGIN_PARENT_ACCESS_GENERIC_DESCRIPTION;
+      break;
+  }
+  return l10n_util::GetStringUTF16(description_id);
+}
+
+base::string16 GetAccessibleTitle() {
+  return l10n_util::GetStringUTF16(IDS_ASH_LOGIN_PARENT_ACCESS_DIALOG_NAME);
 }
 
 // Accessible input field. Customizes field description and focus behavior.
@@ -102,9 +151,19 @@ class AccessibleInputField : public views::Textfield {
 
   // views::View:
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
-    node_data->role = ax::mojom::Role::kLabelText;
-    node_data->SetDescription(accessible_description_);
-    node_data->SetValue(text());
+    views::Textfield::GetAccessibleNodeData(node_data);
+    // The following property setup is needed to match the custom behavior of
+    // parent access input. It results in the following a11y vocalizations:
+    // * when input field is empty: "Next number, {current field index} of
+    // {number of fields}"
+    // * when input field is populated: "{value}, {current field index} of
+    // {number of fields}"
+    node_data->RemoveState(ax::mojom::State::kEditable);
+    node_data->role = ax::mojom::Role::kListItem;
+    base::string16 description =
+        text().empty() ? accessible_description_ : text();
+    node_data->AddStringAttribute(ax::mojom::StringAttribute::kRoleDescription,
+                                  base::UTF16ToUTF8(description));
   }
 
   bool IsGroupFocusTraversable() const override { return false; }
@@ -126,7 +185,8 @@ class AccessibleInputField : public views::Textfield {
 class ParentAccessView::AccessCodeInput : public views::View,
                                           public views::TextfieldController {
  public:
-  using OnInputChange = base::RepeatingCallback<void(bool complete)>;
+  using OnInputChange =
+      base::RepeatingCallback<void(bool complete, bool last_field_active)>;
   using OnEnter = base::RepeatingClosure;
 
   // Builds the view for an access code that consists out of |length| digits.
@@ -141,7 +201,7 @@ class ParentAccessView::AccessCodeInput : public views::View,
     DCHECK(on_input_change_);
 
     SetLayoutManager(std::make_unique<views::BoxLayout>(
-        views::BoxLayout::kHorizontal, gfx::Insets(),
+        views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
         kAccessCodeBetweenInputFieldsGapDp));
     SetGroup(kParentAccessInputGroup);
     SetPaintToLayer();
@@ -162,10 +222,8 @@ class ParentAccessView::AccessCodeInput : public views::View,
       field->SetBorder(views::CreateSolidSidedBorder(
           0, 0, kAccessCodeInputFieldUnderlineThicknessDp, 0, kTextColor));
       field->SetGroup(kParentAccessInputGroup);
-      if (i < length - 1) {
-        field->set_accessible_description(l10n_util::GetStringUTF16(
-            IDS_ASH_LOGIN_PARENT_ACCESS_NEXT_NUMBER_PROMPT));
-      }
+      field->set_accessible_description(l10n_util::GetStringUTF16(
+          IDS_ASH_LOGIN_PARENT_ACCESS_NEXT_NUMBER_PROMPT));
       input_fields_.push_back(field);
       AddChildView(field);
     }
@@ -179,10 +237,16 @@ class ParentAccessView::AccessCodeInput : public views::View,
     DCHECK_LE(0, value);
     DCHECK_GE(9, value);
 
-    ActiveField()->SetText(base::IntToString16(value));
-    FocusNextField();
+    ActiveField()->SetText(base::NumberToString16(value));
+    bool was_last_field = IsLastFieldActive();
 
-    on_input_change_.Run(GetCode().has_value());
+    // Moving focus is delayed by using PostTask to allow for proper
+    // a11y announcements. Without that some of them are skipped.
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(&AccessCodeInput::FocusNextField,
+                                  weak_ptr_factory_.GetWeakPtr()));
+
+    on_input_change_.Run(GetCode().has_value(), was_last_field);
   }
 
   // Clears input from the |active_field_|. If |active_field| is empty moves
@@ -193,7 +257,7 @@ class ParentAccessView::AccessCodeInput : public views::View,
     }
 
     ActiveField()->SetText(base::string16());
-    on_input_change_.Run(false);
+    on_input_change_.Run(false, IsLastFieldActive());
   }
 
   // Returns access code as string if all fields contain input.
@@ -224,6 +288,11 @@ class ParentAccessView::AccessCodeInput : public views::View,
   View* GetSelectedViewForGroup(int group) override { return ActiveField(); }
 
   void RequestFocus() override { ActiveField()->RequestFocus(); }
+
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
+    views::View::GetAccessibleNodeData(node_data);
+    node_data->role = ax::mojom::Role::kGroup;
+  }
 
   // views::TextfieldController:
   bool HandleKeyEvent(views::Textfield* sender,
@@ -266,6 +335,7 @@ class ParentAccessView::AccessCodeInput : public views::View,
     for (size_t i = 0; i < input_fields_.size(); ++i) {
       if (input_fields_[i] == sender) {
         active_input_index_ = i;
+        RequestFocus();
         break;
       }
     }
@@ -282,6 +352,7 @@ class ParentAccessView::AccessCodeInput : public views::View,
     for (size_t i = 0; i < input_fields_.size(); ++i) {
       if (input_fields_[i] == sender) {
         active_input_index_ = i;
+        RequestFocus();
         break;
       }
     }
@@ -301,15 +372,20 @@ class ParentAccessView::AccessCodeInput : public views::View,
 
   // Moves focus to the next input field if it exists.
   void FocusNextField() {
-    if (active_input_index_ == (static_cast<int>(input_fields_.size()) - 1))
+    if (IsLastFieldActive())
       return;
 
     ++active_input_index_;
     ActiveField()->RequestFocus();
   }
 
+  // Returns whether last input field is currently active.
+  bool IsLastFieldActive() const {
+    return active_input_index_ == (static_cast<int>(input_fields_.size()) - 1);
+  }
+
   // Returns pointer to the active input field.
-  views::Textfield* ActiveField() const {
+  AccessibleInputField* ActiveField() const {
     return input_fields_[active_input_index_];
   }
 
@@ -328,7 +404,9 @@ class ParentAccessView::AccessCodeInput : public views::View,
   int active_input_index_ = 0;
 
   // Unowned input textfields ordered from the first to the last digit.
-  std::vector<views::Textfield*> input_fields_;
+  std::vector<AccessibleInputField*> input_fields_;
+
+  base::WeakPtrFactory<AccessCodeInput> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AccessCodeInput);
 };
@@ -378,33 +456,36 @@ ParentAccessView::Callbacks::Callbacks(const Callbacks& other) = default;
 ParentAccessView::Callbacks::~Callbacks() = default;
 
 ParentAccessView::ParentAccessView(const AccountId& account_id,
-                                   const Callbacks& callbacks)
-    : NonAccessibleView(kParentAccessViewClassName),
-      callbacks_(callbacks),
-      account_id_(account_id) {
+                                   const Callbacks& callbacks,
+                                   ParentAccessRequestReason reason)
+    : callbacks_(callbacks), account_id_(account_id), request_reason_(reason) {
   DCHECK(callbacks.on_finished);
 
   // Main view contains all other views aligned vertically and centered.
   auto layout = std::make_unique<views::BoxLayout>(
-      views::BoxLayout::kVertical,
+      views::BoxLayout::Orientation::kVertical,
       gfx::Insets(kParentAccessViewVerticalInsetDp,
                   kParentAccessViewHorizontalInsetDp),
       0);
-  layout->set_main_axis_alignment(views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
+  layout->set_main_axis_alignment(views::BoxLayout::MainAxisAlignment::kStart);
   layout->set_cross_axis_alignment(
-      views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
+      views::BoxLayout::CrossAxisAlignment::kCenter);
   views::BoxLayout* main_layout = SetLayoutManager(std::move(layout));
 
+  SetPreferredSize(GetParentAccessViewSize());
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
 
+  const int child_view_width =
+      kParentAccessViewWidthDp - 2 * kParentAccessViewHorizontalInsetDp;
+
   // Header view contains back button that is aligned to its start.
   auto header_layout = std::make_unique<views::BoxLayout>(
-      views::BoxLayout::kHorizontal, gfx::Insets(), 0);
+      views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 0);
   header_layout->set_main_axis_alignment(
-      views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
+      views::BoxLayout::MainAxisAlignment::kStart);
   auto* header = new NonAccessibleView();
-  header->SetPreferredSize(gfx::Size(kParentAccessViewWidthDp, 0));
+  header->SetPreferredSize(gfx::Size(child_view_width, 0));
   header->SetLayoutManager(std::move(header_layout));
   AddChildView(header);
 
@@ -415,8 +496,8 @@ ParentAccessView::ParentAccessView(const AccountId& account_id,
   back_button_->SetImage(views::Button::STATE_NORMAL,
                          gfx::CreateVectorIcon(kLockScreenArrowBackIcon,
                                                kArrowSizeDp, SK_ColorWHITE));
-  back_button_->SetImageAlignment(views::ImageButton::ALIGN_CENTER,
-                                  views::ImageButton::ALIGN_MIDDLE);
+  back_button_->SetImageHorizontalAlignment(views::ImageButton::ALIGN_CENTER);
+  back_button_->SetImageVerticalAlignment(views::ImageButton::ALIGN_MIDDLE);
   back_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ASH_LOGIN_BACK_BUTTON_ACCESSIBLE_NAME));
   back_button_->SetFocusBehavior(FocusBehavior::ALWAYS);
@@ -445,9 +526,9 @@ ParentAccessView::ParentAccessView(const AccountId& account_id,
   };
 
   // Main view title.
-  title_label_ = new views::Label(
-      l10n_util::GetStringUTF16(IDS_ASH_LOGIN_PARENT_ACCESS_TITLE),
-      views::style::CONTEXT_LABEL, views::style::STYLE_PRIMARY);
+  title_label_ =
+      new views::Label(GetTitle(request_reason_), views::style::CONTEXT_LABEL,
+                       views::style::STYLE_PRIMARY);
   title_label_->SetFontList(gfx::FontList().Derive(
       kTitleFontSizeDeltaDp, gfx::Font::NORMAL, gfx::Font::Weight::MEDIUM));
   decorate_label(title_label_);
@@ -456,9 +537,10 @@ ParentAccessView::ParentAccessView(const AccountId& account_id,
   add_spacer(kTitleToDescriptionDistanceDp);
 
   // Main view description.
-  description_label_ = new views::Label(
-      l10n_util::GetStringUTF16(IDS_ASH_LOGIN_PARENT_ACCESS_DESCRIPTION),
-      views::style::CONTEXT_LABEL, views::style::STYLE_PRIMARY);
+  // TODO(crbug.com/970223): Add learn more link after description.
+  description_label_ = new views::Label(GetDescription(request_reason_),
+                                        views::style::CONTEXT_LABEL,
+                                        views::style::STYLE_PRIMARY);
   description_label_->SetMultiLine(true);
   description_label_->SetLineHeight(kDescriptionTextLineHeightDp);
   description_label_->SetFontList(
@@ -494,18 +576,19 @@ ParentAccessView::ParentAccessView(const AccountId& account_id,
 
   // Vertical spacer to consume height remaining in the view after all children
   // are accounted for.
-  auto* vertical_spacer = new NonAccessibleView();
-  AddChildView(vertical_spacer);
-  main_layout->SetFlexForView(vertical_spacer, 1);
+  pin_keyboard_to_footer_spacer_ = new NonAccessibleView();
+  pin_keyboard_to_footer_spacer_->SetPreferredSize(
+      GetPinKeyboardToFooterSpacerSize());
+  AddChildView(pin_keyboard_to_footer_spacer_);
+  main_layout->SetFlexForView(pin_keyboard_to_footer_spacer_, 1);
 
   // Footer view contains help text button aligned to its start, submit
   // button aligned to its end and spacer view in between.
   auto* footer = new NonAccessibleView();
-  footer->SetPreferredSize(
-      gfx::Size(kParentAccessViewWidthDp, kArrowButtonSizeDp));
+  footer->SetPreferredSize(gfx::Size(child_view_width, kArrowButtonSizeDp));
   auto* bottom_layout =
       footer->SetLayoutManager(std::make_unique<views::BoxLayout>(
-          views::BoxLayout::kHorizontal, gfx::Insets(), 0));
+          views::BoxLayout::Orientation::kHorizontal, gfx::Insets(), 0));
   AddChildView(footer);
 
   help_button_ = new views::LabelButton(
@@ -547,13 +630,21 @@ ParentAccessView::~ParentAccessView() = default;
 void ParentAccessView::OnPaint(gfx::Canvas* canvas) {
   views::View::OnPaint(canvas);
 
+  SkColor color = gfx::kGoogleGrey900;
+  if (Shell::Get()->session_controller()->GetSessionState() !=
+      session_manager::SessionState::ACTIVE) {
+    SkColor extracted_color =
+        Shell::Get()->wallpaper_controller()->GetProminentColor(
+            color_utils::ColorProfile(color_utils::LumaRange::DARK,
+                                      color_utils::SaturationRange::MUTED));
+    if (extracted_color != kInvalidWallpaperColor &&
+        extracted_color != SK_ColorTRANSPARENT) {
+      color = extracted_color;
+    }
+  }
+
   cc::PaintFlags flags;
   flags.setStyle(cc::PaintFlags::kFill_Style);
-  SkColor color = Shell::Get()->wallpaper_controller()->GetProminentColor(
-      color_utils::ColorProfile(color_utils::LumaRange::DARK,
-                                color_utils::SaturationRange::MUTED));
-  if (color == kInvalidWallpaperColor || color == SK_ColorTRANSPARENT)
-    color = gfx::kGoogleGrey900;
   flags.setColor(color);
   canvas->DrawRoundRect(GetContentsBounds(),
                         kParentAccessViewRoundedCornerRadiusDp, flags);
@@ -563,15 +654,24 @@ void ParentAccessView::RequestFocus() {
   access_code_view_->RequestFocus();
 }
 
-void ParentAccessView::Layout() {
-  NonAccessibleView::Layout();
-  SizeToPreferredSize();
+gfx::Size ParentAccessView::CalculatePreferredSize() const {
+  return GetParentAccessViewSize();
 }
 
-gfx::Size ParentAccessView::CalculatePreferredSize() const {
-  return gfx::Size(kParentAccessViewWidthDp,
-                   IsTabletMode() ? kParentAccessViewTabletModeHeightDp
-                                  : kParentAccessViewHeightDp);
+ui::ModalType ParentAccessView::GetModalType() const {
+  // MODAL_TYPE_SYSTEM is used to get a semi-transparent background behind the
+  // parent access view, when it is used directly on a widget. The overlay
+  // consumes all the inputs from the user, so that they can only interact with
+  // the parent access view while it is visible.
+  return ui::MODAL_TYPE_SYSTEM;
+}
+
+views::View* ParentAccessView::GetInitiallyFocusedView() {
+  return access_code_view_;
+}
+
+base::string16 ParentAccessView::GetAccessibleWindowTitle() const {
+  return GetAccessibleTitle();
 }
 
 void ParentAccessView::ButtonPressed(views::Button* sender,
@@ -591,7 +691,7 @@ void ParentAccessView::OnTabletModeStarted() {
   pin_keyboard_view_->SetVisible(true);
   // This will trigger ChildPreferredSizeChanged in parent view and Layout() in
   // view. As the result whole hierarchy will go through re-layout.
-  PreferredSizeChanged();
+  UpdatePreferredSize();
 }
 
 void ParentAccessView::OnTabletModeEnded() {
@@ -600,7 +700,7 @@ void ParentAccessView::OnTabletModeEnded() {
   pin_keyboard_view_->SetVisible(false);
   // This will trigger ChildPreferredSizeChanged in parent view and Layout() in
   // view. As the result whole hierarchy will go through re-layout.
-  PreferredSizeChanged();
+  UpdatePreferredSize();
 }
 
 void ParentAccessView::OnTabletControllerDestroyed() {
@@ -611,10 +711,18 @@ void ParentAccessView::SubmitCode() {
   base::Optional<std::string> code = access_code_view_->GetCode();
   DCHECK(code.has_value());
 
-  Shell::Get()->login_screen_controller()->ValidateParentAccessCode(
-      account_id_, *code,
-      base::BindOnce(&ParentAccessView::OnValidationResult,
-                     weak_ptr_factory_.GetWeakPtr()));
+  bool result =
+      Shell::Get()->login_screen_controller()->ValidateParentAccessCode(
+          account_id_, *code);
+
+  if (result) {
+    VLOG(1) << "Parent access code successfully validated";
+    callbacks_.on_finished.Run(true);
+    return;
+  }
+
+  VLOG(1) << "Invalid parent access code entered";
+  UpdateState(State::kError);
 }
 
 void ParentAccessView::UpdateState(State state) {
@@ -626,8 +734,7 @@ void ParentAccessView::UpdateState(State state) {
     case State::kNormal: {
       access_code_view_->SetInputColor(kTextColor);
       title_label_->SetEnabledColor(kTextColor);
-      title_label_->SetText(
-          l10n_util::GetStringUTF16(IDS_ASH_LOGIN_PARENT_ACCESS_TITLE));
+      title_label_->SetText(GetTitle(request_reason_));
       return;
     }
     case State::kError: {
@@ -640,29 +747,35 @@ void ParentAccessView::UpdateState(State state) {
   }
 }
 
-void ParentAccessView::OnValidationResult(base::Optional<bool> result) {
-  if (result.has_value() && *result) {
-    VLOG(1) << "Parent access code successfully validated";
-    callbacks_.on_finished.Run(true);
-    return;
-  }
-
-  VLOG(1) << "Invalid parent access code entered";
-  UpdateState(State::kError);
+void ParentAccessView::UpdatePreferredSize() {
+  pin_keyboard_to_footer_spacer_->SetPreferredSize(
+      GetPinKeyboardToFooterSpacerSize());
+  SetPreferredSize(CalculatePreferredSize());
 }
 
-void ParentAccessView::OnInputChange(bool complete) {
+void ParentAccessView::FocusSubmitButton() {
+  submit_button_->RequestFocus();
+}
+
+void ParentAccessView::OnInputChange(bool complete, bool last_field_active) {
   if (state_ == State::kError)
     UpdateState(State::kNormal);
 
   submit_button_->SetEnabled(complete);
+
+  if (complete && last_field_active) {
+    // Moving focus is delayed by using PostTask to allow for proper
+    // a11y announcements.
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(&ParentAccessView::FocusSubmitButton,
+                                  weak_ptr_factory_.GetWeakPtr()));
+  }
 }
 
 void ParentAccessView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   views::View::GetAccessibleNodeData(node_data);
   node_data->role = ax::mojom::Role::kDialog;
-  node_data->SetName(
-      l10n_util::GetStringUTF16(IDS_ASH_LOGIN_PARENT_ACCESS_DIALOG_NAME));
+  node_data->SetName(GetAccessibleTitle());
 }
 
 }  // namespace ash

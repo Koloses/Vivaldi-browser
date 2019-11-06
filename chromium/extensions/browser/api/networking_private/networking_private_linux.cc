@@ -138,7 +138,7 @@ void GetCachedNetworkPropertiesCallback(
 
 NetworkingPrivateLinux::NetworkingPrivateLinux()
     : dbus_thread_("Networking Private DBus"), network_manager_proxy_(NULL) {
-  base::Thread::Options thread_options(base::MessageLoop::Type::TYPE_IO, 0);
+  base::Thread::Options thread_options(base::MessageLoop::Type::IO, 0);
 
   dbus_thread_.StartWithOptions(thread_options);
   dbus_thread_.task_runner()->PostTask(
@@ -147,6 +147,11 @@ NetworkingPrivateLinux::NetworkingPrivateLinux()
 }
 
 NetworkingPrivateLinux::~NetworkingPrivateLinux() {
+  if (dbus_) {
+    // dbus_thread_.Stop() below will wait for this task.
+    dbus_thread_.task_runner()->PostTask(
+        FROM_HERE, base::BindOnce(&dbus::Bus::ShutdownAndBlock, dbus_));
+  }
   dbus_thread_.Stop();
 }
 

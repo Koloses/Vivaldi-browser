@@ -6,9 +6,9 @@
 #define ASH_SYSTEM_MESSAGE_CENTER_UNIFIED_MESSAGE_LIST_VIEW_H_
 
 #include "ash/ash_export.h"
-#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/message_center/message_center_observer.h"
 #include "ui/message_center/views/message_view.h"
+#include "ui/views/animation/animation_delegate_views.h"
 #include "ui/views/view.h"
 
 namespace gfx {
@@ -31,7 +31,7 @@ class ASH_EXPORT UnifiedMessageListView
     : public views::View,
       public message_center::MessageCenterObserver,
       public message_center::MessageView::SlideObserver,
-      public gfx::AnimationDelegate {
+      public views::AnimationDelegateViews {
  public:
   // |message_center_view| can be null in unit tests.
   UnifiedMessageListView(UnifiedMessageCenterView* message_center_view,
@@ -65,11 +65,19 @@ class ASH_EXPORT UnifiedMessageListView
   // Returns the total number of notifications in the list.
   int GetTotalNotificationCount() const;
 
+  // Returns true if an animation is currently in progress.
+  bool IsAnimating() const;
+
+  // Called when a notification is slid out so we can run the MOVE_DOWN
+  // animation.
+  void OnNotificationSlidOut();
+
   // views::View:
   void ChildPreferredSizeChanged(views::View* child) override;
   void PreferredSizeChanged() override;
   void Layout() override;
   gfx::Size CalculatePreferredSize() const override;
+  const char* GetClassName() const override;
 
   // message_center::MessageCenterObserver:
   void OnNotificationAdded(const std::string& id) override;
@@ -79,7 +87,7 @@ class ASH_EXPORT UnifiedMessageListView
   // message_center::MessageView::SlideObserver:
   void OnSlideStarted(const std::string& notification_id) override;
 
-  // gfx::AnimationDelegate:
+  // views::AnimationDelegateViews:
   void AnimationEnded(const gfx::Animation* animation) override;
   void AnimationProgressed(const gfx::Animation* animation) override;
   void AnimationCanceled(const gfx::Animation* animation) override;
@@ -99,6 +107,7 @@ class ASH_EXPORT UnifiedMessageListView
  private:
   friend class UnifiedMessageCenterViewTest;
   friend class UnifiedMessageListViewTest;
+  class Background;
   class MessageViewContainer;
 
   // UnifiedMessageListView always runs single animation at one time. When
@@ -107,9 +116,6 @@ class ASH_EXPORT UnifiedMessageListView
   enum class State {
     // No animation is running.
     IDLE,
-
-    // Sliding out a removed notification. It will transition to MOVE_DOWN.
-    SLIDE_OUT,
 
     // Moving down notifications.
     MOVE_DOWN,
@@ -122,8 +128,17 @@ class ASH_EXPORT UnifiedMessageListView
     CLEAR_ALL_VISIBLE
   };
 
-  MessageViewContainer* GetContainer(int index);
-  const MessageViewContainer* GetContainer(int index) const;
+  // Syntactic sugar to downcast.
+  static const MessageViewContainer* AsMVC(const views::View* v);
+  static MessageViewContainer* AsMVC(views::View* v);
+
+  // Returns the notification with the provided |id|.
+  const MessageViewContainer* GetNotificationById(const std::string& id) const;
+  MessageViewContainer* GetNotificationById(const std::string& id) {
+    return const_cast<MessageViewContainer*>(
+        static_cast<const UnifiedMessageListView*>(this)->GetNotificationById(
+            id));
+  }
 
   // Returns the first removable notification from the top.
   MessageViewContainer* GetNextRemovableNotification();

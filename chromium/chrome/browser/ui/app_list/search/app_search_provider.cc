@@ -13,12 +13,14 @@
 #include <unordered_set>
 #include <utility>
 
+#include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/internal_app_id_constants.h"
 #include "ash/public/cpp/app_list/tokenized_string.h"
 #include "ash/public/cpp/app_list/tokenized_string_match.h"
 #include "base/bind.h"
 #include "base/callback_list.h"
+#include "base/containers/flat_map.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial_params.h"
@@ -29,6 +31,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/clock.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
+#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/crostini/crostini_manager.h"
 #include "chrome/browser/chromeos/crostini/crostini_registry_service.h"
@@ -41,9 +44,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/session_sync_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_model_updater.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/chrome_app_list_item.h"
+#include "chrome/browser/ui/app_list/crostini/crostini_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/extension_app_utils.h"
 #include "chrome/browser/ui/app_list/internal_app/internal_app_metadata.h"
 #include "chrome/browser/ui/app_list/search/app_service_app_result.h"
@@ -77,11 +82,11 @@ constexpr size_t kMinimumReservedAppsContainerCapacity = 60U;
 // is somewhat arbitrary, but is roughly equivalent to the 'ter' in 'terminal'.
 constexpr double kCrostiniTerminalRelevanceThreshold = 0.8;
 
-// When ranking with the |AppSearchResultRanker| is enabled, this boost is
+// When ranking with the |QueryBasedAppsRanker| is enabled, this boost is
 // added to all apps that the ranker knows about.
 constexpr float kDefaultRankerScoreBoost = 0.0f;
 
-// When ranking with the |AppSearchResultRanker| is enabled, its scores are
+// When ranking with the |QueryBasedAppsRanker| is enabled, its scores are
 // multiplied by this amount.
 constexpr float kDefaultRankerScoreCoefficient = 0.1f;
 
@@ -162,10 +167,15 @@ class AppSearchProvider::App {
         installed_internally_(installed_internally) {}
   ~App() = default;
 
-  struct CompareByLastActivityTime {
+  struct CompareByLastActivityTimeAndThenAppId {
     bool operator()(const std::unique_ptr<App>& app1,
                     const std::unique_ptr<App>& app2) {
-      return app1->GetLastActivityTime() > app2->GetLastActivityTime();
+      // Sort decreasing by last activity time, then increasing by App ID.
+      base::Time t1 = app1->GetLastActivityTime();
+      base::Time t2 = app2->GetLastActivityTime();
+      if (t1 != t2)
+        return t1 > t2;
+      return app1->id_ < app2->id_;
     }
   };
 
@@ -267,6 +277,8 @@ class AppSearchProvider::DataSource {
       AppListControllerDelegate* list_controller,
       bool is_recommended) = 0;
 
+  virtual void ViewClosing() {}
+
  protected:
   Profile* profile() { return profile_; }
   AppSearchProvider* owner() { return owner_; }
@@ -285,8 +297,11 @@ class AppServiceDataSource : public AppSearchProvider::DataSource,
                              public apps::AppRegistryCache::Observer {
  public:
   AppServiceDataSource(Profile* profile, AppSearchProvider* owner)
-      : AppSearchProvider::DataSource(profile, owner) {
-    apps::AppServiceProxy* proxy = apps::AppServiceProxy::Get(profile);
+      : AppSearchProvider::DataSource(profile, owner),
+        icon_cache_(apps::AppServiceProxyFactory::GetForProfile(profile),
+                    apps::IconCache::GarbageCollectionPolicy::kExplicit) {
+    apps::AppServiceProxy* proxy =
+        apps::AppServiceProxyFactory::GetForProfile(profile);
     if (proxy) {
       Observe(&proxy->AppRegistryCache());
     }
@@ -296,13 +311,15 @@ class AppServiceDataSource : public AppSearchProvider::DataSource,
 
   // AppSearchProvider::DataSource overrides:
   void AddApps(AppSearchProvider::Apps* apps_vector) override {
-    apps::AppServiceProxy* proxy = apps::AppServiceProxy::Get(profile());
+    apps::AppServiceProxy* proxy =
+        apps::AppServiceProxyFactory::GetForProfile(profile());
     if (!proxy) {
       return;
     }
     proxy->AppRegistryCache().ForEachApp([this, apps_vector](
                                              const apps::AppUpdate& update) {
-      if (update.ShowInSearch() != apps::mojom::OptionalBool::kTrue) {
+      if ((update.Readiness() == apps::mojom::Readiness::kUninstalledByUser) ||
+          (update.ShowInSearch() != apps::mojom::OptionalBool::kTrue)) {
         return;
       }
 
@@ -313,6 +330,10 @@ class AppServiceDataSource : public AppSearchProvider::DataSource,
           this, update.AppId(), update.ShortName(), update.LastLaunchTime(),
           update.InstallTime(),
           update.InstalledInternally() == apps::mojom::OptionalBool::kTrue));
+      apps_vector->back()->set_recommendable(update.Recommendable() ==
+                                             apps::mojom::OptionalBool::kTrue);
+      apps_vector->back()->set_searchable(update.Searchable() ==
+                                          apps::mojom::OptionalBool::kTrue);
 
       // Until it's been installed, the Crostini Terminal is hidden and
       // requires a few characters before being shown in search results.
@@ -335,8 +356,10 @@ class AppServiceDataSource : public AppSearchProvider::DataSource,
       AppListControllerDelegate* list_controller,
       bool is_recommended) override {
     return std::make_unique<AppServiceAppResult>(
-        profile(), app_id, list_controller, is_recommended);
+        profile(), app_id, list_controller, is_recommended, &icon_cache_);
   }
+
+  void ViewClosing() override { icon_cache_.SweepReleasedIcons(); }
 
  private:
   // apps::AppRegistryCache::Observer overrides:
@@ -347,6 +370,23 @@ class AppServiceDataSource : public AppSearchProvider::DataSource,
       owner()->RefreshAppsAndUpdateResults();
     }
   }
+
+  void OnAppRegistryCacheWillBeDestroyed(
+      apps::AppRegistryCache* cache) override {
+    Observe(nullptr);
+  }
+
+  // The AppServiceDataSource seems like one (but not the only) good place to
+  // add an App Service icon caching wrapper, because (1) the AppSearchProvider
+  // destroys and creates multiple search results in a short period of time,
+  // while the user is typing, so will clearly benefit from a cache, and (2)
+  // there is an obvious point in time when the cache can be emptied: the user
+  // will obviously stop typing (so stop triggering LoadIcon requests) when the
+  // search box view closes.
+  //
+  // There are reasons to have more than one icon caching layer. See the
+  // comments for the apps::IconCache::GarbageCollectionPolicy enum.
+  apps::IconCache icon_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(AppServiceDataSource);
 };
@@ -425,12 +465,132 @@ class ExtensionDataSource : public AppSearchProvider::DataSource,
   DISALLOW_COPY_AND_ASSIGN(ExtensionDataSource);
 };
 
-class ArcDataSource : public AppSearchProvider::DataSource,
+class AppIconDataSource : public AppIconLoaderDelegate {
+ public:
+  class Delegate {
+   public:
+    virtual std::unique_ptr<AppIconLoader> CreateIconLoader(
+        int icon_size,
+        AppIconLoaderDelegate* delegate) = 0;
+    virtual void IconUpdated(const std::string& app_id,
+                             const gfx::ImageSkia& image,
+                             bool for_chip) = 0;
+  };
+
+  AppIconDataSource(Delegate* delegate, bool for_chip)
+      : delegate_(delegate),
+        icon_loader_(delegate->CreateIconLoader(IconSize(for_chip), this)),
+        for_chip_(for_chip) {}
+  ~AppIconDataSource() override = default;
+
+  void MaybeFetchIcon(const std::string& app_id) {
+    auto iter = icon_map_.find(app_id);
+    if (iter != icon_map_.end()) {
+      delegate_->IconUpdated(app_id, iter->second, for_chip_);
+    } else {
+      icon_loader_->FetchImage(app_id);
+    }
+  }
+
+  void RemoveIcon(const std::string& app_id) { icon_map_.erase(app_id); }
+
+ private:
+  int IconSize(bool for_chip) const {
+    const auto& config = AppListConfig::instance();
+    return for_chip ? config.suggestion_chip_icon_dimension()
+                    : config.GetPreferredIconDimension(
+                          ash::SearchResultDisplayType::kTile);
+  }
+
+  void OnAppImageUpdated(const std::string& app_id,
+                         const gfx::ImageSkia& image) override {
+    icon_map_[app_id] = image;
+    delegate_->IconUpdated(app_id, image, for_chip_);
+  }
+
+  Delegate* delegate_;
+  std::unique_ptr<AppIconLoader> icon_loader_;
+  std::map<std::string, gfx::ImageSkia> icon_map_;
+  bool for_chip_;
+
+  DISALLOW_COPY_AND_ASSIGN(AppIconDataSource);
+};
+
+class IconCachedDataSource : public AppSearchProvider::DataSource,
+                             public AppIconDataSource::Delegate {
+ public:
+  IconCachedDataSource(Profile* profile, AppSearchProvider* owner)
+      : AppSearchProvider::DataSource(profile, owner) {}
+  ~IconCachedDataSource() override = default;
+
+ protected:
+  void InitIconSources() {
+    icon_source_ = std::make_unique<AppIconDataSource>(this, false);
+    chip_icon_source_ = std::make_unique<AppIconDataSource>(this, true);
+  }
+
+  std::unique_ptr<AppResult> WrapResult(std::unique_ptr<AppResult> result) {
+    const std::string& app_id = result->app_id();
+    results_[app_id].push_back(result->GetWeakPtr());
+    icon_source_->MaybeFetchIcon(app_id);
+    if (result->display_type() == ash::SearchResultDisplayType::kRecommendation)
+      chip_icon_source_->MaybeFetchIcon(app_id);
+    return result;
+  }
+
+  void RemoveIcon(const std::string& app_id) {
+    icon_source_->RemoveIcon(app_id);
+    chip_icon_source_->RemoveIcon(app_id);
+  }
+
+  void RevokeInvalidated() {
+    for (auto& p : results_) {
+      for (auto iter = p.second.begin(); iter != p.second.end();) {
+        if (iter->get()) {
+          ++iter;
+        } else {
+          iter = p.second.erase(iter);
+        }
+      }
+    }
+  }
+
+ private:
+  // AppIconDataSource::Delegate:
+  void IconUpdated(const std::string& app_id,
+                   const gfx::ImageSkia& image,
+                   bool for_chip) override {
+    for (auto result : results_[app_id]) {
+      auto* ptr = result.get();
+      if (!ptr)
+        continue;
+      // There's a chance that both kRecommendation results and kTile results
+      // are in |results_| but we don't need chip icons for kTile results.
+      if (for_chip && ptr->display_type() !=
+                          ash::SearchResultDisplayType::kRecommendation) {
+        continue;
+      }
+      if (for_chip)
+        ptr->SetChipIcon(image);
+      else
+        ptr->SetIcon(image);
+    }
+  }
+
+  std::unique_ptr<AppIconDataSource> icon_source_;
+  std::unique_ptr<AppIconDataSource> chip_icon_source_;
+  base::flat_map<std::string, std::vector<base::WeakPtr<AppResult>>> results_;
+
+  DISALLOW_COPY_AND_ASSIGN(IconCachedDataSource);
+};
+
+class ArcDataSource : public IconCachedDataSource,
                       public ArcAppListPrefs::Observer {
  public:
   ArcDataSource(Profile* profile, AppSearchProvider* owner)
-      : AppSearchProvider::DataSource(profile, owner) {
+      : IconCachedDataSource(profile, owner) {
     ArcAppListPrefs::Get(profile)->AddObserver(this);
+    InitIconSources();
   }
 
   ~ArcDataSource() override {
@@ -439,6 +599,7 @@ class ArcDataSource : public AppSearchProvider::DataSource,
 
   // AppSearchProvider::DataSource overrides:
   void AddApps(AppSearchProvider::Apps* apps) override {
+    RevokeInvalidated();
     ArcAppListPrefs* arc_prefs = ArcAppListPrefs::Get(profile());
     CHECK(arc_prefs);
 
@@ -466,8 +627,8 @@ class ArcDataSource : public AppSearchProvider::DataSource,
       const std::string& app_id,
       AppListControllerDelegate* list_controller,
       bool is_recommended) override {
-    return std::make_unique<ArcAppResult>(profile(), app_id, list_controller,
-                                          is_recommended);
+    return WrapResult(std::make_unique<ArcAppResult>(
+        profile(), app_id, list_controller, is_recommended));
   }
 
   // ArcAppListPrefs::Observer overrides:
@@ -478,19 +639,28 @@ class ArcDataSource : public AppSearchProvider::DataSource,
 
   void OnAppStatesChanged(const std::string& app_id,
                           const ArcAppListPrefs::AppInfo& app_info) override {
+    RemoveIcon(app_id);
     owner()->RefreshAppsAndUpdateResultsDeferred();
   }
 
-  void OnAppRemoved(const std::string& id) override {
+  void OnAppRemoved(const std::string& app_id) override {
+    RemoveIcon(app_id);
     owner()->RefreshAppsAndUpdateResults();
   }
 
-  void OnAppNameUpdated(const std::string& id,
+  void OnAppNameUpdated(const std::string& app_id,
                         const std::string& name) override {
     owner()->RefreshAppsAndUpdateResultsDeferred();
   }
 
  private:
+  // AppIconDataSource::Delegate:
+  std::unique_ptr<AppIconLoader> CreateIconLoader(
+      int icon_size,
+      AppIconLoaderDelegate* delegate) override {
+    return std::make_unique<ArcAppIconLoader>(profile(), icon_size, delegate);
+  }
+
   DISALLOW_COPY_AND_ASSIGN(ArcDataSource);
 };
 
@@ -567,13 +737,14 @@ class InternalDataSource : public AppSearchProvider::DataSource {
   DISALLOW_COPY_AND_ASSIGN(InternalDataSource);
 };
 
-class CrostiniDataSource : public AppSearchProvider::DataSource,
+class CrostiniDataSource : public IconCachedDataSource,
                            public crostini::CrostiniRegistryService::Observer {
  public:
   CrostiniDataSource(Profile* profile, AppSearchProvider* owner)
-      : AppSearchProvider::DataSource(profile, owner) {
+      : IconCachedDataSource(profile, owner) {
     crostini::CrostiniRegistryServiceFactory::GetForProfile(profile)
         ->AddObserver(this);
+    InitIconSources();
   }
 
   ~CrostiniDataSource() override {
@@ -583,6 +754,7 @@ class CrostiniDataSource : public AppSearchProvider::DataSource,
 
   // AppSearchProvider::DataSource overrides:
   void AddApps(AppSearchProvider::Apps* apps) override {
+    RevokeInvalidated();
     crostini::CrostiniRegistryService* registry_service =
         crostini::CrostiniRegistryServiceFactory::GetForProfile(profile());
     for (const std::string& app_id : registry_service->GetRegisteredAppIds()) {
@@ -617,8 +789,8 @@ class CrostiniDataSource : public AppSearchProvider::DataSource,
       const std::string& app_id,
       AppListControllerDelegate* list_controller,
       bool is_recommended) override {
-    return std::make_unique<CrostiniAppResult>(profile(), app_id,
-                                               list_controller, is_recommended);
+    return WrapResult(std::make_unique<CrostiniAppResult>(
+        profile(), app_id, list_controller, is_recommended));
   }
 
   // crostini::CrostiniRegistryService::Observer overrides:
@@ -627,6 +799,10 @@ class CrostiniDataSource : public AppSearchProvider::DataSource,
       const std::vector<std::string>& updated_apps,
       const std::vector<std::string>& removed_apps,
       const std::vector<std::string>& inserted_apps) override {
+    for (const auto& id : updated_apps)
+      RemoveIcon(id);
+    for (const auto& id : removed_apps)
+      RemoveIcon(id);
     if (removed_apps.empty())
       owner()->RefreshAppsAndUpdateResultsDeferred();
     else
@@ -634,6 +810,14 @@ class CrostiniDataSource : public AppSearchProvider::DataSource,
   }
 
  private:
+  // AppIconDataSource::Delegate:
+  std::unique_ptr<AppIconLoader> CreateIconLoader(
+      int icon_size,
+      AppIconLoaderDelegate* delegate) override {
+    return std::make_unique<CrostiniAppIconLoader>(profile(), icon_size,
+                                                   delegate);
+  }
+
   DISALLOW_COPY_AND_ASSIGN(CrostiniDataSource);
 };
 
@@ -688,6 +872,12 @@ void AppSearchProvider::Start(const base::string16& query) {
     UpdateResults();
 }
 
+void AppSearchProvider::ViewClosing() {
+  ClearResultsSilently();
+  for (auto& data_source : data_sources_)
+    data_source->ViewClosing();
+}
+
 void AppSearchProvider::Train(const std::string& id, RankingItemType type) {
   if (type == RankingItemType::kApp)
     ranker_->Train(NormalizeID(id));
@@ -729,9 +919,14 @@ void AppSearchProvider::UpdateRecommendedResults(
 
     base::string16 title = app->name();
     if (app->id() == kInternalAppIdContinueReading) {
-      if (HasRecommendableForeignTab(profile_, &title, /*url=*/nullptr,
+      base::string16 navigation_title;
+      if (HasRecommendableForeignTab(profile_, &navigation_title,
+                                     /*url=*/nullptr,
                                      open_tabs_ui_delegate_for_testing())) {
-        app->AddSearchableText(title);
+        if (!navigation_title.empty()) {
+          title = navigation_title;
+          app->AddSearchableText(title);
+        }
       } else {
         continue;
       }
@@ -746,35 +941,27 @@ void AppSearchProvider::UpdateRecommendedResults(
     const auto find_in_app_list = id_to_app_list_index.find(app->id());
     const base::Time time = app->GetLastActivityTime();
 
-    if (app->id() == kInternalAppIdContinueReading) {
-      // Case 1: if it's |kInternalAppIdContinueReading|, set relevance as 1.0
-      // (always show it as the first).
-      result->set_relevance(1.0);
-    } else if (find_in_ranker != ranker_scores.end()) {
-      // Case 2: if it's recommended by |ranker_|, set relevance as a score
-      // in [0.67, 0.99].
-      result->set_relevance(ReRange(find_in_ranker->second, 0.67, 0.99));
+    if (find_in_ranker != ranker_scores.end()) {
+      // Case 1: if it's recommended by |ranker_|, set relevance as a score
+      // in [0.67, 1.0].
+      result->set_relevance(ReRange(find_in_ranker->second, 0.67, 1.0));
     } else if (!time.is_null()) {
-      // Case 3: if it has last activity time or install time, set the relevance
+      // Case 2: if it has last activity time or install time, set the relevance
       // in [0.34, 0.66] based on the time.
       result->UpdateFromLastLaunchedOrInstalledTime(clock_->Now(), time);
       result->set_relevance(ReRange(result->relevance(), 0.34, 0.66));
     } else if (find_in_app_list != id_to_app_list_index.end()) {
-      // Case 4: if it's in the app_list_index, set the relevance in [0.1, 0.33]
+      // Case 3: if it's in the app_list_index, set the relevance in [0.1, 0.33]
       result->set_relevance(
           ReRange(1.0f / (1.0f + find_in_app_list->second), 0.1, 0.33));
     } else {
-      // Case 5: otherwise set the relevance as 0.0f;
+      // Case 4: otherwise set the relevance as 0.0f;
       result->set_relevance(0.0f);
     }
 
     MaybeAddResult(&new_results, std::move(result), &seen_or_filtered_apps);
   }
-
-  MaybeRecordQueryLatencyHistogram(false /* empty query */);
-
-  SwapResults(&new_results);
-  update_results_factory_.InvalidateWeakPtrs();
+  PublishQueriedResultsOrRecommendation(false, &new_results);
 }
 
 void AppSearchProvider::UpdateQueriedResults() {
@@ -784,9 +971,9 @@ void AppSearchProvider::UpdateQueriedResults() {
   new_results.reserve(apps_size);
 
   const bool should_rerank =
-      app_list_features::IsAppSearchResultRankerEnabled() &&
+      app_list_features::IsQueryBasedAppsRankerEnabled() &&
       base::GetFieldTrialParamByFeatureAsBool(
-          app_list_features::kEnableAppSearchResultRanker,
+          app_list_features::kEnableQueryBasedAppsRanker,
           "rank_app_query_results", false) &&
       ranker_ != nullptr;
   // Maps app IDs to their score according to |ranker_|.
@@ -796,10 +983,10 @@ void AppSearchProvider::UpdateQueriedResults() {
   if (should_rerank) {
     ranker_scores = ranker_->Rank();
     ranker_score_coefficient = base::GetFieldTrialParamByFeatureAsDouble(
-        app_list_features::kEnableAppSearchResultRanker,
-        "app_query_coefficient", ranker_score_coefficient);
+        app_list_features::kEnableQueryBasedAppsRanker, "app_query_coefficient",
+        ranker_score_coefficient);
     ranker_score_boost = base::GetFieldTrialParamByFeatureAsDouble(
-        app_list_features::kEnableAppSearchResultRanker, "app_query_boost",
+        app_list_features::kEnableQueryBasedAppsRanker, "app_query_boost",
         ranker_score_boost);
   }
 
@@ -837,10 +1024,14 @@ void AppSearchProvider::UpdateQueriedResults() {
     }
     MaybeAddResult(&new_results, std::move(result), &seen_or_filtered_apps);
   }
+  PublishQueriedResultsOrRecommendation(true, &new_results);
+}
 
-  MaybeRecordQueryLatencyHistogram(true /* queried search */);
-
-  SwapResults(&new_results);
+void AppSearchProvider::PublishQueriedResultsOrRecommendation(
+    bool is_queried_search,
+    Results* new_results) {
+  MaybeRecordQueryLatencyHistogram(is_queried_search);
+  SwapResults(new_results);
   update_results_factory_.InvalidateWeakPtrs();
 }
 
@@ -864,9 +1055,11 @@ void AppSearchProvider::MaybeRecordQueryLatencyHistogram(
 void AppSearchProvider::UpdateResults() {
   const bool show_recommendations = query_.empty();
 
-  // Presort app based on last active time in order to be able to remove
-  // duplicates from results.
-  std::sort(apps_.begin(), apps_.end(), App::CompareByLastActivityTime());
+  // Presort app based on last activity time in order to be able to remove
+  // duplicates from results. We break ties by App ID, which is arbitrary, but
+  // deterministic.
+  std::sort(apps_.begin(), apps_.end(),
+            App::CompareByLastActivityTimeAndThenAppId());
 
   if (show_recommendations) {
     // Get the map of app ids to their position in the app list, and then

@@ -174,8 +174,8 @@ void CastExtensionSystem::LaunchApp(const ExtensionId& extension_id) {
   const Extension* extension = ExtensionRegistry::Get(browser_context_)
                                    ->enabled_extensions()
                                    .GetByID(extension_id);
-  AppRuntimeEventRouter::DispatchOnLaunchedEvent(browser_context_, extension,
-                                                 SOURCE_UNTRACKED, nullptr);
+  AppRuntimeEventRouter::DispatchOnLaunchedEvent(
+      browser_context_, extension, AppLaunchSource::kSourceUntracked, nullptr);
 }
 
 void CastExtensionSystem::Shutdown() {}
@@ -195,10 +195,6 @@ void CastExtensionSystem::InitForRegularProfile(bool extensions_enabled) {
 
   extension_registrar_ =
       std::make_unique<ExtensionRegistrar>(browser_context_, this);
-}
-
-void CastExtensionSystem::InitForIncognitoProfile() {
-  NOTREACHED();
 }
 
 ExtensionService* CastExtensionSystem::extension_service() {
@@ -262,7 +258,7 @@ void CastExtensionSystem::UnregisterExtensionWithRequestContexts(
     const std::string& extension_id,
     const UnloadedExtensionReason reason) {}
 
-const OneShotEvent& CastExtensionSystem::ready() const {
+const base::OneShotEvent& CastExtensionSystem::ready() const {
   return ready_;
 }
 

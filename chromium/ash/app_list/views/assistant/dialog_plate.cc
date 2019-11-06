@@ -9,7 +9,8 @@
 #include "ash/assistant/ui/assistant_view_delegate.h"
 #include "ash/assistant/ui/base/assistant_button.h"
 #include "ash/assistant/ui/dialog_plate/dialog_plate.h"
-#include "ash/assistant/ui/logo_view/base_logo_view.h"
+#include "ash/assistant/ui/dialog_plate/mic_view.h"
+#include "ash/assistant/ui/logo_view/logo_view.h"
 #include "ash/assistant/util/animation_util.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
@@ -86,7 +87,7 @@ gfx::Size DialogPlate::CalculatePreferredSize() const {
 }
 
 void DialogPlate::ButtonPressed(views::Button* sender, const ui::Event& event) {
-  OnButtonPressed(static_cast<ash::AssistantButtonId>(sender->id()));
+  OnButtonPressed(static_cast<ash::AssistantButtonId>(sender->GetID()));
 }
 
 bool DialogPlate::HandleKeyEvent(views::Textfield* textfield,
@@ -258,12 +259,12 @@ void DialogPlate::InitLayout() {
                       kPaddingHorizontalDip)));
 
   layout_manager->set_cross_axis_alignment(
-      views::BoxLayout::CrossAxisAlignment::CROSS_AXIS_ALIGNMENT_CENTER);
+      views::BoxLayout::CrossAxisAlignment::kCenter);
 
   // Molecule icon.
-  molecule_icon_ = ash::BaseLogoView::Create();
+  molecule_icon_ = ash::LogoView::Create();
   molecule_icon_->SetPreferredSize(gfx::Size(kIconSizeDip, kIconSizeDip));
-  molecule_icon_->SetState(ash::BaseLogoView::State::kMoleculeWavy,
+  molecule_icon_->SetState(ash::LogoView::State::kMoleculeWavy,
                            /*animate=*/false);
   AddChildView(molecule_icon_);
 
@@ -299,7 +300,7 @@ void DialogPlate::InitKeyboardLayoutContainer() {
               gfx::Insets(0, kLeftPaddingDip, 0, 0)));
 
   layout_manager->set_cross_axis_alignment(
-      views::BoxLayout::CrossAxisAlignment::CROSS_AXIS_ALIGNMENT_CENTER);
+      views::BoxLayout::CrossAxisAlignment::kCenter);
 
   gfx::FontList font_list =
       ash::assistant::ui::GetDefaultFontList().DeriveWithSizeDelta(2);
@@ -326,7 +327,8 @@ void DialogPlate::InitKeyboardLayoutContainer() {
   voice_input_toggle_ = ash::AssistantButton::Create(
       this, ash::kMicIcon, kButtonSizeDip, kIconSizeDip,
       IDS_ASH_ASSISTANT_DIALOG_PLATE_MIC_ACCNAME,
-      ash::AssistantButtonId::kVoiceInputToggle);
+      ash::AssistantButtonId::kVoiceInputToggle,
+      IDS_ASH_ASSISTANT_DIALOG_PLATE_MIC_TOOLTIP);
   keyboard_layout_container_->AddChildView(voice_input_toggle_);
 
   input_modality_layout_container_->AddChildView(keyboard_layout_container_);
@@ -343,7 +345,7 @@ void DialogPlate::InitVoiceLayoutContainer() {
           views::BoxLayout::Orientation::kHorizontal));
 
   layout_manager->set_cross_axis_alignment(
-      views::BoxLayout::CrossAxisAlignment::CROSS_AXIS_ALIGNMENT_CENTER);
+      views::BoxLayout::CrossAxisAlignment::kCenter);
 
   // Offset.
   // To make the |animated_voice_input_toggle_| horizontally centered in the
@@ -362,7 +364,7 @@ void DialogPlate::InitVoiceLayoutContainer() {
   layout_manager->SetFlexForView(spacer, 1);
 
   // Animated voice input toggle.
-  animated_voice_input_toggle_ = new ash::ActionView(
+  animated_voice_input_toggle_ = new ash::MicView(
       this, delegate_, ash::AssistantButtonId::kVoiceInputToggle);
   animated_voice_input_toggle_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ASH_ASSISTANT_DIALOG_PLATE_MIC_ACCNAME));
@@ -377,7 +379,8 @@ void DialogPlate::InitVoiceLayoutContainer() {
   keyboard_input_toggle_ = ash::AssistantButton::Create(
       this, ash::kKeyboardIcon, kButtonSizeDip, kIconSizeDip,
       IDS_ASH_ASSISTANT_DIALOG_PLATE_KEYBOARD_ACCNAME,
-      ash::AssistantButtonId::kKeyboardInputToggle);
+      ash::AssistantButtonId::kKeyboardInputToggle,
+      IDS_ASH_ASSISTANT_DIALOG_PLATE_KEYBOARD_TOOLTIP);
   voice_layout_container_->AddChildView(keyboard_input_toggle_);
 
   input_modality_layout_container_->AddChildView(voice_layout_container_);

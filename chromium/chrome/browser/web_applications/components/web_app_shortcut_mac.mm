@@ -19,6 +19,7 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #import "base/mac/launch_services_util.h"
 #include "base/mac/mac_util.h"
@@ -210,7 +211,7 @@ bool IsImageValidForIcon(const gfx::Image& image) {
   return false;
 }
 
-bool AppShimsDisabledForTest() {
+bool AppShimCreationDisabledForTest() {
   // Disable app shims in tests because shims created in ~/Applications will not
   // be cleaned up.
   return base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType);
@@ -427,11 +428,6 @@ void LaunchShimOnFileThread(web_app::LaunchShimUpdateBehavior update_behavior,
       base::BindOnce(std::move(launched_callback), base::Process()));
 }
 
-base::FilePath GetAppLoaderPath() {
-  return base::mac::PathForFrameworkBundleResource(
-      base::mac::NSToCFCast(@"app_mode_loader.app"));
-}
-
 base::FilePath GetLocalizableAppShortcutsSubdirName() {
   static const char kChromiumAppDirName[] = "Chromium Apps.localized";
   static const char kChromeAppDirName[] = "Chrome Apps.localized";
@@ -634,7 +630,7 @@ std::unique_ptr<web_app::ShortcutInfo> RecordAppShimErrorAndBuildShortcutInfo(
 }
 
 bool AppShimLaunchDisabled() {
-  return AppShimsDisabledForTest() &&
+  return AppShimCreationDisabledForTest() &&
          !g_app_shims_allow_update_and_launch_in_tests;
 }
 
@@ -648,12 +644,12 @@ WebAppShortcutCreator::~WebAppShortcutCreator() {}
 
 base::FilePath WebAppShortcutCreator::GetApplicationsShortcutPath(
     bool avoid_conflicts) const {
+  if (g_app_shims_allow_update_and_launch_in_tests)
+    return app_data_dir_.Append(GetShortcutBasename());
+
   base::FilePath applications_dir = GetApplicationsDirname();
   if (applications_dir.empty())
     return base::FilePath();
-
-  if (g_app_shims_allow_update_and_launch_in_tests)
-    return app_data_dir_.Append(GetShortcutBasename());
 
   if (!avoid_conflicts)
     return applications_dir.Append(GetShortcutBasename());
@@ -713,11 +709,62 @@ base::FilePath WebAppShortcutCreator::GetFallbackBasename() const {
 
 bool WebAppShortcutCreator::BuildShortcut(
     const base::FilePath& staging_path) const {
-  // Update the app's plist and icon in a temp directory. This works around
-  // a Finder bug where the app's icon doesn't properly update.
-  if (!base::CopyDirectory(GetAppLoaderPath(), staging_path, true)) {
-    LOG(ERROR) << "Copying app to staging path: " << staging_path.value()
-               << " failed.";
+  if (!base::DirectoryExists(staging_path.DirName())) {
+    LOG(ERROR) << "Staging path directory does not exit: "
+               << staging_path.DirName();
+    return false;
+  }
+
+  const base::FilePath framework_bundle_path = base::mac::FrameworkBundlePath();
+
+  const base::FilePath executable_path =
+      framework_bundle_path.Append("Helpers").Append("app_mode_loader");
+  const base::FilePath plist_path =
+      framework_bundle_path.Append("Resources").Append("app_mode-Info.plist");
+
+  const base::FilePath destination_contents_path =
+      staging_path.Append("Contents");
+  const base::FilePath destination_executable_path =
+      destination_contents_path.Append("MacOS");
+
+  // First create the .app bundle directory structure.
+  // Use NSFileManager so that the permissions can be set appropriately. The
+  // base::CreateDirectory() routine forces mode 0700.
+  NSError* error = nil;
+  if (![[NSFileManager defaultManager]
+                 createDirectoryAtURL:base::mac::FilePathToNSURL(
+                                          destination_executable_path)
+          withIntermediateDirectories:YES
+                           attributes:@{
+                             NSFilePosixPermissions : @(0755)
+                           }
+                                error:&error]) {
+    LOG(ERROR) << "Failed to create destination executable path: "
+               << destination_executable_path
+               << ", error=" << base::SysNSStringToUTF8([error description]);
+    return false;
+  }
+
+  // Copy the executable file.
+  if (!base::CopyFile(executable_path, destination_executable_path.Append(
+                                           executable_path.BaseName()))) {
+    LOG(ERROR) << "Failed to copy executable: " << executable_path;
+    return false;
+  }
+
+  // Copy the Info.plist.
+  if (!base::CopyFile(plist_path,
+                      destination_contents_path.Append("Info.plist"))) {
+    LOG(ERROR) << "Failed to copy plist: " << plist_path;
+    return false;
+  }
+
+  // Write the PkgInfo file.
+  constexpr char kPkgInfoData[] = "APPL????";
+  constexpr size_t kPkgInfoDataSize = base::size(kPkgInfoData) - 1;
+  if (base::WriteFile(destination_contents_path.Append("PkgInfo"), kPkgInfoData,
+                      kPkgInfoDataSize) != kPkgInfoDataSize) {
+    LOG(ERROR) << "Failed to write PkgInfo file: " << destination_contents_path;
     return false;
   }
 
@@ -824,30 +871,18 @@ bool WebAppShortcutCreator::UpdateShortcuts(
       LOG(ERROR) << "Failed to localize " << applications_dir.value();
   }
 
-  // Get the list of paths to (re)create.
-  std::vector<base::FilePath> app_paths;
-  if (g_app_shims_allow_update_and_launch_in_tests) {
-    // Never look in ~/Applications or search the system for a bundle ID in a
-    // test since that relies on global system state and potentially cruft that
-    // may be leftover from prior/crashed test runs.
-    // TODO(tapted): Remove this check when tests that arrive here via setting
-    // |g_app_shims_allow_update_and_launch_in_tests| can properly mock out all
-    // the calls below.
-    app_paths.push_back(app_data_dir_.Append(GetShortcutBasename()));
-  } else {
-    // Update all copies located by bundle id (wherever it was moved or copied
-    // by the user).
-    app_paths = GetAppBundlesById();
+  // Get the list of paths to (re)create by bundle id (wherever it was moved
+  // or copied by the user).
+  std::vector<base::FilePath> app_paths = GetAppBundlesById();
 
-    // If that path does not exist, create a new entry in ~/Applications if
-    // requested.
-    if (app_paths.empty() && create_if_needed) {
-      app_paths.push_back(
-          GetApplicationsShortcutPath(true /* avoid_conflicts */));
-    }
-    if (app_paths.empty())
-      return false;
+  // If that path does not exist, create a new entry in ~/Applications if
+  // requested.
+  if (app_paths.empty() && create_if_needed) {
+    app_paths.push_back(
+        GetApplicationsShortcutPath(true /* avoid_conflicts */));
   }
+  if (app_paths.empty())
+    return false;
 
   CreateShortcutsAt(app_paths, updated_paths);
   return updated_paths->size() == app_paths.size();
@@ -911,14 +946,6 @@ bool WebAppShortcutCreator::UpdatePlist(const base::FilePath& app_path) const {
             forKey:app_mode::kLSHasLocalizedDisplayNameKey];
   [plist setObject:[NSNumber numberWithBool:YES]
             forKey:app_mode::kNSHighResolutionCapableKey];
-  [plist
-      setObject:[NSNumber numberWithUnsignedInteger:
-                              app_mode::kCurrentChromeAppModeInfoMajorVersion]
-         forKey:app_mode::kCrAppModeMajorVersionKey];
-  [plist
-      setObject:[NSNumber numberWithUnsignedInteger:
-                              app_mode::kCurrentChromeAppModeInfoMinorVersion]
-         forKey:app_mode::kCrAppModeMinorVersionKey];
   if (info_->extension_id == app_mode::kAppListModeId) {
     // Prevent the app list from bouncing in the dock, and getting a run light.
     [plist setObject:[NSNumber numberWithBool:YES] forKey:kLSUIElement];
@@ -1022,6 +1049,15 @@ std::vector<base::FilePath> WebAppShortcutCreator::GetAppBundlesById() const {
   // Sort the matches by preference.
   base::FilePath default_path =
       GetApplicationsShortcutPath(false /* avoid_conflicts */);
+
+  // When testing, use only the default path.
+  if (g_app_shims_allow_update_and_launch_in_tests) {
+    paths.clear();
+    if (base::PathExists(default_path))
+      paths.push_back(default_path);
+    return paths;
+  }
+
   base::FilePath apps_dir = GetApplicationsDirname();
   auto compare = [default_path, apps_dir](const base::FilePath& a,
                                           const base::FilePath& b) {
@@ -1116,7 +1152,7 @@ bool CreatePlatformShortcuts(const base::FilePath& app_data_path,
                              const ShortcutInfo& shortcut_info) {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
-  if (AppShimsDisabledForTest())
+  if (AppShimCreationDisabledForTest())
     return true;
 
   WebAppShortcutCreator shortcut_creator(app_data_path, &shortcut_info);
@@ -1142,8 +1178,12 @@ void UpdatePlatformShortcuts(const base::FilePath& app_data_path,
   web_app::WebAppShortcutCreator shortcut_creator(app_data_path,
                                                   &shortcut_info);
   std::vector<base::FilePath> updated_shim_paths;
-  shortcut_creator.UpdateShortcuts(false /* create_if_needed */,
-                                   &updated_shim_paths);
+  bool create_if_needed = false;
+  // Tests use web_app::UpdateAllShortcuts to force shim creation (rather than
+  // relying on asynchronous creation at installation.
+  if (g_app_shims_allow_update_and_launch_in_tests)
+    create_if_needed = true;
+  shortcut_creator.UpdateShortcuts(create_if_needed, &updated_shim_paths);
 }
 
 void DeleteAllShortcutsForProfile(const base::FilePath& profile_path) {

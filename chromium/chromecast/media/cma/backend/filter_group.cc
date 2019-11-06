@@ -23,12 +23,6 @@ FilterGroup::FilterGroup(int num_channels,
                          std::unique_ptr<PostProcessingPipeline> pipeline)
     : num_channels_(num_channels),
       name_(name),
-      playout_channel_selection_(kChannelAll),
-      output_samples_per_second_(0),
-      frames_zeroed_(0),
-      last_volume_(0.0),
-      delay_frames_(0),
-      content_type_(AudioContentType::kMedia),
       post_processing_pipeline_(std::move(pipeline)) {}
 
 FilterGroup::~FilterGroup() = default;
@@ -38,11 +32,40 @@ void FilterGroup::AddMixedInput(FilterGroup* input) {
   DCHECK_EQ(input->GetOutputChannelCount(), num_channels_);
 }
 
-void FilterGroup::Initialize(int output_samples_per_second) {
-  output_samples_per_second_ = output_samples_per_second;
-  CHECK(post_processing_pipeline_->SetSampleRate(output_samples_per_second));
+void FilterGroup::AddStreamType(const std::string& stream_type) {
+  stream_types_.push_back(stream_type);
+}
+
+void FilterGroup::Initialize(const AudioPostProcessor2::Config& output_config) {
+  output_config_ = output_config;
+
+  CHECK(post_processing_pipeline_->SetOutputConfig(output_config_));
+  input_samples_per_second_ = post_processing_pipeline_->GetInputSampleRate();
+  input_frames_per_write_ = output_config_.output_frames_per_write *
+                            input_samples_per_second_ /
+                            output_config_.output_sample_rate;
+  DCHECK_EQ(input_frames_per_write_ * output_config_.output_sample_rate,
+            output_config_.output_frames_per_write * input_samples_per_second_)
+      << "Unable to produce stable buffer sizes for resampling rate "
+      << input_samples_per_second_ << " : "
+      << output_config_.output_sample_rate;
+
+  AudioPostProcessor2::Config input_config = output_config;
+  input_config.output_sample_rate = input_samples_per_second_;
+  input_config.output_frames_per_write = input_frames_per_write_;
+
+  for (FilterGroup* input : mixed_inputs_) {
+    input->Initialize(input_config);
+  }
   post_processing_pipeline_->SetContentType(content_type_);
   active_inputs_.clear();
+  ResizeBuffers();
+
+  // Run a buffer of 0's to initialize rendering delay.
+  std::fill_n(interleaved_.data(), interleaved_.size(), 0.0f);
+  delay_seconds_ = post_processing_pipeline_->ProcessFrames(
+      interleaved_.data(), input_frames_per_write_, last_volume_,
+      true /* is_silence */);
 }
 
 void FilterGroup::AddInput(MixerInput* input) {
@@ -57,11 +80,10 @@ void FilterGroup::RemoveInput(MixerInput* input) {
 }
 
 float FilterGroup::MixAndFilter(
-    int num_frames,
+    int num_output_frames,
     MediaPipelineBackend::AudioDecoder::RenderingDelay rendering_delay) {
-  DCHECK_NE(output_samples_per_second_, 0);
-
-  bool resize_needed = ResizeBuffersIfNecessary(num_frames);
+  DCHECK_NE(output_config_.output_sample_rate, 0);
+  DCHECK_EQ(num_output_frames, output_config_.output_frames_per_write);
 
   float volume = 0.0f;
   AudioContentType content_type = static_cast<AudioContentType>(-1);
@@ -71,8 +93,8 @@ float FilterGroup::MixAndFilter(
 
   // Recursively mix inputs.
   for (auto* filter_group : mixed_inputs_) {
-    volume = std::max(volume,
-                      filter_group->MixAndFilter(num_frames, rendering_delay));
+    volume = std::max(volume, filter_group->MixAndFilter(
+                                  input_frames_per_write_, rendering_delay));
     content_type = std::max(content_type, filter_group->content_type());
   }
 
@@ -83,17 +105,12 @@ float FilterGroup::MixAndFilter(
   // b) The output volume is 0 and has NEVER been non-zero,
   //    since FilterGroup will use last_volume_ if volume is 0.
   //    In this case, there was never any data in the pipeline.
-  // However, we still need to ensure that output buffers are initialized &
-  // large enough to hold |num_frames|, so we cannot use this shortcut if
-  // |resize_needed|.
   if (active_inputs_.empty() && volume == 0.0f &&
-      !post_processing_pipeline_->IsRinging() && !resize_needed) {
-    if (frames_zeroed_ < num_frames) {
-      // Ensure OutputBuffer() is zeros.
-      // TODO(bshaya): Determine if this is necessary - if RingingTime is
-      //               calculated correctly, then we could skip the fill_n.
-      std::fill_n(GetOutputBuffer(), num_frames * GetOutputChannelCount(), 0);
-      frames_zeroed_ = num_frames;
+      !post_processing_pipeline_->IsRinging()) {
+    if (frames_zeroed_ < num_output_frames) {
+      std::fill_n(GetOutputBuffer(),
+                  num_output_frames * GetOutputChannelCount(), 0);
+      frames_zeroed_ = num_output_frames;
     }
     return 0.0f;  // Output will be silence, no need to mix.
   }
@@ -101,12 +118,13 @@ float FilterGroup::MixAndFilter(
   frames_zeroed_ = 0;
 
   // Mix InputQueues
-  mixed_->ZeroFramesPartial(0, num_frames);
+  mixed_->ZeroFramesPartial(0, input_frames_per_write_);
   for (MixerInput* input : active_inputs_) {
     DCHECK_LT(input->num_channels(), static_cast<int>(temp_buffers_.size()));
     DCHECK(temp_buffers_[input->num_channels()]);
     ::media::AudioBus* temp = temp_buffers_[input->num_channels()].get();
-    int filled = input->FillAudioData(num_frames, rendering_delay, temp);
+    int filled =
+        input->FillAudioData(input_frames_per_write_, rendering_delay, temp);
     if (filled > 0) {
       int in_c = 0;
       for (int out_c = 0; out_c < num_channels_; ++out_c) {
@@ -124,21 +142,21 @@ float FilterGroup::MixAndFilter(
   }
 
   mixed_->ToInterleaved<::media::FloatSampleTypeTraits<float>>(
-      num_frames, interleaved_.get());
+      input_frames_per_write_, interleaved_.data());
 
   // Mix FilterGroups
   for (FilterGroup* group : mixed_inputs_) {
     if (group->last_volume() > 0.0f) {
-      ::media::vector_math::FMAC(group->interleaved_.get(), 1.0f,
-                                 num_frames * num_channels_,
-                                 interleaved_.get());
+      ::media::vector_math::FMAC(group->GetOutputBuffer(), 1.0f,
+                                 input_frames_per_write_ * num_channels_,
+                                 interleaved_.data());
     }
   }
 
   if (playout_channel_selection_ != kChannelAll) {
     // Duplicate selected channel to all channels.
-    float* data = interleaved_.get();
-    for (int f = 0; f < num_frames; ++f) {
+    float* data = interleaved_.data();
+    for (int f = 0; f < input_frames_per_write_; ++f) {
       float selected = data[f * num_channels_ + playout_channel_selection_];
       for (int c = 0; c < num_channels_; ++c)
         data[f * num_channels_ + c] = selected;
@@ -159,8 +177,8 @@ float FilterGroup::MixAndFilter(
     }
   }
 
-  delay_frames_ = post_processing_pipeline_->ProcessFrames(
-      interleaved_.get(), num_frames, last_volume_, is_silence);
+  delay_seconds_ = post_processing_pipeline_->ProcessFrames(
+      interleaved_.data(), input_frames_per_write_, last_volume_, is_silence);
   return last_volume_;
 }
 
@@ -169,11 +187,10 @@ float* FilterGroup::GetOutputBuffer() {
 }
 
 int64_t FilterGroup::GetRenderingDelayMicroseconds() {
-  if (output_samples_per_second_ == 0) {
+  if (output_config_.output_sample_rate == 0) {
     return 0;
   }
-  return delay_frames_ * base::Time::kMicrosecondsPerSecond /
-         output_samples_per_second_;
+  return delay_seconds_ * base::Time::kMicrosecondsPerSecond;
 }
 
 MediaPipelineBackend::AudioDecoder::RenderingDelay
@@ -181,23 +198,18 @@ FilterGroup::GetRenderingDelayToOutput() {
   return rendering_delay_to_output_;
 }
 
-int FilterGroup::GetOutputChannelCount() {
+int FilterGroup::GetOutputChannelCount() const {
   return post_processing_pipeline_->NumOutputChannels();
 }
 
-bool FilterGroup::ResizeBuffersIfNecessary(int num_frames) {
-  if (mixed_ && mixed_->frames() >= num_frames) {
-    return false;
-  }
-  mixed_ = ::media::AudioBus::Create(num_channels_, num_frames);
+void FilterGroup::ResizeBuffers() {
+  mixed_ = ::media::AudioBus::Create(num_channels_, input_frames_per_write_);
+  mixed_->Zero();
   temp_buffers_.clear();
   for (MixerInput* input : active_inputs_) {
-    AddTempBuffer(input->num_channels(), num_frames);
+    AddTempBuffer(input->num_channels(), input_frames_per_write_);
   }
-  interleaved_.reset(static_cast<float*>(
-      base::AlignedAlloc(num_frames * num_channels_ * sizeof(float),
-                         ::media::AudioBus::kChannelAlignment)));
-  return true;
+  interleaved_.assign(input_frames_per_write_ * num_channels_, 0.0f);
 }
 
 void FilterGroup::AddTempBuffer(int num_channels, int num_frames) {
@@ -207,6 +219,7 @@ void FilterGroup::AddTempBuffer(int num_channels, int num_frames) {
   if (!temp_buffers_[num_channels]) {
     temp_buffers_[num_channels] =
         ::media::AudioBus::Create(num_channels, num_frames);
+    temp_buffers_[num_channels]->Zero();
   }
 }
 
@@ -229,13 +242,37 @@ void FilterGroup::UpdatePlayoutChannel(int playout_channel) {
 }
 
 void FilterGroup::PrintTopology() const {
-  std::string input_groups;
+  std::string filter_groups;
   for (const FilterGroup* mixed_input : mixed_inputs_) {
     mixed_input->PrintTopology();
-    input_groups += mixed_input->name() + ", ";
+    filter_groups += "[GROUP]" + mixed_input->name() + ", ";
   }
 
-  LOG(INFO) << input_groups << " -> " << num_channels_ << "ch -> " << name_;
+  std::string input_groups;
+  for (const std::string& stream_type : stream_types_) {
+    input_groups += "[STREAM]" + stream_type + ", ";
+  }
+
+  // Trim trailing comma.
+  if (!filter_groups.empty()) {
+    filter_groups.resize(filter_groups.size() - 2);
+  }
+  if (!input_groups.empty()) {
+    input_groups.resize(input_groups.size() - 2);
+  }
+
+  std::string all_inputs;
+  if (filter_groups.empty()) {
+    all_inputs = input_groups;
+  } else if (input_groups.empty()) {
+    all_inputs = filter_groups;
+  } else {
+    all_inputs = input_groups + " + " + filter_groups;
+  }
+  LOG(INFO) << all_inputs << ": " << num_channels_ << "ch@"
+            << input_samples_per_second_ << "hz -> [GROUP]" << name_ << " -> "
+            << GetOutputChannelCount() << "ch@"
+            << output_config_.output_sample_rate << "hz";
 }
 
 }  // namespace media

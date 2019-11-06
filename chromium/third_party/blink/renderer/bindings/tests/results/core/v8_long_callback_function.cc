@@ -61,6 +61,11 @@ v8::Maybe<int32_t> V8LongCallbackFunction::Invoke(bindings::V8ValueOrScriptWrapp
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
 
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<int32_t>();
+  }
+
   v8::Local<v8::Function> function;
   // callback function's invoke:
   // step 4. If ! IsCallable(F) is false:
@@ -119,11 +124,6 @@ v8::Maybe<int32_t> V8LongCallbackFunction::Invoke(bindings::V8ValueOrScriptWrapp
     else
       return v8::Just<int32_t>(native_result);
   }
-}
-
-v8::Maybe<int32_t> V8PersistentCallbackFunction<V8LongCallbackFunction>::Invoke(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, int32_t num1, int32_t num2) {
-  return Proxy()->Invoke(
-      callback_this_value, num1, num2);
 }
 
 }  // namespace blink

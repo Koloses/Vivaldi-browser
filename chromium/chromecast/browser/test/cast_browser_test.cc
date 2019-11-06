@@ -59,11 +59,12 @@ void CastBrowserTest::PostRunTestOnMainThread() {
 content::WebContents* CastBrowserTest::CreateWebView() {
   CastWebView::CreateParams params;
   params.delegate = this;
-  params.enabled_for_dev = true;
+  params.web_contents_params.delegate = this;
+  params.web_contents_params.use_cma_renderer = true;
+  params.web_contents_params.enabled_for_dev = true;
   params.window_params.delegate = this;
   cast_web_view_ =
       web_contents_manager_->CreateWebView(params, nullptr, /* site_instance */
-                                           nullptr,         /* extension */
                                            GURL() /* initial_url */);
 
   return cast_web_view_->web_contents();
@@ -83,11 +84,6 @@ content::WebContents* CastBrowserTest::NavigateToURL(const GURL& url) {
   return web_contents;
 }
 
-void CastBrowserTest::OnPageStateChanged(CastWebContents* cast_web_contents) {}
-
-void CastBrowserTest::OnPageStopped(CastWebContents* cast_web_contents,
-                                    int error_code) {}
-
 void CastBrowserTest::OnWindowDestroyed() {}
 
 void CastBrowserTest::OnKeyEvent(const ui::KeyEvent& key_event) {}
@@ -106,12 +102,5 @@ std::string CastBrowserTest::GetId() {
   return "";
 }
 
-bool CastBrowserTest::OnAddMessageToConsoleReceived(
-    int32_t level,
-    const base::string16& message,
-    int32_t line_no,
-    const base::string16& source_id) {
-  return false;
-}
 }  // namespace shell
 }  // namespace chromecast

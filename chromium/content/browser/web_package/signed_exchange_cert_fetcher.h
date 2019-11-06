@@ -20,6 +20,9 @@
 
 namespace network {
 class SharedURLLoaderFactory;
+namespace mojom {
+class URLLoaderFactory;
+}  // namespace mojom
 }  // namespace network
 
 namespace mojo {
@@ -84,6 +87,9 @@ class CONTENT_EXPORT SignedExchangeCertFetcher
   void OnHandleReady(MojoResult result);
   void OnDataComplete();
 
+  void MaybeNotifyCompletionToDevtools(
+      const network::URLLoaderCompletionStatus& status);
+
   // network::mojom::URLLoaderClient
   void OnReceiveResponse(const network::ResourceResponseHead& head) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
@@ -91,11 +97,15 @@ class CONTENT_EXPORT SignedExchangeCertFetcher
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback callback) override;
-  void OnReceiveCachedMetadata(const std::vector<uint8_t>& data) override;
+  void OnReceiveCachedMetadata(mojo_base::BigBuffer data) override;
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
   void OnStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) override;
   void OnComplete(const network::URLLoaderCompletionStatus& status) override;
+
+  void OnDataURLRequest(const network::ResourceRequest& resource_request,
+                        network::mojom::URLLoaderRequest,
+                        network::mojom::URLLoaderClientPtr);
 
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
   std::vector<std::unique_ptr<URLLoaderThrottle>> throttles_;
@@ -109,10 +119,13 @@ class CONTENT_EXPORT SignedExchangeCertFetcher
 
   // This is owned by SignedExchangeHandler which is the owner of |this|.
   SignedExchangeDevToolsProxy* devtools_proxy_;
+  bool has_notified_completion_to_devtools_ = false;
   // This is owned by SignedExchangeLoader which owns SignedExchangeHandler
   // that is the owner of |this|.
   SignedExchangeReporter* reporter_;
   base::Optional<base::UnguessableToken> cert_request_id_;
+
+  std::unique_ptr<network::mojom::URLLoaderFactory> data_url_loader_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SignedExchangeCertFetcher);
 };

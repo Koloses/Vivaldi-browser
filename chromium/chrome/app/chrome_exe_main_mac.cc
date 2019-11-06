@@ -60,18 +60,18 @@ __attribute__((visibility("default"))) int main(int argc, char* argv[]) {
     }
   }
 
-  const char rel_path[] =
-      "../../../" PRODUCT_FULLNAME_STRING
-      " Framework.framework/" PRODUCT_FULLNAME_STRING " Framework";
+  // The helper lives within the versioned framework directory, so simply
+  // go up to find the main dylib.
+  const char rel_path[] = "../../../../" PRODUCT_FULLNAME_STRING " Framework";
 #else
-  const char rel_path[] =
 #if defined(VIVALDI_BUILD)
 #define LOCAL_VERSION_STRING VIVALDI_VERSION_STRING
 #else
 #define LOCAL_VERSION_STRING CHROME_VERSION_STRING
 #endif
-      "../Versions/" LOCAL_VERSION_STRING "/" PRODUCT_FULLNAME_STRING
-      " Framework.framework/" PRODUCT_FULLNAME_STRING " Framework";
+  const char rel_path[] = "../Frameworks/" PRODUCT_FULLNAME_STRING
+                          " Framework.framework/Versions/" LOCAL_VERSION_STRING
+                          "/" PRODUCT_FULLNAME_STRING " Framework";
 #endif  // defined(HELPER_EXECUTABLE)
 
   // Slice off the last part of the main executable path, and append the

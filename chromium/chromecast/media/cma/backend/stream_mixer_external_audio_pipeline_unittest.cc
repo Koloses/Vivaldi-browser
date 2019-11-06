@@ -89,14 +89,9 @@ class ExternalAudioPipelineTest : public ::testing::Test {
   }
   // Run async operations in the stream mixer.
   void RunLoopForMixer() {
-    // SendLoopbackData.
-    base::RunLoop run_loop1;
-    message_loop_->task_runner()->PostTask(FROM_HERE, run_loop1.QuitClosure());
-    run_loop1.Run();
-    // Playbackloop.
-    base::RunLoop run_loop2;
-    message_loop_->task_runner()->PostTask(FROM_HERE, run_loop2.QuitClosure());
-    run_loop2.Run();
+    base::RunLoop run_loop;
+    message_loop_->task_runner()->PostTask(FROM_HERE, run_loop.QuitClosure());
+    run_loop.Run();
   }
 
  protected:
@@ -184,15 +179,15 @@ TEST_F(ExternalAudioPipelineTest, ExternalAudioPipelineLoopbackData) {
 
   // Prepare data for test.
   const size_t kSampleSize = 64;
-  char test_data[kSampleSize];
+  uint8_t test_data[kSampleSize];
   for (size_t i = 0; i < kSampleSize; ++i)
     test_data[i] = i;
 
   // Set test data in AudioBus.
   const auto kNumFrames = kSampleSize / kNumChannels;
   auto data = ::media::AudioBus::Create(kNumChannels, kNumFrames);
-  const size_t kBytesPerSample = sizeof(test_data[0]);
-  data->FromInterleaved(&test_data, kNumFrames, kBytesPerSample);
+  data->FromInterleaved<::media::UnsignedInt8SampleTypeTraits>(test_data,
+                                                               kNumFrames);
   // Prepare data for compare.
   auto expected = ::media::AudioBus::Create(kNumChannels, kNumFrames);
   data->CopyTo(expected.get());
@@ -201,11 +196,10 @@ TEST_F(ExternalAudioPipelineTest, ExternalAudioPipelineLoopbackData) {
   mixer_->AddLoopbackAudioObserver(&mock_loopback_observer);
 
   mixer_->AddInput(&input);
-
   RunLoopForMixer();
+
   // Send data to the stream mixer.
   input.SetData(std::move(data));
-
   RunLoopForMixer();
 
   // Get actual data from our mocked loopback observer.

@@ -5,13 +5,12 @@
 package org.chromium.chrome.browser.ntp;
 
 import android.content.Context;
-import android.graphics.Bitmap;
 import android.support.annotation.IntDef;
 
-import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.base.task.PostTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.favicon.FaviconHelper;
@@ -22,6 +21,7 @@ import org.chromium.chrome.browser.invalidation.SessionsInvalidationManager;
 import org.chromium.chrome.browser.ntp.ForeignSessionHelper.ForeignSession;
 import org.chromium.chrome.browser.ntp.ForeignSessionHelper.ForeignSessionTab;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.PersonalizedSigninPromoView;
 import org.chromium.chrome.browser.signin.ProfileDataCache;
 import org.chromium.chrome.browser.signin.SigninAccessPoint;
@@ -35,6 +35,7 @@ import org.chromium.components.signin.AccountsChangeObserver;
 import org.chromium.components.signin.ChromeSigninController;
 import org.chromium.components.sync.AndroidSyncSettings;
 import org.chromium.components.sync.AndroidSyncSettings.AndroidSyncSettingsObserver;
+import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -100,7 +101,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         mRecentlyClosedTabManager = sRecentlyClosedTabManagerForTests != null
                 ? sRecentlyClosedTabManagerForTests
                 : new RecentlyClosedBridge(profile);
-        mSignInManager = SigninManager.get();
+        mSignInManager = IdentityServicesProvider.getSigninManager();
         mContext = context;
 
         int imageSize = context.getResources().getDimensionPixelSize(R.dimen.user_picture_size);
@@ -239,13 +240,24 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     }
 
     /**
-     * Returns a 16x16 favicon for a given synced url.
+     * Return the managed tab.
+     * @return the tab instance being managed by this object.
+     */
+    public Tab activeTab() {
+        return mTab;
+    }
+
+    /**
+     * Returns a favicon for a given foreign url.
      *
      * @param url The url to fetch the favicon for.
-     * @return 16x16 favicon or null if favicon unavailable.
+     * @param size the desired favicon size.
+     * @param faviconCallback the callback to be invoked when the favicon is available.
+     * @return favicon or null if favicon unavailable.
      */
-    public Bitmap getSyncedFaviconImageForURL(String url) {
-        return mFaviconHelper.getSyncedFaviconImageForURL(mProfile, url);
+    public boolean getForeignFaviconForUrl(
+            String url, int size, FaviconImageCallback faviconCallback) {
+        return mFaviconHelper.getForeignFaviconImageForURL(mProfile, url, size, faviconCallback);
     }
 
     /**
@@ -358,7 +370,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     @PromoState
     int getPromoType() {
         if (!ChromeSigninController.get().isSignedIn()) {
-            if (!SigninManager.get().isSignInAllowed()) {
+            if (!mSignInManager.isSignInAllowed()) {
                 return PromoState.PROMO_NONE;
             }
             return PromoState.PROMO_SIGNIN_PERSONALIZED;
@@ -432,7 +444,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     }
 
     private void update() {
-        ThreadUtils.runOnUiThread(() -> {
+        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
             if (mIsDestroyed) return;
             updateForeignSessions();
             postUpdate();

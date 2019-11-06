@@ -5,9 +5,9 @@
 #include "ash/system/power/power_button_menu_view.h"
 
 #include "ash/display/screen_orientation_controller.h"
-#include "ash/new_window_controller.h"
+#include "ash/public/cpp/new_window_delegate.h"
 #include "ash/resources/vector_icons/vector_icons.h"
-#include "ash/session/session_controller.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/power/power_button_menu_item_view.h"
@@ -38,7 +38,6 @@ constexpr int kPaddingBetweenMenuItems = 8;
 
 using PowerButtonPosition = PowerButtonController::PowerButtonPosition;
 
-constexpr base::Feature PowerButtonMenuView::kEnableFeedbackItem;
 constexpr base::TimeDelta PowerButtonMenuView::kMenuAnimationDuration;
 
 PowerButtonMenuView::PowerButtonMenuView(
@@ -95,9 +94,7 @@ PowerButtonMenuView::TransformDisplacement
 PowerButtonMenuView::GetTransformDisplacement() const {
   TransformDisplacement transform_displacement;
   if (power_button_position_ == PowerButtonPosition::NONE ||
-      !Shell::Get()
-           ->tablet_mode_controller()
-           ->IsTabletModeWindowManagerEnabled()) {
+      !Shell::Get()->tablet_mode_controller()->InTabletMode()) {
     transform_displacement.direction = TransformDirection::Y;
     transform_displacement.distance = kMenuViewTransformDistanceDp;
     return transform_displacement;
@@ -137,6 +134,10 @@ PowerButtonMenuView::GetTransformDisplacement() const {
   return transform_displacement;
 }
 
+const char* PowerButtonMenuView::GetClassName() const {
+  return "PowerButtonMenuView";
+}
+
 void PowerButtonMenuView::CreateItems() {
   power_off_item_ = new PowerButtonMenuItemView(
       this, kSystemPowerButtonMenuPowerOffIcon,
@@ -151,7 +152,7 @@ void PowerButtonMenuView::CreateItems() {
         user::GetLocalizedSignOutStringForStatus(login_status, false));
     AddChildView(sign_out_item_);
 
-    const SessionController* const session_controller =
+    const SessionControllerImpl* const session_controller =
         Shell::Get()->session_controller();
     if (session_controller->CanLockScreen() &&
         !session_controller->IsScreenLocked()) {
@@ -161,13 +162,10 @@ void PowerButtonMenuView::CreateItems() {
               IDS_ASH_POWER_BUTTON_MENU_LOCK_SCREEN_BUTTON));
       AddChildView(lock_screen_item_);
 
-      if (base::FeatureList::IsEnabled(kEnableFeedbackItem)) {
-        feedback_item_ = new PowerButtonMenuItemView(
-            this, kSystemPowerButtonMenuFeedbackIcon,
-            l10n_util::GetStringUTF16(
-                IDS_ASH_POWER_BUTTON_MENU_FEEDBACK_BUTTON));
-        AddChildView(feedback_item_);
-      }
+      feedback_item_ = new PowerButtonMenuItemView(
+          this, kSystemPowerButtonMenuFeedbackIcon,
+          l10n_util::GetStringUTF16(IDS_ASH_POWER_BUTTON_MENU_FEEDBACK_BUTTON));
+      AddChildView(feedback_item_);
     }
   }
 }
@@ -262,7 +260,7 @@ void PowerButtonMenuView::ButtonPressed(views::Button* sender,
     shell->session_controller()->LockScreen();
   } else if (sender == feedback_item_) {
     RecordMenuActionHistogram(PowerButtonMenuActionType::kFeedback);
-    shell->new_window_controller()->OpenFeedbackPage();
+    NewWindowDelegate::GetInstance()->OpenFeedbackPage();
   } else {
     NOTREACHED() << "Invalid sender";
   }

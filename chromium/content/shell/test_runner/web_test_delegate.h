@@ -22,7 +22,7 @@
 
 namespace base {
 class DictionaryValue;
-}
+}  // namespace base
 
 namespace blink {
 struct Manifest;
@@ -32,7 +32,7 @@ class WebPlugin;
 struct WebPluginParams;
 struct WebSize;
 class WebView;
-}
+}  // namespace blink
 
 namespace test_runner {
 
@@ -43,6 +43,8 @@ constexpr int kDefaultDatabaseQuota = -1;
 
 class WebTestDelegate {
  public:
+  virtual ~WebTestDelegate() = default;
+
   // Set and clear the edit command to execute on the next call to
   // WebViewClient::handleCurrentKeyboardEvent().
   virtual void ClearEditCommand() = 0;
@@ -118,6 +120,9 @@ class WebTestDelegate {
       const base::Optional<base::string16>& reply) = 0;
   virtual void SimulateWebNotificationClose(const std::string& title,
                                             bool by_user) = 0;
+
+  // Controls Content Index entries.
+  virtual void SimulateWebContentIndexDelete(const std::string& id) = 0;
 
   // Controls the device scale factor of the main WebView for hidpi tests.
   virtual void SetDeviceScaleFactor(float factor) = 0;
@@ -215,7 +220,7 @@ class WebTestDelegate {
   // Fetch the manifest for a given WebView from the given url.
   virtual void FetchManifest(
       blink::WebView* view,
-      base::OnceCallback<void(const GURL&, const blink::Manifest&)>
+      base::OnceCallback<void(const blink::WebURL&, const blink::Manifest&)>
           callback) = 0;
 
   // Sends a message to the WebTestPermissionManager in order for it to
@@ -253,9 +258,6 @@ class WebTestDelegate {
   // Forces a text input state update for the client of WebFrameWidget
   // associated with |frame|.
   virtual void ForceTextInputStateUpdate(blink::WebLocalFrame* frame) = 0;
-
- protected:
-  virtual ~WebTestDelegate() {}
 };
 
 }  // namespace test_runner

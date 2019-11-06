@@ -38,17 +38,17 @@ void Connector::WarmService(const ServiceFilter& filter,
 
 void Connector::RegisterServiceInstance(
     const Identity& identity,
-    mojom::ServicePtr service,
-    mojom::PIDReceiverRequest pid_receiver_request,
+    mojo::PendingRemote<mojom::Service> service,
+    mojo::PendingReceiver<mojom::ProcessMetadata> metadata_receiver,
     RegisterServiceInstanceCallback callback) {
   if (!BindConnectorIfNecessary())
     return;
 
   DCHECK(identity.IsValid());
-  DCHECK(service.is_bound() && pid_receiver_request.is_pending());
-  connector_->RegisterServiceInstance(
-      identity, service.PassInterface().PassHandle(),
-      std::move(pid_receiver_request), std::move(callback));
+  DCHECK(service);
+  connector_->RegisterServiceInstance(identity, service.PassPipe(),
+                                      std::move(metadata_receiver),
+                                      std::move(callback));
 }
 
 void Connector::QueryService(const std::string& service_name,
@@ -127,7 +127,7 @@ bool Connector::HasBinderOverrideForTesting(
   if (service_overrides == local_binder_overrides_.end())
     return false;
 
-  return base::ContainsKey(service_overrides->second, interface_name);
+  return base::Contains(service_overrides->second, interface_name);
 }
 
 void Connector::ClearBinderOverrideForTesting(

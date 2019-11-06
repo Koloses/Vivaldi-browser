@@ -5,16 +5,18 @@
 #ifndef NGOffsetMappingBuilder_h
 #define NGOffsetMappingBuilder_h
 
+#include <memory>
 #include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_offset_mapping.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class LayoutObject;
+class LayoutText;
 
 // This is the helper class for constructing the DOM-to-TextContent offset
 // mapping. It holds an offset mapping, and provides APIs to modify the mapping
@@ -64,7 +66,7 @@ class CORE_EXPORT NGOffsetMappingBuilder {
 
    private:
     NGOffsetMappingBuilder* const builder_ = nullptr;
-    base::AutoReset<Persistent<const Node>> layout_object_auto_reset_;
+    base::AutoReset<const LayoutObject*> layout_object_auto_reset_;
     base::AutoReset<unsigned> appended_length_auto_reset_;
 
     DISALLOW_COPY_AND_ASSIGN(SourceNodeScope);
@@ -105,26 +107,20 @@ class CORE_EXPORT NGOffsetMappingBuilder {
   // TODO(xiaochengh): Implement when adding support for 'text-transform'
   // void Composite(const NGOffsetMappingBuilder&);
 
+  // Restore a trailing collapsible space at |offset| of text content. The space
+  // is associated with |layout_text|.
+  void RestoreTrailingCollapsibleSpace(const LayoutText& layout_text,
+                                       unsigned offset);
+
   // Set the destination string of the offset mapping.
   void SetDestinationString(String);
 
-  // Called when entering a non-atomic inline node (e.g., SPAN), before
-  // collecting any of its inline descendants.
-  void EnterInline(const LayoutObject&);
-
-  // Called when exiting a non-atomic inline node (e.g., SPAN), after having
-  // collected all of its inline descendants.
-  void ExitInline(const LayoutObject&);
-
   // Finalize and return the offset mapping.
   // This method can only be called once, as it can invalidate the stored data.
-  NGOffsetMapping Build();
+  std::unique_ptr<NGOffsetMapping> Build();
 
  private:
-  // Helper function for CollapseTrailingSpace() to maintain unit ranges.
-  void ShiftRanges(unsigned position, int delta);
-
-  Persistent<const Node> current_node_ = nullptr;
+  const LayoutObject* current_layout_object_ = nullptr;
   unsigned current_offset_ = 0;
   bool has_open_unit_ = false;
 #if DCHECK_IS_ON()
@@ -139,9 +135,6 @@ class CORE_EXPORT NGOffsetMappingBuilder {
 
   // Unit ranges of the current mapping function.
   NGOffsetMapping::RangeMap unit_ranges_;
-
-  // Unit range starts of currently entered inline elements.
-  Vector<unsigned> open_inlines_;
 
   // The destination string of the offset mapping.
   String destination_string_;

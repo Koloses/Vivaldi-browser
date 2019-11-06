@@ -11,7 +11,7 @@
 #include "third_party/blink/public/web/web_remote_frame.h"
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/public/web/web_settings.h"
-#include "third_party/blink/renderer/bindings/core/v8/node_or_string.h"
+#include "third_party/blink/renderer/bindings/core/v8/node_or_string_or_trusted_script.h"
 #include "third_party/blink/renderer/core/exported/web_remote_frame_impl.h"
 #include "third_party/blink/renderer/core/frame/browser_controls.h"
 #include "third_party/blink/renderer/core/frame/dom_visual_viewport.h"
@@ -78,12 +78,12 @@ class RootScrollerTest : public testing::Test,
     }
   }
 
-  WebViewImpl* Initialize(const std::string& page_name,
+  WebViewImpl* Initialize(const String& page_name,
                           frame_test_helpers::TestWebWidgetClient* client) {
     return InitializeInternal(base_url_ + page_name, client);
   }
 
-  WebViewImpl* Initialize(const std::string& page_name) {
+  WebViewImpl* Initialize(const String& page_name) {
     return InitializeInternal(base_url_ + page_name, nullptr);
   }
 
@@ -101,10 +101,9 @@ class RootScrollerTest : public testing::Test,
     settings->SetMainFrameResizesAreOrientationChanges(true);
   }
 
-  void RegisterMockedHttpURLLoad(const std::string& file_name) {
+  void RegisterMockedHttpURLLoad(const String& file_name) {
     url_test_helpers::RegisterMockedURLLoadFromBase(
-        WebString::FromUTF8(base_url_), test::CoreTestDataPath(),
-        WebString::FromUTF8(file_name));
+        WebString(base_url_), test::CoreTestDataPath(), WebString(file_name));
   }
 
   void ExecuteScript(const WebString& code) {
@@ -147,14 +146,14 @@ class RootScrollerTest : public testing::Test,
   WebCoalescedInputEvent GenerateTouchGestureEvent(WebInputEvent::Type type,
                                                    int delta_x = 0,
                                                    int delta_y = 0) {
-    return GenerateGestureEvent(type, kWebGestureDeviceTouchscreen, delta_x,
+    return GenerateGestureEvent(type, WebGestureDevice::kTouchscreen, delta_x,
                                 delta_y);
   }
 
   WebCoalescedInputEvent GenerateWheelGestureEvent(WebInputEvent::Type type,
                                                    int delta_x = 0,
                                                    int delta_y = 0) {
-    return GenerateGestureEvent(type, kWebGestureDeviceTouchpad, delta_x,
+    return GenerateGestureEvent(type, WebGestureDevice::kTouchpad, delta_x,
                                 delta_y);
   }
 
@@ -177,9 +176,9 @@ class RootScrollerTest : public testing::Test,
   }
 
   WebViewImpl* InitializeInternal(
-      const std::string& url,
+      const String& url,
       frame_test_helpers::TestWebWidgetClient* client) {
-    helper_.InitializeAndLoad(url, nullptr, nullptr, client,
+    helper_.InitializeAndLoad(url.Utf8(), nullptr, nullptr, client,
                               &ConfigureSettings);
 
     // Initialize browser controls to be shown.
@@ -196,7 +195,7 @@ class RootScrollerTest : public testing::Test,
         DocumentLifecycle::LifecycleUpdateReason::kTest);
   }
 
-  std::string base_url_;
+  String base_url_;
   std::unique_ptr<frame_test_helpers::TestWebViewClient> view_client_;
   frame_test_helpers::WebViewHelper helper_;
   RuntimeEnabledFeatures::Backup features_backup_;
@@ -226,8 +225,8 @@ TEST_F(RootScrollerTest, defaultEffectiveRootScrollerIsDocumentNode) {
 
   // Replace the documentElement with the iframe. The effectiveRootScroller
   // should remain the same.
-  HeapVector<NodeOrString> nodes;
-  nodes.push_back(NodeOrString::FromNode(iframe));
+  HeapVector<NodeOrStringOrTrustedScript> nodes;
+  nodes.push_back(NodeOrStringOrTrustedScript::FromNode(iframe));
   document->documentElement()->ReplaceWith(nodes, ASSERT_NO_EXCEPTION);
 
   UpdateAllLifecyclePhases(MainFrameView());
@@ -239,12 +238,11 @@ TEST_F(RootScrollerTest, defaultEffectiveRootScrollerIsDocumentNode) {
 class OverscrollTestWebWidgetClient
     : public frame_test_helpers::TestWebWidgetClient {
  public:
-  MOCK_METHOD5(DidOverscroll,
+  MOCK_METHOD4(DidOverscroll,
                void(const WebFloatSize&,
                     const WebFloatSize&,
                     const WebFloatPoint&,
-                    const WebFloatSize&,
-                    const cc::OverscrollBehavior&));
+                    const WebFloatSize&));
 };
 
 // Tests that setting an element as the root scroller causes it to control url
@@ -287,8 +285,7 @@ TEST_F(RootScrollerTest, TestSetRootScroller) {
     // Scroll 50 pixels past the end. Ensure we report the 50 pixels as
     // overscroll.
     EXPECT_CALL(client, DidOverscroll(WebFloatSize(0, 50), WebFloatSize(0, 50),
-                                      WebFloatPoint(100, 100), WebFloatSize(),
-                                      cc::OverscrollBehavior()));
+                                      WebFloatPoint(100, 100), WebFloatSize()));
     GetWebView()->MainFrameWidget()->HandleInputEvent(GenerateTouchGestureEvent(
         WebInputEvent::kGestureScrollUpdate, 0, -500));
     EXPECT_FLOAT_EQ(maximum_scroll, container->scrollTop());
@@ -300,8 +297,7 @@ TEST_F(RootScrollerTest, TestSetRootScroller) {
   {
     // Continue the gesture overscroll.
     EXPECT_CALL(client, DidOverscroll(WebFloatSize(0, 20), WebFloatSize(0, 70),
-                                      WebFloatPoint(100, 100), WebFloatSize(),
-                                      cc::OverscrollBehavior()));
+                                      WebFloatPoint(100, 100), WebFloatSize()));
     GetWebView()->MainFrameWidget()->HandleInputEvent(
         GenerateTouchGestureEvent(WebInputEvent::kGestureScrollUpdate, 0, -20));
     EXPECT_FLOAT_EQ(maximum_scroll, container->scrollTop());
@@ -320,8 +316,7 @@ TEST_F(RootScrollerTest, TestSetRootScroller) {
         GenerateTouchGestureEvent(WebInputEvent::kGestureScrollBegin));
 
     EXPECT_CALL(client, DidOverscroll(WebFloatSize(0, 30), WebFloatSize(0, 30),
-                                      WebFloatPoint(100, 100), WebFloatSize(),
-                                      cc::OverscrollBehavior()));
+                                      WebFloatPoint(100, 100), WebFloatSize()));
     GetWebView()->MainFrameWidget()->HandleInputEvent(
         GenerateTouchGestureEvent(WebInputEvent::kGestureScrollUpdate, 0, -30));
     EXPECT_FLOAT_EQ(maximum_scroll, container->scrollTop());
@@ -804,8 +799,8 @@ TEST_F(RootScrollerTest, RemoteMainFrame) {
         WebSecurityOrigin(SecurityOrigin::CreateUniqueOpaque()), false);
     local_frame = frame_test_helpers::CreateLocalChild(*remote_main_frame);
 
-    frame_test_helpers::LoadFrame(local_frame,
-                                  base_url_ + "root-scroller-child.html");
+    frame_test_helpers::LoadFrame(
+        local_frame, base_url_.Utf8() + "root-scroller-child.html");
     widget = local_frame->FrameWidget();
     widget->Resize(WebSize(400, 400));
   }
@@ -1618,7 +1613,7 @@ TEST_F(ImplicitRootScrollerSimTest, ImplicitRootScroller) {
   // overflow: auto and overflow: scroll should cause a valid element to be
   // promoted to root scroller. Otherwise, they shouldn't, even if they're
   // otherwise a valid root scroller element.
-  std::vector<std::tuple<String, String, Node*>> test_cases = {
+  Vector<std::tuple<String, String, Node*>> test_cases = {
       {"overflow", "hidden", &GetDocument()},
       {"overflow", "auto", container},
       {"overflow", "scroll", container},
@@ -1994,15 +1989,15 @@ TEST_F(ImplicitRootScrollerSimTest, UseCounterNegative) {
   ASSERT_NE(container,
             GetDocument().GetRootScrollerController().EffectiveRootScroller());
 
-  EXPECT_FALSE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kActivatedImplicitRootScroller));
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kActivatedImplicitRootScroller));
 
   container->style()->setProperty(&GetDocument(), "height", "150%", String(),
                                   ASSERT_NO_EXCEPTION);
   Compositor().BeginFrame();
 
-  EXPECT_FALSE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kActivatedImplicitRootScroller));
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kActivatedImplicitRootScroller));
 }
 
 // Tests use counter for implicit root scroller. Ensure it's counted on a
@@ -2042,8 +2037,8 @@ TEST_F(ImplicitRootScrollerSimTest, UseCounterPositive) {
   ASSERT_EQ(container,
             GetDocument().GetRootScrollerController().EffectiveRootScroller());
 
-  EXPECT_TRUE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kActivatedImplicitRootScroller));
+  EXPECT_TRUE(
+      GetDocument().IsUseCounted(WebFeature::kActivatedImplicitRootScroller));
 
   container->style()->setProperty(&GetDocument(), "height", "150%", String(),
                                   ASSERT_NO_EXCEPTION);
@@ -2052,8 +2047,8 @@ TEST_F(ImplicitRootScrollerSimTest, UseCounterPositive) {
   ASSERT_NE(container,
             GetDocument().GetRootScrollerController().EffectiveRootScroller());
 
-  EXPECT_TRUE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kActivatedImplicitRootScroller));
+  EXPECT_TRUE(
+      GetDocument().IsUseCounted(WebFeature::kActivatedImplicitRootScroller));
 }
 
 // Tests use counter for implicit root scroller. Ensure it's counted on a
@@ -2093,8 +2088,8 @@ TEST_F(ImplicitRootScrollerSimTest, UseCounterPositiveAfterLoad) {
   ASSERT_NE(container,
             GetDocument().GetRootScrollerController().EffectiveRootScroller());
 
-  EXPECT_FALSE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kActivatedImplicitRootScroller));
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kActivatedImplicitRootScroller));
 
   container->style()->setProperty(&GetDocument(), "height", "100%", String(),
                                   ASSERT_NO_EXCEPTION);
@@ -2103,8 +2098,8 @@ TEST_F(ImplicitRootScrollerSimTest, UseCounterPositiveAfterLoad) {
   ASSERT_EQ(container,
             GetDocument().GetRootScrollerController().EffectiveRootScroller());
 
-  EXPECT_TRUE(UseCounter::IsCounted(
-      GetDocument(), WebFeature::kActivatedImplicitRootScroller));
+  EXPECT_TRUE(
+      GetDocument().IsUseCounted(WebFeature::kActivatedImplicitRootScroller));
 }
 
 // Tests that if we have multiple valid candidates for implicit promotion, we
@@ -2555,6 +2550,121 @@ TEST_F(ImplicitRootScrollerSimTest, PromotionChangesLayoutSize) {
       << "Once loaded, the iframe should be promoted.";
 }
 
+// Tests that bottom-fixed objects inside of an iframe root scroller and frame
+// are marked as being affected by top controls movement. Those inside a
+// non-rootScroller iframe should not be marked as such.
+TEST_F(ImplicitRootScrollerSimTest, BottomFixedAffectedByTopControls) {
+  WebView().ResizeWithBrowserControls(IntSize(800, 650), 50, 0, false);
+  SimRequest main_request("https://example.com/test.html", "text/html");
+  SimRequest child_request1("https://example.com/child1.html", "text/html");
+  SimRequest child_request2("https://example.com/child2.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  main_request.Complete(R"HTML(
+          <!DOCTYPE html>
+          <style>
+            ::-webkit-scrollbar {
+              width: 0px;
+              height: 0px;
+            }
+            body, html {
+              width: 100%;
+              height: 100%;
+              margin: 0px;
+            }
+            #container1 {
+              width: 100%;
+              height: 100%;
+              border: 0;
+            }
+            #container2 {
+              position: absolute;
+              width: 10px;
+              height: 10px;
+              left: 100px;
+              top: 100px;
+              border: 0;
+            }
+            #fixed {
+              position: fixed;
+              bottom: 10px;
+              left: 10px;
+              width: 10px;
+              height: 10px;
+              background-color: red;
+            }
+          </style>
+          <iframe id="container1" src="child1.html">
+          </iframe>
+          <iframe id="container2" src="child2.html">
+          </iframe>
+          <div id="fixed"></div>
+      )HTML");
+  child_request1.Complete(R"HTML(
+        <!DOCTYPE html>
+        <style>
+          body {
+            height: 1000px;
+          }
+          #fixed {
+            width: 50px;
+            height: 50px;
+            position: fixed;
+            bottom: 0px;
+            left: 0px;
+          }
+        </style>
+        <div id="fixed"></div>
+  )HTML");
+  child_request2.Complete(R"HTML(
+        <!DOCTYPE html>
+        <style>
+          body {
+            height: 1000px;
+          }
+          #fixed {
+            width: 50px;
+            height: 50px;
+            position: fixed;
+            bottom: 0px;
+            left: 0px;
+          }
+        </style>
+        <div id="fixed"></div>
+  )HTML");
+
+  Compositor().BeginFrame();
+
+  Element* container1 = GetDocument().getElementById("container1");
+  Element* container2 = GetDocument().getElementById("container2");
+  ASSERT_EQ(container1,
+            GetDocument().GetRootScrollerController().EffectiveRootScroller())
+      << "The #container1 iframe must be promoted.";
+
+  Document* child1_document =
+      To<HTMLFrameOwnerElement>(container1)->contentDocument();
+  Document* child2_document =
+      To<HTMLFrameOwnerElement>(container2)->contentDocument();
+  LayoutObject* fixed =
+      GetDocument().getElementById("fixed")->GetLayoutObject();
+  LayoutObject* fixed1 =
+      child1_document->getElementById("fixed")->GetLayoutObject();
+  LayoutObject* fixed2 =
+      child2_document->getElementById("fixed")->GetLayoutObject();
+
+  EXPECT_TRUE(fixed->FirstFragment()
+                  .ContentsProperties()
+                  .Transform()
+                  .IsAffectedByOuterViewportBoundsDelta());
+  EXPECT_TRUE(fixed1->FirstFragment()
+                  .ContentsProperties()
+                  .Transform()
+                  .IsAffectedByOuterViewportBoundsDelta());
+  EXPECT_FALSE(fixed2->FirstFragment()
+                   .ContentsProperties()
+                   .Transform()
+                   .IsAffectedByOuterViewportBoundsDelta());
+}
+
 // Ensure that we're using the content box for an iframe. Promotion will cause
 // the content to use the layout size of the parent frame so having padding or
 // a border would cause us to relayout.
@@ -2828,7 +2938,7 @@ TEST_F(ImplicitRootScrollerSimTest, ClippingAncestorPreventsPromotion) {
   Compositor().BeginFrame();
 
   // Each of these style-value pairs should prevent promotion of the iframe.
-  std::vector<std::tuple<String, String>> test_cases = {
+  Vector<std::tuple<String, String>> test_cases = {
       {"overflow", "scroll"},
       {"overflow", "hidden"},
       {"overflow", "auto"},
@@ -2961,7 +3071,7 @@ class RootScrollerHitTest : public RootScrollerSimTest {
     // to the bottom.
     ASSERT_EQ(1, GetBrowserControls().ShownRatio());
     WebView().MainFrameWidget()->ApplyViewportChanges(
-        {gfx::ScrollOffset(), gfx::Vector2dF(), 1, -1,
+        {gfx::ScrollOffset(), gfx::Vector2dF(), 1, false, -1,
          cc::BrowserControlsState::kBoth});
     ASSERT_EQ(0, GetBrowserControls().ShownRatio());
 

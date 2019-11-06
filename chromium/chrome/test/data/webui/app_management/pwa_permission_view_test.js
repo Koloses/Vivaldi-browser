@@ -22,7 +22,7 @@ suite('<app-management-pwa-permission-view>', function() {
 
   async function clickToggle(permissionType) {
     getPermissionToggleByType(permissionType).click();
-    await fakeHandler.$.flushForTesting();
+    await fakeHandler.flushPipesForTesting();
   }
 
   setup(async function() {
@@ -46,7 +46,7 @@ suite('<app-management-pwa-permission-view>', function() {
   });
 
   test('toggle permissions', async function() {
-    let checkToggle = async function(permissionType) {
+    const checkToggle = async (permissionType) => {
       assertTrue(getPermissionBoolByType(permissionType));
       assertTrue(getPermissionToggleByType(permissionType).checked);
 

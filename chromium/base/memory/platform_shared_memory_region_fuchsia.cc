@@ -141,8 +141,7 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
                                      "lead to this region being non-modifiable";
 
   zx::vmo vmo;
-  zx_status_t status =
-      zx::vmo::create(rounded_size, ZX_VMO_NON_RESIZABLE, &vmo);
+  zx_status_t status = zx::vmo::create(rounded_size, 0, &vmo);
   if (status != ZX_OK) {
     ZX_DLOG(ERROR, status) << "zx_vmo_create";
     return {};
@@ -168,7 +167,8 @@ bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
   zx_status_t status = handle->get_info(ZX_INFO_HANDLE_BASIC, &basic,
                                         sizeof(basic), nullptr, nullptr);
   if (status != ZX_OK) {
-    ZX_DLOG(ERROR, status) << "zx_object_get_info";
+    // TODO(crbug.com/838365): convert to DLOG when bug fixed.
+    ZX_LOG(ERROR, status) << "zx_object_get_info";
     return false;
   }
 
@@ -176,9 +176,10 @@ bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
   bool expected_read_only = mode == Mode::kReadOnly;
 
   if (is_read_only != expected_read_only) {
-    DLOG(ERROR) << "VMO object has wrong access rights: it is"
-                << (is_read_only ? " " : " not ") << "read-only but it should"
-                << (expected_read_only ? " " : " not ") << "be";
+    // TODO(crbug.com/838365): convert to DLOG when bug fixed.
+    LOG(ERROR) << "VMO object has wrong access rights: it is"
+               << (is_read_only ? " " : " not ") << "read-only but it should"
+               << (expected_read_only ? " " : " not ") << "be";
     return false;
   }
 

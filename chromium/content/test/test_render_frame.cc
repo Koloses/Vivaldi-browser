@@ -47,6 +47,11 @@ class MockFrameHost : public mojom::FrameHost {
     return std::move(last_document_interface_broker_request_);
   }
 
+  void SetDidAddMessageToConsoleCallback(
+      base::OnceCallback<void(const base::string16& msg)> callback) {
+    did_add_message_to_console_callback_ = std::move(callback);
+  }
+
   // Holds on to the request end of the InterfaceProvider interface whose client
   // end is bound to the corresponding RenderFrame's |remote_interfaces_| to
   // facilitate retrieving the most recent |interface_provider_request| in
@@ -82,6 +87,13 @@ class MockFrameHost : public mojom::FrameHost {
     }
   }
 
+  void TransferUserActivationFrom(int32_t source_routing_id) override {}
+
+  void ShowCreatedWindow(int32_t pending_widget_routing_id,
+                         WindowOpenDisposition disposition,
+                         const gfx::Rect& initial_rect,
+                         bool user_gesture) override {}
+
  protected:
   // mojom::FrameHost:
   void CreateNewWindow(mojom::CreateNewWindowParamsPtr,
@@ -100,9 +112,17 @@ class MockFrameHost : public mojom::FrameHost {
     return true;
   }
 
-  void CreatePortal(blink::mojom::PortalRequest request,
+  void CreatePortal(mojo::PendingAssociatedReceiver<blink::mojom::Portal>,
+                    mojo::PendingAssociatedRemote<blink::mojom::PortalClient>,
                     CreatePortalCallback callback) override {
-    std::move(callback).Run(MSG_ROUTING_NONE, base::UnguessableToken());
+    std::move(callback).Run(MSG_ROUTING_NONE, base::UnguessableToken(),
+                            base::UnguessableToken());
+  }
+
+  void AdoptPortal(const base::UnguessableToken&,
+                   AdoptPortalCallback callback) override {
+    std::move(callback).Run(MSG_ROUTING_NONE, FrameReplicationState(),
+                            base::UnguessableToken());
   }
 
   void IssueKeepAliveHandle(mojom::KeepAliveHandleRequest request) override {}
@@ -112,8 +132,6 @@ class MockFrameHost : public mojom::FrameHost {
       override {
     last_commit_params_ = std::move(params);
   }
-
-  void JavaScriptExecuteResponse(int id, base::Value result) override {}
 
   void BeginNavigation(const CommonNavigationParams& common_params,
                        mojom::BeginNavigationParamsPtr begin_params,
@@ -141,13 +159,39 @@ class MockFrameHost : public mojom::FrameHost {
 
   void CancelInitialHistoryLoad() override {}
 
+  void DocumentOnLoadCompleted() override {}
+
   void UpdateEncoding(const std::string& encoding_name) override {}
 
   void FrameSizeChanged(const gfx::Size& frame_size) override {}
 
   void FullscreenStateChanged(bool is_fullscreen) override {}
 
+  void LifecycleStateChanged(blink::mojom::FrameLifecycleState state) override {
+  }
+
   void VisibilityChanged(blink::mojom::FrameVisibility visibility) override {}
+
+  void UpdateActiveSchedulerTrackedFeatures(uint64_t features_mask) override {}
+
+  void DidAddMessageToConsole(blink::mojom::ConsoleMessageLevel log_level,
+                              const base::string16& msg,
+                              int32_t line_number,
+                              const base::string16& source_id) override {
+    if (did_add_message_to_console_callback_) {
+      std::move(did_add_message_to_console_callback_).Run(msg);
+    }
+  }
+
+  void DidFailProvisionalLoadWithError(
+      const GURL& url,
+      int error_code,
+      const base::string16& error_description,
+      bool showing_repost_interstitial) override {}
+
+  void DidFailLoadWithError(const GURL& url,
+                            int error_code,
+                            const base::string16& error_description) override {}
 
 #if defined(OS_ANDROID)
   void UpdateUserGestureCarryoverInfo() override {}
@@ -160,6 +204,9 @@ class MockFrameHost : public mojom::FrameHost {
       last_interface_provider_request_;
   blink::mojom::DocumentInterfaceBrokerRequest
       last_document_interface_broker_request_;
+
+  base::OnceCallback<void(const base::string16& msg)>
+      did_add_message_to_console_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(MockFrameHost);
 };
@@ -194,22 +241,27 @@ void TestRenderFrame::Navigate(const network::ResourceResponseHead& head,
                                const CommonNavigationParams& common_params,
                                const CommitNavigationParams& commit_params) {
   if (!IsPerNavigationMojoInterfaceEnabled()) {
-    CommitNavigation(head, common_params, commit_params,
+    CommitNavigation(common_params, commit_params, head,
+                     mojo::ScopedDataPipeConsumerHandle(),
                      network::mojom::URLLoaderClientEndpointsPtr(),
                      std::make_unique<blink::URLLoaderFactoryBundleInfo>(),
                      base::nullopt,
                      blink::mojom::ControllerServiceWorkerInfoPtr(),
-                     network::mojom::URLLoaderFactoryPtr(),
+                     blink::mojom::ServiceWorkerProviderInfoForClientPtr(),
+                     mojo::NullRemote() /* prefetch_loader_factory */,
                      base::UnguessableToken::Create(), base::DoNothing());
   } else {
     BindNavigationClient(
         mojo::MakeRequestAssociatedWithDedicatedPipe(&mock_navigation_client_));
     CommitPerNavigationMojoInterfaceNavigation(
-        head, common_params, commit_params,
+        common_params, commit_params, head,
+        mojo::ScopedDataPipeConsumerHandle(),
         network::mojom::URLLoaderClientEndpointsPtr(),
         std::make_unique<blink::URLLoaderFactoryBundleInfo>(), base::nullopt,
         blink::mojom::ControllerServiceWorkerInfoPtr(),
-        network::mojom::URLLoaderFactoryPtr(), base::UnguessableToken::Create(),
+        blink::mojom::ServiceWorkerProviderInfoForClientPtr(),
+        mojo::NullRemote() /* prefetch_loader_factory */,
+        base::UnguessableToken::Create(),
         base::BindOnce(&MockFrameHost::DidCommitProvisionalLoad,
                        base::Unretained(mock_frame_host_.get())));
   }
@@ -298,7 +350,7 @@ void TestRenderFrame::BeginNavigation(
     GURL url = info->url_request.Url();
     auto navigation_params = std::make_unique<blink::WebNavigationParams>();
     navigation_params->url = url;
-    if (!url.IsAboutBlank() && url != content::kAboutSrcDocURL) {
+    if (!url.IsAboutBlank() && !url.IsAboutSrcdoc()) {
       std::string mime_type, charset, data;
       if (!net::DataURL::Parse(url, &mime_type, &charset, &data)) {
         // This case is only here to allow cluster fuzz pass any url,
@@ -320,6 +372,11 @@ void TestRenderFrame::BeginNavigation(
 std::unique_ptr<FrameHostMsg_DidCommitProvisionalLoad_Params>
 TestRenderFrame::TakeLastCommitParams() {
   return mock_frame_host_->TakeLastCommitParams();
+}
+
+void TestRenderFrame::SetDidAddMessageToConsoleCallback(
+    base::OnceCallback<void(const base::string16& msg)> callback) {
+  mock_frame_host_->SetDidAddMessageToConsoleCallback(std::move(callback));
 }
 
 service_manager::mojom::InterfaceProviderRequest

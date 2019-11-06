@@ -14,6 +14,7 @@
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "components/url_formatter/elide_url.h"
+#include "content/app/strings/grit/content_strings.h"
 #include "content/browser/media/session/audio_focus_delegate.h"
 #include "content/browser/media/session/media_session_controller.h"
 #include "content/browser/media/session/media_session_player_observer.h"
@@ -23,10 +24,13 @@
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/favicon_url.h"
 #include "media/base/media_content_type.h"
 #include "services/media_session/public/cpp/media_image_manager.h"
 #include "services/media_session/public/mojom/audio_focus.mojom.h"
-#include "third_party/blink/public/platform/modules/mediasession/media_session.mojom.h"
+#include "third_party/blink/public/mojom/mediasession/media_session.mojom.h"
+#include "ui/gfx/favicon_size.h"
 
 #if defined(OS_ANDROID)
 #include "content/browser/media/session/media_session_android.h"
@@ -90,7 +94,11 @@ MediaSessionUserAction MediaSessionActionToUserAction(
     case media_session::mojom::MediaSessionAction::kSkipAd:
       return MediaSessionUserAction::SkipAd;
     case media_session::mojom::MediaSessionAction::kStop:
-      break;
+      return MediaSessionUserAction::Stop;
+    case media_session::mojom::MediaSessionAction::kSeekTo:
+      return MediaSessionUserAction::SeekTo;
+    case media_session::mojom::MediaSessionAction::kScrubTo:
+      return MediaSessionUserAction::ScrubTo;
   }
   NOTREACHED();
   return MediaSessionUserAction::Play;
@@ -105,6 +113,12 @@ void MaybePushBackString(std::vector<std::string>& vector,
 
 bool IsSizeAtLeast(const gfx::Size& size, int min_size) {
   return size.width() >= min_size || size.height() >= min_size;
+}
+
+base::string16 SanitizeMediaTitle(const base::string16 title) {
+  base::string16 out;
+  base::TrimString(title, base::ASCIIToUTF16(" "), &out);
+  return out;
 }
 
 }  // anonymous namespace
@@ -204,6 +218,49 @@ void MediaSessionImpl::OnWebContentsFocused(RenderWidgetHost*) {
 
 void MediaSessionImpl::OnWebContentsLostFocus(RenderWidgetHost*) {
   focused_ = false;
+}
+
+void MediaSessionImpl::TitleWasSet(NavigationEntry* entry) {
+  RebuildAndNotifyMetadataChanged();
+}
+
+void MediaSessionImpl::DidUpdateFaviconURL(
+    const std::vector<FaviconURL>& candidates) {
+  std::vector<media_session::MediaImage> icons;
+
+  for (auto& icon : candidates) {
+    // We only want either favicons or the touch icons. There is another type of
+    // touch icon which is "precomposed". This means it might have rounded
+    // corners, etc. but it is not predictable so we cannot show them in the UI.
+    if (icon.icon_type != FaviconURL::IconType::kFavicon &&
+        icon.icon_type != FaviconURL::IconType::kTouchIcon) {
+      continue;
+    }
+
+    std::vector<gfx::Size> sizes = icon.icon_sizes;
+
+    // If we are a favicon and we do not have a size then we should assume the
+    // default size for favicons.
+    if (icon.icon_type == FaviconURL::IconType::kFavicon && sizes.empty())
+      sizes.push_back(gfx::Size(gfx::kFaviconSize, gfx::kFaviconSize));
+
+    if (sizes.empty() || !icon.icon_url.is_valid())
+      continue;
+
+    media_session::MediaImage image;
+    image.src = icon.icon_url;
+    image.sizes = sizes;
+    icons.push_back(image);
+  }
+
+  auto it = images_.find(MediaSessionImageType::kSourceIcon);
+  if (it != images_.end() && it->second == icons)
+    return;
+
+  images_.insert_or_assign(MediaSessionImageType::kSourceIcon, icons);
+
+  for (auto& observer : observers_)
+    observer->MediaSessionImagesChanged(this->images_);
 }
 
 bool MediaSessionImpl::AddPlayer(MediaSessionPlayerObserver* observer,
@@ -419,8 +476,14 @@ void MediaSessionImpl::Stop(SuspendType suspend_type) {
   DCHECK(!HasPepper());
 
   if (suspend_type == SuspendType::kUI) {
-    MediaSessionUmaHelper::RecordMediaSessionUserAction(
-        MediaSessionUmaHelper::MediaSessionUserAction::StopDefault, focused_);
+    // If the site has registered an action handle for stop then we should
+    // notify the site but continue stopping the media session.
+    if (ShouldRouteAction(media_session::mojom::MediaSessionAction::kStop)) {
+      DidReceiveAction(media_session::mojom::MediaSessionAction::kStop);
+    } else {
+      MediaSessionUmaHelper::RecordMediaSessionUserAction(
+          MediaSessionUmaHelper::MediaSessionUserAction::StopDefault, focused_);
+    }
   }
 
   // TODO(mlamouri): merge the logic between UI and SYSTEM.
@@ -774,16 +837,24 @@ void MediaSessionImpl::GetMediaSessionInfo(
 }
 
 void MediaSessionImpl::AddObserver(
-    media_session::mojom::MediaSessionObserverPtr observer) {
-  observer->MediaSessionInfoChanged(GetMediaSessionInfoSync());
-  observer->MediaSessionMetadataChanged(metadata_);
-  observer->MediaSessionImagesChanged(images_);
+    mojo::PendingRemote<media_session::mojom::MediaSessionObserver> observer) {
+  mojo::Remote<media_session::mojom::MediaSessionObserver>
+      media_session_observer(std::move(observer));
+  media_session_observer->MediaSessionInfoChanged(GetMediaSessionInfoSync());
+  media_session_observer->MediaSessionMetadataChanged(metadata_);
+  media_session_observer->MediaSessionImagesChanged(images_);
 
   std::vector<media_session::mojom::MediaSessionAction> actions(
       actions_.begin(), actions_.end());
-  observer->MediaSessionActionsChanged(actions);
+  media_session_observer->MediaSessionActionsChanged(actions);
 
-  observers_.AddPtr(std::move(observer));
+  // TODO(crbug.com/985394): Use real position data here, this is mock data.
+  media_session::MediaPosition media_position(
+      1 /* playback_rate */, base::TimeDelta::FromSeconds(600) /* duration */,
+      base::TimeDelta::FromSeconds(300) /* position */);
+  media_session_observer->MediaSessionPositionChanged(media_position);
+
+  observers_.Add(std::move(media_session_observer));
 }
 
 void MediaSessionImpl::FinishSystemAudioFocusRequest(
@@ -798,7 +869,7 @@ void MediaSessionImpl::FinishSystemAudioFocusRequest(
 
   OnSystemAudioFocusRequested(result);
 
-  if (!result) {
+  if (!result && !HasPepper()) {
     switch (audio_focus_type) {
       case AudioFocusType::kGain:
         // If the gain audio focus request failed then we should suspend the
@@ -842,7 +913,7 @@ void MediaSessionImpl::GetMediaImageBitmap(
   // We should make sure |image| is in |images_|.
   bool found = false;
   for (auto& image_type : images_)
-    found = found || base::ContainsValue(image_type.second, image);
+    found = found || base::Contains(image_type.second, image);
 
   // Check that |image.sizes| contains a size that is above the minimum size.
   bool check_size = false;
@@ -906,10 +977,8 @@ void MediaSessionImpl::RebuildAndNotifyMediaSessionInfoChanged() {
   if (current_info == session_info_)
     return;
 
-  observers_.ForAllPtrs(
-      [&current_info](media_session::mojom::MediaSessionObserver* observer) {
-        observer->MediaSessionInfoChanged(current_info.Clone());
-      });
+  for (auto& observer : observers_)
+    observer->MediaSessionInfoChanged(current_info.Clone());
 
   delegate_->MediaSessionInfoChanged(current_info.Clone());
 
@@ -920,7 +989,9 @@ bool MediaSessionImpl::AddPepperPlayer(MediaSessionPlayerObserver* observer,
                                        int player_id) {
   AudioFocusDelegate::AudioFocusResult result =
       RequestSystemAudioFocus(AudioFocusType::kGain);
-  DCHECK_NE(AudioFocusDelegate::AudioFocusResult::kFailed, result);
+
+  if (result == AudioFocusDelegate::AudioFocusResult::kFailed)
+    return false;
 
   pepper_players_.insert(PlayerIdentifier(observer, player_id));
 
@@ -1031,7 +1102,7 @@ void MediaSessionImpl::DidReceiveAction(
   if (!routed_service_)
     return;
 
-  routed_service_->GetClient()->DidReceiveAction(action);
+  routed_service_->GetClient()->DidReceiveAction(action, nullptr /* details */);
 }
 
 bool MediaSessionImpl::IsServiceActiveForRenderFrameHost(RenderFrameHost* rfh) {
@@ -1094,8 +1165,7 @@ MediaSessionServiceImpl* MediaSessionImpl::ComputeServiceForRouting() {
 
 bool MediaSessionImpl::ShouldRouteAction(
     media_session::mojom::MediaSessionAction action) const {
-  return routed_service_ &&
-         base::ContainsKey(routed_service_->actions(), action);
+  return routed_service_ && base::Contains(routed_service_->actions(), action);
 }
 
 void MediaSessionImpl::RebuildAndNotifyActionsChanged() {
@@ -1126,10 +1196,8 @@ void MediaSessionImpl::RebuildAndNotifyActionsChanged() {
 
   std::vector<media_session::mojom::MediaSessionAction> actions_vec(
       actions.begin(), actions.end());
-  observers_.ForAllPtrs(
-      [&actions_vec](media_session::mojom::MediaSessionObserver* observer) {
-        observer->MediaSessionActionsChanged(actions_vec);
-      });
+  for (auto& observer : observers_)
+    observer->MediaSessionActionsChanged(actions_vec);
 }
 
 void MediaSessionImpl::RebuildAndNotifyMetadataChanged() {
@@ -1143,8 +1211,24 @@ void MediaSessionImpl::RebuildAndNotifyMetadataChanged() {
     artwork = routed_service_->metadata()->artwork;
   }
 
-  metadata.source_title = url_formatter::FormatOriginForSecurityDisplay(
-      url::Origin::Create(web_contents()->GetLastCommittedURL()));
+  if (metadata.title.empty())
+    metadata.title = SanitizeMediaTitle(web_contents()->GetTitle());
+
+  ContentClient* content_client = content::GetContentClient();
+  const GURL& url = web_contents()->GetLastCommittedURL();
+
+  // If the url is a file then we should display a placeholder.
+  base::string16 formatted_origin =
+      url.SchemeIsFile()
+          ? content_client->GetLocalizedString(IDS_MEDIA_SESSION_FILE_SOURCE)
+          : url_formatter::FormatOriginForSecurityDisplay(
+                url::Origin::Create(url));
+
+  if (metadata.artist.empty()) {
+    metadata.artist = formatted_origin;
+  } else {
+    metadata.source_title = formatted_origin;
+  }
 
   // If we have no artwork in |images_| or the arwork has changed then we should
   // update it with the latest artwork from the routed service.
@@ -1159,16 +1243,13 @@ void MediaSessionImpl::RebuildAndNotifyMetadataChanged() {
 
   if (!images_changed && !metadata_changed)
     return;
+  for (auto& observer : observers_) {
+    if (metadata_changed)
+      observer->MediaSessionMetadataChanged(this->metadata_);
 
-  observers_.ForAllPtrs(
-      [this, metadata_changed,
-       images_changed](media_session::mojom::MediaSessionObserver* observer) {
-        if (metadata_changed)
-          observer->MediaSessionMetadataChanged(this->metadata_);
-
-        if (images_changed)
-          observer->MediaSessionImagesChanged(this->images_);
-      });
+    if (images_changed)
+      observer->MediaSessionImagesChanged(this->images_);
+  }
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(MediaSessionImpl)

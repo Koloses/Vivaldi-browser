@@ -46,7 +46,8 @@ void ResourceResponseReceived(
     int request_id,
     const GURL& response_url,
     const network::ResourceResponseHead& response_head,
-    content::ResourceType resource_type) {
+    content::ResourceType resource_type,
+    PreviewsState previews_state) {
   RenderFrameImpl* frame = RenderFrameImpl::FromRoutingID(render_frame_id);
   if (!frame)
     return;
@@ -55,7 +56,7 @@ void ResourceResponseReceived(
         response_url, response_head.cert_status);
   }
   frame->DidStartResponse(response_url, request_id, response_head,
-                          resource_type);
+                          resource_type, previews_state);
 }
 
 void ResourceTransferSizeUpdated(int render_frame_id,
@@ -105,7 +106,8 @@ mojom::ResourceLoadInfoPtr NotifyResourceLoadInitiated(
     const GURL& request_url,
     const std::string& http_method,
     const GURL& referrer,
-    ResourceType resource_type) {
+    ResourceType resource_type,
+    net::RequestPriority request_priority) {
   auto resource_load_info = mojom::ResourceLoadInfo::New();
   resource_load_info->method = http_method;
   resource_load_info->original_url = request_url;
@@ -114,6 +116,7 @@ mojom::ResourceLoadInfoPtr NotifyResourceLoadInitiated(
   resource_load_info->request_id = request_id;
   resource_load_info->referrer = referrer;
   resource_load_info->network_info = mojom::CommonNetworkInfo::New();
+  resource_load_info->request_priority = request_priority;
   return resource_load_info;
 }
 
@@ -141,9 +144,10 @@ void NotifyResourceRedirectReceived(
 void NotifyResourceResponseReceived(
     int render_frame_id,
     mojom::ResourceLoadInfo* resource_load_info,
-    const network::ResourceResponseHead& response_head) {
+    const network::ResourceResponseHead& response_head,
+    PreviewsState previews_state) {
   if (response_head.network_accessed) {
-    if (resource_load_info->resource_type == RESOURCE_TYPE_MAIN_FRAME) {
+    if (resource_load_info->resource_type == ResourceType::kMainFrame) {
       UMA_HISTOGRAM_ENUMERATION("Net.ConnectionInfo.MainFrame",
                                 response_head.connection_info,
                                 net::HttpResponseInfo::NUM_OF_CONNECTION_INFOS);
@@ -169,7 +173,7 @@ void NotifyResourceResponseReceived(
   if (task_runner->BelongsToCurrentThread()) {
     ResourceResponseReceived(render_frame_id, resource_load_info->request_id,
                              resource_load_info->url, response_head,
-                             resource_load_info->resource_type);
+                             resource_load_info->resource_type, previews_state);
     return;
   }
 
@@ -182,7 +186,7 @@ void NotifyResourceResponseReceived(
       base::BindOnce(ResourceResponseReceived, render_frame_id,
                      resource_load_info->request_id, resource_load_info->url,
                      deep_copied_response->head,
-                     resource_load_info->resource_type));
+                     resource_load_info->resource_type, previews_state));
 }
 
 void NotifyResourceTransferSizeUpdated(

@@ -24,13 +24,17 @@ class RemoveQueryConfirmationDialog
   // associated result.
   using RemovalConfirmationCallback = base::OnceCallback<void(bool, int)>;
 
-  RemoveQueryConfirmationDialog(RemovalConfirmationCallback callback,
+  RemoveQueryConfirmationDialog(const base::string16& query,
+                                RemovalConfirmationCallback callback,
                                 int event_flgas,
                                 ContentsView* contents_view);
   ~RemoveQueryConfirmationDialog() override;
 
   // Shows the dialog with |parent|.
   void Show(gfx::NativeWindow parent);
+
+  // views::View:
+  const char* GetClassName() const override;
 
  private:
   // views::WidgetDelegate:
@@ -48,6 +52,7 @@ class RemoveQueryConfirmationDialog
 
   // ContentsView::SearchBoxUpdateObserver
   void OnSearchBoxBoundsUpdated() override;
+  void OnSearchBoxClearAndDeactivated() override;
 
   void UpdateBounds();
 

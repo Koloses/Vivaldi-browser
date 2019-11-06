@@ -146,13 +146,16 @@ class CORE_EXPORT LayoutTableSection final : public LayoutTableBoxComponent {
   };
 
   TableGridCell& GridCellAt(unsigned row, unsigned effective_column) {
+    SECURITY_DCHECK(!needs_cell_recalc_);
     return grid_[row].grid_cells[effective_column];
   }
   const TableGridCell& GridCellAt(unsigned row,
                                   unsigned effective_column) const {
+    SECURITY_DCHECK(!needs_cell_recalc_);
     return grid_[row].grid_cells[effective_column];
   }
   LayoutTableCell* PrimaryCellAt(unsigned row, unsigned effective_column) {
+    SECURITY_DCHECK(!needs_cell_recalc_);
     auto& grid_cells = grid_[row].grid_cells;
     if (effective_column >= grid_cells.size())
       return nullptr;
@@ -173,12 +176,19 @@ class CORE_EXPORT LayoutTableSection final : public LayoutTableBoxComponent {
         row, effective_column);
   }
 
-  unsigned NumCols(unsigned row) const { return grid_[row].grid_cells.size(); }
+  unsigned NumCols(unsigned row) const {
+    DCHECK(!NeedsCellRecalc());
+    return grid_[row].grid_cells.size();
+  }
 
   // Returns null for cells with a rowspan that exceed the last row. Possibly
   // others.
-  LayoutTableRow* RowLayoutObjectAt(unsigned row) { return grid_[row].row; }
+  LayoutTableRow* RowLayoutObjectAt(unsigned row) {
+    SECURITY_DCHECK(!needs_cell_recalc_);
+    return grid_[row].row;
+  }
   const LayoutTableRow* RowLayoutObjectAt(unsigned row) const {
+    SECURITY_DCHECK(!needs_cell_recalc_);
     return grid_[row].row;
   }
 
@@ -229,7 +239,7 @@ class CORE_EXPORT LayoutTableSection final : public LayoutTableBoxComponent {
 
   // Flip the rect so it aligns with the coordinates used by the rowPos and
   // columnPos vectors.
-  LayoutRect LogicalRectForWritingModeAndDirection(const LayoutRect&) const;
+  LayoutRect LogicalRectForWritingModeAndDirection(const PhysicalRect&) const;
 
   // Sets |rows| and |columns| to cover all cells needing repaint in
   // |damage_rect|.
@@ -250,11 +260,11 @@ class CORE_EXPORT LayoutTableSection final : public LayoutTableBoxComponent {
   // Whether a section has opaque background depends on many factors, e.g.
   // border spacing, border collapsing, missing cells, etc. For simplicity,
   // just conservatively assume all table sections are not opaque.
-  bool ForegroundIsKnownToBeOpaqueInRect(const LayoutRect&,
+  bool ForegroundIsKnownToBeOpaqueInRect(const PhysicalRect&,
                                          unsigned) const override {
     return false;
   }
-  bool BackgroundIsKnownToBeOpaqueInRect(const LayoutRect&) const override {
+  bool BackgroundIsKnownToBeOpaqueInRect(const PhysicalRect&) const override {
     return false;
   }
 
@@ -296,8 +306,8 @@ class CORE_EXPORT LayoutTableSection final : public LayoutTableBoxComponent {
  protected:
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   bool NodeAtPoint(HitTestResult&,
-                   const HitTestLocation& location_in_container,
-                   const LayoutPoint& accumulated_offset,
+                   const HitTestLocation&,
+                   const PhysicalOffset& accumulated_offset,
                    HitTestAction) override;
 
  private:

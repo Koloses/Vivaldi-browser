@@ -12,7 +12,6 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "chrome/browser/page_load_metrics/browser_page_track_decider.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_embedder_interface.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_update_dispatcher.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
@@ -21,6 +20,7 @@
 #include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_request_id.h"
+#include "content/public/browser/media_player_id.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -32,12 +32,22 @@
 #include "content/public/common/resource_load_info.mojom.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "services/network/public/cpp/features.h"
 #include "ui/base/page_transition_types.h"
 
 namespace page_load_metrics {
 
 namespace {
+
+// Returns the HTTP status code for the current page, or -1 if no status code
+// is available. Can only be called if the |navigation_handle| has committed.
+int GetHttpStatusCode(content::NavigationHandle* navigation_handle) {
+  DCHECK(navigation_handle->HasCommitted());
+  const net::HttpResponseHeaders* response_headers =
+      navigation_handle->GetResponseHeaders();
+  if (!response_headers)
+    return -1;
+  return response_headers->response_code();
+}
 
 content::RenderFrameHost* GetMainFrame(content::RenderFrameHost* rfh) {
   // Don't use rfh->GetRenderViewHost()->GetMainFrame() here because
@@ -156,7 +166,7 @@ void MetricsWebContentsObserver::FrameDeleted(content::RenderFrameHost* rfh) {
 
 void MetricsWebContentsObserver::MediaStartedPlaying(
     const content::WebContentsObserver::MediaPlayerInfo& video_type,
-    const content::WebContentsObserver::MediaPlayerId& id) {
+    const content::MediaPlayerId& id) {
   if (GetMainFrame(id.render_frame_host) != web_contents()->GetMainFrame()) {
     // Ignore media that starts playing in a document that was navigated away
     // from.
@@ -242,7 +252,7 @@ PageLoadTracker* MetricsWebContentsObserver::GetTrackerOrNullForRequest(
     content::RenderFrameHost* render_frame_host_or_null,
     content::ResourceType resource_type,
     base::TimeTicks creation_time) {
-  if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
+  if (resource_type == content::ResourceType::kMainFrame) {
     DCHECK(request_id != content::GlobalRequestID());
     // The main frame request can complete either before or after commit, so we
     // look at both provisional loads and the committed load to find a
@@ -271,7 +281,7 @@ PageLoadTracker* MetricsWebContentsObserver::GetTrackerOrNullForRequest(
     // TODO(bmcquade): consider tracking GlobalRequestIDs for sub-frame
     // navigations in each PageLoadTracker, and performing a lookup for
     // sub-frames similar to the main-frame lookup above.
-    if (resource_type == content::RESOURCE_TYPE_SUB_FRAME)
+    if (resource_type == content::ResourceType::kSubFrame)
       return committed_load_.get();
 
     // This was originally a DCHECK but it fails when the document load happened
@@ -301,8 +311,6 @@ void MetricsWebContentsObserver::ResourceLoadComplete(
     content::RenderFrameHost* render_frame_host,
     const content::GlobalRequestID& request_id,
     const content::mojom::ResourceLoadInfo& resource_load_info) {
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
-    return;
 
   if (!resource_load_info.url.SchemeIsHTTPOrHTTPS())
     return;
@@ -356,37 +364,24 @@ void MetricsWebContentsObserver::FrameSizeChanged(
     committed_load_->FrameSizeChanged(render_frame_host, frame_size);
 }
 
-void MetricsWebContentsObserver::OnRequestComplete(
+void MetricsWebContentsObserver::OnCookiesRead(
     const GURL& url,
-    const net::IPEndPoint& remote_endpoint,
-    int frame_tree_node_id,
-    const content::GlobalRequestID& request_id,
-    content::RenderFrameHost* render_frame_host_or_null,
-    content::ResourceType resource_type,
-    bool was_cached,
-    std::unique_ptr<data_reduction_proxy::DataReductionProxyData>
-        data_reduction_proxy_data,
-    int64_t raw_body_bytes,
-    int64_t original_content_length,
-    base::TimeTicks creation_time,
-    int net_error,
-    std::unique_ptr<net::LoadTimingInfo> load_timing_info) {
-  DCHECK(!base::FeatureList::IsEnabled(network::features::kNetworkService));
+    const GURL& first_party_url,
+    const net::CookieList& cookie_list,
+    bool blocked_by_policy) {
+  if (committed_load_)
+    committed_load_->OnCookiesRead(url, first_party_url, cookie_list,
+                                   blocked_by_policy);
+}
 
-  // Ignore non-HTTP(S) resources (blobs, data uris, etc).
-  if (!url.SchemeIsHTTPOrHTTPS())
-    return;
-
-  PageLoadTracker* tracker = GetTrackerOrNullForRequest(
-      request_id, render_frame_host_or_null, resource_type, creation_time);
-  if (tracker) {
-    ExtraRequestCompleteInfo extra_request_complete_info(
-        url, remote_endpoint, frame_tree_node_id, was_cached, raw_body_bytes,
-        was_cached ? 0 : original_content_length,
-        std::move(data_reduction_proxy_data), resource_type, net_error,
-        std::move(load_timing_info));
-    tracker->OnLoadedResource(extra_request_complete_info);
-  }
+void MetricsWebContentsObserver::OnCookieChange(
+    const GURL& url,
+    const GURL& first_party_url,
+    const net::CanonicalCookie& cookie,
+    bool blocked_by_policy) {
+  if (committed_load_)
+    committed_load_->OnCookieChange(url, first_party_url, cookie,
+                                    blocked_by_policy);
 }
 
 const PageLoadExtraInfo
@@ -678,8 +673,9 @@ void MetricsWebContentsObserver::OnTimingUpdated(
     mojom::PageLoadMetadataPtr metadata,
     mojom::PageLoadFeaturesPtr new_features,
     const std::vector<mojom::ResourceDataUpdatePtr>& resources,
-    mojom::PageRenderDataPtr render_data,
-    mojom::CpuTimingPtr cpu_timing) {
+    mojom::FrameRenderDataUpdatePtr render_data,
+    mojom::CpuTimingPtr cpu_timing,
+    mojom::DeferredResourceCountsPtr new_deferred_resource_data) {
   // We may receive notifications from frames that have been navigated away
   // from. We simply ignore them.
   if (GetMainFrame(render_frame_host) != web_contents()->GetMainFrame()) {
@@ -714,7 +710,7 @@ void MetricsWebContentsObserver::OnTimingUpdated(
     committed_load_->metrics_update_dispatcher()->UpdateMetrics(
         render_frame_host, std::move(timing), std::move(metadata),
         std::move(new_features), resources, std::move(render_data),
-        std::move(cpu_timing));
+        std::move(cpu_timing), std::move(new_deferred_resource_data));
   }
 }
 
@@ -723,13 +719,14 @@ void MetricsWebContentsObserver::UpdateTiming(
     mojom::PageLoadMetadataPtr metadata,
     mojom::PageLoadFeaturesPtr new_features,
     std::vector<mojom::ResourceDataUpdatePtr> resources,
-    mojom::PageRenderDataPtr render_data,
-    mojom::CpuTimingPtr cpu_timing) {
+    mojom::FrameRenderDataUpdatePtr render_data,
+    mojom::CpuTimingPtr cpu_timing,
+    mojom::DeferredResourceCountsPtr new_deferred_resource_data) {
   content::RenderFrameHost* render_frame_host =
       page_load_metrics_binding_.GetCurrentTargetFrame();
   OnTimingUpdated(render_frame_host, std::move(timing), std::move(metadata),
                   std::move(new_features), resources, std::move(render_data),
-                  std::move(cpu_timing));
+                  std::move(cpu_timing), std::move(new_deferred_resource_data));
 }
 
 bool MetricsWebContentsObserver::ShouldTrackNavigation(
@@ -737,9 +734,33 @@ bool MetricsWebContentsObserver::ShouldTrackNavigation(
   DCHECK(navigation_handle->IsInMainFrame());
   DCHECK(!navigation_handle->HasCommitted() ||
          !navigation_handle->IsSameDocument());
+  // If there is an outer WebContents, then this WebContents is embedded into
+  // another one (it is either a portal or a Chrome App <webview>). Ignore these
+  // navigations for now.
+  if (web_contents()->GetOuterWebContents())
+    return false;
 
-  return BrowserPageTrackDecider(embedder_interface_.get(), navigation_handle)
-      .ShouldTrack();
+  // Ignore non-HTTP schemes (e.g. chrome://).
+  if (!navigation_handle->GetURL().SchemeIsHTTPOrHTTPS())
+    return false;
+
+  // Ignore NTP loads.
+  if (embedder_interface_->IsNewTabPageUrl(navigation_handle->GetURL()))
+    return false;
+
+  if (navigation_handle->HasCommitted()) {
+    // Ignore Chrome error pages (e.g. No Internet connection).
+    if (navigation_handle->IsErrorPage())
+      return false;
+
+    // Ignore network error pages (e.g. 4xx, 5xx).
+    int http_status_code = GetHttpStatusCode(navigation_handle);
+    if (http_status_code > 0 &&
+        (http_status_code < 200 || http_status_code >= 400))
+      return false;
+  }
+
+  return true;
 }
 
 void MetricsWebContentsObserver::OnBrowserFeatureUsage(

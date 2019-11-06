@@ -75,14 +75,12 @@ const extensions::Extension* GetExtensionForTab(Profile* profile,
 
   // Bookmark app windows should match their launch url extension despite
   // their web extents.
-  if (extensions::util::IsNewBookmarkAppsEnabled()) {
-    for (const auto& i : extensions) {
-      if (i.get()->from_bookmark() &&
-          extensions::IsInNavigationScopeForLaunchUrl(
-              extensions::AppLaunchInfo::GetLaunchWebURL(i.get()), url) &&
-          !extensions::LaunchesInWindow(profile, i.get())) {
-        return i.get();
-      }
+  for (const auto& i : extensions) {
+    if (i.get()->from_bookmark() &&
+        extensions::IsInNavigationScopeForLaunchUrl(
+            extensions::AppLaunchInfo::GetLaunchWebURL(i.get()), url) &&
+        !extensions::LaunchesInWindow(profile, i.get())) {
+      return i.get();
     }
   }
   return nullptr;
@@ -254,8 +252,8 @@ void LauncherControllerHelper::LaunchApp(const ash::ShelfID& id,
 
   // The app will be created for the currently active profile.
   AppLaunchParams params = CreateAppLaunchParamsWithEventFlags(
-      profile_, extension, event_flags, extensions::SOURCE_APP_LAUNCHER,
-      display_id);
+      profile_, extension, event_flags,
+      extensions::AppLaunchSource::kSourceAppLauncher, display_id);
   if ((source == ash::LAUNCH_FROM_APP_LIST ||
        source == ash::LAUNCH_FROM_APP_LIST_SEARCH) &&
       app_id == extensions::kWebStoreAppId) {

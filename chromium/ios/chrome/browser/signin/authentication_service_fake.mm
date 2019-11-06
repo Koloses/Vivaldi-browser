@@ -12,6 +12,7 @@
 #import "ios/chrome/browser/signin/authentication_service_factory.h"
 #include "ios/chrome/browser/signin/identity_manager_factory.h"
 #include "ios/chrome/browser/sync/profile_sync_service_factory.h"
+#include "ios/chrome/browser/sync/sync_setup_service.h"
 #include "ios/chrome/browser/sync/sync_setup_service_factory.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
 
@@ -22,7 +23,7 @@
 AuthenticationServiceFake::AuthenticationServiceFake(
     PrefService* pref_service,
     SyncSetupService* sync_setup_service,
-    identity::IdentityManager* identity_manager,
+    signin::IdentityManager* identity_manager,
     syncer::SyncService* sync_service)
     : AuthenticationService(pref_service,
                             sync_setup_service,
@@ -32,8 +33,10 @@ AuthenticationServiceFake::AuthenticationServiceFake(
 
 AuthenticationServiceFake::~AuthenticationServiceFake() {}
 
-void AuthenticationServiceFake::SignIn(ChromeIdentity* identity,
-                                       const std::string& hosted_domain) {
+void AuthenticationServiceFake::SignIn(ChromeIdentity* identity) {
+  // Needs to call PrepareForFirstSyncSetup to behave like
+  // AuthenticationService.
+  sync_setup_service_->PrepareForFirstSyncSetup();
   authenticated_identity_ = identity;
 }
 
@@ -49,20 +52,16 @@ void AuthenticationServiceFake::SetHaveAccountsChanged(bool changed) {
   have_accounts_changed_ = changed;
 }
 
-bool AuthenticationServiceFake::HaveAccountsChanged() {
+bool AuthenticationServiceFake::HaveAccountsChanged() const {
   return have_accounts_changed_;
 }
 
-bool AuthenticationServiceFake::IsAuthenticated() {
+bool AuthenticationServiceFake::IsAuthenticated() const {
   return authenticated_identity_ != nil;
 }
 
-ChromeIdentity* AuthenticationServiceFake::GetAuthenticatedIdentity() {
+ChromeIdentity* AuthenticationServiceFake::GetAuthenticatedIdentity() const {
   return authenticated_identity_;
-}
-
-NSString* AuthenticationServiceFake::GetAuthenticatedUserEmail() {
-  return [authenticated_identity_ userEmail];
 }
 
 std::unique_ptr<KeyedService>

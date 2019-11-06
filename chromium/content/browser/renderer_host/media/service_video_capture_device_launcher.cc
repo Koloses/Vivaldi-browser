@@ -4,6 +4,8 @@
 
 #include "content/browser/renderer_host/media/service_video_capture_device_launcher.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/task/post_task.h"
@@ -30,7 +32,7 @@ void ConcludeLaunchDeviceWithSuccess(
       std::make_unique<ServiceLaunchedVideoCaptureDevice>(
           std::move(source), std::move(subscription),
           std::move(connection_lost_cb)));
-  base::ResetAndReturn(&done_cb).Run();
+  std::move(done_cb).Run();
 }
 
 void ConcludeLaunchDeviceWithFailure(
@@ -44,7 +46,7 @@ void ConcludeLaunchDeviceWithFailure(
     callbacks->OnDeviceLaunchAborted();
   else
     callbacks->OnDeviceLaunchFailed(error);
-  base::ResetAndReturn(&done_cb).Run();
+  std::move(done_cb).Run();
 }
 
 }  // anonymous namespace
@@ -62,7 +64,7 @@ ServiceVideoCaptureDeviceLauncher::~ServiceVideoCaptureDeviceLauncher() {
 
 void ServiceVideoCaptureDeviceLauncher::LaunchDeviceAsync(
     const std::string& device_id,
-    blink::MediaStreamType stream_type,
+    blink::mojom::MediaStreamType stream_type,
     const media::VideoCaptureParams& params,
     base::WeakPtr<media::VideoFrameReceiver> receiver,
     base::OnceClosure connection_lost_cb,
@@ -71,8 +73,8 @@ void ServiceVideoCaptureDeviceLauncher::LaunchDeviceAsync(
   DCHECK(sequence_checker_.CalledOnValidSequence());
   DCHECK(state_ == State::READY_TO_LAUNCH);
 
-  if (stream_type != blink::MEDIA_DEVICE_VIDEO_CAPTURE) {
-    // This launcher only supports MEDIA_DEVICE_VIDEO_CAPTURE.
+  if (stream_type != blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE) {
+    // This launcher only supports MediaStreamType::DEVICE_VIDEO_CAPTURE.
     NOTREACHED();
     return;
   }
@@ -181,7 +183,7 @@ void ServiceVideoCaptureDeviceLauncher::OnCreatePushSubscriptionCallback(
         source.reset();
         service_connection_.reset();
         callbacks->OnDeviceLaunchAborted();
-        base::ResetAndReturn(&done_cb_).Run();
+        std::move(done_cb_).Run();
         return;
       }
       ConcludeLaunchDeviceWithSuccess(

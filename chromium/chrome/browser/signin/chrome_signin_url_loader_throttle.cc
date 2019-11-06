@@ -25,12 +25,6 @@ class URLLoaderThrottle::ThrottleRequestAdapter : public ChromeRequestAdapter {
   ~ThrottleRequestAdapter() override = default;
 
   // ChromeRequestAdapter
-  bool IsMainRequestContext(ProfileIOData* io_data) override {
-    // The <webview> check in URLLoaderThrottle::MaybeCreate means this is
-    // always true.
-    return true;
-  }
-
   content::ResourceRequestInfo::WebContentsGetter GetWebContentsGetter()
       const override {
     return throttle_->web_contents_getter_;
@@ -55,11 +49,11 @@ class URLLoaderThrottle::ThrottleRequestAdapter : public ChromeRequestAdapter {
   bool HasHeader(const std::string& name) override {
     return (original_headers_.HasHeader(name) ||
             modified_headers_->HasHeader(name)) &&
-           !base::ContainsValue(*headers_to_remove_, name);
+           !base::Contains(*headers_to_remove_, name);
   }
 
   void RemoveRequestHeaderByName(const std::string& name) override {
-    if (!base::ContainsValue(*headers_to_remove_, name))
+    if (!base::Contains(*headers_to_remove_, name))
       headers_to_remove_->push_back(name);
   }
 
@@ -98,7 +92,7 @@ class URLLoaderThrottle::ThrottleResponseAdapter : public ResponseAdapter {
 
   bool IsMainFrame() const override {
     return throttle_->request_resource_type_ ==
-           content::RESOURCE_TYPE_MAIN_FRAME;
+           content::ResourceType::kMainFrame;
   }
 
   GURL GetOrigin() const override {
@@ -111,6 +105,16 @@ class URLLoaderThrottle::ThrottleResponseAdapter : public ResponseAdapter {
 
   void RemoveHeader(const std::string& name) override {
     headers_->RemoveHeader(name);
+  }
+
+  base::SupportsUserData::Data* GetUserData(const void* key) const override {
+    return throttle_->GetUserData(key);
+  }
+
+  void SetUserData(
+      const void* key,
+      std::unique_ptr<base::SupportsUserData::Data> data) override {
+    throttle_->SetUserData(key, std::move(data));
   }
 
  private:

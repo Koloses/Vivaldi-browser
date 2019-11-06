@@ -13,8 +13,8 @@ namespace features {
 const base::Feature kDockedMagnifier{"DockedMagnifier",
                                      base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kDragTabsInTabletMode{"DragTabsInTabletMode",
-                                          base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kDragToSnapInClamshellMode{
+    "DragToSnapInClamshellMode", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kEnableOverviewRoundedCorners{
     "EnableOverviewRoundedCorners", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -29,8 +29,23 @@ const base::Feature kLockScreenHideSensitiveNotificationsSupport{
     "LockScreenHideSensitiveNotificationsSupport",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kMediaSessionNotification{
-    "MediaSessionNotification", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kLockScreenMediaKeys{"LockScreenMediaKeys",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kLockScreenMediaControls{"LockScreenMediaControls",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kHideArcMediaNotifications{
+    "HideArcMediaNotifications", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kMediaSessionNotification{"MediaSessionNotification",
+                                              base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kMultiDisplayOverviewAndSplitView{
+    "MultiDisplayOverviewAndSplitView", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kManagedDeviceUIRedesign{"ManagedDeviceUIRedesign",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kNightLight{"NightLight", base::FEATURE_ENABLED_BY_DEFAULT};
 
@@ -53,7 +68,7 @@ const base::Feature kUnlockWithExternalBinary{
     "UnlockWithExternalBinary", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kKioskNextShell{"KioskNextShell",
-                                    base::FEATURE_DISABLED_BY_DEFAULT};
+                                    base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kViewsLogin{"ViewsLogin", base::FEATURE_ENABLED_BY_DEFAULT};
 
@@ -66,8 +81,16 @@ const base::Feature kUseBluetoothSystemInAsh{"UseBluetoothSystemInAsh",
 const base::Feature kSupervisedUserDeprecationNotice{
     "SupervisedUserDeprecationNotice", base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kNotificationStackingBarRedesign{
-    "NotificationStackingBarRedesign", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kSystemTrayFeaturePodsPagination{
+    "SystemTrayFeaturePodsPagination", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kSwapSideVolumeButtonsForOrientation{
+    "SwapSideVolumeButtonsForOrientation", base::FEATURE_ENABLED_BY_DEFAULT};
+
+bool IsHideArcMediaNotificationsEnabled() {
+  return base::FeatureList::IsEnabled(kMediaSessionNotification) &&
+         base::FeatureList::IsEnabled(kHideArcMediaNotifications);
+}
 
 bool IsLockScreenNotificationsEnabled() {
   return base::FeatureList::IsEnabled(kLockScreenNotifications);
@@ -80,6 +103,10 @@ bool IsLockScreenInlineReplyEnabled() {
 bool IsLockScreenHideSensitiveNotificationsSupported() {
   return base::FeatureList::IsEnabled(
       kLockScreenHideSensitiveNotificationsSupport);
+}
+
+bool IsManagedDeviceUIRedesignEnabled() {
+  return base::FeatureList::IsEnabled(kManagedDeviceUIRedesign);
 }
 
 bool IsNotificationExpansionAnimationEnabled() {
@@ -121,8 +148,12 @@ bool IsSupervisedUserDeprecationNoticeEnabled() {
   return base::FeatureList::IsEnabled(kSupervisedUserDeprecationNotice);
 }
 
-bool IsNotificationStackingBarRedesignEnabled() {
-  return base::FeatureList::IsEnabled(kNotificationStackingBarRedesign);
+bool IsSystemTrayFeaturePodsPaginationEnabled() {
+  return base::FeatureList::IsEnabled(kSystemTrayFeaturePodsPagination);
+}
+
+bool IsSwapSideVolumeButtonsForOrientationEnabled() {
+  return base::FeatureList::IsEnabled(kSwapSideVolumeButtonsForOrientation);
 }
 
 }  // namespace features

@@ -8,13 +8,14 @@
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/aw_contents.h"
 #include "android_webview/browser/aw_form_database_service.h"
+#include "android_webview/native_jni/AwAutofillClient_jni.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "components/autofill/core/browser/autofill_popup_delegate.h"
-#include "components/autofill/core/browser/suggestion.h"
+#include "components/autofill/core/browser/ui/autofill_popup_delegate.h"
+#include "components/autofill/core/browser/ui/suggestion.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -23,7 +24,6 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
-#include "jni/AwAutofillClient_jni.h"
 #include "ui/android/view_android.h"
 #include "ui/gfx/geometry/rect_f.h"
 
@@ -53,20 +53,20 @@ autofill::PersonalDataManager* AwAutofillClient::GetPersonalDataManager() {
 
 autofill::AutocompleteHistoryManager*
 AwAutofillClient::GetAutocompleteHistoryManager() {
-  return AwContentBrowserClient::GetAwBrowserContext()
+  return AwBrowserContext::FromWebContents(web_contents_)
       ->GetAutocompleteHistoryManager();
 }
 
 PrefService* AwAutofillClient::GetPrefs() {
   return user_prefs::UserPrefs::Get(
-      AwContentBrowserClient::GetAwBrowserContext());
+      AwBrowserContext::FromWebContents(web_contents_));
 }
 
 syncer::SyncService* AwAutofillClient::GetSyncService() {
   return nullptr;
 }
 
-identity::IdentityManager* AwAutofillClient::GetIdentityManager() {
+signin::IdentityManager* AwAutofillClient::GetIdentityManager() {
   return nullptr;
 }
 
@@ -75,10 +75,6 @@ autofill::FormDataImporter* AwAutofillClient::GetFormDataImporter() {
 }
 
 autofill::payments::PaymentsClient* AwAutofillClient::GetPaymentsClient() {
-  return nullptr;
-}
-
-autofill::LegacyStrikeDatabase* AwAutofillClient::GetLegacyStrikeDatabase() {
   return nullptr;
 }
 
@@ -177,6 +173,10 @@ void AwAutofillClient::ConfirmSaveCreditCardToCloud(
   NOTIMPLEMENTED();
 }
 
+void AwAutofillClient::CreditCardUploadCompleted(bool card_saved) {
+  NOTIMPLEMENTED();
+}
+
 void AwAutofillClient::ConfirmCreditCardFillAssist(
     const autofill::CreditCard& card,
     base::OnceClosure callback) {
@@ -196,6 +196,7 @@ void AwAutofillClient::ShowAutofillPopup(
     base::i18n::TextDirection text_direction,
     const std::vector<autofill::Suggestion>& suggestions,
     bool /*unused_autoselect_first_suggestion*/,
+    autofill::PopupType popup_type,
     base::WeakPtr<autofill::AutofillPopupDelegate> delegate) {
   suggestions_ = suggestions;
   delegate_ = delegate;

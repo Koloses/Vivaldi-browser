@@ -16,6 +16,7 @@ js_library("omnibox") {
     ":omnibox_input",
     ":omnibox_output",
     "//chrome/browser/ui/webui/omnibox:mojo_bindings_js_library_for_compile",
+    "//ui/webui/resources/js:load_time_data",
   ]
 }
 
@@ -29,4 +30,5 @@ js_library("omnibox_output") {
   deps = [
     "//ui/webui/resources/js:util",
   ]
+  externs_list = [ "$externs_path/pending.js" ]
 }

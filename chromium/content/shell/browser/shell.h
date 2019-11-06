@@ -103,8 +103,8 @@ class Shell : public WebContentsDelegate,
       const gfx::Size& initial_size,
       scoped_refptr<SessionStorageNamespace> session_storage_namespace);
 
-  // Returns the Shell object corresponding to the given RenderViewHost.
-  static Shell* FromRenderViewHost(RenderViewHost* rvh);
+  // Returns the Shell object corresponding to the given WebContents.
+  static Shell* FromWebContents(WebContents* web_contents);
 
   // Returns the currently open windows.
   static std::vector<Shell*>& windows() { return windows_; }
@@ -124,7 +124,7 @@ class Shell : public WebContentsDelegate,
 
   // Used for content_browsertests. Called once.
   static void SetShellCreatedCallback(
-      base::Callback<void(Shell*)> shell_created_callback);
+      base::OnceCallback<void(Shell*)> shell_created_callback);
 
   WebContents* web_contents() const { return web_contents_.get(); }
   gfx::NativeWindow window() { return window_; }
@@ -155,27 +155,29 @@ class Shell : public WebContentsDelegate,
       const GURL& origin,
       const blink::WebFullscreenOptions& options) override;
   void ExitFullscreenModeForTab(WebContents* web_contents) override;
-  bool IsFullscreenForTabOrPending(
-      const WebContents* web_contents) const override;
+  bool IsFullscreenForTabOrPending(const WebContents* web_contents) override;
   blink::WebDisplayMode GetDisplayMode(
-     const WebContents* web_contents) const override;
+      const WebContents* web_contents) override;
   void RequestToLockMouse(WebContents* web_contents,
                           bool user_gesture,
                           bool last_unlocked_by_target) override;
   void CloseContents(WebContents* source) override;
-  bool CanOverscrollContent() const override;
+  bool CanOverscrollContent() override;
   void DidNavigateMainFramePostCommit(WebContents* web_contents) override;
   JavaScriptDialogManager* GetJavaScriptDialogManager(
       WebContents* source) override;
   std::unique_ptr<BluetoothChooser> RunBluetoothChooser(
       RenderFrameHost* frame,
       const BluetoothChooser::EventHandler& event_handler) override;
+  std::unique_ptr<BluetoothScanningPrompt> ShowBluetoothScanningPrompt(
+      RenderFrameHost* frame,
+      const BluetoothScanningPrompt::EventHandler& event_handler) override;
 #if defined(OS_MACOSX)
   bool HandleKeyboardEvent(WebContents* source,
                            const NativeWebKeyboardEvent& event) override;
 #endif
   bool DidAddMessageToConsole(WebContents* source,
-                              int32_t level,
+                              blink::mojom::ConsoleMessageLevel log_level,
                               const base::string16& message,
                               int32_t line_no,
                               const base::string16& source_id) override;
@@ -194,9 +196,10 @@ class Shell : public WebContentsDelegate,
                                          bool allowed_per_prefs,
                                          const url::Origin& origin,
                                          const GURL& resource_url) override;
-  gfx::Size EnterPictureInPicture(content::WebContents* web_contents,
-                                  const viz::SurfaceId&,
-                                  const gfx::Size& natural_size) override;
+  PictureInPictureResult EnterPictureInPicture(
+      content::WebContents* web_contents,
+      const viz::SurfaceId&,
+      const gfx::Size& natural_size) override;
   bool ShouldResumeRequestsForCreatedWindow() override;
 
   static gfx::Size GetShellDefaultSize();
@@ -310,7 +313,7 @@ class Shell : public WebContentsDelegate,
   // of ordering.
   static std::vector<Shell*> windows_;
 
-  static base::Callback<void(Shell*)> shell_created_callback_;
+  static base::OnceCallback<void(Shell*)> shell_created_callback_;
 };
 
 }  // namespace content

@@ -64,9 +64,9 @@ class MockVideoCaptureControllerEventHandler
 
 class MockMediaStreamProviderListener : public MediaStreamProviderListener {
  public:
-  MOCK_METHOD2(Opened, void(blink::MediaStreamType, int));
-  MOCK_METHOD2(Closed, void(blink::MediaStreamType, int));
-  MOCK_METHOD2(Aborted, void(blink::MediaStreamType, int));
+  MOCK_METHOD2(Opened, void(blink::mojom::MediaStreamType, int));
+  MOCK_METHOD2(Closed, void(blink::mojom::MediaStreamType, int));
+  MOCK_METHOD2(Aborted, void(blink::mojom::MediaStreamType, int));
 };
 
 using DeviceIndex = size_t;
@@ -165,7 +165,7 @@ class VideoCaptureBrowserTest : public ContentBrowserTest,
     command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
     if (params_.exercise_accelerated_jpeg_decoding) {
       base::CommandLine::ForCurrentProcess()->AppendSwitch(
-          switches::kUseFakeJpegDecodeAccelerator);
+          switches::kUseFakeMjpegDecodeAccelerator);
     } else {
       base::CommandLine::ForCurrentProcess()->AppendSwitch(
           switches::kDisableAcceleratedMjpegDecode);
@@ -187,8 +187,8 @@ class VideoCaptureBrowserTest : public ContentBrowserTest,
     ASSERT_TRUE(params_.device_index_to_use < descriptors.size());
     const auto& descriptor = descriptors[params_.device_index_to_use];
     blink::MediaStreamDevice media_stream_device(
-        blink::MEDIA_DEVICE_VIDEO_CAPTURE, descriptor.device_id,
-        descriptor.display_name(), descriptor.facing);
+        blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE,
+        descriptor.device_id, descriptor.display_name(), descriptor.facing);
     session_id_ = video_capture_manager_->Open(media_stream_device);
     media::VideoCaptureParams capture_params;
     capture_params.requested_format = media::VideoCaptureFormat(
@@ -276,6 +276,7 @@ IN_PROC_BROWSER_TEST_P(VideoCaptureBrowserTest,
                  std::move(quit_run_loop_on_current_thread_cb), true);
 
   bool must_wait_for_gpu_decode_to_start = false;
+#if defined(OS_CHROMEOS)
   if (params_.exercise_accelerated_jpeg_decoding) {
     // Since the GPU jpeg decoder is created asynchronously while decoding
     // in software is ongoing, we have to keep pushing frames until a message
@@ -288,6 +289,7 @@ IN_PROC_BROWSER_TEST_P(VideoCaptureBrowserTest,
           must_wait_for_gpu_decode_to_start = false;
         }));
   }
+#endif  // defined(OS_CHROMEOS)
   EXPECT_CALL(mock_controller_event_handler_, DoOnNewBuffer(_, _, _))
       .Times(AtLeast(1));
   EXPECT_CALL(mock_controller_event_handler_, OnBufferReady(_, _, _))

@@ -16,6 +16,10 @@ declare_args() {
   # See http://clang.llvm.org/docs/HardwareAssistedAddressSanitizerDesign.html
   is_hwasan = false
 
+  # Specify whether to target the platform's copy of the HWASan runtime,
+  # rather than one bundled with the application.
+  hwasan_platform = false
+
   # Compile for Leak Sanitizer to find leaks.
   is_lsan = false
 
@@ -88,10 +92,6 @@ declare_args() {
   # is_ubsan.
   is_ubsan_security = false
 
-  # Compile for fuzzing with Dr. Fuzz
-  # See http://www.chromium.org/developers/testing/dr-fuzz
-  use_drfuzz = false
-
   # Helper variable for testing builds with disabled libfuzzer.
   # Not for client use.
   disable_libfuzzer = false
@@ -112,6 +112,14 @@ declare_args() {
 
   # Use blacklists from tools/memory/asan when compiling with asan.
   asan_use_blacklist = true
+
+  # When enabled, only relevant sanitizer defines are set, but compilation
+  # happens with no extra flags. This is useful when in component build
+  # enabling sanitizers only in some of the components.
+  use_sanitizer_configs_without_instrumentation = false
+
+  # When true, seed corpora archives are built.
+  archive_seed_corpus = true
 }
 
 # Disable sanitizers for non-default toolchains.
@@ -119,6 +127,7 @@ if (current_toolchain != default_toolchain) {
   is_asan = false
   is_cfi = false
   is_hwasan = false
+  hwasan_platform = false
   is_lsan = false
   is_msan = false
   is_tsan = false
@@ -132,7 +141,6 @@ if (current_toolchain != default_toolchain) {
   use_afl = false
   use_cfi_diag = false
   use_cfi_recover = false
-  use_drfuzz = false
   use_libfuzzer = false
   use_prebuilt_instrumented_libraries = false
   use_locally_built_instrumented_libraries = false
@@ -241,6 +249,9 @@ assert(
     "crbug.com/753445: use_sanitizer_coverage=true is not supported by the " +
         "Chromium mac_clang_x64 toolchain on iOS distribution. Please set " +
         "the argument value to false.")
+
+assert(!hwasan_platform || is_hwasan,
+       "hwasan_platform requires is_hwasan to be set")
 
 # Use these lists of configs to disable instrumenting code that is part of a
 # fuzzer, but which isn't being targeted (such as libprotobuf-mutator, *.pb.cc

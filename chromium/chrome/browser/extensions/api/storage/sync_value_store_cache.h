@@ -39,7 +39,7 @@ class SyncValueStoreCache : public ValueStoreCache {
   ~SyncValueStoreCache() override;
 
   base::WeakPtr<SyncValueStoreCache> AsWeakPtr();
-  syncer::SyncableService* GetSyncableService(syncer::ModelType type) const;
+  syncer::SyncableService* GetSyncableService(syncer::ModelType type);
 
   // ValueStoreCache implementation:
   void RunWithValueStoreForExtension(
@@ -55,7 +55,7 @@ class SyncValueStoreCache : public ValueStoreCache {
   bool initialized_;
   std::unique_ptr<SyncStorageBackend> app_backend_;
   std::unique_ptr<SyncStorageBackend> extension_backend_;
-  base::WeakPtrFactory<SyncValueStoreCache> weak_ptr_factory_;
+  base::WeakPtrFactory<SyncValueStoreCache> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SyncValueStoreCache);
 };

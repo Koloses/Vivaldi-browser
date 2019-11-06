@@ -298,13 +298,8 @@ public class ProfileSyncService {
         return authErrorCode;
     }
 
-    /**
-     * Gets client action for sync protocol error.
-     *
-     * @return {@link ProtocolErrorClientAction}.
-     */
-    public int getProtocolErrorClientAction() {
-        return nativeGetProtocolErrorClientAction(mNativeProfileSyncServiceAndroid);
+    public boolean requiresClientUpgrade() {
+        return nativeRequiresClientUpgrade(mNativeProfileSyncServiceAndroid);
     }
 
     /**
@@ -379,6 +374,10 @@ public class ProfileSyncService {
                 syncEverything ? ALL_SELECTABLE_TYPES : modelTypeSetToArray(enabledTypes));
     }
 
+    public void triggerRefresh() {
+        nativeTriggerRefresh(mNativeProfileSyncServiceAndroid);
+    }
+
     public void setFirstSetupComplete() {
         nativeSetFirstSetupComplete(mNativeProfileSyncServiceAndroid);
     }
@@ -388,9 +387,9 @@ public class ProfileSyncService {
     }
 
     /**
-     * Checks whether syncing is "requested" by the user, i.e. the user has not disabled syncing
-     * in settings. Note that even if this is true, other reasons might prevent Sync from actually
-     * starting up.
+     * Checks whether syncing is requested by the user, i.e. the user has at least started a Sync
+     * setup flow, and has not disabled syncing in settings. Note that even if this is true, other
+     * reasons might prevent Sync from actually starting up.
      *
      * @return true if the user wants to sync, false otherwise.
      */
@@ -417,6 +416,16 @@ public class ProfileSyncService {
      */
     public boolean isSyncActive() {
         return nativeIsSyncActive(mNativeProfileSyncServiceAndroid);
+    }
+
+    /**
+     * Checks whether Sync is disabled by enterprise policy (through prefs) or account policy
+     * received from the sync server.
+     *
+     * @return true if Sync is disabled, false otherwise.
+     */
+    public boolean isSyncDisabledByEnterprisePolicy() {
+        return nativeIsSyncDisabledByEnterprisePolicy(mNativeProfileSyncServiceAndroid);
     }
 
     /**
@@ -614,7 +623,7 @@ public class ProfileSyncService {
     private native void nativeFlushDirectory(long nativeProfileSyncServiceAndroid);
     private native void nativeSetSyncSessionsId(long nativeProfileSyncServiceAndroid, String tag);
     private native int nativeGetAuthError(long nativeProfileSyncServiceAndroid);
-    private native int nativeGetProtocolErrorClientAction(long nativeProfileSyncServiceAndroid);
+    private native boolean nativeRequiresClientUpgrade(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsEngineInitialized(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsEncryptEverythingAllowed(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsEncryptEverythingEnabled(long nativeProfileSyncServiceAndroid);
@@ -643,6 +652,7 @@ public class ProfileSyncService {
     private native int[] nativeGetPreferredDataTypes(long nativeProfileSyncServiceAndroid);
     private native void nativeSetChosenDataTypes(
             long nativeProfileSyncServiceAndroid, boolean syncEverything, int[] modelTypeArray);
+    private native void nativeTriggerRefresh(long nativeProfileSyncServiceAndroid);
     private native void nativeSetSetupInProgress(
             long nativeProfileSyncServiceAndroid, boolean inProgress);
     private native void nativeSetFirstSetupComplete(long nativeProfileSyncServiceAndroid);
@@ -650,6 +660,8 @@ public class ProfileSyncService {
     private native boolean nativeIsSyncRequested(long nativeProfileSyncServiceAndroid);
     private native boolean nativeCanSyncFeatureStart(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsSyncActive(long nativeProfileSyncServiceAndroid);
+    private native boolean nativeIsSyncDisabledByEnterprisePolicy(
+            long nativeProfileSyncServiceAndroid);
     private native boolean nativeHasKeepEverythingSynced(long nativeProfileSyncServiceAndroid);
     private native boolean nativeHasUnrecoverableError(long nativeProfileSyncServiceAndroid);
     private native boolean nativeIsPassphrasePrompted(long nativeProfileSyncServiceAndroid);

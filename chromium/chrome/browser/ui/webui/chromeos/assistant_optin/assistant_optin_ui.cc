@@ -8,18 +8,21 @@
 #include <string>
 #include <utility>
 
+#include "ash/public/interfaces/voice_interaction_controller.mojom.h"
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/ash_util.h"
-#include "chrome/browser/ui/ash/assistant/assistant_pref_util.h"
 #include "chrome/browser/ui/views/chrome_web_dialog_view.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
+#include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
 #include "components/arc/arc_prefs.h"
 #include "components/prefs/pref_service.h"
+#include "components/session_manager/core/session_manager.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_ui.h"
@@ -32,17 +35,20 @@ namespace chromeos {
 
 namespace {
 
-bool is_active = false;
+AssistantOptInDialog* g_dialog = nullptr;
 
 constexpr int kAssistantOptInDialogWidth = 768;
 constexpr int kAssistantOptInDialogHeight = 640;
+constexpr int kCaptionBarHeight = 32;
 constexpr char kFlowTypeParamKey[] = "flow-type";
+constexpr char kCaptionBarHeightParamKey[] = "caption-bar-height";
 
-GURL CreateAssistantOptInURL(ash::mojom::FlowType type) {
-  // TODO(updowndota): Directly use mojom enum types in js.
-  auto gurl = net::AppendOrReplaceQueryParameter(
-      GURL(chrome::kChromeUIAssistantOptInURL), kFlowTypeParamKey,
-      std::to_string(static_cast<int>(type)));
+GURL CreateAssistantOptInURL(ash::FlowType type) {
+  GURL gurl(chrome::kChromeUIAssistantOptInURL);
+  gurl = net::AppendQueryParameter(
+      gurl, kFlowTypeParamKey, base::NumberToString(static_cast<int>(type)));
+  gurl = net::AppendQueryParameter(gurl, kCaptionBarHeightParamKey,
+                                   base::NumberToString(kCaptionBarHeight));
   return gurl;
 }
 
@@ -104,54 +110,54 @@ void AssistantOptInUI::OnDialogClosed() {
 }
 
 void AssistantOptInUI::Initialize() {
-  js_calls_container_.ExecuteDeferredJSCalls();
+  js_calls_container_.ExecuteDeferredJSCalls(web_ui());
 }
 
 // AssistantOptInDialog
 
 // static
 void AssistantOptInDialog::Show(
-    ash::mojom::FlowType type,
-    ash::mojom::AssistantSetup::StartAssistantOptInFlowCallback callback) {
-  if (is_active)
+    ash::FlowType type,
+    ash::AssistantSetup::StartAssistantOptInFlowCallback callback) {
+  // Check session state here to prevent timing issue -- session state might
+  // have changed during the mojom calls to launch the opt-in dalog.
+  if (session_manager::SessionManager::Get()->session_state() !=
+      session_manager::SessionState::ACTIVE) {
     return;
-  AssistantOptInDialog* dialog =
-      new AssistantOptInDialog(type, std::move(callback));
+  }
+  if (g_dialog) {
+    g_dialog->Focus();
+    std::move(callback).Run(false);
+    return;
+  }
+  g_dialog = new AssistantOptInDialog(type, std::move(callback));
 
-  views::Widget::InitParams extra_params = ash_util::GetFramelessInitParams();
-  chrome::ShowWebDialogWithParams(nullptr /* parent */,
-                                  ProfileManager::GetActiveUserProfile(),
-                                  dialog, &extra_params);
-}
-
-// static
-bool AssistantOptInDialog::IsActive() {
-  return is_active;
+  g_dialog->ShowSystemDialog();
 }
 
 AssistantOptInDialog::AssistantOptInDialog(
-    ash::mojom::FlowType type,
-    ash::mojom::AssistantSetup::StartAssistantOptInFlowCallback callback)
+    ash::FlowType type,
+    ash::AssistantSetup::StartAssistantOptInFlowCallback callback)
     : SystemWebDialogDelegate(CreateAssistantOptInURL(type), base::string16()),
-      callback_(std::move(callback)) {
-  DCHECK(!is_active);
-  is_active = true;
-}
+      callback_(std::move(callback)) {}
 
 AssistantOptInDialog::~AssistantOptInDialog() {
-  is_active = false;
+  DCHECK_EQ(this, g_dialog);
+  g_dialog = nullptr;
+}
+
+void AssistantOptInDialog::AdjustWidgetInitParams(
+    views::Widget::InitParams* params) {
+  params->z_order = ui::ZOrderLevel::kNormal;
 }
 
 void AssistantOptInDialog::GetDialogSize(gfx::Size* size) const {
-  size->SetSize(kAssistantOptInDialogWidth, kAssistantOptInDialogHeight);
+  size->SetSize(kAssistantOptInDialogWidth,
+                kAssistantOptInDialogHeight - kCaptionBarHeight);
 }
 
 std::string AssistantOptInDialog::GetDialogArgs() const {
   return std::string();
-}
-
-bool AssistantOptInDialog::ShouldShowDialogTitle() const {
-  return false;
 }
 
 void AssistantOptInDialog::OnDialogShown(
@@ -167,14 +173,10 @@ void AssistantOptInDialog::OnDialogClosed(const std::string& json_retval) {
   PrefService* prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
   const bool completed =
       prefs->GetBoolean(arc::prefs::kVoiceInteractionEnabled) &&
-      (::assistant::prefs::GetConsentStatus(prefs) ==
-       ash::mojom::ConsentStatus::kActivityControlAccepted);
+      (prefs->GetInteger(assistant::prefs::kAssistantConsentStatus) ==
+       assistant::prefs::ConsentStatus::kActivityControlAccepted);
   std::move(callback_).Run(completed);
   SystemWebDialogDelegate::OnDialogClosed(json_retval);
-}
-
-bool AssistantOptInDialog::CanCloseDialog() const {
-  return false;
 }
 
 }  // namespace chromeos

@@ -11,13 +11,16 @@
 
 class GURL;
 
+namespace aura {
+class Window;
+}
+
 namespace content {
 class BrowserContext;
-class WebContents;
-}  // namespace content
+}
 
 namespace views {
-class RemoteViewProvider;
+class Widget;
 }
 
 namespace ash {
@@ -29,15 +32,17 @@ class EmbeddedBrowser {
   EmbeddedBrowser(content::BrowserContext* context, const GURL& url);
   ~EmbeddedBrowser();
 
+  aura::Window* GetWindow();
+
   // Factory.
-  static void Create(content::BrowserContext* context, const GURL& url);
+  static aura::Window* Create(content::BrowserContext* context,
+                              const GURL& url);
 
  private:
   // Callback invoked when the embedding is broken.
   void OnUnembed();
 
-  std::unique_ptr<content::WebContents> contents_;
-  std::unique_ptr<views::RemoteViewProvider> remote_view_provider_;
+  views::Widget* widget_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(EmbeddedBrowser);
 };

@@ -6,6 +6,7 @@
 #define ASH_SYSTEM_UNIFIED_FEATURE_POD_BUTTON_H_
 
 #include "ash/ash_export.h"
+#include "base/bind.h"
 #include "ui/gfx/vector_icon_types.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/view.h"
@@ -36,6 +37,7 @@ class FeaturePodIconButton : public views::ImageButton {
       const override;
   std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  const char* GetClassName() const override;
 
   bool toggled() const { return toggled_; }
 
@@ -65,22 +67,28 @@ class FeaturePodLabelButton : public views::Button {
 
   // views::Button:
   void Layout() override;
-  void OnEnabledChanged() override;
   gfx::Size CalculatePreferredSize() const override;
   std::unique_ptr<views::InkDrop> CreateInkDrop() override;
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
   std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
+  const char* GetClassName() const override;
 
  private:
   // Layout |child| in horizontal center with its vertical origin set to |y|.
   void LayoutInCenter(views::View* child, int y);
 
+  void OnEnabledChanged();
+
   // Owned by views hierarchy.
   views::Label* const label_;
   views::Label* const sub_label_;
   views::ImageView* const detailed_view_arrow_;
+  views::PropertyChangedSubscription enabled_changed_subscription_ =
+      AddEnabledChangedCallback(
+          base::BindRepeating(&FeaturePodLabelButton::OnEnabledChanged,
+                              base::Unretained(this)));
 
   DISALLOW_COPY_AND_ASSIGN(FeaturePodLabelButton);
 };
@@ -128,8 +136,16 @@ class ASH_EXPORT FeaturePodButton : public views::View,
 
   // Change the expanded state. 0.0 if collapsed, and 1.0 if expanded.
   // Otherwise, it shows intermediate state. In the collapsed state, the labels
-  // are not shown.
-  void SetExpandedAmount(double expanded_amount);
+  // are not shown, so the label buttons always fade out as expanded_amount
+  // decreases. We also need to fade out the icon button when it's not part of
+  // the buttons visible in the collapsed state. fade_icon_button will be passed
+  // as true for these cases.
+  void SetExpandedAmount(double expanded_amount, bool fade_icon_button);
+
+  // Get opacity for a given expanded_amount value. Used to fade out
+  // all label buttons and icon buttons that are hidden in collapsed state
+  // while collapsing.
+  double GetOpacityForExpandedAmount(double expanded_amount);
 
   // Only called by the container. Same as SetVisible but doesn't change
   // |visible_preferred_| flag.
@@ -139,7 +155,7 @@ class ASH_EXPORT FeaturePodButton : public views::View,
   void SetVisible(bool visible) override;
   bool HasFocus() const override;
   void RequestFocus() override;
-  void OnEnabledChanged() override;
+  const char* GetClassName() const override;
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -150,6 +166,8 @@ class ASH_EXPORT FeaturePodButton : public views::View,
   FeaturePodIconButton* icon_button() const { return icon_button_; }
 
  private:
+  void OnEnabledChanged();
+
   // Unowned.
   FeaturePodControllerBase* const controller_;
 
@@ -163,6 +181,11 @@ class ASH_EXPORT FeaturePodButton : public views::View,
   // In such case, the preferred visibility is reflected after the container is
   // expanded.
   bool visible_preferred_ = true;
+
+  views::PropertyChangedSubscription enabled_changed_subscription_ =
+      AddEnabledChangedCallback(
+          base::BindRepeating(&FeaturePodButton::OnEnabledChanged,
+                              base::Unretained(this)));
 
   DISALLOW_COPY_AND_ASSIGN(FeaturePodButton);
 };

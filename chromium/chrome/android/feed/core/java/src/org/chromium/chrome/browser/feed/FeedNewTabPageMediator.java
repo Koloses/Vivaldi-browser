@@ -10,9 +10,9 @@ import android.support.annotation.Nullable;
 import android.view.View;
 import android.widget.ScrollView;
 
-import com.google.android.libraries.feed.api.stream.ContentChangedListener;
-import com.google.android.libraries.feed.api.stream.ScrollListener;
-import com.google.android.libraries.feed.api.stream.Stream;
+import com.google.android.libraries.feed.api.client.stream.Stream;
+import com.google.android.libraries.feed.api.client.stream.Stream.ContentChangedListener;
+import com.google.android.libraries.feed.api.client.stream.Stream.ScrollListener;
 
 import org.chromium.base.MemoryPressureListener;
 import org.chromium.base.VisibleForTesting;
@@ -27,6 +27,7 @@ import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefChangeRegistrar;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.signin.PersonalizedSigninPromoView;
+import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninPromoUtil;
 
 /**
@@ -38,6 +39,7 @@ class FeedNewTabPageMediator
     private final FeedNewTabPage mCoordinator;
     private final SnapScrollHelper mSnapScrollHelper;
     private final PrefChangeRegistrar mPrefChangeRegistrar;
+    private final SigninManager mSigninManager;
 
     private ScrollListener mStreamScrollListener;
     private ContentChangedListener mStreamContentChangedListener;
@@ -56,9 +58,11 @@ class FeedNewTabPageMediator
      * @param feedNewTabPage The {@link FeedNewTabPage} that interacts with this class.
      * @param snapScrollHelper The {@link SnapScrollHelper} that handles snap scrolling.
      */
-    FeedNewTabPageMediator(FeedNewTabPage feedNewTabPage, SnapScrollHelper snapScrollHelper) {
+    FeedNewTabPageMediator(FeedNewTabPage feedNewTabPage, SnapScrollHelper snapScrollHelper,
+            SigninManager signinManager) {
         mCoordinator = feedNewTabPage;
         mSnapScrollHelper = snapScrollHelper;
+        mSigninManager = signinManager;
 
         mPrefChangeRegistrar = new PrefChangeRegistrar();
         mPrefChangeRegistrar.addObserver(Pref.NTP_ARTICLES_SECTION_ENABLED, this::updateContent);
@@ -136,7 +140,7 @@ class FeedNewTabPageMediator
         stream.setStreamContentVisibility(mSectionHeader.isExpanded());
 
         if (SignInPromo.shouldCreatePromo()) {
-            mSignInPromo = new FeedSignInPromo();
+            mSignInPromo = new FeedSignInPromo(mSigninManager);
             mSignInPromo.setCanShowPersonalizedSuggestions(suggestionsVisible);
         }
 
@@ -305,7 +309,8 @@ class FeedNewTabPageMediator
      * TODO(huayinz): Update content and visibility through a ModelChangeProcessor.
      */
     private class FeedSignInPromo extends SignInPromo {
-        FeedSignInPromo() {
+        FeedSignInPromo(SigninManager signinManager) {
+            super(signinManager);
             updateSignInPromo();
         }
 

@@ -32,8 +32,7 @@ oldhttp::URLBodyPtr CreateURLBodyFromBuffer(net::GrowableIOBuffer* buffer) {
 
   ::fuchsia::mem::Buffer mem_buffer;
   mem_buffer.size = total_size;
-  zx_status_t result =
-      zx::vmo::create(total_size, ZX_VMO_NON_RESIZABLE, &mem_buffer.vmo);
+  zx_status_t result = zx::vmo::create(total_size, 0, &mem_buffer.vmo);
   if (result != ZX_OK) {
     ZX_DLOG(WARNING, result) << "zx_vmo_create";
     return nullptr;
@@ -232,7 +231,7 @@ void URLLoaderImpl::OnReceivedRedirect(net::URLRequest* request,
 }
 
 void URLLoaderImpl::OnAuthRequired(net::URLRequest* request,
-                                   net::AuthChallengeInfo* auth_info) {
+                                   const net::AuthChallengeInfo& auth_info) {
   NOTIMPLEMENTED();
   DCHECK_EQ(net_request_.get(), request);
   request->CancelAuth();
@@ -247,6 +246,7 @@ void URLLoaderImpl::OnCertificateRequested(
 }
 
 void URLLoaderImpl::OnSSLCertificateError(net::URLRequest* request,
+                                          int net_error,
                                           const net::SSLInfo& ssl_info,
                                           bool fatal) {
   NOTIMPLEMENTED();

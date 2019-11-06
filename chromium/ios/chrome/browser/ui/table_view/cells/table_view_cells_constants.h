@@ -7,6 +7,9 @@
 
 #import <UIKit/UIKit.h>
 
+// The font text style of the sublabel.
+extern const UIFontTextStyle kTableViewSublabelFontStyle;
+
 // The minimum height for a TableViewHeaderFooterView.
 extern const CGFloat kTableViewHeaderFooterViewHeight;
 
@@ -53,9 +56,6 @@ extern const int kTableViewTextLabelColorLightGrey;
 // Hex Value for the text color of the secondary labels (e.g. details, URL,
 // metadata...).
 extern const int kTableViewSecondaryLabelLightGrayTextColor;
-
-// Hex Value for the tint color for switches.
-extern const int kTableViewSwitchTintColor;
 
 // A masked password string(e.g. "••••••••").
 extern NSString* const kMaskedPassword;

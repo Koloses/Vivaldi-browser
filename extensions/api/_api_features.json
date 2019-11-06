@@ -80,6 +80,16 @@
     "dependencies": [ "permission:mailPrivate" ],
     "contexts": [ "blessed_extension" ]
   },
+  "menubar": {
+    "vivaldi": true,
+    "dependencies": [ "permission:menubar" ],
+    "contexts": [ "blessed_extension" ]
+  },
+  "menubarMenu": {
+    "vivaldi": true,
+    "dependencies": [ "permission:menubarMenu" ],
+    "contexts": [ "blessed_extension" ]
+  },
   "notes": {
     "vivaldi": true,
     "dependencies": [ "permission:notes" ],

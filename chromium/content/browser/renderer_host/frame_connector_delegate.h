@@ -17,10 +17,6 @@
 #include "third_party/blink/public/common/frame/occlusion_state.h"
 #include "ui/gfx/geometry/rect.h"
 
-#if defined(USE_AURA)
-#include "services/ws/public/mojom/window_tree.mojom.h"
-#endif
-
 namespace blink {
 class WebGestureEvent;
 struct WebIntrinsicSizingInfo;
@@ -122,20 +118,6 @@ class CONTENT_EXPORT FrameConnectorDelegate {
   virtual gfx::PointF TransformPointToRootCoordSpace(
       const gfx::PointF& point,
       const viz::SurfaceId& surface_id);
-
-  // Given a point in the coordinate space of a different Surface, transform
-  // it into the coordinate space for this view (corresponding to
-  // local_surface_id).
-  // TransformPointToLocalCoordSpaceLegacy() can only transform points between
-  // surfaces where one is embedded (not necessarily directly) within the
-  // other, and will return false if this is not the case. For points that can
-  // be in sibling surfaces, they must first be converted to the root
-  // surface's coordinate space.
-  virtual bool TransformPointToLocalCoordSpaceLegacy(
-      const gfx::PointF& point,
-      const viz::SurfaceId& original_surface,
-      const viz::SurfaceId& local_surface_id,
-      gfx::PointF* transformed_point);
 
   // Transform a point into the coordinate space of the root
   // RenderWidgetHostView, for the current view's coordinate space.
@@ -247,13 +229,6 @@ class CONTENT_EXPORT FrameConnectorDelegate {
   // zoom-for-dsf is enabled, and in DIP if not.
   virtual void SetScreenSpaceRect(const gfx::Rect& screen_space_rect);
 
-#if defined(USE_AURA)
-  // Embeds a WindowTreeClient in the parent. This results in the parent
-  // creating a window in the ui server so that this can render to the screen.
-  virtual void EmbedRendererWindowTreeClientInParent(
-      ws::mojom::WindowTreeClientPtr window_tree_client) {}
-#endif
-
   // Called by RenderWidgetHostViewChildFrame when the child frame has updated
   // its visual properties and its viz::LocalSurfaceId has changed.
   virtual void DidUpdateVisualProperties(
@@ -273,7 +248,8 @@ class CONTENT_EXPORT FrameConnectorDelegate {
   // ViewportIntersection() can return a reference.
   gfx::Rect viewport_intersection_rect_;
   gfx::Rect compositor_visible_rect_;
-  blink::FrameOcclusionState occlusion_state_ = blink::kUnknownOcclusionState;
+  blink::FrameOcclusionState occlusion_state_ =
+      blink::FrameOcclusionState::kUnknown;
 
   ScreenInfo screen_info_;
   gfx::Size local_frame_size_in_dip_;

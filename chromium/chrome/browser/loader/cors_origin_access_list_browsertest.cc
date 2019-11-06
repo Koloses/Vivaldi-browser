@@ -31,9 +31,9 @@
 namespace {
 
 const auto kAllowSubdomains =
-    network::mojom::CorsOriginAccessMatchMode::kAllowSubdomains;
+    network::mojom::CorsDomainMatchMode::kAllowSubdomains;
 const auto kDisallowSubdomains =
-    network::mojom::CorsOriginAccessMatchMode::kDisallowSubdomains;
+    network::mojom::CorsDomainMatchMode::kDisallowSubdomains;
 
 const char kTestPath[] = "/loader/cors_origin_access_list_test.html";
 
@@ -47,8 +47,7 @@ class CorsOriginAccessListBrowserTest : public InProcessBrowserTest {
   CorsOriginAccessListBrowserTest() {
     scoped_feature_list_.InitWithFeatures(
         // Enabled features
-        {network::features::kOutOfBlinkCors,
-         network::features::kNetworkService},
+        {network::features::kOutOfBlinkCors},
         // Disabled features
         {});
   }
@@ -66,15 +65,13 @@ class CorsOriginAccessListBrowserTest : public InProcessBrowserTest {
     bool executing = true;
     std::string reason;
     web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
-        script_,
-        base::BindRepeating(
-            [](bool* flag, std::string* reason, const base::Value* value) {
-              *flag = false;
-              DCHECK(value);
-              DCHECK(value->is_string());
-              *reason = value->GetString();
-            },
-            base::Unretained(&executing), base::Unretained(&reason)));
+        script_, base::BindOnce(
+                     [](bool* flag, std::string* reason, base::Value value) {
+                       *flag = false;
+                       DCHECK(value.is_string());
+                       *reason = value.GetString();
+                     },
+                     base::Unretained(&executing), base::Unretained(&reason)));
     while (executing) {
       base::RunLoop loop;
       loop.RunUntilIdle();
@@ -84,11 +81,12 @@ class CorsOriginAccessListBrowserTest : public InProcessBrowserTest {
 
   void SetAllowList(const std::string& scheme,
                     const std::string& host,
-                    network::mojom::CorsOriginAccessMatchMode mode) {
+                    network::mojom::CorsDomainMatchMode mode) {
     {
       std::vector<network::mojom::CorsOriginPatternPtr> list;
       list.push_back(network::mojom::CorsOriginPattern::New(
-          scheme, host, mode,
+          scheme, host, /*port=*/0, mode,
+          network::mojom::CorsPortMatchMode::kAllowAnyPort,
           network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority));
 
       base::RunLoop run_loop;
@@ -102,7 +100,8 @@ class CorsOriginAccessListBrowserTest : public InProcessBrowserTest {
     {
       std::vector<network::mojom::CorsOriginPatternPtr> list;
       list.push_back(network::mojom::CorsOriginPattern::New(
-          scheme, host, mode,
+          scheme, host, /*port=*/0, mode,
+          network::mojom::CorsPortMatchMode::kAllowAnyPort,
           network::mojom::CorsOriginAccessMatchPriority::kDefaultPriority));
 
       base::RunLoop run_loop;

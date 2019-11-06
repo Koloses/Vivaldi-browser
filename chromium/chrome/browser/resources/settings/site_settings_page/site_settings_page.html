@@ -4,7 +4,6 @@
 <link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/html/cr/ui/focus_without_ink.html">
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
 <link rel="import" href="../icons.html">
 <link rel="import" href="../route.html">
 <link rel="import" href="../settings_shared_css.html">
@@ -24,17 +23,15 @@
         --cr-section-min-height: var(--cr-section-two-line-min-height);
       }
     </style>
-    <template is="dom-if" if="[[enableSiteSettings_]]">
-      <div class="settings-box first line-only">
-        <h2 class="first">$i18n{siteSettingsAllSites}</h2>
-      </div>
-      <cr-link-row data-route="SITE_SETTINGS_ALL" id="all-sites"
-          label="$i18n{siteSettingsAllSitesDescription}"
-          on-click="onTapNavigate_"></cr-link-row>
-      <div class="settings-box first line-only">
-        <h2>$i18n{siteSettingsPermissions}</h2>
-      </div>
-    </template>
+    <div class="settings-box first line-only">
+      <h2 class="first">$i18n{siteSettingsAllSites}</h2>
+    </div>
+    <cr-link-row data-route="SITE_SETTINGS_ALL" id="all-sites"
+        label="$i18n{siteSettingsAllSitesDescription}"
+        on-click="onTapNavigate_"></cr-link-row>
+    <div class="settings-box first line-only">
+      <h2>$i18n{siteSettingsPermissions}</h2>
+    </div>
 
     <cr-link-row class="two-line" data-route="SITE_SETTINGS_COOKIES"
         id="cookies" label="$i18n{siteSettingsCookies}"
@@ -194,6 +191,22 @@
             '$i18nPolymer{siteSettingsUsbDevicesAsk}',
             '$i18nPolymer{siteSettingsUsbDevicesBlock}')]]"></cr-link-row>
 
+    <template is="dom-if" if="[[enableExperimentalWebPlatformFeatures_]]">
+      <cr-link-row
+          class="hr two-line"
+          data-route="SITE_SETTINGS_SERIAL_PORTS"
+          icon-class="subpage-arrow"
+          id="serial-ports"
+          label="$i18n{siteSettingsSerialPorts}"
+          on-click="onTapNavigate_"
+          start-icon="settings:serial-port"
+          sub-label="[[defaultSettingLabel_(
+              default_.serialPorts,
+              '$i18nPolymer{siteSettingsSerialPortsAsk}',
+              '$i18nPolymer{siteSettingsSerialPortsBlock}')]]">
+      </cr-link-row>
+    </template>
+
     <cr-link-row class="hr" data-route="SITE_SETTINGS_PDF_DOCUMENTS"
         id="pdf-documents" label="$i18n{siteSettingsPdfDocuments}"
         on-click="onTapNavigate_" start-icon="settings:pdf"></cr-link-row>
@@ -203,15 +216,15 @@
         on-click="onTapNavigate_" start-icon="settings:protected-content">
     </cr-link-row>
 
-    <template is="dom-if" if="[[enableClipboardContentSetting_]]">
-      <cr-link-row class="hr two-line" data-route="SITE_SETTINGS_CLIPBOARD"
-          id="clipboard" label="$i18n{siteSettingsClipboard}"
-          on-click="onTapNavigate_" start-icon="settings:clipboard"
-          sub-label="[[defaultSettingLabel_(
-              default_.clipboard,
-              '$i18nPolymer{siteSettingsAskBeforeAccessing}',
-              '$i18nPolymer{siteSettingsBlocked}')]]"></cr-link-row>
-    </template>
+    <cr-link-row class="hr two-line" data-route="SITE_SETTINGS_CLIPBOARD"
+        id="clipboard" label="$i18n{siteSettingsClipboard}"
+        on-click="onTapNavigate_" start-icon="settings:clipboard"
+        sub-label="[[defaultSettingLabel_(
+            default_.clipboard,
+            '$i18nPolymer{siteSettingsAskBeforeAccessing}',
+            '$i18nPolymer{siteSettingsBlocked}')]]">
+    </cr-link-row>
+
     <template is="dom-if" if="[[enablePaymentHandlerContentSetting_]]">
       <cr-link-row class="hr two-line"
           data-route="SITE_SETTINGS_PAYMENT_HANDLER" id="paymentHandler"
@@ -221,6 +234,18 @@
               default_.paymentHandler,
               '$i18nPolymer{siteSettingsPaymentHandlerAllow}',
               '$i18nPolymer{siteSettingsPaymentHandlerBlock}')]]"></cr-link-row>
+    </template>
+
+    <template is="dom-if" if="[[enableBluetoothScanningContentSetting_]]">
+      <cr-link-row class="hr two-line"
+          data-route="SITE_SETTINGS_BLUETOOTH_SCANNING"
+          id="bluetooth-scanning" label="$i18n{siteSettingsBluetoothScanning}"
+          on-click="onTapNavigate_" start-icon="settings:bluetooth-scanning"
+          sub-label="[[defaultSettingLabel_(
+              default_.bluetoothScanning,
+              '$i18nPolymer{siteSettingsBluetoothScanningAsk}',
+              '$i18nPolymer{siteSettingsBluetoothScanningBlock}')]]">
+      </cr-link-row>
     </template>
   </template>
   <script src="site_settings_page.js"></script>

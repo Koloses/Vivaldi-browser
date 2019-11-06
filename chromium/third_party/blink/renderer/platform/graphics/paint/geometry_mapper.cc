@@ -72,7 +72,7 @@ GeometryMapper::SourceToDestinationProjectionInternal(
   if (source.Parent() && &destination == &source.Parent()->Unalias()) {
     if (source.IsIdentityOr2DTranslation()) {
       success = true;
-      return Translation2DOrMatrix(source.Matrix().To2DTranslation());
+      return Translation2DOrMatrix(source.Translation2D());
     }
     // The result will be translate(origin)*matrix*translate(-origin) which
     // equals to matrix if the origin is zero or if the matrix is just
@@ -86,7 +86,7 @@ GeometryMapper::SourceToDestinationProjectionInternal(
   if (destination.IsIdentityOr2DTranslation() && destination.Parent() &&
       &source == &destination.Parent()->Unalias()) {
     success = true;
-    return Translation2DOrMatrix(-destination.Matrix().To2DTranslation());
+    return Translation2DOrMatrix(-destination.Translation2D());
   }
 
   const auto& source_cache = source.GetTransformCache();
@@ -317,7 +317,7 @@ static FloatClipRect GetClipRect(const ClipPaintPropertyNode& clip_node_arg,
   FloatClipRect clip_rect(
       UNLIKELY(clip_behavior == kExcludeOverlayScrollbarSizeForHitTesting)
           ? clip_node.ClipRectExcludingOverlayScrollbars()
-          : clip_node.ClipRect());
+          : FloatClipRect(clip_node.ClipRect()));
   if (clip_node.ClipPath())
     clip_rect.ClearIsTight();
   return clip_rect;

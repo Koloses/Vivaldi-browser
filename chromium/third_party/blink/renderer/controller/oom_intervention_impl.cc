@@ -102,11 +102,14 @@ void OomInterventionImpl::OnMemoryPing(MemoryUsage usage) {
   if (std::isnan(usage.private_footprint_bytes) ||
       std::isnan(usage.swap_bytes) || std::isnan(usage.vm_size_bytes))
     return;
-  Check(CrashMemoryMetricsReporterImpl::MemoryUsageToMetrics(usage));
+  Check(usage);
 }
 
-void OomInterventionImpl::Check(OomInterventionMetrics current_memory) {
+void OomInterventionImpl::Check(MemoryUsage usage) {
   DCHECK(host_);
+
+  OomInterventionMetrics current_memory =
+      CrashMemoryMetricsReporterImpl::MemoryUsageToMetrics(usage);
 
   bool oom_detected = false;
 
@@ -128,6 +131,10 @@ void OomInterventionImpl::Check(OomInterventionMetrics current_memory) {
 
   if (oom_detected) {
     UpdateStateCrashKey(OomInterventionState::During);
+
+    UMA_HISTOGRAM_MEMORY_MB(
+        "Memory.Experimental.OomIntervention.V8UsageBefore",
+        base::saturated_cast<int>(usage.v8_bytes / 1024 / 1024));
 
     if (navigate_ads_enabled_ || purge_v8_memory_enabled_) {
       for (const auto& page : Page::OrdinaryPages()) {
@@ -162,7 +169,8 @@ void OomInterventionImpl::Check(OomInterventionMetrics current_memory) {
     // Report the memory impact of intervention after 10, 20, 30 seconds.
     metrics_at_intervention_ = current_memory;
     number_of_report_needed_ = 3;
-    delayed_report_timer_.StartRepeating(TimeDelta::FromSeconds(10), FROM_HERE);
+    delayed_report_timer_.StartRepeating(base::TimeDelta::FromSeconds(10),
+                                         FROM_HERE);
   }
 }
 
@@ -195,17 +203,21 @@ int ToMemoryUsageDeltaSample(uint64_t after_kb, uint64_t before_kb) {
 }
 
 void OomInterventionImpl::TimerFiredUMAReport(TimerBase*) {
+  MemoryUsage usage = MemoryUsageMonitorInstance().GetCurrentMemoryUsage();
   OomInterventionMetrics current_memory =
-      CrashMemoryMetricsReporterImpl::MemoryUsageToMetrics(
-          MemoryUsageMonitorInstance().GetCurrentMemoryUsage());
+      CrashMemoryMetricsReporterImpl::MemoryUsageToMetrics(usage);
   int blink_usage_delta =
       ToMemoryUsageDeltaSample(current_memory.current_blink_usage_kb,
                                metrics_at_intervention_.current_blink_usage_kb);
   int private_footprint_delta = ToMemoryUsageDeltaSample(
       current_memory.current_private_footprint_kb,
       metrics_at_intervention_.current_private_footprint_kb);
+  int v8_usage_mb = base::saturated_cast<int>(usage.v8_bytes / 1024 / 1024);
   switch (number_of_report_needed_--) {
     case 3:
+      UMA_HISTOGRAM_MEMORY_MB(
+          "Memory.Experimental.OomIntervention.V8UsageAfter10secs",
+          v8_usage_mb);
       base::UmaHistogramSparse(
           "Memory.Experimental.OomIntervention.ReducedBlinkUsageAfter10secs2",
           blink_usage_delta);
@@ -214,6 +226,9 @@ void OomInterventionImpl::TimerFiredUMAReport(TimerBase*) {
           private_footprint_delta);
       break;
     case 2:
+      UMA_HISTOGRAM_MEMORY_MB(
+          "Memory.Experimental.OomIntervention.V8UsageAfter20secs",
+          v8_usage_mb);
       base::UmaHistogramSparse(
           "Memory.Experimental.OomIntervention.ReducedBlinkUsageAfter20secs2",
           blink_usage_delta);
@@ -222,6 +237,9 @@ void OomInterventionImpl::TimerFiredUMAReport(TimerBase*) {
           private_footprint_delta);
       break;
     case 1:
+      UMA_HISTOGRAM_MEMORY_MB(
+          "Memory.Experimental.OomIntervention.V8UsageAfter30secs",
+          v8_usage_mb);
       base::UmaHistogramSparse(
           "Memory.Experimental.OomIntervention.ReducedBlinkUsageAfter30secs2",
           blink_usage_delta);

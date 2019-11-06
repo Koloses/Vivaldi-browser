@@ -7,11 +7,13 @@
 #include <jni.h>
 #include <vector>
 
+#include "base/android/build_info.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/android/chrome_jni_headers/WebApkUpdateDataFetcher_jni.h"
 #include "chrome/browser/android/color_helpers.h"
 #include "chrome/browser/android/shortcut_helper.h"
 #include "chrome/browser/android/webapk/webapk_icon_hasher.h"
@@ -21,17 +23,23 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
-#include "jni/WebApkUpdateDataFetcher_jni.h"
 #include "third_party/blink/public/common/manifest/manifest.h"
 #include "third_party/smhasher/src/MurmurHash2.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 
 namespace {
+
+bool DoesAndroidSupportMaskableIconsForWebApk() {
+  // TODO(crbug.com/977173): re-enable maskable icon support once server support
+  // is ready.
+  return false;
+}
 
 // Returns whether the given |url| is within the scope of the |scope| url.
 bool IsInScope(const GURL& url, const GURL& scope) {
@@ -62,6 +70,7 @@ WebApkUpdateDataFetcher::WebApkUpdateDataFetcher(JNIEnv* env,
       scope_(scope),
       web_manifest_url_(web_manifest_url),
       info_(GURL()),
+      is_primary_icon_maskable_(false),
       weak_ptr_factory_(this) {
   java_ref_.Reset(env, obj);
 }
@@ -110,6 +119,7 @@ void WebApkUpdateDataFetcher::FetchInstallableData() {
 
   InstallableParams params;
   params.valid_manifest = true;
+  params.prefer_maskable_icon = DoesAndroidSupportMaskableIconsForWebApk();
   params.has_worker = true;
   params.valid_primary_icon = true;
   params.valid_badge_icon = true;
@@ -117,8 +127,8 @@ void WebApkUpdateDataFetcher::FetchInstallableData() {
   InstallableManager* installable_manager =
       InstallableManager::FromWebContents(web_contents());
   installable_manager->GetData(
-      params, base::Bind(&WebApkUpdateDataFetcher::OnDidGetInstallableData,
-                         weak_ptr_factory_.GetWeakPtr()));
+      params, base::BindOnce(&WebApkUpdateDataFetcher::OnDidGetInstallableData,
+                             weak_ptr_factory_.GetWeakPtr()));
 }
 
 void WebApkUpdateDataFetcher::OnDidGetInstallableData(
@@ -137,7 +147,7 @@ void WebApkUpdateDataFetcher::OnDidGetInstallableData(
   // observing too. It is based on our assumption that it is invalid for
   // web developers to change the Web Manifest location. When it does
   // change, we will treat the new Web Manifest as the one of another WebAPK.
-  if (data.error_code != NO_ERROR_DETECTED || data.manifest->IsEmpty() ||
+  if (!data.errors.empty() || data.manifest->IsEmpty() ||
       web_manifest_url_ != data.manifest_url ||
       !AreWebManifestUrlsWebApkCompatible(*data.manifest)) {
     return;
@@ -147,6 +157,7 @@ void WebApkUpdateDataFetcher::OnDidGetInstallableData(
   info_.manifest_url = data.manifest_url;
   info_.best_primary_icon_url = data.primary_icon_url;
   primary_icon_ = *data.primary_icon;
+  is_primary_icon_maskable_ = data.has_maskable_primary_icon;
 
   if (data.badge_icon && !data.badge_icon->drawsNothing()) {
     info_.best_badge_icon_url = data.badge_icon_url;
@@ -160,7 +171,7 @@ void WebApkUpdateDataFetcher::OnDidGetInstallableData(
       content::BrowserContext::GetDefaultStoragePartition(profile)
           ->GetURLLoaderFactoryForBrowserProcess()
           .get(),
-      info_.best_primary_icon_url,
+      url::Origin::Create(last_fetched_url_), info_.best_primary_icon_url,
       base::Bind(&WebApkUpdateDataFetcher::OnGotPrimaryIconMurmur2Hash,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -179,7 +190,7 @@ void WebApkUpdateDataFetcher::OnGotPrimaryIconMurmur2Hash(
         content::BrowserContext::GetDefaultStoragePartition(profile)
             ->GetURLLoaderFactoryForBrowserProcess()
             .get(),
-        info_.best_badge_icon_url,
+        url::Origin::Create(last_fetched_url_), info_.best_badge_icon_url,
         base::Bind(&WebApkUpdateDataFetcher::OnDataAvailable,
                    weak_ptr_factory_.GetWeakPtr(), primary_icon_murmur2_hash,
                    true));
@@ -212,6 +223,7 @@ void WebApkUpdateDataFetcher::OnDataAvailable(
       base::android::ConvertUTF8ToJavaString(env, primary_icon_murmur2_hash);
   ScopedJavaLocalRef<jobject> java_primary_icon =
       gfx::ConvertToJavaBitmap(&primary_icon_);
+  jboolean java_is_primary_icon_maskable = is_primary_icon_maskable_;
   ScopedJavaLocalRef<jstring> java_badge_icon_url =
       base::android::ConvertUTF8ToJavaString(env,
                                              info_.best_badge_icon_url.spec());
@@ -227,7 +239,11 @@ void WebApkUpdateDataFetcher::OnDataAvailable(
   ScopedJavaLocalRef<jstring> java_share_params_title;
   ScopedJavaLocalRef<jstring> java_share_params_text;
   ScopedJavaLocalRef<jstring> java_share_params_url;
-  if (info_.share_target.has_value()) {
+  jboolean java_share_params_is_method_post = false;
+  jboolean java_share_params_is_enctype_multipart = false;
+  ScopedJavaLocalRef<jobjectArray> java_share_params_file_names;
+  ScopedJavaLocalRef<jobjectArray> java_share_params_accepts;
+  if (info_.share_target.has_value() && info_.share_target->action.is_valid()) {
     java_share_action = base::android::ConvertUTF8ToJavaString(
         env, info_.share_target->action.spec());
     java_share_params_title = base::android::ConvertUTF16ToJavaString(
@@ -236,14 +252,35 @@ void WebApkUpdateDataFetcher::OnDataAvailable(
         env, info_.share_target->params.text);
     java_share_params_url = base::android::ConvertUTF16ToJavaString(
         env, info_.share_target->params.url);
+
+    java_share_params_is_method_post =
+        (info_.share_target->method ==
+         blink::Manifest::ShareTarget::Method::kPost);
+    java_share_params_is_enctype_multipart =
+        (info_.share_target->enctype ==
+         blink::Manifest::ShareTarget::Enctype::kMultipartFormData);
+
+    std::vector<base::string16> file_names;
+    std::vector<std::vector<base::string16>> accepts;
+    for (auto& f : info_.share_target->params.files) {
+      file_names.push_back(f.name);
+      accepts.push_back(f.accept);
+    }
+    java_share_params_file_names =
+        base::android::ToJavaArrayOfStrings(env, file_names);
+    java_share_params_accepts =
+        base::android::ToJavaArrayOfStringArray(env, accepts);
   }
 
   Java_WebApkUpdateDataFetcher_onDataAvailable(
       env, java_ref_, java_url, java_scope, java_name, java_short_name,
       java_primary_icon_url, java_primary_icon_murmur2_hash, java_primary_icon,
-      java_badge_icon_url, java_badge_icon_murmur2_hash, java_badge_icon,
-      java_icon_urls, info_.display, info_.orientation,
+      java_is_primary_icon_maskable, java_badge_icon_url,
+      java_badge_icon_murmur2_hash, java_badge_icon, java_icon_urls,
+      info_.display, info_.orientation,
       OptionalSkColorToJavaColor(info_.theme_color),
       OptionalSkColorToJavaColor(info_.background_color), java_share_action,
-      java_share_params_title, java_share_params_text, java_share_params_url);
+      java_share_params_title, java_share_params_text, java_share_params_url,
+      java_share_params_is_method_post, java_share_params_is_enctype_multipart,
+      java_share_params_file_names, java_share_params_accepts);
 }

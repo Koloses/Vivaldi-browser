@@ -18,7 +18,7 @@
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "components/arc/common/policy.mojom.h"
-#include "components/arc/connection_observer.h"
+#include "components/arc/session/connection_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/policy_service.h"
@@ -80,6 +80,18 @@ class ArcPolicyBridge : public KeyedService,
                                   const std::string& package_name,
                                   mojom::InstallErrorReason reason) {}
 
+    // Called when CloudDPC scheduled direct install with Play Store for
+    // a set of packages.
+    virtual void OnReportDirectInstall(
+        base::Time time,
+        const std::set<std::string>& package_names) {}
+
+    // Called when in CloudDPC the main loop of retries to install apps failed
+    // to install some apps.
+    virtual void OnReportForceInstallMainLoopFailed(
+        base::Time time,
+        const std::set<std::string>& package_names) {}
+
    protected:
     Observer() = default;
     virtual ~Observer() = default;
@@ -128,6 +140,12 @@ class ArcPolicyBridge : public KeyedService,
   void ReportCloudDpsFailed(base::Time time,
                             const std::string& package_name,
                             mojom::InstallErrorReason reason) override;
+  void ReportDirectInstall(
+      base::Time time,
+      const std::vector<std::string>& package_names) override;
+  void ReportForceInstallMainLoopFailed(
+      base::Time time,
+      const std::vector<std::string>& package_names) override;
 
   // PolicyService::Observer overrides.
   void OnPolicyUpdated(const policy::PolicyNamespace& ns,
@@ -147,7 +165,7 @@ class ArcPolicyBridge : public KeyedService,
   // Called when the compliance report from ARC is parsed.
   void OnReportComplianceParseSuccess(
       base::OnceCallback<void(const std::string&)> callback,
-      std::unique_ptr<base::Value> parsed_json);
+      base::Value parsed_json);
 
   void UpdateComplianceReportMetrics(const base::DictionaryValue* report);
 

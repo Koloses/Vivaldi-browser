@@ -17,10 +17,10 @@
 #include "content/browser/frame_host/navigation_handle_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/android/content_jni_headers/WebContentsObserverProxy_jni.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
-#include "jni/WebContentsObserverProxy_jni.h"
 
 using base::android::AttachCurrentThread;
 using base::android::JavaParamRef;
@@ -132,6 +132,7 @@ void WebContentsObserverProxy::DidStartNavigation(
   Java_WebContentsObserverProxy_didStartNavigation(
       AttachCurrentThread(), java_observer_,
       static_cast<NavigationHandleImpl*>(navigation_handle)
+          ->navigation_request()
           ->java_navigation_handle());
 }
 
@@ -140,6 +141,7 @@ void WebContentsObserverProxy::DidRedirectNavigation(
   Java_WebContentsObserverProxy_didRedirectNavigation(
       AttachCurrentThread(), java_observer_,
       static_cast<NavigationHandleImpl*>(navigation_handle)
+          ->navigation_request()
           ->java_navigation_handle());
 }
 
@@ -151,6 +153,7 @@ void WebContentsObserverProxy::DidFinishNavigation(
   Java_WebContentsObserverProxy_didFinishNavigation(
       AttachCurrentThread(), java_observer_,
       static_cast<NavigationHandleImpl*>(navigation_handle)
+          ->navigation_request()
           ->java_navigation_handle());
 }
 
@@ -204,9 +207,11 @@ void WebContentsObserverProxy::DidDetachInterstitialPage() {
   Java_WebContentsObserverProxy_didDetachInterstitialPage(env, java_observer_);
 }
 
-void WebContentsObserverProxy::DidChangeThemeColor(SkColor color) {
+void WebContentsObserverProxy::DidChangeThemeColor(
+    base::Optional<SkColor> color) {
   JNIEnv* env = AttachCurrentThread();
-  Java_WebContentsObserverProxy_didChangeThemeColor(env, java_observer_, color);
+  Java_WebContentsObserverProxy_didChangeThemeColor(
+      env, java_observer_, color.value_or(SK_ColorTRANSPARENT));
 }
 
 void WebContentsObserverProxy::MediaEffectivelyFullscreenChanged(
@@ -270,6 +275,16 @@ void WebContentsObserverProxy::ViewportFitChanged(
 void WebContentsObserverProxy::DidReloadLoFiImages() {
   JNIEnv* env = AttachCurrentThread();
   Java_WebContentsObserverProxy_didReloadLoFiImages(env, java_observer_);
+}
+
+void WebContentsObserverProxy::OnWebContentsFocused(RenderWidgetHost*) {
+  JNIEnv* env = AttachCurrentThread();
+  Java_WebContentsObserverProxy_onWebContentsFocused(env, java_observer_);
+}
+
+void WebContentsObserverProxy::OnWebContentsLostFocus(RenderWidgetHost*) {
+  JNIEnv* env = AttachCurrentThread();
+  Java_WebContentsObserverProxy_onWebContentsLostFocus(env, java_observer_);
 }
 
 }  // namespace content

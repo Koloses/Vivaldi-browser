@@ -7,6 +7,7 @@
 
 #include "base/macros.h"
 #include "chrome/common/page_load_metrics/page_load_metrics.mojom.h"
+#include "content/public/common/previews_state.h"
 #include "content/public/common/resource_type.h"
 #include "url/origin.h"
 
@@ -30,16 +31,24 @@ class PageResourceDataUse {
   void DidStartResponse(const GURL& response_url,
                         int resource_id,
                         const network::ResourceResponseHead& response_head,
-                        content::ResourceType resource_type);
+                        content::ResourceType resource_type,
+                        content::PreviewsState previews_state);
 
   // Updates received bytes.
   void DidReceiveTransferSizeUpdate(int received_data_length);
 
-  // Updates received bytes from encoded length, returns whether it was updated.
-  bool DidCompleteResponse(const network::URLLoaderCompletionStatus& status);
+  // Updates received bytes from encoded length.
+  void DidCompleteResponse(const network::URLLoaderCompletionStatus& status);
 
   // Flags the resource as canceled.
   void DidCancelResponse();
+
+  // Called when this resource was loaded from the memory cache. Resources
+  // loaded from the memory cache only receive a single update.
+  void DidLoadFromMemoryCache(const GURL& response_url,
+                              int request_id,
+                              int64_t encoded_body_length,
+                              const std::string& mime_type);
 
   // Checks if the resource has completed loading or if the response was
   // cancelled.
@@ -74,10 +83,11 @@ class PageResourceDataUse {
   bool is_canceled_;
   bool reported_as_ad_resource_;
   bool is_main_frame_resource_;
-  bool was_fetched_via_cache_;
   bool is_secure_scheme_;
   bool proxy_used_;
   bool is_primary_frame_resource_ = false;
+
+  mojom::CacheType cache_type_;
 
   url::Origin origin_;
 

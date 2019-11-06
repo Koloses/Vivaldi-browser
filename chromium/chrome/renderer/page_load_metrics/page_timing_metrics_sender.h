@@ -13,9 +13,11 @@
 #include "base/macros.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "chrome/renderer/page_load_metrics/page_resource_data_use.h"
+#include "content/public/common/previews_state.h"
 #include "third_party/blink/public/mojom/use_counter/css_property_id.mojom.h"
 #include "third_party/blink/public/mojom/web_feature/web_feature.mojom-shared.h"
 #include "third_party/blink/public/platform/web_loading_behavior_flag.h"
+#include "third_party/blink/public/web/web_local_frame_client.h"
 
 class GURL;
 
@@ -46,15 +48,23 @@ class PageTimingMetricsSender {
   void DidObserveLoadingBehavior(blink::WebLoadingBehaviorFlag behavior);
   void DidObserveNewFeatureUsage(blink::mojom::WebFeature feature);
   void DidObserveNewCssPropertyUsage(int css_property, bool is_animated);
-  void DidObserveLayoutJank(double jank_fraction);
+  void DidObserveLayoutShift(double score, bool after_input_or_scroll);
+  void DidObserveLazyLoadBehavior(
+      blink::WebLocalFrameClient::LazyLoadBehavior lazy_load_behavior);
+
   void DidStartResponse(const GURL& response_url,
                         int resource_id,
                         const network::ResourceResponseHead& response_head,
-                        content::ResourceType resource_type);
+                        content::ResourceType resource_type,
+                        content::PreviewsState previews_state);
   void DidReceiveTransferSizeUpdate(int resource_id, int received_data_length);
   void DidCompleteResponse(int resource_id,
                            const network::URLLoaderCompletionStatus& status);
   void DidCancelResponse(int resource_id);
+  void DidLoadResourceFromMemoryCache(const GURL& response_url,
+                                      int request_id,
+                                      int64_t encoded_body_length,
+                                      const std::string& mime_type);
 
   // TODO(ericrobinson): There should probably be a name change here:
   // * Send: Sends immediately, functions as SendNow.
@@ -86,7 +96,8 @@ class PageTimingMetricsSender {
   // A list of newly observed features during page load, to be sent to the
   // browser.
   mojom::PageLoadFeaturesPtr new_features_;
-  mojom::PageRenderData render_data_;
+  mojom::FrameRenderDataUpdate render_data_;
+  mojom::DeferredResourceCountsPtr new_deferred_resource_data_;
 
   std::bitset<static_cast<size_t>(blink::mojom::WebFeature::kNumberOfFeatures)>
       features_sent_;

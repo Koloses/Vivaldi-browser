@@ -82,8 +82,8 @@ class NetworkHostScanCacheTest : public testing::Test {
   }
 
   bool HasConnectedToHost(const std::string& tether_network_guid) {
-    return base::ContainsValue(has_connected_to_host_device_ids_,
-                               tether_network_guid);
+    return base::Contains(has_connected_to_host_device_ids_,
+                          tether_network_guid);
   }
 
   // Verifies that the information present in |expected_cache_| and
@@ -105,7 +105,7 @@ class NetworkHostScanCacheTest : public testing::Test {
               tether_network_guid);
       ASSERT_TRUE(tether_network_state);
       EXPECT_EQ(entry.device_name, tether_network_state->name());
-      EXPECT_EQ(entry.carrier, tether_network_state->carrier());
+      EXPECT_EQ(entry.carrier, tether_network_state->tether_carrier());
       EXPECT_EQ(entry.battery_percentage,
                 tether_network_state->battery_percentage());
       EXPECT_EQ(entry.signal_strength, tether_network_state->signal_strength());

@@ -143,9 +143,7 @@ class NetworkQualitiesPrefDelegateImpl
  public:
   // Caller must guarantee that |pref_service| outlives |this|.
   explicit NetworkQualitiesPrefDelegateImpl(PrefService* pref_service)
-      : pref_service_(pref_service),
-        lossy_prefs_writing_task_posted_(false),
-        weak_ptr_factory_(this) {
+      : pref_service_(pref_service), lossy_prefs_writing_task_posted_(false) {
     DCHECK(pref_service_);
   }
 
@@ -199,7 +197,8 @@ class NetworkQualitiesPrefDelegateImpl
 
   THREAD_CHECKER(thread_checker_);
 
-  base::WeakPtrFactory<NetworkQualitiesPrefDelegateImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<NetworkQualitiesPrefDelegateImpl> weak_ptr_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(NetworkQualitiesPrefDelegateImpl);
 };
@@ -254,7 +253,6 @@ CronetPrefsManager::CronetPrefsManager(
   }
 
   {
-    SCOPED_UMA_HISTOGRAM_TIMER("Net.Cronet.PrefsInitTime");
     base::ScopedAllowBlocking allow_blocking;
     pref_service_ = factory.Create(registry.get());
   }

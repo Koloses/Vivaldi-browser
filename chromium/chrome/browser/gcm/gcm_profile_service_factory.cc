@@ -19,13 +19,13 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_instance.h"
+#include "content/public/browser/storage_partition.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/gcm/gcm_product_util.h"
 #include "chrome/common/channel_info.h"
 #include "components/gcm_driver/gcm_client_factory.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/storage_partition.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #endif
 
@@ -132,8 +132,10 @@ KeyedService* GCMProfileServiceFactory::BuildServiceInstanceFor(
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
   std::unique_ptr<GCMProfileService> service = nullptr;
 #if defined(OS_ANDROID)
-  service = base::WrapUnique(
-      new GCMProfileService(profile->GetPath(), blocking_task_runner));
+  service = std::make_unique<GCMProfileService>(
+      profile->GetPath(), blocking_task_runner,
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetURLLoaderFactoryForBrowserProcess());
 #else
   service = std::make_unique<GCMProfileService>(
       profile->GetPrefs(), profile->GetPath(),
@@ -152,7 +154,8 @@ KeyedService* GCMProfileServiceFactory::BuildServiceInstanceFor(
 #endif
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
   offline_pages::PrefetchService* prefetch_service =
-      offline_pages::PrefetchServiceFactory::GetForBrowserContext(context);
+      offline_pages::PrefetchServiceFactory::GetForKey(
+          profile->GetProfileKey());
   if (prefetch_service != nullptr) {
     offline_pages::PrefetchGCMHandler* prefetch_gcm_handler =
         prefetch_service->GetPrefetchGCMHandler();

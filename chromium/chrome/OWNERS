@@ -2,6 +2,7 @@
 # where possible.
 
 # Reviewers (in CET):
+blundell@chromium.org
 droger@chromium.org
 treib@chromium.org
 vasilii@chromium.org
@@ -23,3 +24,5 @@ per-file VERSION=amineer@chromium.org
 per-file VERSION=anantha@chromium.org
 per-file VERSION=govind@chromium.org
 per-file VERSION=mmoss@chromium.org
+# COMPONENT: Build
+# TEAM: chromium-reviews@chromium.org

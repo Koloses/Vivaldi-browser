@@ -39,14 +39,13 @@ class OverlayWindowViews : public content::OverlayWindow,
   enum class WindowQuadrant { kBottomLeft, kBottomRight, kTopLeft, kTopRight };
 
   // OverlayWindow:
-  bool IsActive() const override;
+  bool IsActive() override;
   void Close() override;
   void ShowInactive() override;
   void Hide() override;
-  bool IsVisible() const override;
-  bool IsAlwaysOnTop() const override;
-  ui::Layer* GetLayer() override;
-  gfx::Rect GetBounds() const override;
+  bool IsVisible() override;
+  bool IsAlwaysOnTop() override;
+  gfx::Rect GetBounds() override;
   void UpdateVideoSize(const gfx::Size& natural_size) override;
   void SetPlaybackState(PlaybackState playback_state) override;
   void SetAlwaysHidePlayPauseButton(bool is_visible) override;
@@ -54,11 +53,11 @@ class OverlayWindowViews : public content::OverlayWindow,
   void SetSkipAdButtonVisibility(bool is_visible) override;
   void SetNextTrackButtonVisibility(bool is_visible) override;
   void SetPreviousTrackButtonVisibility(bool is_visible) override;
-  ui::Layer* GetWindowBackgroundLayer() override;
-  ui::Layer* GetVideoLayer() override;
-  gfx::Rect GetVideoBounds() override;
+  void SetSurfaceId(const viz::SurfaceId& surface_id) override;
 
   // views::Widget:
+  bool IsActive() const override;
+  bool IsVisible() const override;
   void OnNativeBlur() override;
   void OnNativeWidgetDestroyed() override;
   gfx::Size GetMinimumSize() const override;
@@ -99,11 +98,21 @@ class OverlayWindowViews : public content::OverlayWindow,
   gfx::Point close_image_position_for_testing() const;
   gfx::Point mute_image_position_for_testing() const;
   gfx::Point resize_handle_position_for_testing() const;
-  views::View* controls_parent_view_for_testing() const;
   OverlayWindowViews::PlaybackState playback_state_for_testing() const;
   OverlayWindowViews::MutedState muted_state_for_testing() const;
+  ui::Layer* video_layer_for_testing() const;
+  cc::Layer* GetLayerForTesting() override;
+
+  // Update the max size of the widget based on |work_area| and |window_size|.
+  // The return value is the new size of the window if it was resized and is
+  // only used for testing.
+  gfx::Size UpdateMaxSize(const gfx::Rect& work_area,
+                          const gfx::Size& window_size);
 
  private:
+  // Return the work area for the nearest display the widget is on.
+  gfx::Rect GetWorkAreaForWindow() const;
+
   // Determine the intended bounds of |this|. This should be called when there
   // is reason for the bounds to change, such as switching primary displays or
   // playing a new video (i.e. different aspect ratio). This also updates
@@ -122,6 +131,9 @@ class OverlayWindowViews : public content::OverlayWindow,
 
   // Updates the bounds of the controls.
   void UpdateControlsBounds();
+
+  // Called when the bounds of the controls should be updated.
+  void OnUpdateControlsBounds();
 
   // Update the size of each controls view as the size of the window changes.
   void UpdateButtonControlsSize();
@@ -162,6 +174,11 @@ class OverlayWindowViews : public content::OverlayWindow,
   // state.
   void ToggleMute();
 
+  // Returns the current frame sink id for the surface displayed in the
+  // |video_view_]. If |video_view_| is not currently displaying a surface then
+  // returns nullptr.
+  const viz::FrameSinkId* GetCurrentFrameSinkId() const;
+
   // Not owned; |controller_| owns |this|.
   content::PictureInPictureWindowController* controller_;
 
@@ -200,23 +217,23 @@ class OverlayWindowViews : public content::OverlayWindow,
   std::unique_ptr<views::View> window_background_view_;
   std::unique_ptr<views::View> video_view_;
   std::unique_ptr<views::View> controls_scrim_view_;
-  // |controls_parent_view_| is the parent view of play/pause, previous
-  // track and next track control views.
-  std::unique_ptr<views::View> controls_parent_view_;
-  std::unique_ptr<views::BackToTabImageButton> back_to_tab_controls_view_;
-  std::unique_ptr<views::MuteImageButton> mute_controls_view_;
-  std::unique_ptr<views::SkipAdLabelButton> skip_ad_controls_view_;
   std::unique_ptr<views::CloseImageButton> close_controls_view_;
-  std::unique_ptr<views::ResizeHandleButton> resize_handle_view_;
+  std::unique_ptr<views::BackToTabImageButton> back_to_tab_controls_view_;
+  std::unique_ptr<views::TrackImageButton> previous_track_controls_view_;
   std::unique_ptr<views::PlaybackImageButton> play_pause_controls_view_;
   std::unique_ptr<views::TrackImageButton> next_track_controls_view_;
-  std::unique_ptr<views::TrackImageButton> previous_track_controls_view_;
+  std::unique_ptr<views::MuteImageButton> mute_controls_view_;
+  std::unique_ptr<views::SkipAdLabelButton> skip_ad_controls_view_;
+  std::unique_ptr<views::ResizeHandleButton> resize_handle_view_;
 #if defined(OS_CHROMEOS)
   std::unique_ptr<ash::RoundedCornerDecorator> decorator_;
 #endif
 
   // Automatically hides the controls a few seconds after user tap gesture.
   base::RetainingOneShotTimer hide_controls_timer_;
+
+  // Timer used to update controls bounds.
+  std::unique_ptr<base::OneShotTimer> update_controls_bounds_timer_;
 
   // Current playback state on the video in Picture-in-Picture window. It is
   // used to toggle play/pause/replay button.
@@ -225,6 +242,10 @@ class OverlayWindowViews : public content::OverlayWindow,
   // Current muted state on the video in Picture-in-Picture window. It is
   // used to toggle mute button.
   MutedState muted_state_for_testing_ = kNoAudio;
+
+  // Whether or not the mute button will be shown. This is not the case when
+  // there is no audio track.
+  bool show_mute_button_ = false;
 
   // Whether or not the skip ad button will be shown. This is the
   // case when Media Session "skipad" action is handled by the website.

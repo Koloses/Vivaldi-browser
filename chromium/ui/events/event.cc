@@ -521,7 +521,7 @@ MouseEvent::MouseEvent(const PlatformEvent& native_event)
       pointer_details_(GetMousePointerDetailsFromNative(native_event)) {
   latency()->set_source_event_type(ui::SourceEventType::MOUSE);
   latency()->AddLatencyNumberWithTimestamp(
-      INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, time_stamp(), 1);
+      INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, time_stamp());
   latency()->AddLatencyNumber(INPUT_EVENT_LATENCY_UI_COMPONENT);
   if (type() == ET_MOUSE_PRESSED || type() == ET_MOUSE_RELEASED)
     SetClickCount(GetRepeatCount(*this));
@@ -759,7 +759,7 @@ TouchEvent::TouchEvent(const PlatformEvent& native_event)
       hovering_(false),
       pointer_details_(GetTouchPointerDetailsFromNative(native_event)) {
   latency()->AddLatencyNumberWithTimestamp(
-      INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, time_stamp(), 1);
+      INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, time_stamp());
   latency()->AddLatencyNumber(INPUT_EVENT_LATENCY_UI_COMPONENT);
 
   if (type() == ET_TOUCH_RELEASED || type() == ET_TOUCH_CANCELLED)
@@ -862,7 +862,7 @@ KeyEvent* KeyEvent::last_ibus_key_event_ = nullptr;
 
 // static
 bool KeyEvent::IsRepeated(const KeyEvent& event) {
-  // A safe guard in case if there were continous key pressed events that are
+  // A safe guard in case if there were continuous key pressed events that are
   // not auto repeat.
   const int kMaxAutoRepeatTimeMs = 2000;
   KeyEvent** last_key_event;
@@ -934,7 +934,7 @@ KeyEvent::KeyEvent(const PlatformEvent& native_event, int event_flags)
       code_(CodeFromNative(native_event)),
       is_char_(IsCharFromNative(native_event)) {
   latency()->AddLatencyNumberWithTimestamp(
-      INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, time_stamp(), 1);
+      INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, time_stamp());
   latency()->AddLatencyNumber(INPUT_EVENT_LATENCY_UI_COMPONENT);
 
   if (IsRepeated(*this))
@@ -1147,12 +1147,6 @@ void KeyEvent::NormalizeFlags() {
     set_flags(flags() | mask);
   else
     set_flags(flags() & ~mask);
-}
-
-base::OnceCallback<void(bool, bool)> KeyEvent::WillHandleAsync() {
-  if (cancelable())
-    SetHandled();
-  return std::move(async_callback_);
 }
 
 KeyboardCode KeyEvent::GetLocatedWindowsKeyboardCode() const {

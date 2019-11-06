@@ -13,7 +13,7 @@
 #include "base/timer/mock_timer.h"
 #include "components/consent_auditor/consent_auditor.h"
 #include "components/consent_auditor/fake_consent_auditor.h"
-#include "components/signin/core/browser/account_consistency_method.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/unified_consent/feature.h"
 #include "components/unified_consent/scoped_unified_consent.h"
 #include "components/version_info/version_info.h"
@@ -30,7 +30,6 @@
 #import "ios/public/provider/chrome/browser/signin/fake_chrome_identity.h"
 #import "ios/public/provider/chrome/browser/signin/fake_chrome_identity_service.h"
 #include "ios/web/public/test/test_web_thread_bundle.h"
-#include "services/identity/public/cpp/identity_manager.h"
 #import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #include "third_party/ocmock/gtest_support.h"
@@ -200,6 +199,7 @@ class ChromeSigninViewControllerTest
         @"UIImageView",
         @"UIScrollView",
         @"UIView",
+        @"_UIScrollViewScrollIndicator",
       ];
       // If this test fails, the unknown class should be added in other_views if
       // it doesn't display any strings, otherwise the strings diplay by this
@@ -371,7 +371,7 @@ class ChromeSigninViewControllerTest
   UIWindow* window_;
   ChromeSigninViewController* vc_;
   consent_auditor::FakeConsentAuditor* fake_consent_auditor_;
-  identity::IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
   base::MockOneShotTimer* mock_timer_ptr_ = nullptr;
   FakeChromeSigninViewControllerDelegate* vc_delegate_;
 };
@@ -406,7 +406,7 @@ TEST_P(ChromeSigninViewControllerTest, TestConsentWithOKGOTIT) {
             fake_consent_auditor_->recorded_statuses().at(0));
   EXPECT_EQ(consent_auditor::Feature::CHROME_SYNC,
             fake_consent_auditor_->recorded_features().at(0));
-  EXPECT_EQ(identity_manager_->LegacyPickAccountIdForAccount(
+  EXPECT_EQ(identity_manager_->PickAccountIdForAccount(
                 base::SysNSStringToUTF8([identity_ gaiaID]),
                 base::SysNSStringToUTF8([identity_ userEmail])),
             fake_consent_auditor_->account_id());
@@ -434,7 +434,7 @@ TEST_P(ChromeSigninViewControllerTest, TestConsentWithSettings) {
             fake_consent_auditor_->recorded_statuses().at(0));
   EXPECT_EQ(consent_auditor::Feature::CHROME_SYNC,
             fake_consent_auditor_->recorded_features().at(0));
-  EXPECT_EQ(identity_manager_->LegacyPickAccountIdForAccount(
+  EXPECT_EQ(identity_manager_->PickAccountIdForAccount(
                 base::SysNSStringToUTF8([identity_ gaiaID]),
                 base::SysNSStringToUTF8([identity_ userEmail])),
             fake_consent_auditor_->account_id());

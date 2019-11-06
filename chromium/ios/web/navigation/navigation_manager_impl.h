@@ -13,9 +13,9 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #import "ios/web/navigation/navigation_item_impl.h"
-#import "ios/web/public/navigation_item_list.h"
-#import "ios/web/public/navigation_manager.h"
-#include "ios/web/public/reload_type.h"
+#import "ios/web/public/deprecated/navigation_item_list.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#include "ios/web/public/navigation/reload_type.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
@@ -129,6 +129,18 @@ class NavigationManagerImpl : public NavigationManager {
   // (normally in NavigationContext). It is possible to have additional pending
   // items owned by navigation manager and/or outside of navigation manager.
   virtual void CommitPendingItem(std::unique_ptr<NavigationItemImpl> item) = 0;
+
+  // Removes pending item, so it can be stored in NavigationContext.
+  // Pending item is stored in this object when NavigationContext object does
+  // not yet exist (e.g. when navigation was just requested, or when navigation
+  // has aborted).
+  virtual std::unique_ptr<NavigationItemImpl> ReleasePendingItem() = 0;
+
+  // Allows transferring pending item from NavigationContext to this object.
+  // Pending item can be moved from NavigationContext to this object when
+  // navigation is aborted, but pending item should be retained.
+  virtual void SetPendingItem(
+      std::unique_ptr<web::NavigationItemImpl> item) = 0;
 
   // Returns the navigation index that differs from the current item (or pending
   // item if it exists) by the specified |offset|, skipping redirect navigation

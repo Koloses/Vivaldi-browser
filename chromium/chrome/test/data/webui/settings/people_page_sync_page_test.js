@@ -26,7 +26,6 @@ cr.define('settings_people_page_sync_page', function() {
         bookmarksSynced: true,
         encryptAllData: false,
         encryptAllDataAllowed: true,
-        enterGooglePassphraseBody: 'Enter Google passphrase.',
         enterPassphraseBody: 'Enter custom passphrase.',
         extensionsEnforced: false,
         extensionsRegistered: true,
@@ -34,7 +33,6 @@ cr.define('settings_people_page_sync_page', function() {
         fullEncryptionBody: '',
         passphrase: '',
         passphraseRequired: false,
-        passphraseTypeIsCustom: false,
         passwordsEnforced: false,
         passwordsRegistered: true,
         passwordsSynced: true,
@@ -583,12 +581,12 @@ cr.define('settings_people_page_sync_page', function() {
         assertFalse(!!toast.open);
 
         // Next, the toast shows up during setup.
-        syncPage.syncStatus = {setupInProgress: true};
+        syncPage.syncStatus = {firstSetupInProgress: true};
         Polymer.dom.flush();
         assertTrue(toast.open);
 
         // At the end, confirm that setup can be cancelled.
-        toast.querySelector('paper-button').click();
+        toast.querySelector('cr-button').click();
 
         return browserProxy.whenCalled('didNavigateAwayFromSyncPage')
             .then(abort => {
@@ -614,7 +612,7 @@ cr.define('settings_people_page_sync_page', function() {
         syncPage.syncStatus = {
           signinAllowed: true,
           syncSystemEnabled: true,
-          setupInProgress: true,
+          firstSetupInProgress: true,
           signedIn: true
         };
         Polymer.dom.flush();
@@ -622,7 +620,7 @@ cr.define('settings_people_page_sync_page', function() {
 
         const cancelButton =
             syncPage.$$('settings-sync-account-control')
-                .shadowRoot.querySelector('#setup-buttons .secondary-button');
+                .shadowRoot.querySelector('#setup-buttons cr-button');
         assertTrue(!!cancelButton);
 
         // Clicking the setup cancel button aborts sync.
@@ -639,7 +637,7 @@ cr.define('settings_people_page_sync_page', function() {
         syncPage.syncStatus = {
           signinAllowed: true,
           syncSystemEnabled: true,
-          setupInProgress: true,
+          firstSetupInProgress: true,
           signedIn: true
         };
         Polymer.dom.flush();
@@ -663,7 +661,7 @@ cr.define('settings_people_page_sync_page', function() {
         syncPage.syncStatus = {
           signinAllowed: true,
           syncSystemEnabled: true,
-          setupInProgress: true,
+          firstSetupInProgress: true,
           signedIn: true
         };
         Polymer.dom.flush();
@@ -704,6 +702,26 @@ cr.define('settings_people_page_sync_page', function() {
                   .click();
               return browserProxy.whenCalled('didNavigateAwayFromSyncPage');
             })
+            .then(abort => {
+              assertTrue(abort);
+            });
+      });
+
+      test('SyncSetupSearchSettings UnifiedConsentEnabled', function() {
+        syncPage.unifiedConsentEnabled = true;
+        syncPage.syncStatus = {
+          signinAllowed: true,
+          syncSystemEnabled: true,
+          firstSetupInProgress: true,
+          signedIn: true
+        };
+        Polymer.dom.flush();
+
+        // Searching settings while setup is in progress cancels sync.
+        settings.navigateTo(
+            settings.routes.BASIC, new URLSearchParams('search=foo'));
+
+        return browserProxy.whenCalled('didNavigateAwayFromSyncPage')
             .then(abort => {
               assertTrue(abort);
             });

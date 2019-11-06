@@ -65,14 +65,13 @@ void RunBenchmark(RasterSource* raster_source,
       image_settings->images_to_skip = {};
       image_settings->image_to_current_frame_index = {};
 
-      PlaybackImageProvider image_provider(image_decode_cache,
-                                           std::move(image_settings));
+      PlaybackImageProvider image_provider(
+          image_decode_cache, gfx::ColorSpace(), std::move(image_settings));
       RasterSource::PlaybackSettings settings;
       settings.image_provider = &image_provider;
 
       raster_source->PlaybackToCanvas(
-          &canvas, gfx::ColorSpace(),
-          raster_source->GetContentSize(contents_scale), content_rect,
+          &canvas, raster_source->GetContentSize(contents_scale), content_rect,
           content_rect, gfx::AxisTransform2d(contents_scale, gfx::Vector2dF()),
           settings);
 
@@ -96,7 +95,7 @@ class FixedInvalidationPictureLayerTilingClient
     return base_client_->CreateTile(info);
   }
 
-  gfx::Size CalculateTileSize(const gfx::Size& content_bounds) const override {
+  gfx::Size CalculateTileSize(const gfx::Size& content_bounds) override {
     return base_client_->CalculateTileSize(content_bounds);
   }
 
@@ -115,6 +114,10 @@ class FixedInvalidationPictureLayerTilingClient
 
   bool RequiresHighResToDraw() const override {
     return base_client_->RequiresHighResToDraw();
+  }
+
+  const PaintWorkletRecordMap& GetPaintWorkletRecords() const override {
+    return base_client_->GetPaintWorkletRecords();
   }
 
  private:

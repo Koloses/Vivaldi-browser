@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/component_export.h"
-#include "chromeos/dbus/audio_node.h"
+#include "chromeos/dbus/audio/audio_node.h"
 
 namespace chromeos {
 
@@ -64,6 +64,8 @@ struct COMPONENT_EXPORT(CHROMEOS_AUDIO) AudioDevice {
   }
 
   bool IsExternalDevice() const;
+
+  bool IsInternalMic() const;
 
   bool is_input = false;
 

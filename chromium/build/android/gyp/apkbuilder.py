@@ -17,6 +17,10 @@ import zipfile
 import finalize_apk
 
 from util import build_utils
+from util import zipalign
+
+# Input dex.jar files are zipaligned.
+zipalign.ApplyZipFileZipAlignFix()
 
 
 # Taken from aapt's Package.cpp:
@@ -230,6 +234,12 @@ def main(args):
   # Include native libs in the depfile_deps since GN doesn't know about the
   # dependencies when is_component_build=true.
   depfile_deps = list(native_libs)
+
+  # For targets that depend on static library APKs, dex paths are created by
+  # the static library's dexsplitter target and GN doesn't know about these
+  # paths.
+  if options.dex_file:
+    depfile_deps.append(options.dex_file)
 
   secondary_native_libs = []
   if options.secondary_native_libs:

@@ -7,11 +7,12 @@
 #include <memory>
 #include <utility>
 
-#include "ash/accessibility/accessibility_controller.h"
+#include "ash/accessibility/accessibility_controller_impl.h"
 #include "ash/accessibility/accessibility_delegate.h"
-#include "ash/magnifier/docked_magnifier_controller.h"
+#include "ash/magnifier/docked_magnifier_controller_impl.h"
 #include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/ash_view_ids.h"
+#include "ash/public/cpp/system_tray_client.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
@@ -21,7 +22,9 @@
 #include "ash/system/tray/tray_popup_utils.h"
 #include "ash/system/tray/tray_utils.h"
 #include "ash/system/tray/tri_view.h"
+#include "base/command_line.h"
 #include "base/metrics/user_metrics.h"
+#include "ui/accessibility/accessibility_switches.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/separator.h"
@@ -45,6 +48,7 @@ enum AccessibilityState {
   A11Y_SELECT_TO_SPEAK = 1 << 11,
   A11Y_DOCKED_MAGNIFIER = 1 << 12,
   A11Y_DICTATION = 1 << 13,
+  A11Y_SWITCH_ACCESS = 1 << 14,
 };
 
 }  // namespace
@@ -65,7 +69,7 @@ AccessibilityDetailedView::AccessibilityDetailedView(
 
 void AccessibilityDetailedView::OnAccessibilityStatusChanged() {
   AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
-  AccessibilityController* controller =
+  AccessibilityControllerImpl* controller =
       Shell::Get()->accessibility_controller();
 
   spoken_feedback_enabled_ = controller->spoken_feedback_enabled();
@@ -76,11 +80,9 @@ void AccessibilityDetailedView::OnAccessibilityStatusChanged() {
   TrayPopupUtils::UpdateCheckMarkVisibility(select_to_speak_view_,
                                             select_to_speak_enabled_);
 
-  if (dictation_view_) {
-    dictation_enabled_ = controller->dictation_enabled();
-    TrayPopupUtils::UpdateCheckMarkVisibility(dictation_view_,
-                                              dictation_enabled_);
-  }
+  dictation_enabled_ = controller->dictation_enabled();
+  TrayPopupUtils::UpdateCheckMarkVisibility(dictation_view_,
+                                            dictation_enabled_);
 
   high_contrast_enabled_ = controller->high_contrast_enabled();
   TrayPopupUtils::UpdateCheckMarkVisibility(high_contrast_view_,
@@ -102,6 +104,12 @@ void AccessibilityDetailedView::OnAccessibilityStatusChanged() {
   virtual_keyboard_enabled_ = controller->virtual_keyboard_enabled();
   TrayPopupUtils::UpdateCheckMarkVisibility(virtual_keyboard_view_,
                                             virtual_keyboard_enabled_);
+
+  if (switch_access_view_) {
+    switch_access_enabled_ = controller->switch_access_enabled();
+    TrayPopupUtils::UpdateCheckMarkVisibility(switch_access_view_,
+                                              switch_access_enabled_);
+  }
 
   large_cursor_enabled_ = controller->large_cursor_enabled();
   TrayPopupUtils::UpdateCheckMarkVisibility(large_cursor_view_,
@@ -130,11 +138,15 @@ void AccessibilityDetailedView::OnAccessibilityStatusChanged() {
                                             sticky_keys_enabled_);
 }
 
+const char* AccessibilityDetailedView::GetClassName() const {
+  return "AccessibilityDetailedView";
+}
+
 void AccessibilityDetailedView::AppendAccessibilityList() {
   CreateScrollableList();
 
   AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
-  AccessibilityController* controller =
+  AccessibilityControllerImpl* controller =
       Shell::Get()->accessibility_controller();
 
   spoken_feedback_enabled_ = controller->spoken_feedback_enabled();
@@ -184,9 +196,6 @@ void AccessibilityDetailedView::AppendAccessibilityList() {
       kSystemMenuAccessibilityAutoClickIcon,
       l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_ACCESSIBILITY_AUTOCLICK),
       autoclick_enabled_);
-  autoclick_view_->set_id(ash::VIEW_ID_ACCESSIBILITY_AUTOCLICK);
-  autoclick_view_->right_view()->set_id(
-      ash::VIEW_ID_ACCESSIBILITY_AUTOCLICK_ENABLED);
 
   virtual_keyboard_enabled_ = controller->virtual_keyboard_enabled();
   virtual_keyboard_view_ = AddScrollListCheckableItem(
@@ -194,6 +203,19 @@ void AccessibilityDetailedView::AppendAccessibilityList() {
       l10n_util::GetStringUTF16(
           IDS_ASH_STATUS_TRAY_ACCESSIBILITY_VIRTUAL_KEYBOARD),
       virtual_keyboard_enabled_);
+  virtual_keyboard_view_->SetID(ash::VIEW_ID_ACCESSIBILITY_VIRTUAL_KEYBOARD);
+  virtual_keyboard_view_->right_view()->SetID(
+      ash::VIEW_ID_ACCESSIBILITY_VIRTUAL_KEYBOARD_ENABLED);
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalAccessibilitySwitchAccess)) {
+    switch_access_enabled_ = controller->switch_access_enabled();
+    switch_access_view_ = AddScrollListCheckableItem(
+        kSwitchAccessIcon,
+        l10n_util::GetStringUTF16(
+            IDS_ASH_STATUS_TRAY_ACCESSIBILITY_SWITCH_ACCESS),
+        switch_access_enabled_);
+  }
 
   scroll_content()->AddChildView(CreateListSubHeaderSeparator());
 
@@ -239,7 +261,7 @@ void AccessibilityDetailedView::AppendAccessibilityList() {
 
 void AccessibilityDetailedView::HandleViewClicked(views::View* view) {
   AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
-  AccessibilityController* controller =
+  AccessibilityControllerImpl* controller =
       Shell::Get()->accessibility_controller();
   using base::RecordAction;
   using base::UserMetricsAction;
@@ -275,6 +297,13 @@ void AccessibilityDetailedView::HandleViewClicked(views::View* view) {
     auto* docked_magnifier_controller =
         Shell::Get()->docked_magnifier_controller();
     const bool new_state = !docked_magnifier_controller->GetEnabled();
+
+    if (new_state) {
+      // Close the system tray bubble as there may not be enough screen space to
+      // display the current bubble after enabling the docked magnifier.
+      CloseBubble();
+    }
+
     RecordAction(new_state
                      ? UserMetricsAction("StatusArea_DockedMagnifierEnabled")
                      : UserMetricsAction("StatusArea_DockedMagnifierDisabled"));
@@ -296,6 +325,12 @@ void AccessibilityDetailedView::HandleViewClicked(views::View* view) {
                      ? UserMetricsAction("StatusArea_VirtualKeyboardEnabled")
                      : UserMetricsAction("StatusArea_VirtualKeyboardDisabled"));
     controller->SetVirtualKeyboardEnabled(new_state);
+  } else if (switch_access_view_ && view == switch_access_view_) {
+    bool new_state = !controller->switch_access_enabled();
+    RecordAction(new_state
+                     ? UserMetricsAction("StatusArea_SwitchAccessEnabled")
+                     : UserMetricsAction("StatusArea_SwitchAccessDisabled"));
+    controller->SetSwitchAccessEnabled(new_state);
   } else if (caret_highlight_view_ && view == caret_highlight_view_) {
     bool new_state = !controller->caret_highlight_enabled();
     RecordAction(new_state
@@ -355,18 +390,15 @@ void AccessibilityDetailedView::CreateExtraTitleRowButtons() {
 
 void AccessibilityDetailedView::ShowSettings() {
   if (TrayPopupUtils::CanOpenWebUISettings()) {
-    Shell::Get()
-        ->system_tray_model()
-        ->client_ptr()
-        ->ShowAccessibilitySettings();
-    CloseBubble();
+    CloseBubble();  // Deletes |this|.
+    Shell::Get()->system_tray_model()->client()->ShowAccessibilitySettings();
   }
 }
 
 void AccessibilityDetailedView::ShowHelp() {
   if (TrayPopupUtils::CanOpenWebUISettings()) {
-    Shell::Get()->system_tray_model()->client_ptr()->ShowAccessibilityHelp();
-    CloseBubble();
+    CloseBubble();  // Deletes |this|.
+    Shell::Get()->system_tray_model()->client()->ShowAccessibilityHelp();
   }
 }
 

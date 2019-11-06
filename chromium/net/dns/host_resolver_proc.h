@@ -18,9 +18,9 @@ namespace net {
 class AddressList;
 
 // Interface for a getaddrinfo()-like procedure. This is used by unit-tests
-// to control the underlying resolutions in HostResolverImpl. HostResolverProcs
-// can be chained together; they fallback to the next procedure in the chain
-// by calling ResolveUsingPrevious().
+// to control the underlying resolutions in HostResolverManager.
+// HostResolverProcs can be chained together; they fallback to the next
+// procedure in the chain by calling ResolveUsingPrevious().
 //
 // Note that implementations of HostResolverProc *MUST BE THREADSAFE*, since
 // the HostResolver implementation using them can be multi-threaded.
@@ -52,7 +52,7 @@ class NET_EXPORT HostResolverProc
                            int* os_error);
 
  private:
-  friend class HostResolverImpl;
+  friend class HostResolverManager;
   friend class MockHostResolverBase;
   friend class ScopedDefaultHostResolverProc;
 
@@ -68,10 +68,10 @@ class NET_EXPORT HostResolverProc
   // NULL iff |proc| is NULL.
   static HostResolverProc* GetLastProc(HostResolverProc* proc);
 
-  // Sets the default host resolver procedure that is used by HostResolverImpl.
-  // This can be used through ScopedDefaultHostResolverProc to set a catch-all
-  // DNS block in unit-tests (individual tests should use MockHostResolver to
-  // prevent hitting the network).
+  // Sets the default host resolver procedure that is used by
+  // HostResolverManager. This can be used through ScopedDefaultHostResolverProc
+  // to set a catch-all DNS block in unit-tests (individual tests should use
+  // MockHostResolver to prevent hitting the network).
   static HostResolverProc* SetDefault(HostResolverProc* proc);
   static HostResolverProc* GetDefault();
 
@@ -140,7 +140,8 @@ struct NET_EXPORT_PRIVATE ProcTaskParams {
   scoped_refptr<HostResolverProc> resolver_proc;
 
   // Maximum number retry attempts to resolve the hostname.
-  // Pass HostResolver::kDefaultRetryAttempts to choose a default value.
+  // Pass HostResolver::Options::kDefaultRetryAttempts to choose a default
+  // value.
   size_t max_retry_attempts;
 
   // This is the limit after which we make another attempt to resolve the host

@@ -11,7 +11,7 @@ cr.define('onboarding_welcome_app_test', function() {
     /** @type {welcome.WelcomeBrowserProxy} */
     let testWelcomeBrowserProxy;
 
-    /** @type {nux.NuxSetAsDefaultProxy} */
+    /** @type {welcome.NuxSetAsDefaultProxy} */
     let testSetAsDefaultProxy;
 
     function resetTestElement() {
@@ -48,11 +48,11 @@ cr.define('onboarding_welcome_app_test', function() {
       welcome.WelcomeBrowserProxyImpl.instance_ = testWelcomeBrowserProxy;
 
       testSetAsDefaultProxy = new TestNuxSetAsDefaultProxy();
-      nux.NuxSetAsDefaultProxyImpl.instance_ = testSetAsDefaultProxy;
+      welcome.NuxSetAsDefaultProxyImpl.instance_ = testSetAsDefaultProxy;
 
       // Not used in test, but setting to test proxy anyway, in order to prevent
       // calls to backend.
-      nux.BookmarkProxyImpl.instance_ = new TestBookmarkProxy();
+      welcome.BookmarkProxyImpl.instance_ = new TestBookmarkProxy();
 
       resetTestElement();
     });
@@ -71,12 +71,11 @@ cr.define('onboarding_welcome_app_test', function() {
     test('new user route (can set default)', function() {
       simulateCanSetDefault();
       welcome.navigateTo(welcome.Routes.NEW_USER, 1);
-      return test_util.waitForRenderOrTimeout0(testElement).then(() => {
+      return test_util.waitForRender(testElement).then(() => {
         const views = testElement.shadowRoot.querySelectorAll('[slot=view]');
-        assertEquals(views.length, 6);
+        assertEquals(views.length, 5);
         ['LANDING-VIEW',
          'NUX-GOOGLE-APPS',
-         'NUX-EMAIL',
          'NUX-NTP-BACKGROUND',
          'NUX-SET-AS-DEFAULT',
          'SIGNIN-VIEW',
@@ -89,12 +88,11 @@ cr.define('onboarding_welcome_app_test', function() {
     test('new user route (cannot set default)', function() {
       simulateCannotSetDefault();
       welcome.navigateTo(welcome.Routes.NEW_USER, 1);
-      return test_util.waitForRenderOrTimeout0(testElement).then(() => {
+      return test_util.waitForRender(testElement).then(() => {
         const views = testElement.shadowRoot.querySelectorAll('[slot=view]');
-        assertEquals(views.length, 5);
+        assertEquals(views.length, 4);
         ['LANDING-VIEW',
          'NUX-GOOGLE-APPS',
-         'NUX-EMAIL',
          'NUX-NTP-BACKGROUND',
          'SIGNIN-VIEW',
         ].forEach((expectedView, ix) => {
@@ -106,7 +104,7 @@ cr.define('onboarding_welcome_app_test', function() {
     test('returning user route (can set default)', function() {
       simulateCanSetDefault();
       welcome.navigateTo(welcome.Routes.RETURNING_USER, 1);
-      return test_util.waitForRenderOrTimeout0(testElement).then(() => {
+      return test_util.waitForRender(testElement).then(() => {
         const views = testElement.shadowRoot.querySelectorAll('[slot=view]');
         assertEquals(views.length, 2);
         assertEquals(views[0].tagName, 'LANDING-VIEW');
@@ -125,7 +123,7 @@ cr.define('onboarding_welcome_app_test', function() {
 
     test('default-status check resolves with correct value', function() {
       /**
-       * @param {!nux.DefaultBrowserInfo} status
+       * @param {!welcome.DefaultBrowserInfo} status
        * @param {boolean} expectedDefaultExists
        * @return {!Promise}
        */
@@ -136,7 +134,7 @@ cr.define('onboarding_welcome_app_test', function() {
         // Use the new-user route to test if nux-set-as-default module gets
         // initialized.
         welcome.navigateTo(welcome.Routes.NEW_USER, 1);
-        return test_util.waitForRenderOrTimeout0(testElement).then(() => {
+        return test_util.waitForRender(testElement).then(() => {
           // Use the existence of the nux-set-as-default as indication of
           // whether or not the promise is resolved with the expected result.
           assertEquals(

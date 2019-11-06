@@ -51,6 +51,12 @@ class ProcessManager;
 
 namespace api {
 
+namespace developer_private {
+
+struct ProfileInfo;
+
+}
+
 class EntryPickerClient;
 
 }  // namespace api
@@ -108,10 +114,6 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
                                const Command& added_command) override;
   void OnExtensionCommandRemoved(const std::string& extension_id,
                                  const Command& removed_command) override;
-
-  // ExtensionActionAPI::Observer:
-  void OnExtensionActionVisibilityChanged(const std::string& extension_id,
-                                          bool is_now_visible) override;
 
   // ExtensionPrefsObserver:
   void OnExtensionDisableReasonsChanged(const std::string& extension_id,
@@ -177,7 +179,7 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
 
   content::NotificationRegistrar notification_registrar_;
 
-  base::WeakPtrFactory<DeveloperPrivateEventRouter> weak_factory_;
+  base::WeakPtrFactory<DeveloperPrivateEventRouter> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DeveloperPrivateEventRouter);
 };
@@ -190,6 +192,9 @@ class DeveloperPrivateAPI : public BrowserContextKeyedAPI,
 
   static BrowserContextKeyedAPIFactory<DeveloperPrivateAPI>*
       GetFactoryInstance();
+
+  static std::unique_ptr<api::developer_private::ProfileInfo> CreateProfileInfo(
+      Profile* profile);
 
   // Convenience method to get the DeveloperPrivateAPI for a profile.
   static DeveloperPrivateAPI* Get(content::BrowserContext* context);
@@ -282,7 +287,7 @@ class DeveloperPrivateAPI : public BrowserContextKeyedAPI,
   // Created lazily upon OnListenerAdded.
   std::unique_ptr<DeveloperPrivateEventRouter> developer_private_event_router_;
 
-  base::WeakPtrFactory<DeveloperPrivateAPI> weak_factory_;
+  base::WeakPtrFactory<DeveloperPrivateAPI> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(DeveloperPrivateAPI);
 };

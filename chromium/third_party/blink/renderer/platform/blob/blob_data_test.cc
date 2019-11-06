@@ -19,7 +19,7 @@
 #include "third_party/blink/renderer/platform/blob/blob_bytes_provider.h"
 #include "third_party/blink/renderer/platform/blob/testing/fake_blob_registry.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
-#include "third_party/blink/renderer/platform/uuid.h"
+#include "third_party/blink/renderer/platform/wtf/uuid.h"
 
 namespace blink {
 
@@ -59,7 +59,7 @@ struct ExpectedElement {
   static ExpectedElement File(const String& path,
                               uint64_t offset,
                               uint64_t length,
-                              WTF::Time time) {
+                              base::Time time) {
     return ExpectedElement{DataElement::NewFile(
         DataElementFile::New(WebStringToFilePath(path), offset, length, time))};
   }
@@ -67,7 +67,7 @@ struct ExpectedElement {
   static ExpectedElement FileFilesystem(const KURL& url,
                                         uint64_t offset,
                                         uint64_t length,
-                                        WTF::Time time) {
+                                        base::Time time) {
     return ExpectedElement{DataElement::NewFileFilesystem(
         DataElementFilesystemURL::New(url, offset, length, time))};
   }
@@ -118,7 +118,7 @@ class BlobDataHandleTest : public testing::Test {
 
     empty_blob_ = BlobDataHandle::Create();
 
-    std::unique_ptr<BlobData> test_data = BlobData::Create();
+    auto test_data = std::make_unique<BlobData>();
     test_data->AppendBytes(large_test_data_.data(), large_test_data_.size());
     test_blob_ =
         BlobDataHandle::Create(std::move(test_data), large_test_data_.size());
@@ -257,14 +257,14 @@ TEST_F(BlobDataHandleTest, CreateEmpty) {
 TEST_F(BlobDataHandleTest, CreateFromEmptyData) {
   String kType = "content/type";
 
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->SetContentType(kType);
 
   TestCreateBlob(std::move(data), {});
 }
 
 TEST_F(BlobDataHandleTest, CreateFromUUID) {
-  String kUuid = CreateCanonicalUUIDString();
+  String kUuid = WTF::CreateCanonicalUUIDString();
   String kType = "content/type";
   uint64_t kSize = 1234;
 
@@ -282,7 +282,7 @@ TEST_F(BlobDataHandleTest, CreateFromUUID) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromEmptyElements) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendBytes(small_test_data_.data(), 0);
   data->AppendBlob(empty_blob_, 0, 0);
   data->AppendFile("path", 0, 0, 0.0);
@@ -292,7 +292,7 @@ TEST_F(BlobDataHandleTest, CreateFromEmptyElements) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromSmallBytes) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendBytes(small_test_data_.data(), small_test_data_.size());
 
   Vector<ExpectedElement> expected_elements;
@@ -302,7 +302,7 @@ TEST_F(BlobDataHandleTest, CreateFromSmallBytes) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromLargeBytes) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendBytes(large_test_data_.data(), large_test_data_.size());
 
   Vector<ExpectedElement> expected_elements;
@@ -312,7 +312,7 @@ TEST_F(BlobDataHandleTest, CreateFromLargeBytes) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromMergedBytes) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendBytes(medium_test_data_.data(), medium_test_data_.size());
   data->AppendBytes(small_test_data_.data(), small_test_data_.size());
   EXPECT_EQ(1u, data->Elements().size());
@@ -328,7 +328,7 @@ TEST_F(BlobDataHandleTest, CreateFromMergedBytes) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromMergedLargeAndSmallBytes) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendBytes(large_test_data_.data(), large_test_data_.size());
   data->AppendBytes(small_test_data_.data(), small_test_data_.size());
   EXPECT_EQ(1u, data->Elements().size());
@@ -344,7 +344,7 @@ TEST_F(BlobDataHandleTest, CreateFromMergedLargeAndSmallBytes) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromMergedSmallAndLargeBytes) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendBytes(small_test_data_.data(), small_test_data_.size());
   data->AppendBytes(large_test_data_.data(), large_test_data_.size());
   EXPECT_EQ(1u, data->Elements().size());
@@ -360,18 +360,18 @@ TEST_F(BlobDataHandleTest, CreateFromMergedSmallAndLargeBytes) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromFileAndFileSystemURL) {
-  double timestamp1 = CurrentTime();
+  double timestamp1 = base::Time::Now().ToDoubleT();
   double timestamp2 = timestamp1 + 1;
   KURL url(NullURL(), "http://example.com/");
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendFile("path", 4, 32, timestamp1);
   data->AppendFileSystemURL(url, 15, 876, timestamp2);
 
   Vector<ExpectedElement> expected_elements;
-  expected_elements.push_back(
-      ExpectedElement::File("path", 4, 32, WTF::Time::FromDoubleT(timestamp1)));
+  expected_elements.push_back(ExpectedElement::File(
+      "path", 4, 32, base::Time::FromDoubleT(timestamp1)));
   expected_elements.push_back(ExpectedElement::FileFilesystem(
-      url, 15, 876, WTF::Time::FromDoubleT(timestamp2)));
+      url, 15, 876, base::Time::FromDoubleT(timestamp2)));
 
   TestCreateBlob(std::move(data), std::move(expected_elements));
 }
@@ -379,18 +379,18 @@ TEST_F(BlobDataHandleTest, CreateFromFileAndFileSystemURL) {
 TEST_F(BlobDataHandleTest, CreateFromFileWithUnknownSize) {
   Vector<ExpectedElement> expected_elements;
   expected_elements.push_back(
-      ExpectedElement::File("path", 0, uint64_t(-1), WTF::Time()));
+      ExpectedElement::File("path", 0, uint64_t(-1), base::Time()));
 
   TestCreateBlob(BlobData::CreateForFileWithUnknownSize("path"),
                  std::move(expected_elements));
 }
 
 TEST_F(BlobDataHandleTest, CreateFromFilesystemFileWithUnknownSize) {
-  double timestamp = CurrentTime();
+  double timestamp = base::Time::Now().ToDoubleT();
   KURL url(NullURL(), "http://example.com/");
   Vector<ExpectedElement> expected_elements;
   expected_elements.push_back(ExpectedElement::FileFilesystem(
-      url, 0, uint64_t(-1), WTF::Time::FromDoubleT(timestamp)));
+      url, 0, uint64_t(-1), base::Time::FromDoubleT(timestamp)));
 
   TestCreateBlob(
       BlobData::CreateForFileSystemURLWithUnknownSize(url, timestamp),
@@ -398,7 +398,7 @@ TEST_F(BlobDataHandleTest, CreateFromFilesystemFileWithUnknownSize) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromBlob) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendBlob(test_blob_, 13, 765);
 
   Vector<ExpectedElement> expected_elements;
@@ -408,7 +408,7 @@ TEST_F(BlobDataHandleTest, CreateFromBlob) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromBlobsAndBytes) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendBlob(test_blob_, 10, 10);
   data->AppendBytes(medium_test_data_.data(), medium_test_data_.size());
   data->AppendBlob(test_blob_, 0, 0);
@@ -430,7 +430,7 @@ TEST_F(BlobDataHandleTest, CreateFromBlobsAndBytes) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromSmallBytesAfterLargeBytes) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendBytes(large_test_data_.data(), large_test_data_.size());
   data->AppendBlob(test_blob_, 0, 10);
   data->AppendBytes(small_test_data_.data(), small_test_data_.size());
@@ -444,7 +444,7 @@ TEST_F(BlobDataHandleTest, CreateFromSmallBytesAfterLargeBytes) {
 }
 
 TEST_F(BlobDataHandleTest, CreateFromManyMergedBytes) {
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   Vector<uint8_t> merged_data;
   while (merged_data.size() <= DataElementBytes::kMaximumEmbeddedDataSize) {
     data->AppendBytes(medium_test_data_.data(), medium_test_data_.size());

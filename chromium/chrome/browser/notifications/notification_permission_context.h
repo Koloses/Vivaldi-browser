@@ -119,13 +119,14 @@ class NotificationPermissionContext : public PermissionContextBase {
                         const GURL& requesting_origin,
                         const GURL& embedding_origin,
                         bool user_gesture,
-                        const BrowserPermissionCallback& callback) override;
+                        BrowserPermissionCallback callback) override;
   void UpdateContentSetting(const GURL& requesting_origin,
                             const GURL& embedder_origin,
                             ContentSetting content_setting) override;
   bool IsRestrictedToSecureOrigins() const override;
 
-  base::WeakPtrFactory<NotificationPermissionContext> weak_factory_ui_thread_;
+  base::WeakPtrFactory<NotificationPermissionContext> weak_factory_ui_thread_{
+      this};
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_PERMISSION_CONTEXT_H_

@@ -38,6 +38,7 @@ PageTimingMetricsSender::PageTimingMetricsSender(
       metadata_(mojom::PageLoadMetadata::New()),
       new_features_(mojom::PageLoadFeatures::New()),
       render_data_(),
+      new_deferred_resource_data_(mojom::DeferredResourceCounts::New()),
       buffer_timer_delay_ms_(kBufferTimerDelayMillis) {
   page_resource_data_use_.emplace(
       std::piecewise_construct,
@@ -93,24 +94,47 @@ void PageTimingMetricsSender::DidObserveNewCssPropertyUsage(int css_property,
   }
 }
 
-void PageTimingMetricsSender::DidObserveLayoutJank(double jank_fraction) {
-  DCHECK(jank_fraction > 0);
-  render_data_.layout_jank_score += jank_fraction;
+void PageTimingMetricsSender::DidObserveLayoutShift(
+    double score,
+    bool after_input_or_scroll) {
+  DCHECK(score > 0);
+  render_data_.layout_shift_delta += score;
+  if (!after_input_or_scroll)
+    render_data_.layout_shift_delta_before_input_or_scroll += score;
   EnsureSendTimer();
+}
+
+void PageTimingMetricsSender::DidObserveLazyLoadBehavior(
+    blink::WebLocalFrameClient::LazyLoadBehavior lazy_load_behavior) {
+  switch (lazy_load_behavior) {
+    case blink::WebLocalFrameClient::LazyLoadBehavior::kDeferredFrame:
+      ++new_deferred_resource_data_->deferred_frames;
+      break;
+    case blink::WebLocalFrameClient::LazyLoadBehavior::kDeferredImage:
+      ++new_deferred_resource_data_->deferred_images;
+      break;
+    case blink::WebLocalFrameClient::LazyLoadBehavior::kLazyLoadedFrame:
+      ++new_deferred_resource_data_->frames_loaded_after_deferral;
+      break;
+    case blink::WebLocalFrameClient::LazyLoadBehavior::kLazyLoadedImage:
+      ++new_deferred_resource_data_->images_loaded_after_deferral;
+      break;
+  }
 }
 
 void PageTimingMetricsSender::DidStartResponse(
     const GURL& response_url,
     int resource_id,
     const network::ResourceResponseHead& response_head,
-    content::ResourceType resource_type) {
-  DCHECK(!base::ContainsKey(page_resource_data_use_, resource_id));
+    content::ResourceType resource_type,
+    content::PreviewsState previews_state) {
+  DCHECK(!base::Contains(page_resource_data_use_, resource_id));
 
   auto resource_it = page_resource_data_use_.emplace(
       std::piecewise_construct, std::forward_as_tuple(resource_id),
       std::forward_as_tuple(std::make_unique<PageResourceDataUse>()));
-  resource_it.first->second->DidStartResponse(response_url, resource_id,
-                                              response_head, resource_type);
+  resource_it.first->second->DidStartResponse(
+      response_url, resource_id, response_head, resource_type, previews_state);
 }
 
 void PageTimingMetricsSender::DidReceiveTransferSizeUpdate(
@@ -145,9 +169,8 @@ void PageTimingMetricsSender::DidCompleteResponse(
     resource_it = new_resource_it.first;
   }
 
-  if (resource_it->second->DidCompleteResponse(status)) {
-    EnsureSendTimer();
-  }
+  resource_it->second->DidCompleteResponse(status);
+  EnsureSendTimer();
   modified_resources_.insert(resource_it->second.get());
 }
 
@@ -157,6 +180,27 @@ void PageTimingMetricsSender::DidCancelResponse(int resource_id) {
     return;
   }
   resource_it->second->DidCancelResponse();
+}
+
+void PageTimingMetricsSender::DidLoadResourceFromMemoryCache(
+    const GURL& response_url,
+    int request_id,
+    int64_t encoded_body_length,
+    const std::string& mime_type) {
+  // In general, we should not observe the same resource being loaded twice in
+  // the frame. This is possible due to an existing workaround in
+  // ResourceFetcher::EmulateLoadStartedForInspector(). In this case, ignore
+  // multiple resources being loaded in the document, as memory cache resources
+  // are only reported once per context by design in all other cases.
+  if (base::Contains(page_resource_data_use_, request_id))
+    return;
+
+  auto resource_it = page_resource_data_use_.emplace(
+      std::piecewise_construct, std::forward_as_tuple(request_id),
+      std::forward_as_tuple(std::make_unique<PageResourceDataUse>()));
+  resource_it.first->second->DidLoadFromMemoryCache(
+      response_url, request_id, encoded_body_length, mime_type);
+  modified_resources_.insert(resource_it.first->second.get());
 }
 
 void PageTimingMetricsSender::UpdateResourceMetadata(
@@ -217,10 +261,14 @@ void PageTimingMetricsSender::SendNow() {
     }
   }
   sender_->SendTiming(last_timing_, metadata_, std::move(new_features_),
-                      std::move(resources), render_data_, last_cpu_timing_);
+                      std::move(resources), render_data_, last_cpu_timing_,
+                      std::move(new_deferred_resource_data_));
+  new_deferred_resource_data_ = mojom::DeferredResourceCounts::New();
   new_features_ = mojom::PageLoadFeatures::New();
   last_cpu_timing_->task_time = base::TimeDelta();
   modified_resources_.clear();
+  render_data_.layout_shift_delta = 0;
+  render_data_.layout_shift_delta_before_input_or_scroll = 0;
 }
 
 }  // namespace page_load_metrics

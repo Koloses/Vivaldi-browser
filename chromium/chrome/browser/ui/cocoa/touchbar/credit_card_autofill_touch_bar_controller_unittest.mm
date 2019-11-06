@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/autofill/autofill_popup_layout_model.h"
 #import "chrome/browser/ui/cocoa/test/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/touchbar/credit_card_autofill_touch_bar_controller.h"
-#include "components/autofill/core/browser/suggestion.h"
+#include "components/autofill/core/browser/ui/suggestion.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "ui/base/cocoa/touch_bar_util.h"
@@ -80,8 +80,6 @@ class MockAutofillPopupController : public autofill::AutofillPopupController {
   MOCK_METHOD3(GetRemovalConfirmationText,
                bool(int index, base::string16* title, base::string16* body));
   MOCK_METHOD1(RemoveSuggestion, bool(int index));
-  MOCK_CONST_METHOD1(GetBackgroundColorIDForRow,
-                     ui::NativeTheme::ColorId(int index));
   MOCK_METHOD1(SetSelectedLine, void(base::Optional<int> selected_line));
   MOCK_CONST_METHOD0(selected_line, base::Optional<int>());
   const autofill::AutofillPopupLayoutModel& layout_model() const override {

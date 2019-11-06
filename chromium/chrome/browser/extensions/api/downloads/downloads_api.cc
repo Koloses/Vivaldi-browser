@@ -11,7 +11,6 @@
 #include <string>
 #include <utility>
 
-#include "app/vivaldi_apptools.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
@@ -46,7 +45,6 @@
 #include "chrome/browser/download/download_query.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_stats.h"
-#include "chrome/browser/download/drag_download_item.h"
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/icon_loader.h"
 #include "chrome/browser/icon_manager.h"
@@ -66,7 +64,6 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -153,6 +150,8 @@ const char kDangerSafe[] = "safe";
 const char kDangerUncommon[] = "uncommon";
 const char kDangerUnwanted[] = "unwanted";
 const char kDangerWhitelistedByPolicy[] = "whitelistedByPolicy";
+const char kDangerAsyncScanning[] = "asyncScanning";
+const char kDangerPasswordProtected[] = "passwordProtected";
 const char kDangerUrl[] = "url";
 const char kEndTimeKey[] = "endTime";
 const char kEndedAfterKey[] = "endedAfter";
@@ -187,11 +186,12 @@ const char kFinalUrlRegexKey[] = "finalUrlRegex";
 // Note: Any change to the danger type strings, should be accompanied by a
 // corresponding change to downloads.json.
 const char* const kDangerStrings[] = {
-    kDangerSafe,     kDangerFile,
-    kDangerUrl,      kDangerContent,
-    kDangerSafe,     kDangerUncommon,
-    kDangerAccepted, kDangerHost,
-    kDangerUnwanted, kDangerWhitelistedByPolicy};
+    kDangerSafe,          kDangerFile,
+    kDangerUrl,           kDangerContent,
+    kDangerSafe,          kDangerUncommon,
+    kDangerAccepted,      kDangerHost,
+    kDangerUnwanted,      kDangerWhitelistedByPolicy,
+    kDangerAsyncScanning, kDangerPasswordProtected};
 static_assert(base::size(kDangerStrings) == download::DOWNLOAD_DANGER_TYPE_MAX,
               "kDangerStrings should have DOWNLOAD_DANGER_TYPE_MAX elements");
 
@@ -318,8 +318,9 @@ class DownloadFileIconExtractorImpl : public DownloadFileIconExtractor {
                              IconURLCallback callback) override;
 
  private:
-  void OnIconLoadComplete(
-      float scale, const IconURLCallback& callback, gfx::Image* icon);
+  void OnIconLoadComplete(float scale,
+                          const IconURLCallback& callback,
+                          gfx::Image icon);
 
   base::CancelableTaskTracker cancelable_task_tracker_;
 };
@@ -342,12 +343,15 @@ bool DownloadFileIconExtractorImpl::ExtractIconURLForPath(
 }
 
 void DownloadFileIconExtractorImpl::OnIconLoadComplete(
-    float scale, const IconURLCallback& callback, gfx::Image* icon) {
+    float scale,
+    const IconURLCallback& callback,
+    gfx::Image icon) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   callback.Run(
-      !icon ? std::string()
-            : webui::GetBitmapDataUrl(
-                  icon->ToImageSkia()->GetRepresentation(scale).GetBitmap()));
+      icon.IsEmpty()
+          ? std::string()
+          : webui::GetBitmapDataUrl(
+                icon.ToImageSkia()->GetRepresentation(scale).GetBitmap()));
 }
 
 IconLoader::IconSize IconLoaderSizeFromPixelSize(int pixel_size) {
@@ -1033,7 +1037,7 @@ bool DownloadsDownloadFunction::RunAsync() {
         })");
   std::unique_ptr<download::DownloadUrlParameters> download_params(
       new download::DownloadUrlParameters(
-          download_url, render_frame_host()->GetProcess()->GetID(),
+          download_url, source_process_id(),
           render_frame_host()->GetRenderViewHost()->GetRoutingID(),
           render_frame_host()->GetRoutingID(), traffic_annotation));
 
@@ -1512,36 +1516,6 @@ void DownloadsOpenFunction::OpenPromptDone(int download_id, bool accept) {
   }
   download_item->OpenDownload();
   Respond(NoArguments());
-}
-
-DownloadsDragFunction::DownloadsDragFunction() {}
-
-DownloadsDragFunction::~DownloadsDragFunction() {}
-
-ExtensionFunction::ResponseAction DownloadsDragFunction::Run() {
-  std::unique_ptr<downloads::Drag::Params> params(
-      downloads::Drag::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-  DownloadItem* download_item = GetDownload(
-      browser_context(), include_incognito_information(), params->download_id);
-  content::WebContents* web_contents =
-      dispatcher()->GetVisibleWebContents();
-  std::string error;
-  if (InvalidId(download_item, &error) ||
-      Fault(!web_contents, download_extension_errors::kInvisibleContext,
-            &error)) {
-    return RespondNow(Error(error));
-  }
-  RecordApiFunctions(DOWNLOADS_FUNCTION_DRAG);
-  gfx::Image* icon = g_browser_process->icon_manager()->LookupIconFromFilepath(
-      download_item->GetTargetFilePath(), IconLoader::NORMAL);
-  gfx::NativeView view = web_contents->GetNativeView();
-  {
-    // Enable nested tasks during DnD, while |DragDownload()| blocks.
-    base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
-    DragDownloadItem(download_item, icon, view);
-  }
-  return RespondNow(NoArguments());
 }
 
 DownloadsSetShelfEnabledFunction::DownloadsSetShelfEnabledFunction() {}

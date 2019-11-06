@@ -229,8 +229,7 @@ NaClProcessHost::NaClProcessHost(
       off_the_record_(off_the_record),
       process_type_(process_type),
       profile_directory_(profile_directory),
-      render_view_id_(render_view_id),
-      weak_factory_(this) {
+      render_view_id_(render_view_id) {
   process_.reset(content::BrowserChildProcessHost::Create(
       static_cast<content::ProcessType>(PROCESS_TYPE_NACL_LOADER), this,
       kNaClLoaderServiceName));
@@ -317,15 +316,6 @@ void NaClProcessHost::EarlyStartup() {
   NaClBrowser::GetInstance()->EnsureIrtAvailable();
 #endif
   base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
-  UMA_HISTOGRAM_BOOLEAN(
-      "NaCl.nacl-gdb",
-      !cmd->GetSwitchValuePath(switches::kNaClGdb).empty());
-  UMA_HISTOGRAM_BOOLEAN(
-      "NaCl.nacl-gdb-script",
-      !cmd->GetSwitchValuePath(switches::kNaClGdbScript).empty());
-  UMA_HISTOGRAM_BOOLEAN(
-      "NaCl.enable-nacl-debug",
-      cmd->HasSwitch(switches::kEnableNaClDebug));
   std::string nacl_debug_mask =
       cmd->GetSwitchValueASCII(switches::kNaClDebugMask);
   // By default, exclude debugging SSH and the PNaCl translator.
@@ -407,10 +397,6 @@ void NaClProcessHost::Launch(
       return;
     }
   }
-
-  // Create a shared memory region that the renderer and plugin share for
-  // reporting crash information.
-  crash_info_shmem_.CreateAnonymous(kNaClCrashInfoShmemSize);
 
   // Launch the process
   if (!LaunchSelLdr()) {
@@ -495,6 +481,8 @@ bool NaClProcessHost::LaunchSelLdr() {
 
 #if defined(OS_LINUX)
   int flags = ChildProcessHost::CHILD_ALLOW_SELF;
+#elif defined(OS_MACOSX)
+  int flags = ChildProcessHost::CHILD_PLUGIN;
 #else
   int flags = ChildProcessHost::CHILD_NORMAL;
 #endif
@@ -622,20 +610,19 @@ void NaClProcessHost::OnResourcesReady() {
 void NaClProcessHost::ReplyToRenderer(
     mojo::ScopedMessagePipeHandle ppapi_channel_handle,
     mojo::ScopedMessagePipeHandle trusted_channel_handle,
-    mojo::ScopedMessagePipeHandle manifest_service_channel_handle) {
+    mojo::ScopedMessagePipeHandle manifest_service_channel_handle,
+    base::ReadOnlySharedMemoryRegion crash_info_shmem_region) {
   // Hereafter, we always send an IPC message with handles created above
   // which, on Windows, are not closable in this process.
   std::string error_message;
-  base::SharedMemoryHandle crash_info_shmem_renderer_handle =
-      crash_info_shmem_.handle().Duplicate();
-  if (!crash_info_shmem_renderer_handle.IsValid()) {
+  if (!uses_nonsfi_mode_ && !crash_info_shmem_region.IsValid()) {
     // On error, we do not send "IPC::ChannelHandle"s to the renderer process.
     // Note that some other FDs/handles still get sent to the renderer, but
     // will be closed there.
     ppapi_channel_handle.reset();
     trusted_channel_handle.reset();
     manifest_service_channel_handle.reset();
-    error_message = "handle duplication failed";
+    error_message = "shared memory region not valid";
   }
 
   const ChildProcessData& data = process_->GetData();
@@ -643,12 +630,8 @@ void NaClProcessHost::ReplyToRenderer(
       NaClLaunchResult(
           ppapi_channel_handle.release(), trusted_channel_handle.release(),
           manifest_service_channel_handle.release(), data.GetProcess().Pid(),
-          data.id, crash_info_shmem_renderer_handle),
+          data.id, std::move(crash_info_shmem_region)),
       error_message);
-
-  // Now that the crash information shmem handles have been shared with the
-  // plugin and the renderer, the browser can close its handle.
-  crash_info_shmem_.Close();
 }
 
 void NaClProcessHost::SendErrorToRenderer(const std::string& error_message) {
@@ -790,9 +773,12 @@ bool NaClProcessHost::StartNaClExecution() {
 #endif
   }
 
-  params.crash_info_shmem_handle = crash_info_shmem_.handle().Duplicate();
-  if (!params.crash_info_shmem_handle.IsValid()) {
-    DLOG(ERROR) << "Failed to duplicate a shared memory buffer";
+  // Create a shared memory region that the renderer and the plugin share to
+  // report crash information.
+  params.crash_info_shmem_region =
+      base::WritableSharedMemoryRegion::Create(kNaClCrashInfoShmemSize);
+  if (!params.crash_info_shmem_region.IsValid()) {
+    DLOG(ERROR) << "Failed to create a shared memory buffer";
     return false;
   }
 
@@ -824,15 +810,20 @@ bool NaClProcessHost::StartNaClExecution() {
       // compromised renderer to pass an arbitrary fd that could get loaded
       // into the plugin process.
       base::PostTaskWithTraitsAndReplyWithResult(
-          FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
-          base::Bind(OpenNaClReadExecImpl, file_path, true /* is_executable */),
-          base::Bind(&NaClProcessHost::StartNaClFileResolved,
-                     weak_factory_.GetWeakPtr(), params, file_path));
+          FROM_HERE,
+          // USER_BLOCKING because it is on the critical path of displaying the
+          // official virtual keyboard on Chrome OS. https://crbug.com/976542
+          {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
+          base::BindOnce(OpenNaClReadExecImpl, file_path,
+                         true /* is_executable */),
+          base::BindOnce(&NaClProcessHost::StartNaClFileResolved,
+                         weak_factory_.GetWeakPtr(), std::move(params),
+                         file_path));
       return true;
     }
   }
 
-  StartNaClFileResolved(params, base::FilePath(), base::File());
+  StartNaClFileResolved(std::move(params), base::FilePath(), base::File());
   return true;
 }
 
@@ -871,10 +862,12 @@ void NaClProcessHost::StartNaClFileResolved(
 
     // On success, send back a success message to the renderer process,
     // and transfer the channel handles for the NaCl loader process to
-    // |params|.
+    // |params|. Also send an invalid shared memory region as nonsfi_mode
+    // does not use the region.
     ReplyToRenderer(std::move(ppapi_renderer_channel.handle1),
                     std::move(trusted_service_channel.handle1),
-                    std::move(manifest_service_channel.handle1));
+                    std::move(manifest_service_channel.handle1),
+                    base::ReadOnlySharedMemoryRegion());
     params.ppapi_browser_channel_handle =
         ppapi_browser_channel.handle0.release();
     params.ppapi_renderer_channel_handle =
@@ -886,7 +879,7 @@ void NaClProcessHost::StartNaClFileResolved(
   }
 #endif
 
-  process_->Send(new NaClProcessMsg_Start(params));
+  process_->Send(new NaClProcessMsg_Start(std::move(params)));
 }
 
 bool NaClProcessHost::StartPPAPIProxy(
@@ -958,7 +951,8 @@ void NaClProcessHost::OnPpapiChannelsCreated(
     const IPC::ChannelHandle& raw_ppapi_browser_channel_handle,
     const IPC::ChannelHandle& raw_ppapi_renderer_channel_handle,
     const IPC::ChannelHandle& raw_trusted_renderer_channel_handle,
-    const IPC::ChannelHandle& raw_manifest_service_channel_handle) {
+    const IPC::ChannelHandle& raw_manifest_service_channel_handle,
+    base::ReadOnlySharedMemoryRegion crash_info_shmem_region) {
   DCHECK(raw_ppapi_browser_channel_handle.is_mojo_channel_handle());
   DCHECK(raw_ppapi_renderer_channel_handle.is_mojo_channel_handle());
   DCHECK(raw_trusted_renderer_channel_handle.is_mojo_channel_handle());
@@ -981,7 +975,8 @@ void NaClProcessHost::OnPpapiChannelsCreated(
   // Let the renderer know that the IPC channels are established.
   ReplyToRenderer(std::move(ppapi_renderer_channel_handle),
                   std::move(trusted_renderer_channel_handle),
-                  std::move(manifest_service_channel_handle));
+                  std::move(manifest_service_channel_handle),
+                  std::move(crash_info_shmem_region));
 }
 
 bool NaClProcessHost::StartWithLaunchedProcess() {
@@ -1051,7 +1046,10 @@ void NaClProcessHost::OnResolveFileToken(uint64_t file_token_lo,
 
   // Open the file.
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+      FROM_HERE,
+      // USER_BLOCKING because it is on the critical path of displaying the
+      // official virtual keyboard on Chrome OS. https://crbug.com/976542
+      {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
       base::Bind(OpenNaClReadExecImpl, file_path, true /* is_executable */),
       base::Bind(&NaClProcessHost::FileResolved, weak_factory_.GetWeakPtr(),
                  file_token_lo, file_token_hi, file_path));

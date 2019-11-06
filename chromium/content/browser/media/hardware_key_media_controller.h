@@ -11,7 +11,7 @@
 #include "base/containers/flat_set.h"
 #include "base/optional.h"
 #include "content/common/content_export.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "services/media_session/public/mojom/media_controller.mojom.h"
 #include "ui/base/accelerators/media_keys_listener.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -38,6 +38,10 @@ class CONTENT_EXPORT HardwareKeyMediaController
   void MediaSessionActionsChanged(
       const std::vector<media_session::mojom::MediaSessionAction>& actions)
       override;
+  void MediaSessionChanged(
+      const base::Optional<base::UnguessableToken>& request_id) override {}
+  void MediaSessionPositionChanged(
+      const base::Optional<media_session::MediaPosition>& position) override {}
 
   // ui::MediaKeysListener::Delegate:
   void OnMediaKeysAccelerator(const ui::Accelerator& accelerator) override;
@@ -72,8 +76,8 @@ class CONTENT_EXPORT HardwareKeyMediaController
   base::flat_set<media_session::mojom::MediaSessionAction> actions_;
 
   // Used to receive updates to the active media controller.
-  mojo::Binding<media_session::mojom::MediaControllerObserver>
-      media_controller_observer_binding_{this};
+  mojo::Receiver<media_session::mojom::MediaControllerObserver>
+      media_controller_observer_receiver_{this};
 
   DISALLOW_COPY_AND_ASSIGN(HardwareKeyMediaController);
 };

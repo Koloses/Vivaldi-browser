@@ -13,6 +13,7 @@
 namespace web {
 
 void FakeNavigationManagerDelegate::ClearTransientContent() {}
+void FakeNavigationManagerDelegate::ClearDialogs() {}
 void FakeNavigationManagerDelegate::RecordPageStateInNavigationItem() {}
 void FakeNavigationManagerDelegate::OnGoToIndexSameDocumentNavigation(
     NavigationInitiationType type,
@@ -39,6 +40,10 @@ void FakeNavigationManagerDelegate::GoToBackForwardListItem(
     NavigationInitiationType type,
     bool has_user_gesture) {}
 void FakeNavigationManagerDelegate::RemoveWebView() {}
+
+NavigationItemImpl* FakeNavigationManagerDelegate::GetPendingItem() {
+  return nullptr;
+}
 
 void FakeNavigationManagerDelegate::SetWebViewNavigationProxy(id web_view) {
   test_web_view_ = web_view;

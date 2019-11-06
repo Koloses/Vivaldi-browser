@@ -9,9 +9,8 @@
 #include <memory>
 
 #include "base/callback_forward.h"
-#include "base/md5.h"
+#include "base/hash/md5.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/scoped_task_environment.h"
 #include "media/audio/clockless_audio_sink.h"
 #include "media/audio/null_audio_sink.h"
@@ -227,7 +226,7 @@ class PipelineIntegrationTestBase : public Pipeline::Client
   // Creates Demuxer and sets |demuxer_|.
   void CreateDemuxer(std::unique_ptr<DataSource> data_source);
 
-  void OnVideoFramePaint(const scoped_refptr<VideoFrame>& frame);
+  void OnVideoFramePaint(scoped_refptr<VideoFrame> frame);
 
   void CheckDuration();
 
@@ -247,8 +246,9 @@ class PipelineIntegrationTestBase : public Pipeline::Client
   // Pipeline::Client overrides.
   void OnError(PipelineStatus status) override;
   void OnEnded() override;
-  MOCK_METHOD1(OnMetadata, void(PipelineMetadata));
-  MOCK_METHOD1(OnBufferingStateChange, void(BufferingState));
+  MOCK_METHOD1(OnMetadata, void(const PipelineMetadata&));
+  MOCK_METHOD2(OnBufferingStateChange,
+               void(BufferingState, BufferingStateChangeReason));
   MOCK_METHOD0(OnDurationChange, void());
   MOCK_METHOD2(OnAddTextTrack,
                void(const TextTrackConfig& config,
@@ -259,8 +259,8 @@ class PipelineIntegrationTestBase : public Pipeline::Client
   MOCK_METHOD1(OnAudioConfigChange, void(const AudioDecoderConfig&));
   MOCK_METHOD1(OnVideoOpacityChange, void(bool));
   MOCK_METHOD0(OnVideoAverageKeyframeDistanceUpdate, void());
-  MOCK_METHOD1(OnAudioDecoderChange, void(const std::string&));
-  MOCK_METHOD1(OnVideoDecoderChange, void(const std::string&));
+  MOCK_METHOD1(OnAudioDecoderChange, void(const PipelineDecoderInfo&));
+  MOCK_METHOD1(OnVideoDecoderChange, void(const PipelineDecoderInfo&));
   MOCK_METHOD1(OnRemotePlayStateChange, void(MediaStatus::State state));
 
  private:

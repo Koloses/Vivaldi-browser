@@ -7,17 +7,15 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
 #include "services/identity/identity_accessor_impl.h"
-#include "services/identity/public/cpp/identity_manager.h"
 
 namespace identity {
 
-IdentityService::IdentityService(IdentityManager* identity_manager,
-                                 AccountTrackerService* account_tracker,
+IdentityService::IdentityService(signin::IdentityManager* identity_manager,
                                  service_manager::mojom::ServiceRequest request)
     : service_binding_(this, std::move(request)),
-      identity_manager_(identity_manager),
-      account_tracker_(account_tracker) {
+      identity_manager_(identity_manager) {
   registry_.AddInterface<mojom::IdentityAccessor>(
       base::Bind(&IdentityService::Create, base::Unretained(this)));
 }
@@ -38,7 +36,7 @@ void IdentityService::ShutDown() {
     return;
 
   identity_manager_ = nullptr;
-  account_tracker_ = nullptr;
+  identity_accessor_bindings_.CloseAllBindings();
 }
 
 bool IdentityService::IsShutDown() {
@@ -50,8 +48,9 @@ void IdentityService::Create(mojom::IdentityAccessorRequest request) {
   if (IsShutDown())
     return;
 
-  IdentityAccessorImpl::Create(std::move(request), identity_manager_,
-                               account_tracker_);
+  identity_accessor_bindings_.AddBinding(
+      std::make_unique<IdentityAccessorImpl>(identity_manager_),
+      std::move(request));
 }
 
 }  // namespace identity

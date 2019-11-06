@@ -29,6 +29,32 @@ async function fileDisplay(path, defaultEntries) {
 }
 
 /**
+ * Waits 250ms and fail if toast shows in this time.
+ *
+ * @param {string} appId The app's window id.
+ */
+async function checkHiddenToast(appId) {
+  const start = new Date();
+  const caller = getCaller();
+  await repeatUntil(async () => {
+    if (new Date() - start > 250 /* ms */) {
+      // Waited long enough. End with success.
+      return;
+    }
+
+    const visibleQuery = ['#toast', '#container:not([hidden])'];
+    const visibleToast = await remoteCall.callRemoteTestUtil(
+        'deepQueryAllElements', appId, [visibleQuery]);
+
+    // Fails if finds a non-hidden toast.
+    chrome.test.assertTrue(
+        visibleToast.length == 0, 'Toast is visible when it shouldn\'t');
+
+    return pending(caller, 'Waiting to see if toast will show.');
+  });
+}
+
+/**
  * Tests files display in Downloads.
  */
 testcase.fileDisplayDownloads = () => {
@@ -230,6 +256,97 @@ testcase.fileDisplayUsbPartition = async () => {
   chrome.test.assertEq(1, itemEntries.length);
   const childVolumeType = itemEntries[0].attributes['volume-type-for-testing'];
   chrome.test.assertTrue('removable' !== childVolumeType);
+};
+
+/**
+ * Tests USB toast display for ARC on clicking a USB volume.
+ */
+testcase.fileDisplayUsbToast = async () => {
+  const USB_VOLUME_QUERY = '#directory-tree [volume-type-icon="removable"]';
+
+  // Open Files app on local downloads.
+  const appId = await setupAndWaitUntilReady(RootPath.DOWNLOADS);
+
+  // Mount USB volume in the Downloads window.
+  await sendTestMessage({name: 'mountFakeUsb'});
+
+  // Wait for the USB mount.
+  await remoteCall.waitForElement(appId, USB_VOLUME_QUERY);
+
+  // Enable ARC, but disallow ARC from accessing the USB volume so that the
+  // toast UI will be shown.
+  const preferences = {
+    arcEnabled: true,
+    arcRemovableMediaAccessEnabled: false,
+  };
+  await remoteCall.callRemoteTestUtil('setPreferences', null, [preferences]);
+
+  // Click to open the USB volume.
+  await remoteCall.waitAndClickElement(appId, USB_VOLUME_QUERY);
+
+  // Verify the toast UI.
+  await remoteCall.waitForElement(
+      appId, ['#toast', '#container:not([hidden])']);
+
+  // Wait for the toast to disappear.
+  await remoteCall.waitForElement(appId, ['#toast', '#container[hidden]']);
+
+  // Navigate to My files.
+  await remoteCall.waitAndClickElement(appId, '[root-type-icon=\'my_files\']');
+
+  // Verify the toast UI never shows up.
+  await checkHiddenToast(appId);
+
+  // Navigate to the USB volume again.
+  await remoteCall.waitAndClickElement(appId, USB_VOLUME_QUERY);
+
+  // Verify the toast UI never shows up again.
+  await checkHiddenToast(appId);
+};
+
+/**
+ * Tests USB toast won't show up when ARC is disabled or the access has already
+ * been granted.
+ */
+testcase.fileDisplayUsbNoToast = async () => {
+  const USB_VOLUME_QUERY = '#directory-tree [volume-type-icon="removable"]';
+
+  // Open Files app on local downloads.
+  const appId = await setupAndWaitUntilReady(RootPath.DOWNLOADS);
+
+  // Mount USB volume in the Downloads window.
+  await sendTestMessage({name: 'mountFakeUsb'});
+
+  // Wait for the USB mount.
+  await remoteCall.waitForElement(appId, USB_VOLUME_QUERY);
+
+  // Disable ARC so that the toast UI won't be shown.
+  const preferences = {
+    arcEnabled: false,
+  };
+  await remoteCall.callRemoteTestUtil('setPreferences', null, [preferences]);
+
+  // Click to open the USB volume.
+  await remoteCall.waitAndClickElement(appId, USB_VOLUME_QUERY);
+
+  // Verify the toast UI never shows up.
+  await checkHiddenToast(appId);
+
+  // Navigate to My files.
+  await remoteCall.waitAndClickElement(appId, '[root-type-icon=\'my_files\']');
+
+  // Enable ARC and its storage access so that the toast UI won't be shown.
+  const preferences2 = {
+    arcEnabled: true,
+    arcRemovableMediaAccessEnabled: true,
+  };
+  await remoteCall.callRemoteTestUtil('setPreferences', null, [preferences2]);
+
+  // Navigate to the USB volume again.
+  await remoteCall.waitAndClickElement(appId, USB_VOLUME_QUERY);
+
+  // Verify the toast UI is still not shown.
+  await checkHiddenToast(appId);
 };
 
 /**
@@ -649,7 +766,7 @@ async function unmountRemovableVolume(removableDirectory) {
   if (removableDirectory === 'partition-1' ||
       removableDirectory === 'partition-2') {
     const partitionQuery = `#file-list [file-name="${removableDirectory}"]`;
-    const partitionFiles = [ENTRIES.hello.getExpectedRow()];
+    const partitionFiles = TestEntryInfo.getExpectedRows(BASIC_FAKE_ENTRY_SET);
     await remoteCall.callRemoteTestUtil(
         'fakeMouseDoubleClick', appId, [partitionQuery]);
     await remoteCall.waitUntilCurrentDirectoryIsChanged(
@@ -714,4 +831,59 @@ testcase.fileDisplayDownloadsWithBlockedFileTaskRunner = async () => {
   await sendTestMessage({name: 'blockFileTaskRunner'});
   await fileDisplay(RootPath.DOWNLOADS, BASIC_LOCAL_ENTRY_SET);
   await sendTestMessage({name: 'unblockFileTaskRunner'});
+};
+
+/**
+ * Tests to make sure check-select mode enables when selecting one item
+ */
+testcase.fileDisplayCheckSelectWithFakeItemSelected = async () => {
+  // Open files app on Downloads containing ENTRIES.hello.
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.hello], []);
+
+  // Select ENTRIES.hello.
+  chrome.test.assertTrue(
+      await remoteCall.callRemoteTestUtil('selectFile', appId, ['hello.txt']));
+
+  // Select all.
+  const ctrlA = ['#file-list', 'a', true, false, false];
+  chrome.test.assertTrue(
+      await remoteCall.callRemoteTestUtil('fakeKeyDown', appId, ctrlA));
+
+  // Make sure check-select is enabled.
+  await remoteCall.waitForElement(appId, 'body.check-select');
+};
+
+/**
+ * Tests to make sure read-only indicator is visible when the current directory
+ * is read-only.
+ */
+testcase.fileDisplayCheckReadOnlyIconOnFakeDirectory = async () => {
+  // Open Files app on Drive with the given test files.
+  const appId = await setupAndWaitUntilReady(
+      RootPath.DRIVE, [ENTRIES.newlyAdded],
+      [ENTRIES.testSharedDocument, ENTRIES.hello]);
+
+  // Navigate to Shared with me.
+  await remoteCall.callRemoteTestUtil(
+      'fakeMouseClick', appId, ['[volume-type-icon=\'drive_shared_with_me\']']);
+
+  // Wait for the navigation to complete.
+  await remoteCall.waitUntilCurrentDirectoryIsChanged(appId, '/Shared with me');
+
+  // Make sure read-only indicator on toolbar is visible.
+  await remoteCall.waitForElement(appId, '#read-only-indicator:not([hidden])');
+};
+
+/**
+ * Tests to make sure read-only indicator is NOT visible when the current
+ * is writable.
+ */
+testcase.fileDisplayCheckNoReadOnlyIconOnDownloads = async () => {
+  // Open files app on Downloads containing ENTRIES.hello.
+  const appId =
+      await setupAndWaitUntilReady(RootPath.DOWNLOADS, [ENTRIES.hello], []);
+
+  // Make sure read-only indicator on toolbar is NOT visible.
+  await remoteCall.waitForElement(appId, '#read-only-indicator[hidden]');
 };

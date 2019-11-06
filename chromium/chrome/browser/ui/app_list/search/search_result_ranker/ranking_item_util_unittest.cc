@@ -40,7 +40,7 @@ class RankingItemUtilTest : public AppListTestBase {
   void SetAdaptiveRankerParams(
       const std::map<std::string, std::string>& params) {
     scoped_feature_list_.InitAndEnableFeatureWithParameters(
-        app_list_features::kEnableAdaptiveResultRanker, params);
+        app_list_features::kEnableQueryBasedMixedTypesRanker, params);
   }
 
   std::unique_ptr<OmniboxResult> MakeOmniboxResult(
@@ -64,6 +64,42 @@ TEST_F(RankingItemUtilTest, OmniboxSubtypeReturnedWithFinchParameterOn) {
       MakeOmniboxResult(AutocompleteMatchType::HISTORY_URL);
   RankingItemType type = RankingItemTypeFromSearchResult(*result.get());
   EXPECT_EQ(type, RankingItemType::kOmniboxHistory);
+}
+
+TEST_F(RankingItemUtilTest, SimplifyUrlId) {
+  // Test handling different kinds of scheme, domain, and path. These should all
+  // be no-ops.
+  EXPECT_EQ(SimplifyUrlId("scheme://domain.com/path"),
+            "scheme://domain.com/path");
+  EXPECT_EQ(SimplifyUrlId("://domain.com"), "://domain.com");
+  EXPECT_EQ(SimplifyUrlId("domain.com/path"), "domain.com/path");
+  EXPECT_EQ(SimplifyUrlId("domain.com:1123/path"), "domain.com:1123/path");
+  EXPECT_EQ(SimplifyUrlId("://"), "://");
+
+  // Test removing trailing slash.
+  EXPECT_EQ(SimplifyUrlId("scheme://domain.com/"), "scheme://domain.com");
+  EXPECT_EQ(SimplifyUrlId("scheme:///"), "scheme://");
+  EXPECT_EQ(SimplifyUrlId("scheme://"), "scheme://");
+
+  // Test removing queries and fragments.
+  EXPECT_EQ(SimplifyUrlId("domain.com/path?query=query"), "domain.com/path");
+  EXPECT_EQ(SimplifyUrlId("scheme://path?query=query#fragment"),
+            "scheme://path");
+  EXPECT_EQ(SimplifyUrlId("scheme://?query=query#fragment"), "scheme://");
+}
+
+TEST_F(RankingItemUtilTest, SimplifyGoogleDocsUrlId) {
+  EXPECT_EQ(SimplifyGoogleDocsUrlId("docs.google.com/hash/edit?"),
+            "docs.google.com/hash");
+  EXPECT_EQ(SimplifyGoogleDocsUrlId(
+                "http://docs.google.com/hash/view?query#fragment"),
+            "http://docs.google.com/hash");
+  EXPECT_EQ(SimplifyGoogleDocsUrlId("https://docs.google.com/d/document/hash/"),
+            "https://docs.google.com/d/document/hash");
+
+  // We only want to remove one /view or /edit from the end of the URL.
+  EXPECT_EQ(SimplifyGoogleDocsUrlId("docs.google.com/edit/hash/view/view"),
+            "docs.google.com/edit/hash/view");
 }
 
 }  // namespace app_list

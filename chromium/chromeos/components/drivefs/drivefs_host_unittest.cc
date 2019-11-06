@@ -133,11 +133,20 @@ class TestingDriveFsHostDelegate : public DriveFsHost::Delegate,
   std::string GetObfuscatedAccountId() override {
     return "salt-" + account_id_.GetAccountIdKey();
   }
+  bool IsMetricsCollectionEnabled() override { return false; }
 
   std::unique_ptr<DriveFsBootstrapListener> CreateMojoListener() override {
     DCHECK(pending_bootstrap_);
     return std::make_unique<FakeDriveFsBootstrapListener>(
         std::move(pending_bootstrap_));
+  }
+
+  std::string GetLostAndFoundDirectoryName() override {
+    return "recovered files";
+  }
+
+  base::FilePath GetMyFilesPath() override {
+    return base::FilePath("/MyFiles");
   }
 
   const std::unique_ptr<service_manager::Connector> connector_;
@@ -219,14 +228,12 @@ class FakeIdentityService
   void GetPrimaryAccountWhenAvailable(
       GetPrimaryAccountWhenAvailableCallback callback) override {
     auto account_id = AccountId::FromUserEmailGaiaId("test@example.com", "ID");
-    AccountInfo account_info;
-    account_info.email = account_id.GetUserEmail();
-    account_info.gaia = account_id.GetGaiaId();
-    account_info.account_id = account_id.GetAccountIdKey();
-    std::move(callback).Run(account_info, {});
+    std::move(callback).Run(CoreAccountId(account_id.GetUserEmail()),
+                            account_id.GetGaiaId(), account_id.GetUserEmail(),
+                            {});
   }
 
-  void GetAccessToken(const std::string& account_id,
+  void GetAccessToken(const CoreAccountId& account_id,
                       const ::identity::ScopeSet& scopes,
                       const std::string& consumer_id,
                       GetAccessTokenCallback callback) override {
@@ -309,7 +316,9 @@ class DriveFsHostTest : public ::testing::Test, public mojom::DriveFsBootstrap {
         *disk_manager_,
         MountPath(
             testing::StartsWith("drivefs://"), "", "drivefs-salt-g-ID",
-            testing::Contains("datadir=/path/to/profile/GCache/v2/salt-g-ID"),
+            testing::AllOf(testing::Contains(
+                               "datadir=/path/to/profile/GCache/v2/salt-g-ID"),
+                           testing::Contains("myfiles=/MyFiles")),
             _, chromeos::MOUNT_ACCESS_MODE_READ_WRITE))
         .WillOnce(testing::SaveArg<0>(&source));
 
@@ -364,7 +373,7 @@ class DriveFsHostTest : public ::testing::Test, public mojom::DriveFsBootstrap {
         .WillOnce(RunQuitClosure(&quit_closure));
     // Eventually we must attempt unmount.
     EXPECT_CALL(*disk_manager_, UnmountPath("/media/drivefsroot/salt-g-ID",
-                                            chromeos::UNMOUNT_OPTIONS_NONE, _));
+                                            chromeos::UNMOUNT_OPTIONS_LAZY, _));
     SendOnMounted();
     run_loop.Run();
     ASSERT_TRUE(host_->IsMounted());
@@ -400,6 +409,8 @@ class DriveFsHostTest : public ::testing::Test, public mojom::DriveFsBootstrap {
             mojom::DriveFsRequest drive_fs_request,
             mojom::DriveFsDelegatePtr delegate) override {
     EXPECT_EQ("test@example.com", config->user_email);
+    EXPECT_EQ("recovered files",
+              config->lost_and_found_directory_name.value_or("<None>"));
     init_access_token_ = std::move(config->access_token);
     binding_.Bind(std::move(drive_fs_request));
     mojo::FuseInterface(std::move(pending_delegate_request_),
@@ -500,7 +511,7 @@ TEST_F(DriveFsHostTest, DestroyBeforeMojoConnection) {
   auto token = StartMount();
   DispatchMountSuccessEvent(token);
   EXPECT_CALL(*disk_manager_, UnmountPath("/media/drivefsroot/salt-g-ID",
-                                          chromeos::UNMOUNT_OPTIONS_NONE, _));
+                                          chromeos::UNMOUNT_OPTIONS_LAZY, _));
 
   host_.reset();
   EXPECT_FALSE(PendingConnectionManager::Get().OpenIpcChannel(token, {}));
@@ -538,7 +549,8 @@ TEST_F(DriveFsHostTest, GetAccessToken_UnmountDuringMojoRequest) {
       .WillOnce(testing::DoAll(
           testing::InvokeWithoutArgs([&]() { host_->Unmount(); }),
           testing::Return(std::make_pair(
-              base::nullopt, GoogleServiceAuthError::ACCOUNT_DISABLED))));
+              base::nullopt,
+              GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS))));
 
   base::RunLoop run_loop;
   delegate_ptr_.set_connection_error_handler(run_loop.QuitClosure());

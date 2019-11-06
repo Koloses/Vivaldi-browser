@@ -53,21 +53,21 @@
 
   // Load the first page.
   [ChromeEarlGrey loadURL:self.testServer->GetURL("/echo")];
-  [ChromeEarlGrey waitForWebViewContainingText:"Echo"];
+  [ChromeEarlGrey waitForWebStateContainingText:"Echo"];
 
   // Open a new Tab to have a tab to switch to.
   [ChromeEarlGreyUI openNewTab];
 
   // Load the second page in the new tab.
   [ChromeEarlGrey loadURL:self.testServer->GetURL("/defaultresponse")];
-  [ChromeEarlGrey waitForWebViewContainingText:"Default response"];
+  [ChromeEarlGrey waitForWebStateContainingText:"Default response"];
 
   // Side swipe on the toolbar.
   [[EarlGrey selectElementWithMatcher:grey_kindOfClass(klass)]
       performAction:grey_swipeSlowInDirection(kGREYDirectionRight)];
 
   // Check that we swiped back to our web page.
-  [ChromeEarlGrey waitForWebViewContainingText:"Echo"];
+  [ChromeEarlGrey waitForWebStateContainingText:"Echo"];
 }
 
 @end

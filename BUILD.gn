@@ -23,10 +23,8 @@ group("All") {
     ":generate_files_cfg",
     "//base:base_unittests",
     "//cc:cc_unittests",
-    "//chrome/test:browser_tests",
     "//chrome/test:unit_tests",
     "//components:components_unittests",
-    "//content/shell:content_shell",
     "//content/test:content_browsertests",
     "//content/test:content_unittests",
     "//crypto:crypto_unittests",
@@ -53,11 +51,13 @@ group("All") {
   }
   if (!is_android) {
     deps += [
+      "//chrome/test:browser_tests",
       "//chrome/test/chromedriver:chromedriver_unittests",
     ]
   }
   if (is_win) {
     deps += [
+      "//vivaldi/tools/vivaldi_proxy",
       "//chrome/installer/mini_installer",
       "//courgette:courgette",
       "//courgette:courgette_unittests",
@@ -128,14 +128,17 @@ group("All") {
 group("vivaldi") {
   deps = [
     ":standalone",
-    "//chrome:chrome",
+    "//chrome",
   ]
   if (is_android) {
-    deps -= [ "//chrome:chrome" ]
+    deps -= [ "//chrome" ]
     deps += [ "//chrome/android:chrome_public_apk" ]
   }
   if (is_mac || is_win) {
     deps += [ "//third_party/crashpad/crashpad/handler:crashpad_handler" ]
+  }
+  if (is_win) {
+    deps += [ "//vivaldi/tools/vivaldi_proxy" ]
   }
 }
 

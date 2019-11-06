@@ -13,12 +13,11 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/synchronization/cancellation_flag.h"
+#include "base/synchronization/atomic_flag.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/drive/chromeos/change_list_loader_observer.h"
@@ -214,7 +213,7 @@ ChangeListLoader::ChangeListLoader(
     const base::FilePath& root_entry_path)
     : logger_(logger),
       blocking_task_runner_(blocking_task_runner),
-      in_shutdown_(new base::CancellationFlag),
+      in_shutdown_(new base::AtomicFlag),
       resource_metadata_(resource_metadata),
       scheduler_(scheduler),
       root_folder_id_loader_(root_folder_id_loader),
@@ -400,7 +399,10 @@ void ChangeListLoader::OnChangeListLoadComplete(FileError error) {
   // If there is pending update check, try to load the change from the server
   // again, because there may exist an update during the completed loading.
   if (pending_update_check_callback_) {
-    Load(base::ResetAndReturn(&pending_update_check_callback_));
+    auto cb = std::move(pending_update_check_callback_);
+    // TODO(dcheng): Rewrite this to use OnceCallback. Load() currently takes a
+    // callback by const ref, so std::move() won't do anything. :(
+    Load(cb);
   }
 }
 

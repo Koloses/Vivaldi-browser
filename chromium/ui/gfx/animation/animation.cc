@@ -4,12 +4,16 @@
 
 #include "ui/gfx/animation/animation.h"
 
+#include <memory>
+
+#include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
 #include "build/build_config.h"
 #include "ui/gfx/animation/animation_container.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/switches.h"
 
 namespace gfx {
 
@@ -37,8 +41,11 @@ void Animation::Start() {
   if (is_animating_)
     return;
 
-  if (!container_.get())
-    container_ = new AnimationContainer();
+  if (!container_) {
+    container_ = base::MakeRefCounted<AnimationContainer>();
+    if (delegate_)
+      delegate_->AnimationContainerWasSet(container_.get());
+  }
 
   is_animating_ = true;
 
@@ -92,6 +99,9 @@ void Animation::SetContainer(AnimationContainer* container) {
   else
     container_ = new AnimationContainer();
 
+  if (delegate_)
+    delegate_->AnimationContainerWasSet(container_.get());
+
   if (is_animating_)
     container_->Start(this);
 }
@@ -103,15 +113,13 @@ bool Animation::ShouldRenderRichAnimation() {
          RichAnimationRenderMode::FORCE_ENABLED;
 }
 
-#if !defined(OS_WIN)
+#if !defined(OS_WIN) && (!defined(OS_MACOSX) || defined(OS_IOS))
 // static
 bool Animation::ShouldRenderRichAnimationImpl() {
-  // Defined in platform specific file for Windows.
+  // Defined in platform specific file for Windows and OSX.
   return true;
 }
-#endif
 
-#if !defined(OS_WIN) && (!defined(OS_MACOSX) || defined(OS_IOS))
 // static
 bool Animation::ScrollAnimationsEnabledBySystem() {
   // Defined in platform specific files for Windows and OSX.
@@ -133,6 +141,10 @@ void Animation::UpdatePrefersReducedMotion() {
 
 // static
 bool Animation::PrefersReducedMotion() {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kForcePrefersReducedMotion)) {
+    return true;
+  }
   if (!prefers_reduced_motion_)
     UpdatePrefersReducedMotion();
   return *prefers_reduced_motion_;

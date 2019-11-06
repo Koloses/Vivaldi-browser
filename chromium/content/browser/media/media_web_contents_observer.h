@@ -15,6 +15,7 @@
 #include "build/build_config.h"
 #include "content/browser/media/session/media_session_controllers_manager.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/media_player_id.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "services/device/public/mojom/wake_lock.mojom.h"
 
@@ -29,6 +30,10 @@ enum class WebFullscreenVideoStatus;
 namespace media {
 enum class MediaContentType;
 }  // namespace media
+
+namespace media_session {
+struct MediaPosition;
+}  // namespace media_session
 
 namespace gfx {
 class Size;
@@ -125,6 +130,10 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
   void OnMediaMutedStatusChanged(RenderFrameHost* render_frame_host,
                                  int delegate_id,
                                  bool muted);
+  void OnMediaPositionStateChanged(
+      RenderFrameHost* render_frame_host,
+      int delegate_id,
+      const media_session::MediaPosition& position);
 
   // Clear |render_frame_host|'s tracking entry for its WakeLocks.
   void ClearWakeLocks(RenderFrameHost* render_frame_host);

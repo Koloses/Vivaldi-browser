@@ -24,21 +24,25 @@ import org.chromium.android_webview.AwBrowserProcess;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwCookieManager;
+import org.chromium.android_webview.AwFirebaseConfig;
+import org.chromium.android_webview.AwLocaleConfig;
 import org.chromium.android_webview.AwNetworkChangeNotifierRegistrationPolicy;
 import org.chromium.android_webview.AwProxyController;
 import org.chromium.android_webview.AwQuotaManagerBridge;
-import org.chromium.android_webview.AwResource;
 import org.chromium.android_webview.AwServiceWorkerController;
 import org.chromium.android_webview.AwTracingController;
 import org.chromium.android_webview.HttpAuthDatabase;
+import org.chromium.android_webview.R;
 import org.chromium.android_webview.ScopedSysTraceEvent;
 import org.chromium.android_webview.VariationsSeedLoader;
 import org.chromium.android_webview.WebViewChromiumRunQueue;
+import org.chromium.android_webview.common.AwResource;
 import org.chromium.android_webview.gfx.AwDrawFnImpl;
 import org.chromium.base.BuildConfig;
 import org.chromium.base.BuildInfo;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.FieldTrialList;
+import org.chromium.base.JNIUtils;
 import org.chromium.base.PathService;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
@@ -51,6 +55,7 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.net.NetworkChangeNotifier;
+import org.chromium.ui.base.ResourceBundle;
 
 /**
  * Class controlling the Chromium initialization for WebView.
@@ -133,6 +138,13 @@ public class WebViewChromiumAwInit {
             }
 
             final Context context = ContextUtils.getApplicationContext();
+
+            BuildInfo.setFirebaseAppId(AwFirebaseConfig.getFirebaseAppId());
+
+            JNIUtils.setClassLoader(WebViewChromiumAwInit.class.getClassLoader());
+
+            ResourceBundle.setAvailablePakLocales(
+                    new String[] {}, AwLocaleConfig.getWebViewSupportedPakLocales());
 
             // We are rewriting Java resources in the background.
             // NOTE: Any reference to Java resources will cause a crash.
@@ -242,7 +254,8 @@ public class WebViewChromiumAwInit {
                 packageName = webViewPackageInfo.applicationInfo.metaData.getString(
                         "com.android.webview.WebViewDonorPackage", packageName);
             }
-            ResourceRewriter.rewriteRValues(mFactory.getWebViewDelegate().getPackageId(
+
+            R.onResourcesLoaded(mFactory.getWebViewDelegate().getPackageId(
                     context.getResources(), packageName));
 
             AwResource.setResources(context.getResources());
@@ -459,7 +472,14 @@ public class WebViewChromiumAwInit {
                 return;
             }
 
-            PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> FieldTrialList.logActiveTrials());
+            PostTask.postTask(UiThreadTaskTraits.BEST_EFFORT, () -> {
+                // TODO(ntfschr): CommandLine can change at any time. For simplicity, only log it
+                // once during startup.
+                AwContentsStatics.logCommandLineForDebugging();
+                // Field trials can be activated at any time. We'll continue logging them as they're
+                // activated.
+                FieldTrialList.logActiveTrials();
+            });
         });
     }
 

@@ -33,11 +33,16 @@
 #include "third_party/blink/public/web/web_navigation_policy.h"
 #include "third_party/blink/public/web/web_navigation_timings.h"
 #include "third_party/blink/public/web/web_navigation_type.h"
+#include "third_party/blink/public/web/web_origin_policy.h"
 #include "third_party/blink/public/web/web_triggering_event_info.h"
 
 #if INSIDE_BLINK
 #include "base/memory/scoped_refptr.h"
 #endif
+
+namespace base {
+class TickClock;
+}
 
 namespace blink {
 
@@ -53,6 +58,11 @@ struct BLINK_EXPORT WebNavigationInfo {
 
   // The main resource request.
   WebURLRequest url_request;
+
+  // The frame type. This must not be kNone. See RequestContextFrameType.
+  // TODO(dgozman): enforce this is not kNone.
+  network::mojom::RequestContextFrameType frame_type =
+      network::mojom::RequestContextFrameType::kNone;
 
   // The navigation type. See WebNavigationType.
   WebNavigationType navigation_type = kWebNavigationTypeOther;
@@ -73,6 +83,13 @@ struct BLINK_EXPORT WebNavigationInfo {
 
   // Whether the navigation is a result of client redirect.
   bool is_client_redirect = false;
+
+  // Whether the navigation initiator frame has the
+  // |WebSandboxFlags::kDownloads| bit set in its sandbox flags set.
+  bool initiator_frame_has_download_sandbox_flag = false;
+
+  // Whether the navigation initiator frame is an ad frame.
+  bool initiator_frame_is_ad = false;
 
   // Whether this is a navigation in the opener frame initiated
   // by the window.open'd frame.
@@ -120,6 +137,10 @@ struct BLINK_EXPORT WebNavigationInfo {
   // resource instead of doing a network request.
   enum class ArchiveStatus { Absent, Present };
   ArchiveStatus archive_status = ArchiveStatus::Absent;
+
+  // The origin trial features activated in the document initiating this
+  // navigation that should be applied in the document being navigated to.
+  WebVector<int> initiator_origin_trial_features;
 
   // The value of hrefTranslate attribute of a link, if this navigation was
   // inititated by clicking a link.
@@ -190,8 +211,6 @@ struct BLINK_EXPORT WebNavigationParams {
   // The http content type of the request used to load the main resource, if
   // any.
   WebString http_content_type;
-  // The origin policy for this navigation.
-  WebString origin_policy;
   // The origin of the request used to load the main resource, specified at
   // https://fetch.spec.whatwg.org/#concept-request-origin. Can be null.
   // TODO(dgozman,nasko): we shouldn't need both this and |origin_to_commit|.
@@ -276,6 +295,8 @@ struct BLINK_EXPORT WebNavigationParams {
   bool had_transient_activation = false;
   // Whether this navigation has a sticky user activation flag.
   bool is_user_activated = false;
+  // Whether this navigation was browser initiated.
+  bool is_browser_initiated = false;
   // The previews state which should be used for this navigation.
   WebURLRequest::PreviewsState previews_state =
       WebURLRequest::kPreviewsUnspecified;
@@ -283,6 +304,37 @@ struct BLINK_EXPORT WebNavigationParams {
   // document.
   std::unique_ptr<blink::WebServiceWorkerNetworkProvider>
       service_worker_network_provider;
+  // The AppCache host id for this navigation.
+  base::UnguessableToken appcache_host_id;
+
+  // Used for SignedExchangeSubresourcePrefetch.
+  // This struct keeps the information about a prefetched signed exchange.
+  struct BLINK_EXPORT PrefetchedSignedExchange {
+    PrefetchedSignedExchange();
+    PrefetchedSignedExchange(
+        const WebURL& outer_url,
+        const WebString& header_integrity,
+        const WebURL& inner_url,
+        const WebURLResponse& inner_response,
+        mojo::ScopedMessagePipeHandle loader_factory_handle);
+    ~PrefetchedSignedExchange();
+
+    WebURL outer_url;
+    WebString header_integrity;
+    WebURL inner_url;
+    WebURLResponse inner_response;
+    mojo::ScopedMessagePipeHandle loader_factory_handle;
+  };
+  WebVector<std::unique_ptr<PrefetchedSignedExchange>>
+      prefetched_signed_exchanges;
+  // An optional tick clock to be used for document loader timing. This is used
+  // for testing.
+  const base::TickClock* tick_clock = nullptr;
+  // The origin trial features activated in the document initiating this
+  // navigation that should be applied in the document being navigated to.
+  WebVector<int> initiator_origin_trial_features;
+
+  base::Optional<WebOriginPolicy> origin_policy;
 };
 
 }  // namespace blink

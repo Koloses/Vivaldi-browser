@@ -28,6 +28,7 @@
 #include "components/feed/core/feed_networking_host.h"
 #include "components/feed/core/feed_scheduler_host.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/leveldb_proto/content/proto_database_provider_factory.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
@@ -61,9 +62,11 @@ FeedHostServiceFactory::FeedHostServiceFactory()
           "FeedHostService",
           BrowserContextDependencyManager::GetInstance()) {
   DependsOn(IdentityManagerFactory::GetInstance());
-  DependsOn(offline_pages::OfflinePageModelFactory::GetInstance());
+  // Depends on offline_pages::OfflinePageModelFactory in
+  // SimpleDependencyManager.
   DependsOn(offline_pages::PrefetchServiceFactory::GetInstance());
   DependsOn(HistoryServiceFactory::GetInstance());
+  DependsOn(leveldb_proto::ProtoDatabaseProviderFactory::GetInstance());
 }
 
 FeedHostServiceFactory::~FeedHostServiceFactory() = default;
@@ -75,7 +78,7 @@ KeyedService* FeedHostServiceFactory::BuildServiceInstanceFor(
   content::StoragePartition* storage_partition =
       content::BrowserContext::GetDefaultStoragePartition(context);
 
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   std::string api_key;
   if (google_apis::IsGoogleChromeAPIKeyUsed()) {
@@ -94,13 +97,19 @@ KeyedService* FeedHostServiceFactory::BuildServiceInstanceFor(
       base::DefaultClock::GetInstance());
 
   base::FilePath feed_dir(profile->GetPath().Append(kFeedFolder));
-  auto content_database = std::make_unique<FeedContentDatabase>(feed_dir);
-  auto journal_database = std::make_unique<FeedJournalDatabase>(feed_dir);
+  leveldb_proto::ProtoDatabaseProvider* proto_database_provider =
+      leveldb_proto::ProtoDatabaseProviderFactory::GetForKey(
+          profile->GetProfileKey());
+  auto content_database =
+      std::make_unique<FeedContentDatabase>(proto_database_provider, feed_dir);
+  auto journal_database =
+      std::make_unique<FeedJournalDatabase>(proto_database_provider, feed_dir);
 
   offline_pages::OfflinePageModel* offline_page_model =
       offline_pages::OfflinePageModelFactory::GetForBrowserContext(profile);
   offline_pages::PrefetchService* prefetch_service =
-      offline_pages::PrefetchServiceFactory::GetForBrowserContext(profile);
+      offline_pages::PrefetchServiceFactory::GetForKey(
+          profile->GetProfileKey());
   // Using base::Unretained is safe because the FeedSchedulerHost ensures the
   // |scheduler_host| will outlive the |offline_host|, and calls to
   // |the scheduler_host| are never posted to a message loop.
@@ -118,7 +127,7 @@ KeyedService* FeedHostServiceFactory::BuildServiceInstanceFor(
   auto logging_metrics = std::make_unique<FeedLoggingMetrics>(
       base::BindRepeating(&FeedHistoryHelper::CheckURL,
                           std::move(history_helper)),
-      base::DefaultClock::GetInstance());
+      base::DefaultClock::GetInstance(), scheduler_host.get());
 
   return new FeedHostService(
       std::move(logging_metrics), std::move(networking_host),

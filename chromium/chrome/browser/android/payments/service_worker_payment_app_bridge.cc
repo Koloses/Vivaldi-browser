@@ -12,18 +12,21 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/macros.h"
+#include "chrome/android/chrome_jni_headers/ServiceWorkerPaymentAppBridge_jni.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/web_data_service_factory.h"
+#include "components/payments/content/payment_event_response_util.h"
+#include "components/payments/content/payment_handler_host.h"
 #include "components/payments/content/payment_manifest_web_data_service.h"
 #include "components/payments/content/service_worker_payment_app_factory.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/payment_app_provider.h"
 #include "content/public/browser/web_contents.h"
-#include "jni/ServiceWorkerPaymentAppBridge_jni.h"
 #include "third_party/blink/public/mojom/payments/payment_app.mojom.h"
 #include "ui/gfx/android/java_bitmap.h"
+#include "url/gurl.h"
 #include "url/origin.h"
 
 namespace {
@@ -56,8 +59,14 @@ void OnGotAllPaymentApps(
     const JavaRef<jobject>& jcallback,
     content::PaymentAppProvider::PaymentApps apps,
     payments::ServiceWorkerPaymentAppFactory::InstallablePaymentApps
-        installable_apps) {
+        installable_apps,
+    const std::string& error_message) {
   JNIEnv* env = AttachCurrentThread();
+
+  if (!error_message.empty()) {
+    Java_ServiceWorkerPaymentAppBridge_onGetPaymentAppsError(
+        env, jcallback, ConvertUTF8ToJavaString(env, error_message));
+  }
 
   for (const auto& app_info : apps) {
     // Sends related application Ids to java side if the app prefers related
@@ -167,7 +176,10 @@ void OnPaymentAppInvoked(
   Java_ServiceWorkerPaymentAppBridge_onPaymentAppInvoked(
       env, jcallback,
       ConvertUTF8ToJavaString(env, handler_response->method_name),
-      ConvertUTF8ToJavaString(env, handler_response->stringified_details));
+      ConvertUTF8ToJavaString(env, handler_response->stringified_details),
+      ConvertUTF8ToJavaString(
+          env, payments::ConvertPaymentEventResponseTypeToErrorString(
+                   handler_response->response_type)));
 }
 
 void OnPaymentAppAborted(const JavaRef<jobject>& jweb_contents,
@@ -191,9 +203,7 @@ std::vector<PaymentMethodDataPtr> ConvertPaymentMethodDataFromJavaToNative(
     JNIEnv* env,
     const JavaParamRef<jobjectArray>& jmethod_data) {
   std::vector<PaymentMethodDataPtr> result;
-  for (jsize i = 0; i < env->GetArrayLength(jmethod_data); i++) {
-    ScopedJavaLocalRef<jobject> element(
-        env, env->GetObjectArrayElement(jmethod_data, i));
+  for (auto element : jmethod_data.ReadElements<jobject>()) {
     PaymentMethodDataPtr method_data_item = PaymentMethodData::New();
     method_data_item->supported_method = ConvertJavaStringToUTF8(
         env,
@@ -234,7 +244,9 @@ PaymentRequestEventDataPtr ConvertPaymentRequestEventDataFromJavaToNative(
     const JavaParamRef<jstring>& jpayment_request_id,
     const JavaParamRef<jobjectArray>& jmethod_data,
     const JavaParamRef<jobject>& jtotal,
-    const JavaParamRef<jobjectArray>& jmodifiers) {
+    const JavaParamRef<jobjectArray>& jmodifiers,
+    jlong payment_handler_host) {
+  DCHECK_NE(0, payment_handler_host);
   PaymentRequestEventDataPtr event_data = PaymentRequestEventData::New();
 
   event_data->top_origin = GURL(ConvertJavaStringToUTF8(env, jtop_origin));
@@ -253,9 +265,7 @@ PaymentRequestEventDataPtr ConvertPaymentRequestEventDataFromJavaToNative(
       env,
       Java_ServiceWorkerPaymentAppBridge_getValueFromPaymentItem(env, jtotal));
 
-  for (jsize i = 0; i < env->GetArrayLength(jmodifiers); i++) {
-    ScopedJavaLocalRef<jobject> jmodifier(
-        env, env->GetObjectArrayElement(jmodifiers, i));
+  for (auto jmodifier : jmodifiers.ReadElements<jobject>()) {
     PaymentDetailsModifierPtr modifier = PaymentDetailsModifier::New();
 
     ScopedJavaLocalRef<jobject> jmodifier_total =
@@ -287,6 +297,10 @@ PaymentRequestEventDataPtr ConvertPaymentRequestEventDataFromJavaToNative(
 
     event_data->modifiers.push_back(std::move(modifier));
   }
+
+  event_data->payment_handler_host =
+      reinterpret_cast<payments::PaymentHandlerHost*>(payment_handler_host)
+          ->Bind();
 
   return event_data;
 }
@@ -344,6 +358,8 @@ static void JNI_ServiceWorkerPaymentAppBridge_CanMakePayment(
     JNIEnv* env,
     const JavaParamRef<jobject>& jweb_contents,
     jlong registration_id,
+    const JavaParamRef<jstring>& jservice_worker_scope,
+    const JavaParamRef<jstring>& jpayment_request_id,
     const JavaParamRef<jstring>& jtop_origin,
     const JavaParamRef<jstring>& jpayment_request_origin,
     const JavaParamRef<jobjectArray>& jmethod_data,
@@ -360,9 +376,7 @@ static void JNI_ServiceWorkerPaymentAppBridge_CanMakePayment(
   event_data->method_data =
       ConvertPaymentMethodDataFromJavaToNative(env, jmethod_data);
 
-  for (jsize i = 0; i < env->GetArrayLength(jmodifiers); i++) {
-    ScopedJavaLocalRef<jobject> jmodifier(
-        env, env->GetObjectArrayElement(jmodifiers, i));
+  for (auto jmodifier : jmodifiers.ReadElements<jobject>()) {
     PaymentDetailsModifierPtr modifier = PaymentDetailsModifier::New();
 
     ScopedJavaLocalRef<jobject> jmodifier_total =
@@ -396,7 +410,10 @@ static void JNI_ServiceWorkerPaymentAppBridge_CanMakePayment(
   }
 
   content::PaymentAppProvider::GetInstance()->CanMakePayment(
-      web_contents->GetBrowserContext(), registration_id, std::move(event_data),
+      web_contents->GetBrowserContext(), registration_id,
+      url::Origin::Create(
+          GURL(ConvertJavaStringToUTF8(env, jservice_worker_scope))),
+      ConvertJavaStringToUTF8(env, jpayment_request_id), std::move(event_data),
       base::BindOnce(&OnCanMakePayment,
                      ScopedJavaGlobalRef<jobject>(env, jweb_contents),
                      ScopedJavaGlobalRef<jobject>(env, jcallback)));
@@ -406,21 +423,25 @@ static void JNI_ServiceWorkerPaymentAppBridge_InvokePaymentApp(
     JNIEnv* env,
     const JavaParamRef<jobject>& jweb_contents,
     jlong registration_id,
+    const JavaParamRef<jstring>& jservice_worker_scope,
     const JavaParamRef<jstring>& jtop_origin,
     const JavaParamRef<jstring>& jpayment_request_origin,
     const JavaParamRef<jstring>& jpayment_request_id,
     const JavaParamRef<jobjectArray>& jmethod_data,
     const JavaParamRef<jobject>& jtotal,
     const JavaParamRef<jobjectArray>& jmodifiers,
+    jlong payment_handler_host,
     const JavaParamRef<jobject>& jcallback) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(jweb_contents);
 
   content::PaymentAppProvider::GetInstance()->InvokePaymentApp(
       web_contents->GetBrowserContext(), registration_id,
+      url::Origin::Create(
+          GURL(ConvertJavaStringToUTF8(env, jservice_worker_scope))),
       ConvertPaymentRequestEventDataFromJavaToNative(
           env, jtop_origin, jpayment_request_origin, jpayment_request_id,
-          jmethod_data, jtotal, jmodifiers),
+          jmethod_data, jtotal, jmodifiers, payment_handler_host),
       base::BindOnce(&OnPaymentAppInvoked,
                      ScopedJavaGlobalRef<jobject>(env, jweb_contents),
                      ScopedJavaGlobalRef<jobject>(env, jcallback)));
@@ -435,6 +456,7 @@ static void JNI_ServiceWorkerPaymentAppBridge_InstallAndInvokePaymentApp(
     const JavaParamRef<jobjectArray>& jmethod_data,
     const JavaParamRef<jobject>& jtotal,
     const JavaParamRef<jobjectArray>& jmodifiers,
+    jlong payment_handler_host,
     const JavaParamRef<jobject>& jcallback,
     const JavaParamRef<jstring>& japp_name,
     const JavaParamRef<jobject>& jicon,
@@ -454,7 +476,7 @@ static void JNI_ServiceWorkerPaymentAppBridge_InstallAndInvokePaymentApp(
       web_contents,
       ConvertPaymentRequestEventDataFromJavaToNative(
           env, jtop_origin, jpayment_request_origin, jpayment_request_id,
-          jmethod_data, jtotal, jmodifiers),
+          jmethod_data, jtotal, jmodifiers, payment_handler_host),
       ConvertJavaStringToUTF8(env, japp_name), icon_bitmap,
       ConvertJavaStringToUTF8(env, jsw_js_url),
       ConvertJavaStringToUTF8(env, jsw_scope), juse_cache,
@@ -468,12 +490,17 @@ static void JNI_ServiceWorkerPaymentAppBridge_AbortPaymentApp(
     JNIEnv* env,
     const JavaParamRef<jobject>& jweb_contents,
     jlong registration_id,
+    const JavaParamRef<jstring>& jservice_worker_scope,
+    const JavaParamRef<jstring>& jpayment_request_id,
     const JavaParamRef<jobject>& jcallback) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(jweb_contents);
 
   content::PaymentAppProvider::GetInstance()->AbortPayment(
       web_contents->GetBrowserContext(), registration_id,
+      url::Origin::Create(
+          GURL(ConvertJavaStringToUTF8(env, jservice_worker_scope))),
+      ConvertJavaStringToUTF8(env, jpayment_request_id),
       base::BindOnce(&OnPaymentAppAborted,
                      ScopedJavaGlobalRef<jobject>(env, jweb_contents),
                      ScopedJavaGlobalRef<jobject>(env, jcallback)));
@@ -481,10 +508,12 @@ static void JNI_ServiceWorkerPaymentAppBridge_AbortPaymentApp(
 
 static void JNI_ServiceWorkerPaymentAppBridge_OnClosingPaymentAppWindow(
     JNIEnv* env,
-    const JavaParamRef<jobject>& jweb_contents) {
+    const JavaParamRef<jobject>& jweb_contents,
+    jint reason) {
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(jweb_contents);
 
   content::PaymentAppProvider::GetInstance()->OnClosingOpenedWindow(
-      web_contents->GetBrowserContext());
+      web_contents->GetBrowserContext(),
+      static_cast<payments::mojom::PaymentEventResponseType>(reason));
 }

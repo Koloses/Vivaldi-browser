@@ -44,6 +44,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/crx_file/id_util.h"
+#include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/update_client/update_query_params.h"
 #include "content/public/browser/notification_details.h"
@@ -73,7 +74,6 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
 #include "services/data_decoder/public/cpp/test_data_decoder_service.h"
-#include "services/identity/public/cpp/identity_test_environment.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -266,11 +266,11 @@ class MockService : public TestExtensionService {
 
   PrefService* pref_service() { return prefs_->pref_service(); }
 
-  identity::IdentityTestEnvironment* identity_test_env() {
+  signin::IdentityTestEnvironment* identity_test_env() {
     return identity_test_env_.get();
   }
 
-  const std::string& account_id() { return account_info_.account_id; }
+  const std::string& account_id() { return account_info_.account_id.id; }
 
   // Creates test extensions and inserts them into list. The name and
   // version are all based on their index. If |update_url| is non-null, it
@@ -328,7 +328,7 @@ class MockService : public TestExtensionService {
 
   std::unique_ptr<ExtensionDownloader> CreateExtensionDownloaderWithIdentity(
       ExtensionDownloaderDelegate* delegate) {
-    identity_test_env_ = std::make_unique<identity::IdentityTestEnvironment>();
+    identity_test_env_ = std::make_unique<signin::IdentityTestEnvironment>();
     account_info_ = identity_test_env_->MakePrimaryAccountAvailable(
         "bobloblaw@lawblog.example.com");
 
@@ -339,7 +339,7 @@ class MockService : public TestExtensionService {
   }
 
   AccountInfo account_info_;
-  std::unique_ptr<identity::IdentityTestEnvironment> identity_test_env_;
+  std::unique_ptr<signin::IdentityTestEnvironment> identity_test_env_;
 
   ExtensionDownloaderDelegate* downloader_delegate_override_;
 
@@ -457,7 +457,7 @@ class ServiceForDownloadTests : public MockService {
     extension_id_ = file.extension_id;
     install_path_ = file.path;
 
-    if (base::ContainsKey(fake_crx_installers_, extension_id_)) {
+    if (base::Contains(fake_crx_installers_, extension_id_)) {
       *out_crx_installer = fake_crx_installers_[extension_id_];
       return true;
     }
@@ -536,29 +536,23 @@ static std::map<std::string, ParamsMap> GetPingDataFromURL(
 
     // We've found "x=<something>", now unescape <something> and look for
     // the "id=<id>&ping=<ping_value>" parameters within.
-    std::string unescaped = net::UnescapeURLComponent(
-        param.second,
-        net::UnescapeRule::PATH_SEPARATORS |
-            net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS);
+    std::string unescaped = net::UnescapeBinaryURLComponent(param.second);
     base::StringPairs extension_params;
     base::SplitStringIntoKeyValuePairs(unescaped, '=', '&', &extension_params);
     std::multimap<std::string, std::string> param_map;
     param_map.insert(extension_params.begin(), extension_params.end());
-    if (base::ContainsKey(param_map, "id") &&
-        base::ContainsKey(param_map, "ping")) {
+    if (base::Contains(param_map, "id") && base::Contains(param_map, "ping")) {
       std::string id = param_map.find("id")->second;
       result[id] = ParamsMap();
 
       // Pull the key=value pairs out of the ping parameter for this id and
       // put into the result.
-      std::string ping = net::UnescapeURLComponent(
-          param_map.find("ping")->second,
-          net::UnescapeRule::PATH_SEPARATORS |
-              net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS);
+      std::string ping =
+          net::UnescapeBinaryURLComponent(param_map.find("ping")->second);
       base::StringPairs ping_params;
       base::SplitStringIntoKeyValuePairs(ping, '=', '&', &ping_params);
       for (const auto& ping_param : ping_params) {
-        if (!base::ContainsKey(result[id], ping_param.first))
+        if (!base::Contains(result[id], ping_param.first))
           result[id][ping_param.first] = std::set<std::string>();
         result[id][ping_param.first].insert(ping_param.second);
       }
@@ -582,10 +576,7 @@ static void VerifyQueryAndExtractParameters(
   }
 
   EXPECT_EQ(1U, params.count("x"));
-  std::string decoded = net::UnescapeURLComponent(
-      params["x"],
-      net::UnescapeRule::PATH_SEPARATORS |
-          net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS);
+  std::string decoded = net::UnescapeBinaryURLComponent(params["x"]);
   ExtractParameters(decoded, result);
 }
 
@@ -1918,7 +1909,7 @@ class ExtensionUpdaterTest : public testing::Test {
     std::map<std::string, ParamsMap> url1_ping_data =
         GetPingDataFromURL(url1_fetch_url);
     ParamsMap url1_params = ParamsMap();
-    if (!url1_ping_data.empty() && base::ContainsKey(url1_ping_data, id))
+    if (!url1_ping_data.empty() && base::Contains(url1_ping_data, id))
       url1_params = url1_ping_data[id];
 
     // First make sure the non-google query had no ping parameter.
@@ -1927,14 +1918,14 @@ class ExtensionUpdaterTest : public testing::Test {
     // Now make sure the google query had the correct ping parameter.
     bool did_rollcall = false;
     if (rollcall_ping_days != 0) {
-      ASSERT_TRUE(base::ContainsKey(url1_params, "r"));
+      ASSERT_TRUE(base::Contains(url1_params, "r"));
       ASSERT_EQ(1u, url1_params["r"].size());
       EXPECT_EQ(base::NumberToString(rollcall_ping_days),
                 *url1_params["r"].begin());
       did_rollcall = true;
     }
     if (active_bit && active_ping_days != 0 && did_rollcall) {
-      ASSERT_TRUE(base::ContainsKey(url1_params, "a"));
+      ASSERT_TRUE(base::Contains(url1_params, "a"));
       ASSERT_EQ(1u, url1_params["a"].size());
       EXPECT_EQ(base::NumberToString(active_ping_days),
                 *url1_params["a"].begin());
@@ -2059,14 +2050,14 @@ class ExtensionUpdaterTest : public testing::Test {
     // Make sure that all the enabled extensions have "e=1" in their ping
     // parameter.
     for (const auto& ext : enabled_extensions) {
-      ASSERT_TRUE(base::ContainsKey(all_pings, ext->id()));
+      ASSERT_TRUE(base::Contains(all_pings, ext->id()));
       ParamsMap& ping = all_pings[ext->id()];
-      EXPECT_FALSE(base::ContainsKey(ping, "dr"));
-      ASSERT_TRUE(base::ContainsKey(ping, "e")) << url;
+      EXPECT_FALSE(base::Contains(ping, "dr"));
+      ASSERT_TRUE(base::Contains(ping, "e")) << url;
       std::set<std::string> e = ping["e"];
       ASSERT_EQ(1u, e.size()) << url;
       EXPECT_EQ(std::string("1"), *e.begin()) << url;
-      EXPECT_FALSE(base::ContainsKey(ping, "dr"));
+      EXPECT_FALSE(base::Contains(ping, "dr"));
     }
 
     // Make sure that all the disable extensions have the appropriate
@@ -2076,18 +2067,18 @@ class ExtensionUpdaterTest : public testing::Test {
     for (size_t i = 0; i < disabled.size(); i++) {
       scoped_refptr<const Extension>& ext = disabled_extensions[i];
       int disable_reasons = disabled[i];
-      ASSERT_TRUE(base::ContainsKey(all_pings, ext->id())) << url;
+      ASSERT_TRUE(base::Contains(all_pings, ext->id())) << url;
       ParamsMap& ping = all_pings[ext->id()];
 
-      ASSERT_TRUE(base::ContainsKey(ping, "e")) << url;
+      ASSERT_TRUE(base::Contains(ping, "e")) << url;
       std::set<std::string> e = ping["e"];
       ASSERT_EQ(1u, e.size()) << url;
       EXPECT_EQ(std::string("0"), *e.begin()) << url;
 
       if (disable_reasons == 0) {
-        EXPECT_FALSE(base::ContainsKey(ping, "dr"));
+        EXPECT_FALSE(base::Contains(ping, "dr"));
       } else {
-        ASSERT_TRUE(base::ContainsKey(ping, "dr"));
+        ASSERT_TRUE(base::Contains(ping, "dr"));
         int found_reasons = 0;
         for (const auto& reason_string : ping["dr"]) {
           int reason = 0;
@@ -2308,11 +2299,11 @@ TEST_F(ExtensionUpdaterTest, TestManifestRetryDownloading) {
   TestManifestRetryDownloading();
 }
 
-TEST_F(ExtensionUpdaterTest, TestGalleryRequestsWithOrganicBrand) {
+TEST_F(ExtensionUpdaterTest, DISABLED_TestGalleryRequestsWithOrganicBrand) {
   TestGalleryRequestsWithBrand(true);
 }
 
-TEST_F(ExtensionUpdaterTest, TestGalleryRequestsWithNonOrganicBrand) {
+TEST_F(ExtensionUpdaterTest, DISABLED_TestGalleryRequestsWithNonOrganicBrand) {
   TestGalleryRequestsWithBrand(false);
 }
 
@@ -2442,6 +2433,61 @@ TEST_F(ExtensionUpdaterTest, TestManifestFetchesBuilderAddExtension) {
   auto* request = &(*helper->test_url_loader_factory().pending_requests())[0];
   ASSERT_TRUE(request);
   EXPECT_FALSE(request->request.url.is_empty());
+}
+
+TEST_F(ExtensionUpdaterTest, TestAddPendingExtensionWithVersion) {
+  constexpr char kVersion[] = "1.2.3.4";
+  auto helper = std::make_unique<ExtensionDownloaderTestHelper>();
+  EXPECT_EQ(0u, ManifestFetchersCount(&helper->downloader()));
+
+  // First, verify that adding valid extensions does invoke the callbacks on
+  // the delegate.
+  std::string id = crx_file::id_util::GenerateId("foo");
+  EXPECT_CALL(helper->delegate(), GetPingDataForExtension(id, _))
+      .WillOnce(Return(false));
+  EXPECT_TRUE(helper->downloader().AddPendingExtensionWithVersion(
+      id, GURL("http://example.com/update"), Manifest::INTERNAL, false, 0,
+      ManifestFetchData::FetchPriority::BACKGROUND, base::Version(kVersion)));
+  helper->downloader().StartAllPending(NULL);
+  Mock::VerifyAndClearExpectations(&helper->delegate());
+  EXPECT_EQ(1u, ManifestFetchersCount(&helper->downloader()));
+
+  // Extensions with invalid update URLs should be rejected.
+  id = crx_file::id_util::GenerateId("foo2");
+  EXPECT_FALSE(helper->downloader().AddPendingExtensionWithVersion(
+      id, GURL("http:google.com:foo"), Manifest::INTERNAL, false, 0,
+      ManifestFetchData::FetchPriority::BACKGROUND, base::Version(kVersion)));
+  helper->downloader().StartAllPending(NULL);
+  EXPECT_EQ(1u, ManifestFetchersCount(&helper->downloader()));
+
+  // Extensions with empty IDs should be rejected.
+  EXPECT_FALSE(helper->downloader().AddPendingExtensionWithVersion(
+      std::string(), GURL(), Manifest::INTERNAL, false, 0,
+      ManifestFetchData::FetchPriority::BACKGROUND, base::Version(kVersion)));
+  helper->downloader().StartAllPending(NULL);
+  EXPECT_EQ(1u, ManifestFetchersCount(&helper->downloader()));
+
+  // Reset the ExtensionDownloader so that it drops the current fetcher.
+  helper = std::make_unique<ExtensionDownloaderTestHelper>();
+  EXPECT_EQ(0u, ManifestFetchersCount(&helper->downloader()));
+
+  // Extensions with empty update URLs should have a default one
+  // filled in.
+  id = crx_file::id_util::GenerateId("foo3");
+  EXPECT_CALL(helper->delegate(), GetPingDataForExtension(id, _))
+      .WillOnce(Return(false));
+  EXPECT_TRUE(helper->downloader().AddPendingExtensionWithVersion(
+      id, GURL(), Manifest::INTERNAL, false, 0,
+      ManifestFetchData::FetchPriority::BACKGROUND, base::Version(kVersion)));
+  helper->downloader().StartAllPending(NULL);
+  EXPECT_EQ(1u, ManifestFetchersCount(&helper->downloader()));
+
+  RunUntilIdle();
+  auto* request = &(*helper->test_url_loader_factory().pending_requests())[0];
+  ASSERT_TRUE(request);
+  EXPECT_FALSE(request->request.url.is_empty());
+  EXPECT_THAT(request->request.url.possibly_invalid_spec(),
+              testing::HasSubstr(kVersion));
 }
 
 TEST_F(ExtensionUpdaterTest, TestStartUpdateCheckMemory) {

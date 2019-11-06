@@ -69,54 +69,26 @@ class LocalNtpSource : public content::URLDataSource,
     content::URLDataSource::GotDataCallback callback;
   };
 
-  struct OneGoogleBarRequest {
-    OneGoogleBarRequest(
-        base::TimeTicks start_time,
-        const content::URLDataSource::GotDataCallback& callback);
-    OneGoogleBarRequest(const OneGoogleBarRequest&);
-    ~OneGoogleBarRequest();
-
-    base::TimeTicks start_time;
-    content::URLDataSource::GotDataCallback callback;
-  };
-
-  struct PromoRequest {
-    PromoRequest(base::TimeTicks start_time,
-                 const content::URLDataSource::GotDataCallback& callback);
-    PromoRequest(const PromoRequest&);
-    ~PromoRequest();
-
-    base::TimeTicks start_time;
-    content::URLDataSource::GotDataCallback callback;
-  };
-
-  struct SearchSuggestRequest {
-    explicit SearchSuggestRequest(base::TimeTicks start_time);
-    explicit SearchSuggestRequest(const SearchSuggestRequest&);
-    ~SearchSuggestRequest();
-
-    base::TimeTicks start_time;
-  };
-
   // Overridden from content::URLDataSource:
-  std::string GetSource() const override;
+  std::string GetSource() override;
   void StartDataRequest(
       const std::string& path,
       const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override;
-  std::string GetMimeType(const std::string& path) const override;
-  bool AllowCaching() const override;
+  std::string GetMimeType(const std::string& path) override;
+  bool AllowCaching() override;
   bool ShouldServiceRequest(const GURL& url,
                             content::ResourceContext* resource_context,
-                            int render_process_id) const override;
-  bool ShouldAddContentSecurityPolicy() const override;
+                            int render_process_id) override;
+  bool ShouldAddContentSecurityPolicy() override;
 
   // The Content Security Policy for the Local NTP.
-  std::string GetContentSecurityPolicy() const;
+  std::string GetContentSecurityPolicy();
 
   // Overridden from NtpBackgroundServiceObserver:
   void OnCollectionInfoAvailable() override;
   void OnCollectionImagesAvailable() override;
+  void OnNextCollectionImageAvailable() override {}
   void OnNtpBackgroundServiceShuttingDown() override;
 
   // Overridden from OneGoogleBarServiceObserver:
@@ -131,12 +103,31 @@ class LocalNtpSource : public content::URLDataSource,
   void OnSearchSuggestDataUpdated() override;
   void OnSearchSuggestServiceShuttingDown() override;
 
+  // Called when the OGB data is available and serves |data| to any pending
+  // request from the NTP.
   void ServeOneGoogleBar(const base::Optional<OneGoogleBarData>& data);
-
-  void ServePromo(const base::Optional<PromoData>& data);
-
-  void MaybeServeSearchSuggestions(
+  // Called when the page requests OGB data. If the data is available it
+  // is returned immediately, otherwise it is returned when it becomes available
+  // in ServeOneGoogleBar.
+  void ServeOneGoogleBarWhenAvailable(
       const content::URLDataSource::GotDataCallback& callback);
+
+  // Called when the promo data is available and serves |data| to any pending
+  // requests from the NTP.
+  void ServePromo(const base::Optional<PromoData>& data);
+  // Called when the page requests promo data. If the data is available it
+  // is returned immediately, otherwise it is returned when it becomes
+  // available in ServePromo.
+  void ServePromoWhenAvailable(
+      const content::URLDataSource::GotDataCallback& callback);
+
+  // If suggestion data is available return it immediately, otherwise no search
+  // suggestions will be shown on this NTP load.
+  void ServeSearchSuggestionsIfAvailable(
+      const content::URLDataSource::GotDataCallback& callback);
+
+  // Start requests for the promo and OGB.
+  void InitiatePromoAndOGBRequests();
 
   Profile* const profile_;
 
@@ -148,20 +139,23 @@ class LocalNtpSource : public content::URLDataSource,
   ScopedObserver<NtpBackgroundService, NtpBackgroundServiceObserver>
       ntp_background_service_observer_;
 
-  std::vector<OneGoogleBarRequest> one_google_bar_requests_;
+  base::Optional<base::TimeTicks> pending_one_google_bar_request_;
+  std::vector<content::URLDataSource::GotDataCallback>
+      one_google_bar_callbacks_;
 
   OneGoogleBarService* one_google_bar_service_;
 
   ScopedObserver<OneGoogleBarService, OneGoogleBarServiceObserver>
       one_google_bar_service_observer_;
 
-  std::vector<PromoRequest> promo_requests_;
+  base::Optional<base::TimeTicks> pending_promo_request_;
+  std::vector<content::URLDataSource::GotDataCallback> promo_callbacks_;
 
   PromoService* promo_service_;
 
   ScopedObserver<PromoService, PromoServiceObserver> promo_service_observer_;
 
-  std::vector<SearchSuggestRequest> search_suggest_requests_;
+  base::Optional<base::TimeTicks> pending_search_suggest_request_;
 
   SearchSuggestService* search_suggest_service_;
 
@@ -173,7 +167,7 @@ class LocalNtpSource : public content::URLDataSource,
 
   std::unique_ptr<SearchConfigurationProvider> search_config_provider_;
 
-  base::WeakPtrFactory<LocalNtpSource> weak_ptr_factory_;
+  base::WeakPtrFactory<LocalNtpSource> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(LocalNtpSource);
 };

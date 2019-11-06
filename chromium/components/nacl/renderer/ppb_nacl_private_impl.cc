@@ -333,13 +333,11 @@ blink::WebURLRequest CreateWebURLRequest(const blink::WebDocument& document,
   // Follow the original behavior in the trusted plugin and
   // PepperURLLoaderHost.
   if (document.GetSecurityOrigin().CanRequest(gurl)) {
-    request.SetFetchRequestMode(network::mojom::FetchRequestMode::kSameOrigin);
-    request.SetFetchCredentialsMode(
-        network::mojom::FetchCredentialsMode::kSameOrigin);
+    request.SetMode(network::mojom::RequestMode::kSameOrigin);
+    request.SetCredentialsMode(network::mojom::CredentialsMode::kSameOrigin);
   } else {
-    request.SetFetchRequestMode(network::mojom::FetchRequestMode::kCors);
-    request.SetFetchCredentialsMode(
-        network::mojom::FetchCredentialsMode::kOmit);
+    request.SetMode(network::mojom::RequestMode::kCors);
+    request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
   }
 
   // Plug-ins should not load via service workers as plug-ins may have their own
@@ -427,7 +425,8 @@ void PPBNaClPrivate::LaunchSelLdr(
   InstanceInfo instance_info;
   instance_info.url = GURL(alleged_url);
 
-  uint32_t perm_bits = ppapi::PERMISSION_NONE;
+  // Keep backwards-compatible, but no other permissions.
+  uint32_t perm_bits = ppapi::PERMISSION_DEFAULT;
   instance_info.permissions =
       ppapi::PpapiPermissions::GetForCommandLine(perm_bits);
 
@@ -486,10 +485,6 @@ void PPBNaClPrivate::LaunchSelLdr(
     // Even on error, some FDs/handles may be passed to here.
     // We must release those resources.
     // See also nacl_process_host.cc.
-    if (base::SharedMemory::IsHandleValid(
-            launch_result.crash_info_shmem_handle))
-      base::SharedMemory::CloseHandle(launch_result.crash_info_shmem_handle);
-
     if (PP_ToBool(main_service_runtime)) {
       load_manager->ReportLoadError(PP_NACL_ERROR_SEL_LDR_LAUNCH,
                                     "ServiceRuntime: failed to start",
@@ -526,8 +521,8 @@ void PPBNaClPrivate::LaunchSelLdr(
   }
 
   // Store the crash information shared memory handle.
-  load_manager->set_crash_info_shmem_handle(
-      launch_result.crash_info_shmem_handle);
+  load_manager->set_crash_info_shmem_region(
+      std::move(launch_result.crash_info_shmem_region));
 
   // Create the trusted plugin channel.
   if (!IsValidChannelHandle(launch_result.trusted_ipc_channel_handle)) {
@@ -1595,8 +1590,7 @@ class PexeDownloader : public blink::WebAssociatedURLLoaderClient {
         stream_handler_(stream_handler),
         stream_handler_user_data_(stream_handler_user_data),
         success_(false),
-        expected_content_length_(-1),
-        weak_factory_(this) {}
+        expected_content_length_(-1) {}
 
   void Load(const blink::WebURLRequest& request) {
     url_loader_->LoadAsynchronously(request, this);
@@ -1704,7 +1698,7 @@ class PexeDownloader : public blink::WebAssociatedURLLoaderClient {
   void* stream_handler_user_data_;
   bool success_;
   int64_t expected_content_length_;
-  base::WeakPtrFactory<PexeDownloader> weak_factory_;
+  base::WeakPtrFactory<PexeDownloader> weak_factory_{this};
 };
 
 }  // namespace
@@ -1737,7 +1731,7 @@ void PPBNaClPrivate::StreamPexe(PP_Instance instance,
   blink::WebURLRequest url_request = CreateWebURLRequest(document, gurl);
   // Mark the request as requesting a PNaCl bitcode file,
   // so that component updater can detect this user action.
-  url_request.AddHTTPHeaderField(
+  url_request.AddHttpHeaderField(
       blink::WebString::FromUTF8("Accept"),
       blink::WebString::FromUTF8("application/x-pnacl, */*"));
   url_request.SetRequestContext(blink::mojom::RequestContextType::OBJECT);

@@ -10,12 +10,14 @@
 // <include src="oobe-screen.js">
 
 // <include src="oobe_dialog_host_behavior.js">
+// <include src="login_screen_behavior.js">
 // <include src="gaia_buttons.js">
 // <include src="gaia_card.js">
 // <include src="gaia_header.js">
 // <include src="gaia_input_form.js">
 // <include src="gaia_input.js">
 // <include src="gaia_password_changed.js">
+// <include src="screen_gaia_signin.js">
 // <include src="hd-iron-icon.js">
 // <include src="network_select_login.js">
 // <include src="notification_card.js">
@@ -28,7 +30,6 @@
 // <include src="oobe_buttons.js">
 // <include src="oobe_change_picture.js">
 // <include src="oobe_dialog.js">
-// <include src="oobe_enrollment.js">
 // <include src="oobe_eula.js">
 // <include src="oobe_hid_detection.js">
 // <include src="oobe_reset.js">
@@ -43,6 +44,7 @@
 // <include src="arc_terms_of_service.js">
 // <include src="oobe_supervision_transition.js">
 // <include src="enrollment_license_card.js">
+// <include src="enterprise_enrollment.js">
 // <include src="sync_consent.js">
 // <include src="fingerprint_setup.js">
 // <include src="demo_setup.js">
@@ -53,3 +55,4 @@
 // <include src="marketing_opt_in.js">
 // <include src="../assistant_optin/assistant_optin_flow.js">
 // <include src="multidevice_setup_first_run.js">
+// <include src="security_token_pin.js">

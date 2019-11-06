@@ -8,7 +8,6 @@
 #include "ash/ash_export.h"
 #include "ash/login_status.h"
 #include "ash/public/cpp/shelf_types.h"
-#include "ash/shelf/shelf_background_animator_observer.h"
 #include "base/macros.h"
 #include "ui/views/widget/widget.h"
 
@@ -17,8 +16,6 @@ class Window;
 }
 
 namespace ash {
-class AutoclickTray;
-class FlagWarningTray;
 class ImeMenuTray;
 class LogoutButtonTray;
 class OverviewButtonTray;
@@ -35,8 +32,7 @@ class VirtualKeyboardTray;
 // the bottom-right of the screen. Exists separately from ShelfView/ShelfWidget
 // so that it can be shown in cases where the rest of the shelf is hidden (e.g.
 // on secondary monitors at the login screen).
-class ASH_EXPORT StatusAreaWidget : public views::Widget,
-                                    public ShelfBackgroundAnimatorObserver {
+class ASH_EXPORT StatusAreaWidget : public views::Widget {
  public:
   StatusAreaWidget(aura::Window* status_container, Shelf* shelf);
   ~StatusAreaWidget() override;
@@ -80,7 +76,6 @@ class ASH_EXPORT StatusAreaWidget : public views::Widget,
   SelectToSpeakTray* select_to_speak_tray() {
     return select_to_speak_tray_.get();
   }
-  AutoclickTray* autoclick_tray() { return autoclick_tray_.get(); }
 
   Shelf* shelf() { return shelf_; }
 
@@ -109,9 +104,6 @@ class ASH_EXPORT StatusAreaWidget : public views::Widget,
   VirtualKeyboardTray* virtual_keyboard_tray_for_testing() {
     return virtual_keyboard_tray_.get();
   }
-  FlagWarningTray* flag_warning_tray_for_testing() {
-    return flag_warning_tray_.get();
-  }
 
  private:
   friend class StatusAreaWidgetTestApi;
@@ -130,8 +122,6 @@ class ASH_EXPORT StatusAreaWidget : public views::Widget,
   std::unique_ptr<VirtualKeyboardTray> virtual_keyboard_tray_;
   std::unique_ptr<ImeMenuTray> ime_menu_tray_;
   std::unique_ptr<SelectToSpeakTray> select_to_speak_tray_;
-  std::unique_ptr<AutoclickTray> autoclick_tray_;
-  std::unique_ptr<FlagWarningTray> flag_warning_tray_;
 
   LoginStatus login_status_ = LoginStatus::NOT_LOGGED_IN;
 

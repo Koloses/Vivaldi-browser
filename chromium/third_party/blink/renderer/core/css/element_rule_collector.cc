@@ -90,7 +90,7 @@ inline StyleRuleList* ElementRuleCollector::EnsureStyleRuleList() {
 
 inline StaticCSSRuleList* ElementRuleCollector::EnsureRuleList() {
   if (!css_rule_list_)
-    css_rule_list_ = StaticCSSRuleList::Create();
+    css_rule_list_ = MakeGarbageCollected<StaticCSSRuleList>();
   return css_rule_list_.Get();
 }
 
@@ -130,7 +130,7 @@ void ElementRuleCollector::CollectMatchingRulesForList(
   init.part_names = part_names;
   SelectorChecker checker(init);
   SelectorChecker::SelectorCheckingContext context(
-      context_.GetElement(), SelectorChecker::kVisitedMatchEnabled);
+      &context_.GetElement(), SelectorChecker::kVisitedMatchEnabled);
   context.scope = match_request.scope;
   context.pseudo_id = pseudo_style_request_.pseudo_id;
 
@@ -175,7 +175,7 @@ void ElementRuleCollector::CollectMatchingRulesForList(
   }
 
   StyleEngine& style_engine =
-      context_.GetElement()->GetDocument().GetStyleEngine();
+      context_.GetElement().GetDocument().GetStyleEngine();
   if (!style_engine.Stats())
     return;
 
@@ -191,9 +191,8 @@ void ElementRuleCollector::CollectMatchingRules(
     ShadowV0CascadeOrder cascade_order,
     bool matching_tree_boundary_rules) {
   DCHECK(match_request.rule_set);
-  DCHECK(context_.GetElement());
 
-  Element& element = *context_.GetElement();
+  Element& element = context_.GetElement();
   const AtomicString& pseudo_id = element.ShadowPseudoId();
   if (!pseudo_id.IsEmpty()) {
     DCHECK(element.IsStyledElement());
@@ -327,7 +326,7 @@ void ElementRuleCollector::SortAndTransferMatchedRules() {
     const RuleData* rule_data = matched_rules_[i].GetRuleData();
     result_.AddMatchedProperties(
         &rule_data->Rule()->Properties(), rule_data->LinkMatchType(),
-        rule_data->PropertyWhitelist(matching_ua_rules_));
+        rule_data->GetValidPropertyFilter(matching_ua_rules_));
   }
 }
 
@@ -349,7 +348,7 @@ void ElementRuleCollector::DidMatchRule(
       return;
     if ((dynamic_pseudo == kPseudoIdBefore ||
          dynamic_pseudo == kPseudoIdAfter) &&
-        !rule_data->Rule()->Properties().HasProperty(CSSPropertyContent))
+        !rule_data->Rule()->Properties().HasProperty(CSSPropertyID::kContent))
       return;
     style_->SetHasPseudoStyle(dynamic_pseudo);
   } else {

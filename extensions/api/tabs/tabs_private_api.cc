@@ -11,6 +11,7 @@
 #include "app/vivaldi_constants.h"
 #include "base/base64.h"
 #include "base/json/json_reader.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/strings/utf_string_conversions.h"
@@ -31,6 +32,7 @@
 #include "chrome/common/extensions/api/tabs.h"
 #include "chrome/common/extensions/command.h"
 #include "components/prefs/pref_service.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "components/zoom/zoom_controller.h"
 #include "content/browser/renderer_host/render_view_host_delegate_view.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
@@ -53,14 +55,12 @@
 #include "prefs/vivaldi_tab_zoom_pref.h"
 #include "renderer/vivaldi_render_messages.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
-#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/content/vivaldi_event_hooks.h"
 #include "ui/content/vivaldi_tab_check.h"
 #include "ui/display/screen.h"
 #include "ui/display/win/dpi.h"
-#include "ui/events/keycodes/keyboard_code_conversion.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/views/drag_utils.h"
@@ -74,6 +74,9 @@
 using content::WebContents;
 
 namespace extensions {
+
+const char kVivaldiTabZoom[] = "vivaldi_tab_zoom";
+const char kVivaldiTabMuted[] = "vivaldi_tab_muted";
 
 const int& VivaldiPrivateTabObserver::kUserDataKey =
     VivaldiTabCheck::kVivaldiTabObserverContextKey;
@@ -238,6 +241,8 @@ static tabs_private::MediaType ConvertTabAlertState(TabAlertState status) {
     return tabs_private::MediaType::MEDIA_TYPE_DESKTOP_CAPTURING;
   case TabAlertState::VR_PRESENTING_IN_HEADSET:
     return tabs_private::MediaType::MEDIA_TYPE_VR_PRESENTING_IN_HEADSET;
+  case TabAlertState::SERIAL_CONNECTED:
+    return tabs_private::MediaType::MEDIA_TYPE_SERIAL_CONNECTED;
   }
   NOTREACHED() << "Unknown TabAlertState Status.";
   return tabs_private::MediaType::MEDIA_TYPE_NONE;
@@ -257,175 +262,6 @@ void TabsPrivateAPIPrivate::TabChangedAt(content::WebContents* web_contents,
       web_contents->GetBrowserContext());
 }
 
-namespace {
-
-#if defined(OS_MACOSX)
-
-base::string16 KeyCodeToName(ui::KeyboardCode key_code) {
-  int string_id = 0;
-  switch (key_code) {
-    case ui::VKEY_TAB:
-      string_id = IDS_APP_TAB_KEY;
-      break;
-    case ui::VKEY_RETURN:
-      string_id = IDS_APP_ENTER_KEY;
-      break;
-    case ui::VKEY_SPACE:
-      string_id = IDS_APP_SPACE_KEY;
-      break;
-    case ui::VKEY_PRIOR:
-      string_id = IDS_APP_PAGEUP_KEY;
-      break;
-    case ui::VKEY_NEXT:
-      string_id = IDS_APP_PAGEDOWN_KEY;
-      break;
-    case ui::VKEY_END:
-      string_id = IDS_APP_END_KEY;
-      break;
-    case ui::VKEY_HOME:
-      string_id = IDS_APP_HOME_KEY;
-      break;
-    case ui::VKEY_INSERT:
-      string_id = IDS_APP_INSERT_KEY;
-      break;
-    case ui::VKEY_DELETE:
-      string_id = IDS_APP_DELETE_KEY;
-      break;
-    case ui::VKEY_LEFT:
-      string_id = IDS_APP_LEFT_ARROW_KEY;
-      break;
-    case ui::VKEY_RIGHT:
-      string_id =IDS_APP_RIGHT_ARROW_KEY;
-      break;
-    case ui::VKEY_UP:
-      string_id = IDS_APP_UP_ARROW_KEY;
-      break;
-    case ui::VKEY_DOWN:
-      string_id = IDS_APP_DOWN_ARROW_KEY;
-      break;
-    case ui::VKEY_ESCAPE:
-      string_id = IDS_APP_ESC_KEY;
-      break;
-    case ui::VKEY_BACK:
-      string_id = IDS_APP_BACKSPACE_KEY;
-      break;
-    case ui::VKEY_F1:
-      string_id = IDS_APP_F1_KEY;
-      break;
-    case ui::VKEY_F11:
-      string_id = IDS_APP_F11_KEY;
-      break;
-    case ui::VKEY_OEM_COMMA:
-      string_id = IDS_APP_COMMA_KEY;
-      break;
-    case ui::VKEY_OEM_PERIOD:
-      string_id = IDS_APP_PERIOD_KEY;
-      break;
-    case ui::VKEY_MEDIA_NEXT_TRACK:
-      string_id = IDS_APP_MEDIA_NEXT_TRACK_KEY;
-      break;
-    case ui::VKEY_MEDIA_PLAY_PAUSE:
-      string_id = IDS_APP_MEDIA_PLAY_PAUSE_KEY;
-      break;
-    case ui::VKEY_MEDIA_PREV_TRACK:
-      string_id = IDS_APP_MEDIA_PREV_TRACK_KEY;
-      break;
-    case ui::VKEY_MEDIA_STOP:
-      string_id = IDS_APP_MEDIA_STOP_KEY;
-      break;
-    default:
-      break;
-  }
-  return string_id ? l10n_util::GetStringUTF16(string_id) : base::string16();
-}
-
-#endif // OS_MACOSX
-
-std::string ShortcutText(const content::NativeWebKeyboardEvent& event) {
-  // We'd just use Accelerator::GetShortcutText to get the shortcut text but
-  // it translates the modifiers when the system language is set to
-  // non-English (since it's used for display). We can't match something
-  // like 'Strg+G' however, so we do the modifiers manually.
-  //
-  // AcceleratorToString gets the shortcut text, but doesn't localize
-  // like Accelerator::GetShortcutText() does, so it's suitable for us.
-  // It doesn't handle all keys, however, and doesn't work with ctrl+alt
-  // shortcuts so we're left with doing a little tweaking.
-  ui::KeyboardCode key_code =
-      static_cast<ui::KeyboardCode>(event.windows_key_code);
-  ui::Accelerator accelerator =
-      ui::Accelerator(key_code, 0, ui::Accelerator::KeyState::PRESSED);
-
-  std::string shortcutText = "";
-  if (event.GetModifiers() & content::NativeWebKeyboardEvent::kControlKey) {
-    shortcutText += "Ctrl+";
-  }
-  if (event.GetModifiers() & content::NativeWebKeyboardEvent::kShiftKey) {
-    shortcutText += "Shift+";
-  }
-  if (event.GetModifiers() & content::NativeWebKeyboardEvent::kAltKey) {
-    shortcutText += "Alt+";
-  }
-  if (event.GetModifiers() & content::NativeWebKeyboardEvent::kMetaKey) {
-    shortcutText += "Meta+";
-  }
-
-  std::string key_from_accelerator =
-      extensions::Command::AcceleratorToString(accelerator);
-  if (!key_from_accelerator.empty()) {
-    shortcutText += key_from_accelerator;
-  } else if (event.windows_key_code >= ui::VKEY_F1 &&
-             event.windows_key_code <= ui::VKEY_F24) {
-    char buf[4];
-    base::snprintf(buf, 4, "F%d", event.windows_key_code - ui::VKEY_F1 + 1);
-    shortcutText += buf;
-
-  } else if (event.windows_key_code >= ui::VKEY_NUMPAD0 &&
-             event.windows_key_code <= ui::VKEY_NUMPAD9) {
-    char buf[8];
-    base::snprintf(buf, 8, "Numpad%d",
-                   event.windows_key_code - ui::VKEY_NUMPAD0);
-    shortcutText += buf;
-
-  // Enter is somehow not covered anywhere else.
-  } else if (event.windows_key_code == ui::VKEY_RETURN) {
-    shortcutText += "Enter";
-  // GetShortcutText doesn't translate numbers and digits but
-  // 'does' translate backspace
-  } else if (event.windows_key_code == ui::VKEY_BACK) {
-    shortcutText += "Backspace";
-  // Escape was being translated as well in some languages
-  } else if (event.windows_key_code == ui::VKEY_ESCAPE) {
-    shortcutText += "Esc";
-  } else {
-#if defined(OS_MACOSX)
-  // This is equivalent to js event.code and deals with a few
-  // MacOS keyboard shortcuts like cmd+alt+n that fall through
-  // in some languages, i.e. AcceleratorToString returns a blank.
-  // Cmd+Alt shortcuts seem to be the only case where this fallback
-  // is required.
-  if (event.GetModifiers() & content::NativeWebKeyboardEvent::kAltKey &&
-      event.GetModifiers() & content::NativeWebKeyboardEvent::kMetaKey) {
-    shortcutText += ui::DomCodeToUsLayoutCharacter(
-        static_cast<ui::DomCode>(event.dom_code), 0);
-  } else {
-    // With chrome 67 accelerator.GetShortcutText() will return Mac specific
-    // symbols (like '⎋' for escape). All is private so we bypass that by
-    // testing with KeyCodeToName first.
-    base::string16 shortcut = KeyCodeToName(key_code);
-    if (shortcut.empty())
-      shortcut = accelerator.GetShortcutText();
-    shortcutText += base::UTF16ToUTF8(shortcut);
-  }
-#else
-    shortcutText += base::UTF16ToUTF8(accelerator.GetShortcutText());
-#endif // OS_MACOSX
-  }
-  return shortcutText;
-}
-
-}  // namespace
-
 // static
 void TabsPrivateAPI::SendKeyboardShortcutEvent(
     content::BrowserContext* browser_context,
@@ -444,7 +280,8 @@ void TabsPrivateAPI::SendKeyboardShortcutEvent(
   if (event.GetType() == blink::WebInputEvent::kKeyUp)
     return;
 
-  std::string shortcut_text = ShortcutText(event);
+  std::string shortcut_text = ::vivaldi::ShortcutTextFromEvent(event);
+
   // If the event wasn't prevented we'll get a rawKeyDown event. In some
   // exceptional cases we'll never get that, so we let these through
   // unconditionally
@@ -843,7 +680,19 @@ bool VivaldiEventHooksImpl::HandleMouseEvent(
     content::RenderWidgetHostViewBase* root_view,
     const blink::WebMouseEvent& event) {
   bool eat_event = false;
-  if (TabsPrivateAPIPrivate* priv = GetTabsAPIPriv()) {
+  bool is_blocked = false;
+  const web_modal::WebContentsModalDialogManager* manager =
+      web_modal::WebContentsModalDialogManager::FromWebContents(web_contents_);
+  if (manager) {
+    // Avoid dangling modal dialogs that will crash if the tab is closed
+    // through a gesture.
+    // TODO(pettern): There is still a chance a tab will be able to close
+    // before this check, so investigate blocking on the api level after
+    // the tab close rewrite on the js side.
+    is_blocked = manager->IsDialogActive();
+  }
+  if (!is_blocked) {
+    TabsPrivateAPIPrivate* priv = GetTabsAPIPriv();
     // Rocker gestures take priority over any other mouse gestures.
     eat_event = CheckRockerGesture(priv, web_contents_, event);
     if (!eat_event) {
@@ -1023,7 +872,6 @@ void VivaldiPrivateTabObserver::OnPrefsChanged(const std::string& path) {
     UpdateAllowAccessKeys();
     CommitSettings();
   }
-
 }
 
 void VivaldiPrivateTabObserver::BroadcastTabInfo() {
@@ -1032,6 +880,7 @@ void VivaldiPrivateTabObserver::BroadcastTabInfo() {
   info.load_from_cache_only.reset(new bool(load_from_cache_only()));
   info.enable_plugins.reset(new bool(enable_plugins()));
   info.mime_type.reset(new std::string(contents_mime_type()));
+  info.mute_tab.reset(new bool(mute()));
   int id = SessionTabHelper::IdForTab(web_contents()).id();
 
   ::vivaldi::BroadcastEvent(tabs_private::OnTabUpdated::kEventName,
@@ -1041,11 +890,14 @@ void VivaldiPrivateTabObserver::BroadcastTabInfo() {
 
 const int kThemeColorBufferSize = 8;
 
-void VivaldiPrivateTabObserver::DidChangeThemeColor(SkColor theme_color) {
+void VivaldiPrivateTabObserver::DidChangeThemeColor(base::Optional<SkColor> theme_color) {
+  if (!theme_color)
+    return;
+
   char rgb_buffer[kThemeColorBufferSize];
   base::snprintf(rgb_buffer, kThemeColorBufferSize, "#%02x%02x%02x",
-                 SkColorGetR(theme_color), SkColorGetG(theme_color),
-                 SkColorGetB(theme_color));
+                 SkColorGetR(*theme_color), SkColorGetG(*theme_color),
+                 SkColorGetB(*theme_color));
   int tab_id = extensions::ExtensionTabUtil::GetTabId(web_contents());
   ::vivaldi::BroadcastEvent(
       tabs_private::OnThemeColorChanged::kEventName,
@@ -1053,37 +905,45 @@ void VivaldiPrivateTabObserver::DidChangeThemeColor(SkColor theme_color) {
       web_contents()->GetBrowserContext());
 }
 
-base::Value DictionaryToJSONString(const base::DictionaryValue& dict) {
-  std::string json_string;
-  base::JSONWriter::WriteWithOptions(dict, 0, &json_string);
-  return base::Value(json_string);
+bool ValueToJSONString(const base::Value& value, std::string& json_string) {
+  JSONStringValueSerializer serializer(&json_string);
+  return serializer.Serialize(value);
+}
+
+base::Optional<base::Value> GetDictValueFromExtData(std::string& extdata) {
+  base::JSONParserOptions options = base::JSON_PARSE_RFC;
+  base::Optional<base::Value> value = base::JSONReader::Read(extdata, options);
+  if (value && value->is_dict()) {
+    return value;
+  }
+  return base::nullopt;
 }
 
 void VivaldiPrivateTabObserver::RenderViewCreated(
     content::RenderViewHost* render_view_host) {
+  std::string ext = web_contents()->GetExtData();
+  base::Optional<base::Value> json = GetDictValueFromExtData(ext);
   if (::vivaldi::isTabZoomEnabled(web_contents())) {
-    std::string ext = web_contents()->GetExtData();
-
-    base::JSONParserOptions options = base::JSON_PARSE_RFC;
-    base::Optional<base::Value> json = base::JSONReader::Read(ext, options);
-    base::DictionaryValue* dict = NULL;
-    content::HostZoomMap* host_zoom_map =
-        content::HostZoomMap::GetDefaultForBrowserContext(
-            web_contents()->GetBrowserContext());
-    double default_zoom_level = host_zoom_map->GetDefaultZoomLevel();
-
-    if (json && json->GetAsDictionary(&dict)) {
-      if (dict) {
-        if (dict->HasKey("vivaldi_tab_zoom")) {
-          dict->GetDouble("vivaldi_tab_zoom", &tab_zoom_level_);
-        } else {
-          tab_zoom_level_ = default_zoom_level;
-        }
-      }
+    base::Optional<double> zoom =
+        json ? json->FindDoubleKey(kVivaldiTabZoom) : base::nullopt;
+    if (zoom) {
+      tab_zoom_level_ = *zoom;
     } else {
-      tab_zoom_level_ = default_zoom_level;
+      content::HostZoomMap* host_zoom_map =
+        content::HostZoomMap::GetDefaultForBrowserContext(
+          web_contents()->GetBrowserContext());
+      tab_zoom_level_ = host_zoom_map->GetDefaultZoomLevel();
     }
   }
+
+  base::Optional<bool> mute =
+      json ? json->FindBoolKey(kVivaldiTabMuted) : base::nullopt;
+  if (mute) {
+    mute_ = *mute;
+  }
+
+  // This is not necessary for each RVH-change.
+  SetMuted(mute_);
 
   SetShowImages(show_images_);
   SetLoadFromCacheOnly(load_from_cache_only_);
@@ -1104,15 +964,12 @@ void VivaldiPrivateTabObserver::RenderViewCreated(
 
 void VivaldiPrivateTabObserver::SaveZoomLevelToExtData(double zoom_level) {
   std::string ext = web_contents()->GetExtData();
-
-  base::JSONParserOptions options = base::JSON_PARSE_RFC;
-  base::Optional<base::Value> json = base::JSONReader::Read(ext, options);
-  base::DictionaryValue* dict = NULL;
-  if (json && json->GetAsDictionary(&dict)) {
-    if (dict) {
-      dict->SetDouble("vivaldi_tab_zoom", zoom_level);
-      base::Value st = DictionaryToJSONString(*dict);
-      web_contents()->SetExtData(st.GetString());
+  base::Optional<base::Value> json = GetDictValueFromExtData(ext);
+  if (json) {
+    json->SetDoubleKey(kVivaldiTabZoom, zoom_level);
+    std::string json_string;
+    if (ValueToJSONString(*json, json_string)) {
+      web_contents()->SetExtData(json_string);
     }
   }
 }
@@ -1187,6 +1044,25 @@ void VivaldiPrivateTabObserver::SetEnablePlugins(bool enable_plugins) {
   render_prefs->should_enable_plugin_content = enable_plugins;
 }
 
+void VivaldiPrivateTabObserver::SetMuted(bool mute) {
+  mute_ = mute;
+  std::string ext = web_contents()->GetExtData();
+  base::Optional<base::Value> json = GetDictValueFromExtData(ext);
+  if (json) {
+    json->SetBoolKey(kVivaldiTabMuted, mute);
+    std::string json_string;
+    if (ValueToJSONString(*json, json_string)) {
+      web_contents()->SetExtData(json_string);
+    }
+  }
+
+  chrome::SetTabAudioMuted(
+      web_contents(), mute,
+      TabMutedReason::MEDIA_CAPTURE,  // This will keep the state between
+                                      // navigations.
+      std::string());
+}
+
 void VivaldiPrivateTabObserver::CommitSettings() {
   blink::mojom::RendererPreferences* render_prefs =
       web_contents()->GetMutableRendererPrefs();
@@ -1213,24 +1089,42 @@ void VivaldiPrivateTabObserver::OnZoomChanged(
       content::BrowserContext::GetStoragePartition(
           web_contents->GetBrowserContext(), web_contents->GetSiteInstance(),
           false);
+  if (!::vivaldi::isTabZoomEnabled(web_contents) || tab_zoom_level_ == -1) {
+    return;
+  }
+
   if (current_partition &&
       current_partition == content::BrowserContext::GetDefaultStoragePartition(
                                web_contents->GetBrowserContext()))
-    SetZoomLevelForTab(data.new_zoom_level);
+    SetZoomLevelForTab(data.new_zoom_level, data.old_zoom_level);
 }
 
-void VivaldiPrivateTabObserver::SetZoomLevelForTab(double level) {
-  if (level != tab_zoom_level_) {
-    tab_zoom_level_ = level;
-    SaveZoomLevelToExtData(level);
+void VivaldiPrivateTabObserver::SetZoomLevelForTab(double new_level,
+                                                   double old_level) {
+  // Only update zoomlevel to new level if the tab_level is in sync. This was
+  // added because restoring a tab from a session would fire a zoom-update when
+  // the document finished loading through
+  // ZoomController::DidFinishNavigation().
+  if (old_level == tab_zoom_level_ && new_level != tab_zoom_level_) {
+    tab_zoom_level_ = new_level;
+    SaveZoomLevelToExtData(new_level);
+  } else if (old_level != tab_zoom_level_) {
+    // Make sure the view has the correct zoom level set.
+    RenderViewHost* rvh = web_contents()->GetRenderViewHost();
+    int render_view_id = rvh->GetRoutingID();
+    int process_id = rvh->GetProcess()->GetID();
+
+    content::HostZoomMap* host_zoom_map_ =
+        content::HostZoomMap::GetForWebContents(web_contents());
+
+    host_zoom_map_->SetTemporaryZoomLevel(process_id, render_view_id,
+                                          tab_zoom_level_);
   }
 }
 
 bool VivaldiPrivateTabObserver::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(VivaldiPrivateTabObserver, message)
-  IPC_MESSAGE_HANDLER(VivaldiViewHostMsg_RequestThumbnailForFrame_ACK,
-                      OnRequestThumbnailForFrameResponse)
   IPC_MESSAGE_HANDLER(VivaldiViewHostMsg_GetAccessKeysForPage_ACK,
                       OnGetAccessKeysForPageResponse)
   IPC_MESSAGE_UNHANDLED(handled = false)
@@ -1243,49 +1137,10 @@ void VivaldiPrivateTabObserver::DocumentAvailableInMainFrame() {
   BroadcastTabInfo();
 }
 
-void VivaldiPrivateTabObserver::CaptureTab(
-    gfx::Size size,
-    bool full_page,
-    const CaptureTabDoneCallback& callback) {
-  VivaldiViewMsg_RequestThumbnailForFrame_Params param;
-  gfx::Rect rect = web_contents()->GetContainerBounds();
-
-  param.callback_id = SessionTabHelper::IdForTab(web_contents()).id();
-  if (full_page) {
-    param.size = size;
-  } else {
-    param.size = rect.size();
-  }
-  capture_callback_ = callback;
-  param.full_page = full_page;
-
-  web_contents()->GetRenderViewHost()->Send(
-      new VivaldiViewMsg_RequestThumbnailForFrame(
-          web_contents()->GetRenderViewHost()->GetRoutingID(), param));
-}
-
-bool VivaldiPrivateTabObserver::IsCapturing() {
-  return capture_callback_.is_null() ? false : true;
-}
-
-void VivaldiPrivateTabObserver::OnRequestThumbnailForFrameResponse(
-    base::SharedMemoryHandle handle,
-    const gfx::Size image_size,
-    int callback_id,
-    bool success) {
-  if (!capture_callback_.is_null()) {
-    capture_callback_.Run(handle, image_size, callback_id, success);
-    capture_callback_.Reset();
-  }
-}
-
-void VivaldiPrivateTabObserver::GetAccessKeys(
-    content::WebContents* web_contents,
-    AccessKeysCallback callback) {
+void VivaldiPrivateTabObserver::GetAccessKeys(AccessKeysCallback callback) {
   access_keys_callback_ = std::move(callback);
-  web_contents->GetRenderViewHost()->Send(
-      new VivaldiViewMsg_GetAccessKeysForPage(
-          web_contents->GetRenderViewHost()->GetRoutingID()));
+  RenderViewHost* rvh = web_contents()->GetRenderViewHost();
+  rvh->Send(new VivaldiViewMsg_GetAccessKeysForPage(rvh->GetRoutingID()));
 }
 
 void VivaldiPrivateTabObserver::OnGetAccessKeysForPageResponse(
@@ -1295,11 +1150,10 @@ void VivaldiPrivateTabObserver::OnGetAccessKeysForPageResponse(
   }
 }
 
-void VivaldiPrivateTabObserver::AccessKeyAction(
-    content::WebContents* web_contents,
-    std::string access_key) {
-  web_contents->GetRenderViewHost()->Send(new VivaldiViewMsg_AccessKeyAction(
-      web_contents->GetRenderViewHost()->GetRoutingID(), access_key));
+void VivaldiPrivateTabObserver::AccessKeyAction(std::string access_key) {
+  RenderViewHost* rvh = web_contents()->GetRenderViewHost();
+  rvh->Send(
+      new VivaldiViewMsg_AccessKeyAction(rvh->GetRoutingID(), access_key));
 }
 
 void VivaldiPrivateTabObserver::OnPermissionAccessed(
@@ -1353,35 +1207,18 @@ void VivaldiPrivateTabObserver::WebContentsDidAttach() {
       web_contents()->GetBrowserContext());
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-namespace {
-
-content::WebContents* GetTabStripWebContents(
-    UIThreadExtensionFunction* function,
+VivaldiPrivateTabObserver* VivaldiPrivateTabObserver::FromTabId(
+    content::BrowserContext* browser_context,
     int tab_id,
     std::string* error) {
   content::WebContents* tabstrip_contents =
       ::vivaldi::ui_tools::GetWebContentsFromTabStrip(
-          tab_id, function->browser_context());
-  if (!tabstrip_contents) {
-    *error = "No such tab - " + std::to_string(tab_id);
-  }
-  return tabstrip_contents;
-}
-
-VivaldiPrivateTabObserver* GetTabObserver(
-    UIThreadExtensionFunction* function,
-    int tab_id,
-    std::string* error) {
-  content::WebContents* tabstrip_contents =
-      GetTabStripWebContents(function, tab_id, error);
+          tab_id, browser_context, error);
   if (!tabstrip_contents)
     return nullptr;
 
   VivaldiPrivateTabObserver* observer =
       VivaldiPrivateTabObserver::FromWebContents(tabstrip_contents);
-  DCHECK(observer);
   if (!observer) {
     *error = "Cannot locate VivaldiPrivateTabObserver for tab " +
              std::to_string(tab_id);
@@ -1391,12 +1228,17 @@ VivaldiPrivateTabObserver* GetTabObserver(
   return observer;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+namespace {
+
 content::RenderViewHost *GetFocusedRenderViewHost(
     UIThreadExtensionFunction* function,
     int tab_id,
     std::string* error) {
   content::WebContents* tabstrip_contents =
-      GetTabStripWebContents(function, tab_id, error);
+      ::vivaldi::ui_tools::GetWebContentsFromTabStrip(
+          tab_id, function->browser_context(), error);
   if (!tabstrip_contents)
     return nullptr;
 
@@ -1425,8 +1267,8 @@ ExtensionFunction::ResponseAction TabsPrivateUpdateFunction::Run() {
 
   tabs_private::UpdateTabInfo* info = &params->tab_info;
   std::string error;
-  VivaldiPrivateTabObserver* tab_api =
-      GetTabObserver(this, params->tab_id, &error);
+  VivaldiPrivateTabObserver* tab_api = VivaldiPrivateTabObserver::FromTabId(
+      browser_context(), params->tab_id, &error);
   if (!tab_api)
     return RespondNow(Error(error));
 
@@ -1438,6 +1280,9 @@ ExtensionFunction::ResponseAction TabsPrivateUpdateFunction::Run() {
   }
   if (info->enable_plugins) {
     tab_api->SetEnablePlugins(*info->enable_plugins.get());
+  }
+  if (info->mute_tab) {
+    tab_api->SetMuted(*info->mute_tab.get());
   }
   tab_api->CommitSettings();
   tab_api->BroadcastTabInfo();
@@ -1452,8 +1297,8 @@ ExtensionFunction::ResponseAction TabsPrivateGetFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   std::string error;
-  VivaldiPrivateTabObserver* tab_api =
-      GetTabObserver(this, params->tab_id, &error);
+  VivaldiPrivateTabObserver* tab_api = VivaldiPrivateTabObserver::FromTabId(
+      browser_context(), params->tab_id, &error);
   if (!tab_api)
     return RespondNow(Error(error));
 

@@ -19,7 +19,7 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.chrome.browser.tab.TabState.WebContentsState;
 import org.chromium.chrome.browser.tabmodel.TestTabModelDirectory;
-import org.chromium.chrome.browser.test.ChromeBrowserTestRule;
+import org.chromium.chrome.test.ChromeBrowserTestRule;
 
 import java.io.File;
 import java.nio.ByteBuffer;
@@ -101,7 +101,6 @@ public class TabStateTest {
         tabState.parentId = 2;
         tabState.openerAppId = "app";
         tabState.contentsState.setVersion(TabState.CONTENTS_STATE_CURRENT_VERSION);
-        tabState.shouldPreserve = true;
         tabState.themeColor = Color.BLACK;
         tabState.mIsIncognito = true;
 
@@ -116,7 +115,6 @@ public class TabStateTest {
         Assert.assertEquals(tabState.timestampMillis, restoredState.timestampMillis);
         Assert.assertEquals(
                 tabState.contentsState.version(), restoredState.contentsState.version());
-        Assert.assertEquals(tabState.shouldPreserve, restoredState.shouldPreserve);
         Assert.assertEquals(tabState.themeColor, restoredState.themeColor);
         Assert.assertEquals(tabState.mIsIncognito, restoredState.mIsIncognito);
     }

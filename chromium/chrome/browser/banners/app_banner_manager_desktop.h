@@ -8,11 +8,18 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/banners/app_banner_manager.h"
+#include "chrome/browser/web_applications/components/app_registrar.h"
+#include "chrome/browser/web_applications/components/app_registrar_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
 namespace extensions {
-class BookmarkAppHelper;
+class ExtensionRegistry;
+}
+
+namespace web_app {
+enum class InstallResultCode;
 }
 
 namespace banners {
@@ -20,13 +27,12 @@ namespace banners {
 // Manages web app banners for desktop platforms.
 class AppBannerManagerDesktop
     : public AppBannerManager,
-      public content::WebContentsUserData<AppBannerManagerDesktop> {
+      public content::WebContentsUserData<AppBannerManagerDesktop>,
+      public web_app::AppRegistrarObserver {
  public:
   ~AppBannerManagerDesktop() override;
 
   using content::WebContentsUserData<AppBannerManagerDesktop>::FromWebContents;
-
-  static bool IsEnabled();
 
   // Turn off triggering on engagement notifications or navigates, for testing
   // purposes only.
@@ -36,14 +42,19 @@ class AppBannerManagerDesktop
   explicit AppBannerManagerDesktop(content::WebContents* web_contents);
 
   // AppBannerManager overrides.
-  void CreateBookmarkApp(WebappInstallSource install_source) override;
-  void DidFinishCreatingBookmarkApp(
-      const extensions::Extension* extension,
-      const WebApplicationInfo& web_app_info) override;
-  void ResetCurrentPageData() override;
+  base::WeakPtr<AppBannerManager> GetWeakPtr() override;
+  void InvalidateWeakPtrs() override;
+  bool IsSupportedAppPlatform(const base::string16& platform) const override;
+  bool IsRelatedAppInstalled(
+      const blink::Manifest::RelatedApplication& related_app) const override;
+
+  // Called when the web app install initiated by a banner has completed.
+  virtual void DidFinishCreatingWebApp(const web_app::AppId& app_id,
+                                       web_app::InstallResultCode code);
 
  private:
   friend class content::WebContentsUserData<AppBannerManagerDesktop>;
+  friend class FakeAppBannerManagerDesktop;
 
   // AppBannerManager overrides.
   bool IsWebAppConsideredInstalled(content::WebContents* web_contents,
@@ -62,7 +73,18 @@ class AppBannerManagerDesktop
                          double score,
                          SiteEngagementService::EngagementType type) override;
 
-  std::unique_ptr<extensions::BookmarkAppHelper> bookmark_app_helper_;
+  // web_app::AppRegistrarObserver:
+  void OnWebAppInstalled(const web_app::AppId& app_id) override;
+  void OnAppRegistrarDestroyed() override;
+
+  void CreateWebApp(WebappInstallSource install_source);
+
+  extensions::ExtensionRegistry* extension_registry_;
+
+  ScopedObserver<web_app::AppRegistrar, web_app::AppRegistrarObserver>
+      registrar_observer_;
+
+  base::WeakPtrFactory<AppBannerManagerDesktop> weak_factory_{this};
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 

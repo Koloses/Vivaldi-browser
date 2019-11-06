@@ -81,8 +81,12 @@ BaseParallelResourceThrottle::BaseParallelResourceThrottle(
     : request_(request), resource_type_(resource_type) {
   content::ResourceRequestInfo* info =
       content::ResourceRequestInfo::ForRequest(request_);
-  auto throttle = BrowserURLLoaderThrottle::MaybeCreate(
-      std::move(url_checker_delegate), info->GetWebContentsGetterForRequest());
+  auto throttle = BrowserURLLoaderThrottle::Create(
+      base::BindOnce([](scoped_refptr<UrlCheckerDelegate> delegate,
+                        content::ResourceContext*) { return delegate; },
+                     url_checker_delegate),
+      info->GetWebContentsGetterForRequest(), info->GetFrameTreeNodeId(),
+      info->GetContext());
   url_loader_throttle_holder_ =
       std::make_unique<URLLoaderThrottleHolder>(this, std::move(throttle));
 }
@@ -116,7 +120,7 @@ void BaseParallelResourceThrottle::WillStartRequest(bool* defer) {
                                  : request_->extra_request_headers();
 
   resource_request.load_flags = request_->load_flags();
-  resource_request.resource_type = resource_type_;
+  resource_request.resource_type = static_cast<int>(resource_type_);
 
   content::ResourceRequestInfo* info =
       content::ResourceRequestInfo::ForRequest(request_);
@@ -168,7 +172,7 @@ void BaseParallelResourceThrottle::WillProcessResponse(bool* defer) {
     throttle_in_band_ = false;
 }
 
-const char* BaseParallelResourceThrottle::GetNameForLogging() const {
+const char* BaseParallelResourceThrottle::GetNameForLogging() {
   return "BaseParallelResourceThrottle";
 }
 

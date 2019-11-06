@@ -17,6 +17,8 @@ source_set("gfx") {
     "aw_picture.h",
     "aw_render_thread_context_provider.cc",
     "aw_render_thread_context_provider.h",
+    "aw_vulkan_context_provider.cc",
+    "aw_vulkan_context_provider.h",
     "browser_view_renderer.cc",
     "browser_view_renderer.h",
     "browser_view_renderer_client.h",
@@ -28,6 +30,8 @@ source_set("gfx") {
     "compositor_id.h",
     "deferred_gpu_command_service.cc",
     "deferred_gpu_command_service.h",
+    "gpu_service_web_view.cc",
+    "gpu_service_web_view.h",
     "hardware_renderer.cc",
     "hardware_renderer.h",
     "java_browser_view_renderer_helper.cc",
@@ -42,6 +46,10 @@ source_set("gfx") {
     "scoped_app_gl_state_restore.h",
     "surfaces_instance.cc",
     "surfaces_instance.h",
+    "task_forwarding_sequence.cc",
+    "task_forwarding_sequence.h",
+    "task_queue_web_view.cc",
+    "task_queue_web_view.h",
   ]
 
   deps = [

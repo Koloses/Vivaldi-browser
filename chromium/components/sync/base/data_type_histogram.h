@@ -21,9 +21,6 @@ void SyncRecordModelTypeMemoryHistogram(syncer::ModelType model_type,
 void SyncRecordModelTypeCountHistogram(syncer::ModelType model_type,
                                        size_t count);
 
-// Records that |count| entities have been cleared when disabling sync.
-void SyncWalletDataRecordClearedEntitiesCount(size_t count);
-
 // Helper macro for datatype specific histograms. For each datatype, invokes
 // a pre-defined PER_DATA_TYPE_MACRO(type_str), where |type_str| is the string
 // version of the datatype.
@@ -161,7 +158,7 @@ void SyncWalletDataRecordClearedEntitiesCount(size_t count);
       case ::syncer::NIGORI:                                     \
         PER_DATA_TYPE_MACRO("Nigori");                           \
         break;                                                   \
-      case ::syncer::EXPERIMENTS:                                \
+      case ::syncer::DEPRECATED_EXPERIMENTS:                     \
         PER_DATA_TYPE_MACRO("Experiments");                      \
         break;                                                   \
       case ::syncer::MOUNTAIN_SHARES:                            \
@@ -172,6 +169,12 @@ void SyncWalletDataRecordClearedEntitiesCount(size_t count);
         break;                                                   \
       case ::syncer::SECURITY_EVENTS:                            \
         PER_DATA_TYPE_MACRO("SecurityEvents");                   \
+        break;                                                   \
+      case ::syncer::WEB_APPS:                                   \
+        PER_DATA_TYPE_MACRO("WebApps");                          \
+        break;                                                   \
+      case ::syncer::WIFI_CONFIGURATIONS:                        \
+        PER_DATA_TYPE_MACRO("WifiConfigurations");               \
         break;                                                   \
       case ::syncer::NOTES:                                      \
         PER_DATA_TYPE_MACRO("Notes");                            \

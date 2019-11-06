@@ -10,12 +10,15 @@
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/open_from_clipboard/clipboard_recent_content.h"
 #include "components/strings/grit/components_strings.h"
+#include "ios/chrome/browser/infobars/infobar_metrics_recorder.h"
+#import "ios/chrome/browser/ui/badges/badge_item.h"
 #import "ios/chrome/browser/ui/commands/activity_service_commands.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/infobar_commands.h"
 #import "ios/chrome/browser/ui/commands/load_query_commands.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_animator.h"
+#import "ios/chrome/browser/ui/infobars/badge/infobar_badge_button.h"
 #import "ios/chrome/browser/ui/infobars/infobar_feature.h"
 #include "ios/chrome/browser/ui/location_bar/location_bar_steady_view.h"
 #import "ios/chrome/browser/ui/orchestrator/location_bar_offset_provider.h"
@@ -57,6 +60,17 @@ typedef NS_ENUM(int, TrailingButtonState) {
 // state of the share button if it's temporarily replaced by the voice search
 // icon (in iPad multitasking).
 @property(nonatomic, assign) BOOL shareButtonEnabled;
+
+// Keeps the status of the leading button of the location bar steady view. Used
+// to preserve leading button visibility during animations.
+@property(nonatomic, assign) BOOL shouldShowLeadingButton;
+
+// Used to build and record Infobar metrics.
+@property(nonatomic, strong) InfobarMetricsRecorder* infobarMetricsRecorder;
+
+// Whether the InfobarBadge is active or not.
+// TODO(crbug.com/961343): Move this into a future BadgeContainer.
+@property(nonatomic, assign) BOOL activeBadge;
 
 // Starts voice search, updating the NamedGuide to be constrained to the
 // trailing button.
@@ -113,10 +127,9 @@ typedef NS_ENUM(int, TrailingButtonState) {
 
 - (void)setIncognito:(BOOL)incognito {
   _incognito = incognito;
-  [self.locationBarSteadyView
-      setColorScheme:incognito
-                         ? [LocationBarSteadyViewColorScheme incognitoScheme]
-                         : [LocationBarSteadyViewColorScheme standardScheme]];
+  self.locationBarSteadyView.colorScheme =
+      incognito ? [LocationBarSteadyViewColorScheme incognitoScheme]
+                : [LocationBarSteadyViewColorScheme standardScheme];
 }
 
 - (void)setDispatcher:(id<ActivityServiceCommands,
@@ -192,6 +205,9 @@ typedef NS_ENUM(int, TrailingButtonState) {
   CGFloat alphaValue = fmax((progress - 0.85) / 0.15, 0);
   CGFloat scaleValue = 0.79 + 0.21 * progress;
   self.locationBarSteadyView.trailingButton.alpha = alphaValue;
+  if (IsInfobarUIRebootEnabled()) {
+    self.locationBarSteadyView.leadingButton.alpha = alphaValue;
+  }
   self.locationBarSteadyView.transform =
       CGAffineTransformMakeScale(scaleValue, scaleValue);
 }
@@ -210,8 +226,10 @@ typedef NS_ENUM(int, TrailingButtonState) {
 
 #pragma mark - LocationBarConsumer
 
-- (void)updateLocationText:(NSString*)text {
-  [self.locationBarSteadyView setLocationLabelText:text];
+- (void)updateLocationText:(NSString*)string clipTail:(BOOL)clipTail {
+  [self.locationBarSteadyView setLocationLabelText:string];
+  self.locationBarSteadyView.locationLabel.lineBreakMode =
+      clipTail ? NSLineBreakByTruncatingTail : NSLineBreakByTruncatingHead;
 }
 
 - (void)updateLocationIcon:(UIImage*)icon
@@ -220,19 +238,16 @@ typedef NS_ENUM(int, TrailingButtonState) {
   self.locationBarSteadyView.securityLevelAccessibilityString = statusText;
 }
 
+// Updates display on the NTP. Note that this is only meaningful on iPad, where
+// the location bar is visible after scrolling the fakebox off the page. On
+// iPhone, the location bar is not shown on the NTP at all.
 - (void)updateForNTP:(BOOL)isNTP {
   if (isNTP) {
     // Display a fake "placeholder".
     NSString* placeholderString =
         l10n_util::GetNSString(IDS_OMNIBOX_EMPTY_HINT);
-    LocationBarSteadyViewColorScheme* scheme =
-        self.incognito ? [LocationBarSteadyViewColorScheme incognitoScheme]
-                       : [LocationBarSteadyViewColorScheme standardScheme];
-    UIColor* placeholderColor = scheme.placeholderColor;
-    self.locationBarSteadyView.locationLabel.attributedText = [
-        [NSAttributedString alloc]
-        initWithString:placeholderString
-            attributes:@{NSForegroundColorAttributeName : placeholderColor}];
+    [self.locationBarSteadyView
+        setLocationLabelPlaceholderText:placeholderString];
   }
   self.hideShareButtonWhileOnIncognitoNTP = isNTP;
 }
@@ -240,12 +255,15 @@ typedef NS_ENUM(int, TrailingButtonState) {
 - (void)setShareButtonEnabled:(BOOL)enabled {
   _shareButtonEnabled = enabled;
   if (self.trailingButtonState == kShareButton) {
-    self.locationBarSteadyView.trailingButton.enabled = enabled;
+    [self.locationBarSteadyView enableTrailingButton:enabled];
   }
 }
 
-- (void)displayInfobarButton:(BOOL)display {
-  self.locationBarSteadyView.leadingButton.hidden = !display;
+- (void)displayInfobarButton:(BOOL)display
+             metricsRecorder:(InfobarMetricsRecorder*)metricsRecorder {
+  self.infobarMetricsRecorder = metricsRecorder;
+  self.shouldShowLeadingButton = display;
+  [self.locationBarSteadyView displayBadge:display animated:YES];
 }
 
 #pragma mark - LocationBarAnimatee
@@ -276,6 +294,15 @@ typedef NS_ENUM(int, TrailingButtonState) {
 
 - (void)setSteadyViewFaded:(BOOL)hidden {
   self.locationBarSteadyView.alpha = hidden ? 0 : 1;
+}
+
+- (void)hideSteadyViewLeadingButton {
+  [self.locationBarSteadyView displayBadge:NO animated:NO];
+}
+
+- (void)showSteadyViewLeadingButtonIfNeeded {
+  [self.locationBarSteadyView displayBadge:self.shouldShowLeadingButton
+                                  animated:NO];
 }
 
 - (void)setEditViewFaded:(BOOL)hidden {
@@ -372,8 +399,7 @@ typedef NS_ENUM(int, TrailingButtonState) {
           forState:UIControlStateNormal];
       self.locationBarSteadyView.trailingButton.accessibilityLabel =
           l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_SHARE);
-      self.locationBarSteadyView.trailingButton.enabled =
-          self.shareButtonEnabled;
+      [self.locationBarSteadyView enableTrailingButton:self.shareButtonEnabled];
       break;
     };
     case kVoiceSearchButton: {
@@ -392,7 +418,7 @@ typedef NS_ENUM(int, TrailingButtonState) {
           forState:UIControlStateNormal];
       self.locationBarSteadyView.trailingButton.accessibilityLabel =
           l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_VOICE_SEARCH);
-      self.locationBarSteadyView.trailingButton.enabled = YES;
+      [self.locationBarSteadyView enableTrailingButton:YES];
     }
   }
 }
@@ -430,21 +456,69 @@ typedef NS_ENUM(int, TrailingButtonState) {
   base::RecordAction(base::UserMetricsAction("MobileToolbarShareMenu"));
 }
 
-// TODO(crbug.com/935804): This method is currently only being used in the
-// Infobar redesign.
+// TODO(crbug.com/935804): Create constants variables for the magic numbers
+// being used here if/when this stops being temporary.
 - (void)updateInfobarButton {
   DCHECK(IsInfobarUIRebootEnabled());
+
   [self.locationBarSteadyView.leadingButton
-      setImage:[[UIImage imageNamed:@"infobar_passwords_icon"]
-                   imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]
-      forState:UIControlStateNormal];
-  [self.locationBarSteadyView.leadingButton
-             addTarget:self.dispatcher
+             addTarget:self
                 action:@selector(displayModalInfobar)
       forControlEvents:UIControlEventTouchUpInside];
-  self.locationBarSteadyView.leadingButton.tintColor = [UIColor lightGrayColor];
   // Set as hidden as it should only be shown by |displayInfobarButton:|
-  self.locationBarSteadyView.leadingButton.hidden = YES;
+  [self.locationBarSteadyView.leadingButton displayBadge:NO animated:NO];
+}
+
+- (void)displayModalInfobar {
+  MobileMessagesBadgeState state;
+  if (self.activeBadge) {
+    state = MobileMessagesBadgeState::Active;
+    base::RecordAction(
+        base::UserMetricsAction("MobileMessagesBadgeAcceptedTapped"));
+  } else {
+    state = MobileMessagesBadgeState::Inactive;
+    base::RecordAction(
+        base::UserMetricsAction("MobileMessagesBadgeNonAcceptedTapped"));
+  }
+  [self.infobarMetricsRecorder recordBadgeTappedInState:state];
+  [self.dispatcher displayModalInfobar];
+}
+
+- (void)setInfobarButtonStyleActive:(BOOL)active {
+  self.activeBadge = active;
+  [self.locationBarSteadyView.leadingButton setActive:active animated:YES];
+}
+
+#pragma mark - BadgeConsumer
+
+- (void)setupWithBadges:(NSArray*)badges {
+  BOOL hasBadge = badges.count > 0;
+  if (hasBadge) {
+    id<BadgeItem> firstBadge = badges[0];
+    BOOL isAccepted = firstBadge.isAccepted;
+    self.activeBadge = isAccepted;
+    [self.locationBarSteadyView.leadingButton setActive:isAccepted animated:NO];
+  }
+  [self.locationBarSteadyView.leadingButton displayBadge:hasBadge animated:NO];
+  self.shouldShowLeadingButton = hasBadge;
+}
+
+- (void)addBadge:(id<BadgeItem>)badgeItem {
+  self.activeBadge = badgeItem.isAccepted;
+  [self.locationBarSteadyView.leadingButton setActive:badgeItem.isAccepted
+                                             animated:NO];
+  [self.locationBarSteadyView.leadingButton displayBadge:YES animated:YES];
+  self.shouldShowLeadingButton = YES;
+}
+
+- (void)removeBadge:(id<BadgeItem>)badgeItem {
+  [self.locationBarSteadyView.leadingButton displayBadge:NO animated:NO];
+  self.shouldShowLeadingButton = NO;
+}
+
+- (void)updateBadge:(id<BadgeItem>)badgeItem {
+  [self.locationBarSteadyView.leadingButton setActive:badgeItem.isAccepted
+                                             animated:YES];
 }
 
 #pragma mark - UIMenu

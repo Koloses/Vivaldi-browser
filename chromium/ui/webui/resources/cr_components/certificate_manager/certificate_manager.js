@@ -54,7 +54,7 @@ Polymer({
      * CertificateManagementAllowed.
      * Value exists only for Chrome OS.
      */
-    importAllowed: {
+    clientImportAllowed: {
       type: Boolean,
       value: true,
     },
@@ -115,20 +115,26 @@ Polymer({
             loadTimeData.getBoolean('isKiosk');
       },
     },
+
+    /** @private {!Array<string>} */
+    tabNames_: {
+      type: Array,
+      computed: 'computeTabNames_(isKiosk_)',
+    },
   },
 
   /** @override */
   attached: function() {
     this.addWebUIListener('certificates-changed', this.set.bind(this));
     this.addWebUIListener(
-        'certificates-model-ready', this.setImportAllowed.bind(this));
+        'certificates-model-ready', this.setClientImportAllowed.bind(this));
     certificate_manager.CertificatesBrowserProxyImpl.getInstance()
         .refreshCertificates();
   },
 
   /** @private */
-  setImportAllowed: function(allowed) {
-    this.importAllowed = allowed;
+  setClientImportAllowed: function(allowed) {
+    this.clientImportAllowed = allowed;
   },
 
   /**
@@ -213,5 +219,22 @@ Polymer({
         cr.ui.focusWithoutInk(assert(this.activeDialogAnchor_));
       });
     });
+  },
+
+  /**
+   * @return {!Array<string>}
+   * @private
+   */
+  computeTabNames_: function() {
+    return [
+      loadTimeData.getString('certificateManagerYourCertificates'),
+      ...(this.isKiosk_ ?
+              [] :
+              [
+                loadTimeData.getString('certificateManagerServers'),
+                loadTimeData.getString('certificateManagerAuthorities'),
+              ]),
+      loadTimeData.getString('certificateManagerOthers'),
+    ];
   },
 });

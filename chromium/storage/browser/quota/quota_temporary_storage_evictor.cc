@@ -59,8 +59,6 @@ void QuotaTemporaryStorageEvictor::GetStatistics(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(statistics);
 
-  (*statistics)["errors-on-evicting-origin"] =
-      statistics_.num_errors_on_evicting_origin;
   (*statistics)["errors-on-getting-usage-and-quota"] =
       statistics_.num_errors_on_getting_usage_and_quota;
   (*statistics)["evicted-origins"] =
@@ -116,7 +114,6 @@ void QuotaTemporaryStorageEvictor::OnEvictionRoundStarted() {
 
 void QuotaTemporaryStorageEvictor::OnEvictionRoundFinished() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  in_progress_eviction_origins_.clear();
 
   // Check if skipped round
   if (round_statistics_.num_evicted_origins_in_round) {
@@ -143,7 +140,8 @@ void QuotaTemporaryStorageEvictor::Start() {
       this, &QuotaTemporaryStorageEvictor::ReportPerHourHistogram);
 }
 
-void QuotaTemporaryStorageEvictor::StartEvictionTimerWithDelay(int delay_ms) {
+void QuotaTemporaryStorageEvictor::StartEvictionTimerWithDelay(
+    int64_t delay_ms) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (eviction_timer_.IsRunning() || timer_disabled_for_testing_)
     return;
@@ -204,8 +202,7 @@ void QuotaTemporaryStorageEvictor::OnGotEvictionRoundInfo(
     // TODO(michaeln): if the reason for eviction is low physical disk space,
     // make 'unlimited' origins subject to eviction too.
     quota_eviction_handler_->GetEvictionOrigin(
-        blink::mojom::StorageType::kTemporary, in_progress_eviction_origins_,
-        settings.pool_size,
+        blink::mojom::StorageType::kTemporary, settings.pool_size,
         base::BindOnce(&QuotaTemporaryStorageEvictor::OnGotEvictionOrigin,
                        weak_factory_.GetWeakPtr()));
     return;
@@ -235,7 +232,6 @@ void QuotaTemporaryStorageEvictor::OnGotEvictionOrigin(
   }
 
   DCHECK(!origin->GetURL().is_empty());
-  in_progress_eviction_origins_.insert(*origin);
 
   quota_eviction_handler_->EvictOriginData(
       *origin, blink::mojom::StorageType::kTemporary,
@@ -259,7 +255,6 @@ void QuotaTemporaryStorageEvictor::OnEvictionComplete(
     // We many need to get rid of more space so reconsider immediately.
     ConsiderEviction();
   } else {
-    ++statistics_.num_errors_on_evicting_origin;
     // Sleep for a while and retry again until we see too many errors.
     StartEvictionTimerWithDelay(interval_ms_);
     OnEvictionRoundFinished();

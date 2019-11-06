@@ -9,11 +9,16 @@ class TestNtpBackgroundProxy extends TestBrowserProxy {
       'clearBackground',
       'getBackgrounds',
       'preloadImage',
+      'recordBackgroundImageFailedToLoad',
+      'recordBackgroundImageLoadTime',
       'setBackground',
     ]);
 
-    /** @private {!Array<!nux.NtpBackgroundData} */
+    /** @private {!Array<!welcome.NtpBackgroundData} */
     this.backgroundsList_ = [];
+
+    /** @private {boolean} */
+    this.preloadImageSuccess_ = true;
   }
 
   /** @override */
@@ -30,7 +35,17 @@ class TestNtpBackgroundProxy extends TestBrowserProxy {
   /** @override */
   preloadImage(url) {
     this.methodCalled('preloadImage');
-    return Promise.resolve();
+    return this.preloadImageSuccess_ ? Promise.resolve() : Promise.reject();
+  }
+
+  /** @override */
+  recordBackgroundImageFailedToLoad() {
+    this.methodCalled('recordBackgroundImageFailedToLoad');
+  }
+
+  /** @override */
+  recordBackgroundImageLoadTime(loadTime) {
+    this.methodCalled('recordBackgroundImageLoadTime', loadTime);
   }
 
   /** @override */
@@ -38,7 +53,12 @@ class TestNtpBackgroundProxy extends TestBrowserProxy {
     this.methodCalled('setBackground', id);
   }
 
-  /** @param {!Array<!nux.NtpBackgroundData>} backgroundsList */
+  /** @param {boolean} success */
+  setPreloadImageSuccess(success) {
+    this.preloadImageSuccess_ = success;
+  }
+
+  /** @param {!Array<!welcome.NtpBackgroundData>} backgroundsList */
   setBackgroundsList(backgroundsList) {
     this.backgroundsList_ = backgroundsList;
   }

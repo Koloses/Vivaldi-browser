@@ -12,7 +12,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
 #import "ios/chrome/app/main_controller.h"
-#import "ios/chrome/browser/ui/browser_view_controller.h"
 #include "ios/chrome/browser/ui/icons/chrome_icon.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_coordinator.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_url_loader.h"
@@ -22,6 +21,7 @@
 #include "ios/chrome/browser/ui/qr_scanner/qr_scanner_view_controller.h"
 #import "ios/chrome/browser/ui/toolbar/public/features.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
+#import "ios/chrome/browser/url_loading/url_loading_params.h"
 #import "ios/chrome/browser/url_loading/url_loading_service.h"
 #import "ios/chrome/browser/url_loading/url_loading_service_factory.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
@@ -116,14 +116,12 @@ void ShowQRScanner() {
   [[EarlGrey selectElementWithMatcher:chrome_test_util::NewTabPageOmnibox()]
       performAction:grey_tap()];
   [ChromeEarlGrey
-      waitForElementWithMatcherSufficientlyVisible:chrome_test_util::Omnibox()];
+      waitForSufficientlyVisibleElementWithMatcher:chrome_test_util::Omnibox()];
 
   // Tap the QR Code scanner button in the keyboard accessory view.
-  id<GREYMatcher> matcher =
-      grey_allOf(grey_accessibilityLabel(@"QR code Search"),
-                 grey_kindOfClass([UIButton class]), nil);
-
-  [[EarlGrey selectElementWithMatcher:matcher] performAction:grey_tap()];
+  [[EarlGrey
+      selectElementWithMatcher:grey_accessibilityLabel(@"QR code Search")]
+      performAction:grey_tap()];
 }
 
 // Taps the |button|.
@@ -423,9 +421,8 @@ void TapKeyboardReturnKeyInOmniboxWithText(std::string text) {
             ui::PageTransition transition) {
         web::NavigationManager::WebLoadParams params(replacementURL);
         params.transition_type = transition;
-        ChromeLoadParams chromeParams(params);
         UrlLoadingServiceFactory::GetForBrowserState(self.browserState)
-            ->LoadUrlInCurrentTab(chromeParams);
+            ->Load(UrlLoadParams::InCurrentTab(params));
         [self cancelOmniboxEdit];
       };
   load_GURL_from_location_bar_swizzler_.reset(new ScopedBlockSwizzler(
@@ -776,7 +773,7 @@ void TapKeyboardReturnKeyInOmniboxWithText(std::string text) {
   } else {
     TapKeyboardReturnKeyInOmniboxWithText(result);
   }
-  [ChromeEarlGrey waitForWebViewContainingText:response];
+  [ChromeEarlGrey waitForWebStateContainingText:response];
 
   // Press the back button to get back to the NTP.
   [[EarlGrey selectElementWithMatcher:chrome_test_util::BackButton()]
@@ -797,7 +794,7 @@ void TapKeyboardReturnKeyInOmniboxWithText(std::string text) {
 - (void)testReceivingQRScannerURLResultAndEditingTheURL {
   // TODO(crbug.com/753098): Re-enable this test on iPad once grey_typeText
   // works.
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     EARL_GREY_TEST_DISABLED(@"Test disabled on iPad.");
   }
 
@@ -817,7 +814,7 @@ void TapKeyboardReturnKeyInOmniboxWithText(std::string text) {
 - (void)testReceivingQRScannerSearchQueryResultAndEditingTheQuery {
   // TODO(crbug.com/753098): Re-enable this test on iPad once grey_typeText
   // works.
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     EARL_GREY_TEST_DISABLED(@"Test disabled on iPad.");
   }
 

@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "base/scoped_observer.h"
+#include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/omnibox/omnibox_theme.h"
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -18,6 +19,7 @@
 #include "ui/views/controls/image_view.h"
 
 class CommandUpdater;
+class OmniboxView;
 
 namespace content {
 class WebContents;
@@ -41,9 +43,15 @@ class PageActionIconView : public IconLabelBubbleView {
     virtual SkColor GetPageActionInkDropColor() const = 0;
 
     virtual content::WebContents* GetWebContentsForPageActionIconView() = 0;
+
+    // Delegate should override and return true when the user is editing the
+    // location bar contents.
+    virtual bool IsLocationBarUserInputInProgress() const;
+
+    virtual const OmniboxView* GetOmniboxView() const;
   };
 
-  void Init();
+  ~PageActionIconView() override;
 
   // Updates the color of the icon, this must be set before the icon is drawn.
   void SetIconColor(SkColor icon_color);
@@ -60,6 +68,10 @@ class PageActionIconView : public IconLabelBubbleView {
   // Retrieve the text to be used for a tooltip or accessible name.
   virtual base::string16 GetTextForTooltipAndAccessibleName() const = 0;
 
+  SkColor GetLabelColorForTesting() const;
+
+  void ExecuteForTesting();
+
  protected:
   enum ExecuteSource {
     EXECUTE_SOURCE_MOUSE,
@@ -71,7 +83,6 @@ class PageActionIconView : public IconLabelBubbleView {
                      int command_id,
                      Delegate* delegate,
                      const gfx::FontList& = gfx::FontList());
-  ~PageActionIconView() override;
 
   // Returns true if a related bubble is showing.
   bool IsBubbleShowing() const override;
@@ -92,27 +103,15 @@ class PageActionIconView : public IconLabelBubbleView {
   // views::IconLabelBubbleView:
   SkColor GetTextColor() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
-  bool GetTooltipText(const gfx::Point& p,
-                      base::string16* tooltip) const override;
-  bool OnMousePressed(const ui::MouseEvent& event) override;
-  void OnMouseReleased(const ui::MouseEvent& event) override;
-  bool OnKeyPressed(const ui::KeyEvent& event) override;
-  bool OnKeyReleased(const ui::KeyEvent& event) override;
+  base::string16 GetTooltipText(const gfx::Point& p) const override;
   void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) override;
-  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
+      const views::ViewHierarchyChangedDetails& details) override;
   void OnThemeChanged() override;
-  void AddInkDropLayer(ui::Layer* ink_drop_layer) override;
-  void RemoveInkDropLayer(ui::Layer* ink_drop_layer) override;
-  std::unique_ptr<views::InkDrop> CreateInkDrop() override;
-  std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
-  std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
-      const override;
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
   SkColor GetInkDropBaseColor() const override;
-
-  // ui::EventHandler:
-  void OnGestureEvent(ui::GestureEvent* event) override;
+  bool ShouldShowSeparator() const final;
+  void NotifyClick(const ui::Event& event) override;
+  bool IsTriggerableEvent(const ui::Event& event) override;
+  bool ShouldUpdateInkDropOnClickCanceled() const override;
 
  protected:
   // Calls OnExecuting and runs |command_id_| with a valid |command_updater_|.
@@ -127,7 +126,6 @@ class PageActionIconView : public IconLabelBubbleView {
   // IconLabelBubbleView:
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
   void OnTouchUiChanged() override;
-  void UpdateBorder() override;
 
   // Updates the icon image after some state has changed.
   virtual void UpdateIconImage();
@@ -141,18 +139,23 @@ class PageActionIconView : public IconLabelBubbleView {
 
   bool active() const { return active_; }
 
+  // Delegate accessor for subclasses.
+  Delegate* delegate() const { return delegate_; }
+
  private:
+  void UpdateBorder();
+
   // The size of the icon image (excluding the ink drop).
-  int icon_size_;
+  int icon_size_ = GetLayoutConstant(LOCATION_BAR_ICON_SIZE);
 
   // What color to paint the icon with.
   SkColor icon_color_ = gfx::kPlaceholderColor;
 
   // The CommandUpdater for the Browser object that owns the location bar.
-  CommandUpdater* command_updater_;
+  CommandUpdater* const command_updater_;
 
   // Delegate for access to associated state.
-  Delegate* delegate_;
+  Delegate* const delegate_;
 
   // The command ID executed when the user clicks this icon.
   const int command_id_;
@@ -160,12 +163,7 @@ class PageActionIconView : public IconLabelBubbleView {
   // The active node_data. The precise definition of "active" is unique to each
   // subclass, but generally indicates that the associated feature is acting on
   // the web page.
-  bool active_;
-
-  // This is used to check if the bookmark bubble was showing during the mouse
-  // pressed event. If this is true then the mouse released event is ignored to
-  // prevent the bubble from reshowing.
-  bool suppress_mouse_released_action_;
+  bool active_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(PageActionIconView);
 };

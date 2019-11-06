@@ -26,6 +26,7 @@ namespace media {
 enum class AudioContentType;
 class CastDecoderBuffer;
 class CmaBackend;
+class ExtraAudioStream;
 class MediaPipelineBackendWrapper;
 class ActiveAudioDecoderWrapper;
 class ActiveMediaPipelineBackendWrapper;
@@ -95,6 +96,12 @@ class MediaPipelineBackendManager {
   // Inform that a backend previously created is destroyed.
   // Must be called on the same thread as |media_task_runner_|.
   void BackendDestroyed(MediaPipelineBackendWrapper* backend_wrapper);
+  // |backend_wrapper| will use a VideoDecoder.
+  // MediaPipelineBackendManager needs to record the backend that uses the
+  // VideoDecoder; and if there is an active backend using VideoDecoder, that
+  // backend needs to be revoked.
+  // Must be called on the same thread as |media_task_runner_|.
+  void BackendUseVideoDecoder(MediaPipelineBackendWrapper* backend_wrapper);
 
   base::SingleThreadTaskRunner* task_runner() const {
     return media_task_runner_.get();
@@ -109,8 +116,12 @@ class MediaPipelineBackendManager {
   // CmaBackend instance (for example, direct audio output using
   // CastMediaShlib::AddDirectAudioSource()). |sfx| indicates whether or not
   // the stream is a sound effects stream (has no effect on volume feedback).
-  void AddExtraPlayingStream(bool sfx, const AudioContentType type);
-  void RemoveExtraPlayingStream(bool sfx, const AudioContentType type);
+  void AddExtraPlayingStream(bool sfx,
+                             const AudioContentType type,
+                             ExtraAudioStream* extra_audio_stream = nullptr);
+  void RemoveExtraPlayingStream(bool sfx,
+                                const AudioContentType type,
+                                ExtraAudioStream* extra_audio_stream = nullptr);
 
   // Sets a global multiplier for output volume for streams of the given |type|.
   // The multiplier may be any value >= 0; if the resulting volume for an
@@ -167,11 +178,12 @@ class MediaPipelineBackendManager {
       allow_volume_feedback_observers_;
 
   base::flat_set<ActiveAudioDecoderWrapper*> audio_decoders_;
+  base::flat_map<AudioContentType, base::flat_set<ExtraAudioStream*>>
+      extra_audio_streams_;
   base::flat_map<AudioContentType, float> global_volume_multipliers_;
 
-  // Previously issued MediaPipelineBackendWraper that is still alive
-  // and not revoked.
-  MediaPipelineBackendWrapper* active_backend_wrapper_;
+  // Previously issued MediaPipelineBackendWrapper that uses a video decoder.
+  MediaPipelineBackendWrapper* backend_wrapper_using_video_decoder_;
 
   BufferDelegate* buffer_delegate_;
 

@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
@@ -32,6 +31,7 @@
 #include "content/public/renderer/render_view_visitor.h"
 #include "content/public/test/frame_load_waiter.h"
 #include "content/renderer/history_serialization.h"
+#include "content/renderer/loader/resource_dispatcher.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
@@ -49,6 +49,7 @@
 #include "third_party/blink/public/platform/web_gesture_event.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 #include "third_party/blink/public/platform/web_mouse_event.h"
+#include "third_party/blink/public/platform/web_url_loader_client.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/public/web/web_document.h"
@@ -102,6 +103,70 @@ class CloseMessageSendingRenderViewVisitor : public RenderViewVisitor {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CloseMessageSendingRenderViewVisitor);
+};
+
+class FakeWebURLLoader : public blink::WebURLLoader {
+ public:
+  FakeWebURLLoader(
+      std::unique_ptr<blink::scheduler::WebResourceLoadingTaskRunnerHandle>
+          task_runner_handle)
+      : task_runner_handle_(std::move(task_runner_handle)) {}
+
+  void LoadSynchronously(const WebURLRequest& request,
+                         blink::WebURLLoaderClient* client,
+                         blink::WebURLResponse&,
+                         base::Optional<blink::WebURLError>&,
+                         blink::WebData&,
+                         int64_t&,
+                         int64_t&,
+                         blink::WebBlobInfo&) override {
+    client->DidFail(blink::WebURLError(kFailureReason, request.Url()), 0, 0, 0);
+  }
+
+  void LoadAsynchronously(const WebURLRequest& request,
+                          blink::WebURLLoaderClient* client) override {
+    DCHECK(task_runner_handle_);
+    async_client_ = client;
+    task_runner_handle_->GetTaskRunner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&FakeWebURLLoader::DidFail, weak_factory_.GetWeakPtr(),
+                       blink::WebURLError(kFailureReason, request.Url()), 0, 0,
+                       0));
+  }
+
+  void SetDefersLoading(bool) override {}
+  void DidChangePriority(WebURLRequest::Priority, int) override {}
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() override {
+    return nullptr;
+  }
+
+  void DidFail(const blink::WebURLError& error,
+               int64_t total_encoded_data_length,
+               int64_t total_encoded_body_length,
+               int64_t total_decoded_body_length) {
+    DCHECK(async_client_);
+    async_client_->DidFail(error, total_encoded_data_length,
+                           total_encoded_body_length,
+                           total_decoded_body_length);
+  }
+
+ private:
+  static const int kFailureReason = net::ERR_FAILED;
+  std::unique_ptr<blink::scheduler::WebResourceLoadingTaskRunnerHandle>
+      task_runner_handle_;
+  blink::WebURLLoaderClient* async_client_ = nullptr;
+
+  base::WeakPtrFactory<FakeWebURLLoader> weak_factory_{this};
+};
+
+class FakeWebURLLoaderFactory : public blink::WebURLLoaderFactory {
+ public:
+  std::unique_ptr<blink::WebURLLoader> CreateURLLoader(
+      const WebURLRequest&,
+      std::unique_ptr<blink::scheduler::WebResourceLoadingTaskRunnerHandle>
+          task_runner_handle) override {
+    return std::make_unique<FakeWebURLLoader>(std::move(task_runner_handle));
+  }
 };
 
 // Converts |ascii_character| into |key_code| and returns true on success.
@@ -308,10 +373,6 @@ void RenderViewTest::SetUp() {
 #endif
   command_line_ =
       std::make_unique<base::CommandLine>(base::CommandLine::NO_PROGRAM);
-  field_trial_list_ = std::make_unique<base::FieldTrialList>(nullptr);
-  // We don't use the descriptor here anyways so it's ok to pass -1.
-  base::FieldTrialList::CreateTrialsFromCommandLine(
-      *command_line_, switches::kFieldTrialHandle, -1);
   params_ = std::make_unique<MainFunctionParams>(*command_line_);
   platform_ = std::make_unique<RendererMainPlatformDelegate>(*params_);
   platform_->PlatformInitialize();
@@ -319,7 +380,7 @@ void RenderViewTest::SetUp() {
   // Setting flags and really doing anything with WebKit is fairly fragile and
   // hacky, but this is the world we live in...
   std::string flags("--expose-gc");
-  v8::V8::SetFlagsFromString(flags.c_str(), static_cast<int>(flags.size()));
+  v8::V8::SetFlagsFromString(flags.c_str(), flags.size());
 
   // Ensure that we register any necessary schemes when initializing WebKit,
   // since we are using a MockRenderThread.
@@ -564,7 +625,7 @@ void RenderViewTest::SimulatePointRightClick(const gfx::Point& point) {
 void RenderViewTest::SimulateRectTap(const gfx::Rect& rect) {
   WebGestureEvent gesture_event(
       WebInputEvent::kGestureTap, WebInputEvent::kNoModifiers,
-      ui::EventTimeForNow(), blink::kWebGestureDeviceTouchscreen);
+      ui::EventTimeForNow(), blink::WebGestureDevice::kTouchscreen);
   gesture_event.SetPositionInWidget(gfx::PointF(rect.CenterPoint()));
   gesture_event.data.tap.tap_count = 1;
   gesture_event.data.tap.width = rect.width();
@@ -575,19 +636,19 @@ void RenderViewTest::SimulateRectTap(const gfx::Rect& rect) {
   widget->FocusChangeComplete();
 }
 
-void RenderViewTest::SetFocused(const blink::WebNode& node) {
+void RenderViewTest::SetFocused(const blink::WebElement& element) {
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  impl->FocusedNodeChanged(blink::WebNode(), node);
+  impl->FocusedElementChanged(blink::WebElement(), element);
 }
 
 void RenderViewTest::Reload(const GURL& url) {
   CommonNavigationParams common_params(
       url, base::nullopt, Referrer(), ui::PAGE_TRANSITION_LINK,
-      FrameMsg_Navigate_Type::RELOAD, NavigationDownloadPolicy::kAllow, false,
-      GURL(), GURL(), PREVIEWS_UNSPECIFIED, base::TimeTicks::Now(), "GET",
-      nullptr, base::Optional<SourceLocation>(),
-      false /* started_from_context_menu */, false /* has_user_gesture */,
-      InitiatorCSPInfo(), std::string());
+      FrameMsg_Navigate_Type::RELOAD, NavigationDownloadPolicy(), false, GURL(),
+      GURL(), PREVIEWS_UNSPECIFIED, base::TimeTicks::Now(), "GET", nullptr,
+      base::Optional<SourceLocation>(), false /* started_from_context_menu */,
+      false /* has_user_gesture */, InitiatorCSPInfo(), std::vector<int>(),
+      std::string(), false /* is_history_navigation_in_new_child_frame */);
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   TestRenderFrame* frame =
       static_cast<TestRenderFrame*>(impl->GetMainRenderFrame());
@@ -729,10 +790,11 @@ void RenderViewTest::GoToOffset(int offset,
   CommonNavigationParams common_params(
       url, base::nullopt, Referrer(), ui::PAGE_TRANSITION_FORWARD_BACK,
       FrameMsg_Navigate_Type::HISTORY_DIFFERENT_DOCUMENT,
-      NavigationDownloadPolicy::kAllow, false, GURL(), GURL(),
-      PREVIEWS_UNSPECIFIED, base::TimeTicks::Now(), "GET", nullptr,
-      base::Optional<SourceLocation>(), false /* started_from_context_menu */,
-      false /* has_user_gesture */, InitiatorCSPInfo(), std::string());
+      NavigationDownloadPolicy(), false, GURL(), GURL(), PREVIEWS_UNSPECIFIED,
+      base::TimeTicks::Now(), "GET", nullptr, base::Optional<SourceLocation>(),
+      false /* started_from_context_menu */, false /* has_user_gesture */,
+      InitiatorCSPInfo(), std::vector<int>(), std::string(),
+      false /* is_history_navigation_in_new_child_frame */);
   CommitNavigationParams commit_params;
   commit_params.page_state = state;
   commit_params.nav_entry_id = pending_offset + 1;
@@ -749,6 +811,13 @@ void RenderViewTest::GoToOffset(int offset,
   waiter.Wait();
   view_->GetWebView()->MainFrameWidget()->UpdateAllLifecyclePhases(
       blink::WebWidget::LifecycleUpdateReason::kTest);
+}
+
+void RenderViewTest::CreateFakeWebURLLoaderFactory() {
+  auto* frame_impl = static_cast<RenderViewImpl*>(view_)->GetMainRenderFrame();
+  DCHECK(frame_impl);
+  frame_impl->SetWebURLLoaderFactoryOverrideForTest(
+      std::make_unique<FakeWebURLLoaderFactory>());
 }
 
 }  // namespace content

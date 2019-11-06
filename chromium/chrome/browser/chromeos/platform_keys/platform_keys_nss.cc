@@ -605,7 +605,7 @@ void SelectCertificatesOnIOThread(
   SelectCertificatesState* state_ptr = state.get();
   state_ptr->cert_store_->GetClientCerts(
       *state_ptr->cert_request_info_,
-      base::Bind(&DidSelectCertificatesOnIOThread, base::Passed(&state)));
+      base::BindOnce(&DidSelectCertificatesOnIOThread, std::move(state)));
 }
 
 // Filters the obtained certificates on a worker thread. Used by
@@ -873,8 +873,7 @@ void SelectClientCertificates(
     content::BrowserContext* browser_context) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  scoped_refptr<net::SSLCertRequestInfo> cert_request_info(
-      new net::SSLCertRequestInfo);
+  auto cert_request_info = base::MakeRefCounted<net::SSLCertRequestInfo>();
 
   // Currently we do not pass down the requested certificate type to the net
   // layer, as it does not support filtering certificates by type. Rather, we

@@ -33,19 +33,18 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.chrome.browser.browserservices.BrowserSessionContentUtils;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
 import org.chromium.chrome.browser.externalnav.IntentWithGesturesHandler;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
-import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController;
+import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteCoordinatorFactory;
 import org.chromium.chrome.browser.rappor.RapporServiceBridge;
-import org.chromium.chrome.browser.search_engines.TemplateUrlService;
+import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabLaunchType;
-import org.chromium.chrome.browser.tabmodel.document.ActivityDelegate;
 import org.chromium.chrome.browser.util.IntentUtils;
+import org.chromium.chrome.browser.util.UrlConstants;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -303,12 +302,16 @@ public class IntentHandler {
         // Opens a new incognito tab.
         int OPEN_NEW_INCOGNITO_TAB = 5;
         // Tab is reused only if the tab ID exists (tab ID is specified with the integer extra
-        // REUSE_TAB_MATCHING_ID_STRING), and if the tab matches the requested URL.
-        // Otherwise, the URL is opened in a new tab.
+        // REUSE_TAB_MATCHING_ID_STRING), and if the tab matches either the requested URL, or
+        // the URL provided in the REUSE_TAB_ORIGINAL_URL_STRING extra.
+        // Otherwise, the URL is opened in a new tab. REUSE_TAB_ORIGINAL_URL_STRING can be used if
+        // the intent url is a result of a redirect, so that a tab pointing at the original URL can
+        // be reused.
         int REUSE_TAB_MATCHING_ID_ELSE_NEW_TAB = 6;
 
         String BRING_TAB_TO_FRONT_STRING = "BRING_TAB_TO_FRONT";
         String REUSE_TAB_MATCHING_ID_STRING = "REUSE_TAB_MATCHING_ID";
+        String REUSE_TAB_ORIGINAL_URL_STRING = "REUSE_TAB_ORIGINAL_URL";
     }
 
     /**
@@ -468,6 +471,10 @@ public class IntentHandler {
 
         if (isIntentForMhtmlFileOrContent(intent) && tabOpenType == TabOpenType.OPEN_NEW_TAB
                 && referrerUrl == null && extraHeaders == null) {
+            // TODO(https://crbug.com/963233): should MHTML intent be handled on touchless someday?
+            if (!OfflinePageUtils.isEnabled()) {
+                return false;
+            }
             handleMhtmlFileOrContentIntent(url, intent);
             return true;
         }
@@ -524,8 +531,8 @@ public class IntentHandler {
         } else if (isValidReferrerHeader(referrerExtra)) {
             return referrerExtra.toString();
         } else if (IntentHandler.notSecureIsIntentChromeOrFirstParty(intent)
-                || BrowserSessionContentUtils.canActiveContentHandlerUseReferrer(
-                           intent, referrerExtra)) {
+                || ChromeApplication.getComponent().resolveSessionDataHolder()
+                        .canActiveHandlerUseReferrer(intent, referrerExtra)) {
             return referrerExtra.toString();
         }
         return null;
@@ -626,20 +633,22 @@ public class IntentHandler {
                 results.add(testResult);
             }
         }
+        // The logic in this method should be moved to ChromeTabbedActivity eventually. We should
+        // support async handling of voice search when native finishes initializing.
         if (results == null || results.size() == 0
                 || !BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                            .isStartupSuccessfullyCompleted()) {
+                            .isFullBrowserStarted()) {
             return null;
         }
         String query = results.get(0);
-        String url = AutocompleteController.nativeQualifyPartialURLQuery(query);
+        String url = AutocompleteCoordinatorFactory.qualifyPartialURLQuery(query);
         if (url == null) {
             List<String> urls = IntentUtils.safeGetStringArrayListExtra(
                     intent, RecognizerResultsIntent.EXTRA_VOICE_SEARCH_RESULT_URLS);
             if (urls != null && urls.size() > 0) {
                 url = urls.get(0);
             } else {
-                url = TemplateUrlService.getInstance().getUrlForVoiceSearchQuery(query);
+                url = TemplateUrlServiceFactory.get().getUrlForVoiceSearchQuery(query);
             }
         }
         return url;
@@ -909,7 +918,8 @@ public class IntentHandler {
                     // applications.
                     String lowerCaseUrl = url.toLowerCase(Locale.US);
                     if (ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL.equals(lowerCaseUrl)
-                            || ContentUrlConstants.ABOUT_BLANK_URL.equals(lowerCaseUrl)) {
+                            || ContentUrlConstants.ABOUT_BLANK_URL.equals(lowerCaseUrl)
+                            || UrlConstants.CHROME_DINO_URL.equals(lowerCaseUrl)) {
                         return false;
                     }
 
@@ -1138,7 +1148,6 @@ public class IntentHandler {
     private static String extractUrlFromIntent(Intent intent) {
         if (intent == null) return null;
         String url = getUrlFromVoiceSearchResult(intent);
-        if (url == null) url = ActivityDelegate.getInitialUrlForDocument(intent);
         if (url == null) url = getUrlForCustomTab(intent);
         if (url == null) url = intent.getDataString();
         if (url == null) return null;

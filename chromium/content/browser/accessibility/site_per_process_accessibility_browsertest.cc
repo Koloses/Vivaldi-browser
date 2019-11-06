@@ -21,12 +21,12 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/accessibility_notification_waiter.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
-#include "content/test/accessibility_browser_test_utils.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -136,8 +136,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_SitePerProcessAccessibilityBrowserTest,
   EXPECT_EQ(ax_child_frame_root->PlatformGetParent(), ax_iframe);
 }
 
+// TODO(aboxhall): Flaky test, discuss with dmazzoni
 IN_PROC_BROWSER_TEST_F(MAYBE_SitePerProcessAccessibilityBrowserTest,
-                       TwoCrossSiteNavigations) {
+                       DISABLED_TwoCrossSiteNavigations) {
   // Enable full accessibility for all current and future WebContents.
   BrowserAccessibilityState::GetInstance()->EnableAccessibility();
 

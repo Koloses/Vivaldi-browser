@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/media/router/mojo/media_router_mojo_impl.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -16,6 +18,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "base/test/gmock_callback_support.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -28,7 +31,7 @@
 #include "chrome/browser/media/router/test/test_helper.h"
 #include "chrome/common/media_router/issue.h"
 #include "chrome/common/media_router/media_route.h"
-#include "chrome/common/media_router/media_source_helper.h"
+#include "chrome/common/media_router/media_source.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -38,7 +41,6 @@
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_manager_factory.h"
 #include "extensions/common/extension.h"
-#include "media/base/gmock_callback_support.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -984,10 +986,6 @@ TEST_F(MediaRouterMojoImplTest, SearchSinks) {
 
 TEST_F(MediaRouterMojoImplTest, GetRouteController) {
   TestCreateMediaRouteController();
-}
-
-TEST_F(MediaRouterMojoImplTest, GetHangoutsRouteController) {
-  TestCreateHangoutsMediaRouteController();
 }
 
 TEST_F(MediaRouterMojoImplTest, GetRouteControllerMultipleTimes) {

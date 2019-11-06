@@ -65,6 +65,17 @@ void PageLoadMetricsObserverTestHarness::SimulateTimingAndMetadataUpdate(
   tester_->SimulateTimingAndMetadataUpdate(timing, metadata);
 }
 
+void PageLoadMetricsObserverTestHarness::SimulateCpuTimingUpdate(
+    const mojom::CpuTiming& cpu_timing) {
+  tester_->SimulateCpuTimingUpdate(cpu_timing);
+}
+
+void PageLoadMetricsObserverTestHarness::SimulateMetadataUpdate(
+    const mojom::PageLoadMetadata& metadata,
+    content::RenderFrameHost* rfh) {
+  tester_->SimulateMetadataUpdate(metadata, rfh);
+}
+
 void PageLoadMetricsObserverTestHarness::SimulateResourceDataUseUpdate(
     const std::vector<mojom::ResourceDataUpdatePtr>& resources) {
   tester_->SimulateResourceDataUseUpdate(resources);
@@ -82,12 +93,12 @@ void PageLoadMetricsObserverTestHarness::SimulateFeaturesUpdate(
 }
 
 void PageLoadMetricsObserverTestHarness::SimulateRenderDataUpdate(
-    const mojom::PageRenderData& render_data) {
+    const mojom::FrameRenderDataUpdate& render_data) {
   tester_->SimulateRenderDataUpdate(render_data);
 }
 
 void PageLoadMetricsObserverTestHarness::SimulateRenderDataUpdate(
-    const mojom::PageRenderData& render_data,
+    const mojom::FrameRenderDataUpdate& render_data,
     content::RenderFrameHost* render_frame_host) {
   tester_->SimulateRenderDataUpdate(render_data, render_frame_host);
 }
@@ -116,6 +127,24 @@ void PageLoadMetricsObserverTestHarness::SimulateMediaPlayed() {
   tester_->SimulateMediaPlayed();
 }
 
+void PageLoadMetricsObserverTestHarness::SimulateCookiesRead(
+    const GURL& url,
+    const GURL& first_party_url,
+    const net::CookieList& cookie_list,
+    bool blocked_by_policy) {
+  tester_->SimulateCookiesRead(url, first_party_url, cookie_list,
+                               blocked_by_policy);
+}
+
+void PageLoadMetricsObserverTestHarness::SimulateCookieChange(
+    const GURL& url,
+    const GURL& first_party_url,
+    const net::CanonicalCookie& cookie,
+    bool blocked_by_policy) {
+  tester_->SimulateCookieChange(url, first_party_url, cookie,
+                                blocked_by_policy);
+}
+
 const base::HistogramTester&
 PageLoadMetricsObserverTestHarness::histogram_tester() const {
   return histogram_tester_;
@@ -134,8 +163,11 @@ PageLoadMetricsObserverTestHarness::GetPageLoadExtraInfoForCommittedLoad() {
 void PageLoadMetricsObserverTestHarness::NavigateWithPageTransitionAndCommit(
     const GURL& url,
     ui::PageTransition transition) {
-  auto simulator =
-      content::NavigationSimulator::CreateRendererInitiated(url, main_rfh());
+  auto simulator = PageTransitionIsWebTriggerable(transition)
+                       ? content::NavigationSimulator::CreateRendererInitiated(
+                             url, main_rfh())
+                       : content::NavigationSimulator::CreateBrowserInitiated(
+                             url, web_contents());
   simulator->SetTransition(transition);
   simulator->Commit();
 }

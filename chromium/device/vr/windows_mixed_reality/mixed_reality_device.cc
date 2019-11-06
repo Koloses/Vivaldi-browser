@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/numerics/math_constants.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
@@ -27,21 +28,21 @@ namespace {
 mojom::VRDisplayInfoPtr CreateFakeVRDisplayInfo(device::mojom::XRDeviceId id) {
   mojom::VRDisplayInfoPtr display_info = mojom::VRDisplayInfo::New();
   display_info->id = id;
-  display_info->displayName = "Windows Mixed Reality";
+  display_info->display_name = "Windows Mixed Reality";
   display_info->capabilities = mojom::VRDisplayCapabilities::New();
-  display_info->capabilities->hasPosition = true;
-  display_info->capabilities->hasExternalDisplay = true;
-  display_info->capabilities->canPresent = true;
+  display_info->capabilities->has_position = true;
+  display_info->capabilities->has_external_display = true;
+  display_info->capabilities->can_present = true;
   display_info->webvr_default_framebuffer_scale = 1.0;
   display_info->webxr_default_framebuffer_scale = 1.0;
 
-  display_info->leftEye = mojom::VREyeParameters::New();
-  display_info->rightEye = mojom::VREyeParameters::New();
-  mojom::VREyeParametersPtr& left_eye = display_info->leftEye;
-  mojom::VREyeParametersPtr& right_eye = display_info->rightEye;
+  display_info->left_eye = mojom::VREyeParameters::New();
+  display_info->right_eye = mojom::VREyeParameters::New();
+  mojom::VREyeParametersPtr& left_eye = display_info->left_eye;
+  mojom::VREyeParametersPtr& right_eye = display_info->right_eye;
 
-  left_eye->fieldOfView = mojom::VRFieldOfView::New(45, 45, 45, 45);
-  right_eye->fieldOfView = mojom::VRFieldOfView::New(45, 45, 45, 45);
+  left_eye->field_of_view = mojom::VRFieldOfView::New(45, 45, 45, 45);
+  right_eye->field_of_view = mojom::VRFieldOfView::New(45, 45, 45, 45);
 
   constexpr float interpupillary_distance = 0.1f;  // 10cm
   left_eye->offset = {-interpupillary_distance * 0.5, 0, 0};
@@ -49,10 +50,10 @@ mojom::VRDisplayInfoPtr CreateFakeVRDisplayInfo(device::mojom::XRDeviceId id) {
 
   constexpr uint32_t width = 1024;
   constexpr uint32_t height = 1024;
-  left_eye->renderWidth = width;
-  left_eye->renderHeight = height;
-  right_eye->renderWidth = left_eye->renderWidth;
-  right_eye->renderHeight = left_eye->renderHeight;
+  left_eye->render_width = width;
+  left_eye->render_height = height;
+  right_eye->render_width = left_eye->render_width;
+  right_eye->render_height = left_eye->render_height;
 
   return display_info;
 }
@@ -94,7 +95,11 @@ void MixedRealityDevice::RequestSession(
     CreateRenderLoop();
 
   if (!render_loop_->IsRunning()) {
-    render_loop_->Start();
+    // We need to start a UI message loop or we will not receive input events
+    // on 1809 or newer.
+    base::Thread::Options options;
+    options.message_loop_type = base::MessageLoop::TYPE_UI;
+    render_loop_->StartWithOptions(options);
 
     // IsRunning() should be true here unless the thread failed to start (likely
     // memory exhaustion). If the thread fails to start, then we fail to create

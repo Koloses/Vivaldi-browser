@@ -5,14 +5,55 @@
 #ifndef DEVICE_VR_TEST_TEST_HOOK_H_
 #define DEVICE_VR_TEST_TEST_HOOK_H_
 
+#include "base/logging.h"
+#include "ui/gfx/transform.h"
+
 #include <cstdint>
 
 namespace device {
 
 // Update this string whenever either interface changes.
-constexpr char kChromeOpenVRTestHookAPI[] = "ChromeTestHook_2";
+constexpr char kChromeOpenVRTestHookAPI[] = "ChromeTestHook_3";
 constexpr unsigned int kMaxTrackedDevices = 64;
 constexpr unsigned int kMaxNumAxes = 5;
+
+// These are largely the same as the OpenVR button/axis constants, but kept
+// separate so they're more runtime-agnostic.
+enum XrButtonId {
+  kSystem = 0,
+  kMenu = 1,
+  kGrip = 2,
+  kDpadLeft = 3,
+  kDpadUp = 4,
+  kDpadRight = 5,
+  kDpadDown = 6,
+  kA = 7,
+  kProximitySensor = 31,
+  kAxisPrimary = 32,
+  kAxisTrigger = 33,
+  kAxisSecondary = 34,
+  kAxisTertiary = 35,
+  kAxisQuaternary = 36,
+  kMax = 64
+};
+
+enum XrAxisType {
+  kNone = 0,
+  kTrackpad = 1,
+  kJoystick = 2,
+  kTrigger = 3,
+};
+
+inline uint64_t XrButtonMaskFromId(XrButtonId id) {
+  return 1ull << id;
+}
+
+inline unsigned int XrAxisOffsetFromId(XrButtonId id) {
+  DCHECK(XrButtonId::kAxisPrimary <= id &&
+         id < XrButtonId::kAxisPrimary + kMaxNumAxes);
+  return static_cast<unsigned int>(id) -
+         static_cast<unsigned int>(XrButtonId::kAxisPrimary);
+}
 
 struct Color {
   unsigned char r;
@@ -80,6 +121,18 @@ struct ControllerFrameData {
   bool is_valid = false;
 };
 
+inline gfx::Transform PoseFrameDataToTransform(PoseFrameData data) {
+  // The gfx::Transform constructor takes arguments in row-major order, but
+  // we're given data in column-major order. Construct in column-major order and
+  // transpose since it looks cleaner than manually transposing the arguments
+  // passed to the constructor.
+  float* t = data.device_to_origin;
+  gfx::Transform transform(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8],
+                           t[9], t[10], t[11], t[12], t[13], t[14], t[15]);
+  transform.Transpose();
+  return transform;
+}
+
 // Tests may implement this, and register it to control behavior of VR runtime.
 class VRTestHook {
  public:
@@ -96,7 +149,7 @@ class VRTestHook {
   virtual void DetachCurrentThread() = 0;
 };
 
-class TestHookRegistration {
+class ServiceTestHook {
  public:
   virtual void SetTestHook(VRTestHook*) = 0;
 };

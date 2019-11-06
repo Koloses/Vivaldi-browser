@@ -6,15 +6,15 @@
 
 #include "base/bind.h"
 #include "base/files/file.h"
-#include "base/md5.h"
+#include "base/hash/md5.h"
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "media/base/video_frame.h"
 #include "media/gpu/test/video_decode_accelerator_unittest_helpers.h"
-#include "media/gpu/test/video_frame_mapper.h"
-#include "media/gpu/test/video_frame_mapper_factory.h"
+#include "media/gpu/video_frame_mapper.h"
+#include "media/gpu/video_frame_mapper_factory.h"
 
 namespace media {
 namespace test {
@@ -23,18 +23,8 @@ namespace test {
 std::unique_ptr<VideoFrameValidator> VideoFrameValidator::Create(
     const std::vector<std::string>& expected_frame_checksums,
     const VideoPixelFormat validation_format) {
-  std::unique_ptr<VideoFrameMapper> video_frame_mapper;
-#if defined(OS_CHROMEOS)
-  video_frame_mapper = VideoFrameMapperFactory::CreateMapper();
-  if (!video_frame_mapper) {
-    LOG(ERROR) << "Failed to create VideoFrameMapper.";
-    return nullptr;
-  }
-#endif
-
-  auto video_frame_validator = base::WrapUnique(new VideoFrameValidator(
-      expected_frame_checksums, std::move(video_frame_mapper),
-      validation_format));
+  auto video_frame_validator = base::WrapUnique(
+      new VideoFrameValidator(expected_frame_checksums, validation_format));
   if (!video_frame_validator->Initialize()) {
     LOG(ERROR) << "Failed to initialize VideoFrameValidator.";
     return nullptr;
@@ -45,10 +35,8 @@ std::unique_ptr<VideoFrameValidator> VideoFrameValidator::Create(
 
 VideoFrameValidator::VideoFrameValidator(
     std::vector<std::string> expected_frame_checksums,
-    std::unique_ptr<VideoFrameMapper> video_frame_mapper,
     VideoPixelFormat validation_format)
     : expected_frame_checksums_(std::move(expected_frame_checksums)),
-      video_frame_mapper_(std::move(video_frame_mapper)),
       validation_format_(validation_format),
       num_frames_validating_(0),
       frame_validator_thread_("FrameValidatorThread"),
@@ -73,10 +61,6 @@ void VideoFrameValidator::Destroy() {
   frame_validator_thread_.Stop();
   base::AutoLock auto_lock(frame_validator_lock_);
   DCHECK_EQ(0u, num_frames_validating_);
-}
-
-const std::vector<std::string>& VideoFrameValidator::GetFrameChecksums() const {
-  return frame_checksums_;
 }
 
 std::vector<VideoFrameValidator::MismatchedFrameInfo>
@@ -126,11 +110,26 @@ void VideoFrameValidator::ProcessVideoFrameTask(
 
   scoped_refptr<const VideoFrame> validated_frame = video_frame;
   // If this is a DMABuf-backed memory frame we need to map it before accessing.
-#if defined(OS_LINUX)
-  if (validated_frame->storage_type() == VideoFrame::STORAGE_DMABUFS)
-    validated_frame = video_frame_mapper_->Map(std::move(validated_frame));
-#endif
+#if defined(OS_CHROMEOS)
+  if (validated_frame->storage_type() == VideoFrame::STORAGE_DMABUFS) {
+    // Create VideoFrameMapper if not yet created. The decoder's output pixel
+    // format is not known yet when creating the VideoFrameValidator. We can
+    // only create the VideoFrameMapper upon receiving the first video frame.
+    if (!video_frame_mapper_) {
+      video_frame_mapper_ =
+          VideoFrameMapperFactory::CreateMapper(video_frame->format());
+      LOG_ASSERT(video_frame_mapper_) << "Failed to create VideoFrameMapper";
+    }
 
+    validated_frame = video_frame_mapper_->Map(std::move(validated_frame));
+    if (!validated_frame) {
+      LOG(ERROR) << "Failed to map video frame";
+      return;
+    }
+  }
+#endif  // defined(OS_CHROMEOS)
+
+  LOG_ASSERT(validated_frame->IsMappable());
   if (validated_frame->format() != validation_format_) {
     validated_frame =
         ConvertVideoFrame(validated_frame.get(), validation_format_);
@@ -140,7 +139,6 @@ void VideoFrameValidator::ProcessVideoFrameTask(
   std::string computed_md5 = ComputeMD5FromVideoFrame(validated_frame.get());
 
   base::AutoLock auto_lock(frame_validator_lock_);
-  frame_checksums_.push_back(computed_md5);
 
   if (expected_frame_checksums_.size() > 0) {
     LOG_IF(FATAL, frame_index >= expected_frame_checksums_.size())

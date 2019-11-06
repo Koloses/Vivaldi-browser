@@ -7,7 +7,11 @@
 ../../third_party/catapult/common/py_trace_event/py_trace_event/trace_event_impl/log.py
 ../../third_party/catapult/common/py_trace_event/py_trace_event/trace_event_impl/meta_class.py
 ../../third_party/catapult/common/py_trace_event/py_trace_event/trace_event_impl/multiprocessing_shim.py
+../../third_party/catapult/common/py_trace_event/py_trace_event/trace_event_impl/perfetto_proto_classes.py
+../../third_party/catapult/common/py_trace_event/py_trace_event/trace_event_impl/perfetto_trace_writer.py
 ../../third_party/catapult/common/py_trace_event/py_trace_event/trace_time.py
+../../third_party/catapult/common/py_trace_event/third_party/protobuf/encoder.py
+../../third_party/catapult/common/py_trace_event/third_party/protobuf/wire_format.py
 ../../third_party/catapult/common/py_utils/py_utils/__init__.py
 ../../third_party/catapult/common/py_utils/py_utils/cloud_storage.py
 ../../third_party/catapult/common/py_utils/py_utils/cloud_storage_global_lock.py
@@ -162,7 +166,6 @@ pylib/local/device/local_device_gtest_run.py
 pylib/local/device/local_device_instrumentation_test_run.py
 pylib/local/device/local_device_linker_test_run.py
 pylib/local/device/local_device_monkey_test_run.py
-pylib/local/device/local_device_perf_test_run.py
 pylib/local/device/local_device_test_run.py
 pylib/local/local_test_server_spawner.py
 pylib/local/machine/__init__.py
@@ -174,8 +177,6 @@ pylib/output/__init__.py
 pylib/output/local_output_manager.py
 pylib/output/noop_output_manager.py
 pylib/output/remote_output_manager.py
-pylib/perf/__init__.py
-pylib/perf/perf_test_instance.py
 pylib/results/__init__.py
 pylib/results/flakiness_dashboard/__init__.py
 pylib/results/flakiness_dashboard/json_results_generator.py

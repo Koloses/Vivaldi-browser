@@ -8,11 +8,11 @@
 #include <queue>
 
 #include "base/containers/queue.h"
+#include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
-#include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/disk_cache/disk_cache.h"
 #include "url/origin.h"
@@ -91,7 +91,7 @@ class CONTENT_EXPORT GeneratedCodeCache {
   void WriteData(const GURL& resource_url,
                  const GURL& origin_lock,
                  const base::Time& response_time,
-                 const std::vector<uint8_t>& data);
+                 base::span<const uint8_t> data);
 
   // Fetch entry corresponding to <resource_url, origin_lock> from the cache
   // and return it using the ReadDataCallback.
@@ -192,7 +192,7 @@ class CONTENT_EXPORT GeneratedCodeCache {
   int max_size_bytes_;
   CodeCacheType cache_type_;
 
-  base::WeakPtrFactory<GeneratedCodeCache> weak_ptr_factory_;
+  base::WeakPtrFactory<GeneratedCodeCache> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(GeneratedCodeCache);
 };

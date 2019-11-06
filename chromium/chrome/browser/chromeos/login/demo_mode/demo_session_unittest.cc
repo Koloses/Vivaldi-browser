@@ -15,7 +15,6 @@
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/timer/mock_timer.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
@@ -33,7 +32,6 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/session_manager/core/session_manager.h"
@@ -72,9 +70,6 @@ class DemoSessionTest : public testing::Test {
   ~DemoSessionTest() override = default;
 
   void SetUp() override {
-    scoped_feature_list_.InitAndEnableFeature(
-        chromeos::switches::kShowSplashScreenInDemoMode);
-
     ASSERT_TRUE(profile_manager_->SetUp());
     chromeos::DBusThreadManager::Initialize();
     DemoSession::SetDemoConfigForTesting(DemoSession::DemoModeConfig::kOnline);
@@ -82,8 +77,7 @@ class DemoSessionTest : public testing::Test {
     session_manager_ = std::make_unique<session_manager::SessionManager>();
     wallpaper_controller_client_ =
         std::make_unique<WallpaperControllerClient>();
-    wallpaper_controller_client_->InitForTesting(
-        test_wallpaper_controller_.CreateInterfacePtr());
+    wallpaper_controller_client_->InitForTesting(&test_wallpaper_controller_);
   }
 
   void TearDown() override {
@@ -159,7 +153,6 @@ class DemoSessionTest : public testing::Test {
   BrowserProcessPlatformPartTestApi browser_process_platform_part_test_api_;
   user_manager::ScopedUserManager scoped_user_manager_;
   chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
-  base::test::ScopedFeatureList scoped_feature_list_;
 
   DISALLOW_COPY_AND_ASSIGN(DemoSessionTest);
 };
@@ -421,8 +414,7 @@ TEST_F(DemoSessionTest, MultipleEnsureOfflineResourcesLoaded) {
       demo_session->resources()->GetAbsolutePath(base::FilePath("foo.txt")));
 }
 
-// TODO(crbug.com/939687): Reenable the test.
-TEST_F(DemoSessionTest, DISABLED_ShowAndRemoveSplashScreen) {
+TEST_F(DemoSessionTest, ShowAndRemoveSplashScreen) {
   DemoSession* demo_session = DemoSession::StartIfInDemoMode();
   ASSERT_TRUE(demo_session);
 
@@ -435,14 +427,12 @@ TEST_F(DemoSessionTest, DISABLED_ShowAndRemoveSplashScreen) {
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
   session_manager_->SetSessionState(
       session_manager::SessionState::LOGIN_PRIMARY);
-  wallpaper_controller_client_->FlushForTesting();
   EXPECT_EQ(0, test_wallpaper_controller_.show_always_on_top_wallpaper_count());
   EXPECT_EQ(0,
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
 
   ASSERT_TRUE(FinishResourcesComponentLoad(
       base::FilePath(kTestDemoModeResourcesMountPoint)));
-  wallpaper_controller_client_->FlushForTesting();
   EXPECT_EQ(1, test_wallpaper_controller_.show_always_on_top_wallpaper_count());
   EXPECT_EQ(0,
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
@@ -461,13 +451,11 @@ TEST_F(DemoSessionTest, DISABLED_ShowAndRemoveSplashScreen) {
       profile, new ChromeAppDelegate(true /* keep_alive */),
       screensaver_app.get());
   demo_session->OnAppWindowActivated(app_window);
-  wallpaper_controller_client_->FlushForTesting();
   // The splash screen is not removed until active session starts.
   EXPECT_EQ(1, test_wallpaper_controller_.show_always_on_top_wallpaper_count());
   EXPECT_EQ(0,
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
   session_manager_->SetSessionState(session_manager::SessionState::ACTIVE);
-  wallpaper_controller_client_->FlushForTesting();
   EXPECT_EQ(1, test_wallpaper_controller_.show_always_on_top_wallpaper_count());
   EXPECT_EQ(1,
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
@@ -477,8 +465,7 @@ TEST_F(DemoSessionTest, DISABLED_ShowAndRemoveSplashScreen) {
   app_window->OnNativeClose();
 }
 
-// TODO(crbug.com/939687): Reenable the test.
-TEST_F(DemoSessionTest, DISABLED_RemoveSplashScreenWhenTimeout) {
+TEST_F(DemoSessionTest, RemoveSplashScreenWhenTimeout) {
   DemoSession* demo_session = DemoSession::StartIfInDemoMode();
   ASSERT_TRUE(demo_session);
 
@@ -491,14 +478,12 @@ TEST_F(DemoSessionTest, DISABLED_RemoveSplashScreenWhenTimeout) {
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
   session_manager_->SetSessionState(
       session_manager::SessionState::LOGIN_PRIMARY);
-  wallpaper_controller_client_->FlushForTesting();
   EXPECT_EQ(0, test_wallpaper_controller_.show_always_on_top_wallpaper_count());
   EXPECT_EQ(0,
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
 
   ASSERT_TRUE(FinishResourcesComponentLoad(
       base::FilePath(kTestDemoModeResourcesMountPoint)));
-  wallpaper_controller_client_->FlushForTesting();
   EXPECT_EQ(1, test_wallpaper_controller_.show_always_on_top_wallpaper_count());
   EXPECT_EQ(0,
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
@@ -507,7 +492,6 @@ TEST_F(DemoSessionTest, DISABLED_RemoveSplashScreenWhenTimeout) {
       static_cast<base::MockOneShotTimer*>(demo_session->GetTimerForTesting());
   ASSERT_TRUE(timer_ptr);
   timer_ptr->Fire();
-  wallpaper_controller_client_->FlushForTesting();
   EXPECT_EQ(1, test_wallpaper_controller_.show_always_on_top_wallpaper_count());
   EXPECT_EQ(1,
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
@@ -527,13 +511,11 @@ TEST_F(DemoSessionTest, DISABLED_RemoveSplashScreenWhenTimeout) {
       profile, new ChromeAppDelegate(true /* keep_alive */),
       screensaver_app.get());
   demo_session->OnAppWindowActivated(app_window);
-  wallpaper_controller_client_->FlushForTesting();
   EXPECT_EQ(1, test_wallpaper_controller_.show_always_on_top_wallpaper_count());
   EXPECT_EQ(1,
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());
   // Entering active session will not trigger splash screen removal anymore.
   session_manager_->SetSessionState(session_manager::SessionState::ACTIVE);
-  wallpaper_controller_client_->FlushForTesting();
   EXPECT_EQ(1, test_wallpaper_controller_.show_always_on_top_wallpaper_count());
   EXPECT_EQ(1,
             test_wallpaper_controller_.remove_always_on_top_wallpaper_count());

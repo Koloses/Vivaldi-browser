@@ -4,16 +4,20 @@
 
 #include "chrome/browser/chrome_content_browser_client.h"
 
+#include <memory>
 #include <vector>
 
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
-#include "chrome/browser/policy/cloud/policy_header_service_factory.h"
+#include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
@@ -21,20 +25,25 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/search/instant_test_base.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/network_session_configurator/common/network_switches.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
-#include "components/policy/core/common/cloud/policy_header_service.h"
+#include "components/prefs/pref_service.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
@@ -46,15 +55,20 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "ui/native_theme/native_theme.h"
+#include "ui/native_theme/test_native_theme.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "extensions/common/constants.h"
+#include "extensions/common/extension_urls.h"
+#include "url/url_constants.h"
+#endif
 
 namespace content {
 
 namespace {
-
-const char kTestPolicyHeader[] = "test_header";
-const char kServerRedirectUrl[] = "/server-redirect";
 
 enum class NetworkServiceState {
   kDisabled,
@@ -95,6 +109,55 @@ IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientBrowserTest,
   ASSERT_TRUE(entry != NULL);
   EXPECT_EQ(url, entry->GetURL());
   EXPECT_EQ(url, entry->GetVirtualURL());
+}
+
+class ChromeContentBrowserClientPopupsTest : public InProcessBrowserTest {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    // Required setup for kAllowPopupsDuringPageUnload switch
+    // as its being checked (whether its going to be enabled or not)
+    // only if the process type is renderer process.
+    command_line_.AppendSwitchASCII(switches::kProcessType,
+                                    switches::kRendererProcess);
+  }
+  void SetUpOnMainThread() override {
+    kChildProcessId = browser()
+                          ->tab_strip_model()
+                          ->GetActiveWebContents()
+                          ->GetMainFrame()
+                          ->GetProcess()
+                          ->GetID();
+  }
+  ChromeContentBrowserClientPopupsTest()
+      : command_line_(base::CommandLine::NO_PROGRAM) {}
+
+  void AppendContentBrowserClientSwitches() {
+    client_.AppendExtraCommandLineSwitches(&command_line_, kChildProcessId);
+  }
+
+  const base::CommandLine& command_line() const { return command_line_; }
+
+ private:
+  ChromeContentBrowserClient client_;
+  base::CommandLine command_line_;
+  int kChildProcessId;
+};
+
+IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientPopupsTest,
+                       AllowPopupsDuringPageUnload) {
+  // Verify that the switch is included only when the
+  // pref AllowPopupsDuringPageUnload value is true.
+
+  PrefService* pref_service = browser()->profile()->GetPrefs();
+  pref_service->SetBoolean(prefs::kAllowPopupsDuringPageUnload, false);
+  AppendContentBrowserClientSwitches();
+  EXPECT_FALSE(
+      command_line().HasSwitch(switches::kAllowPopupsDuringPageUnload));
+  // When the pref value is being set to true
+  // the switch should be included.
+  pref_service->SetBoolean(prefs::kAllowPopupsDuringPageUnload, true);
+  AppendContentBrowserClientSwitches();
+  EXPECT_TRUE(command_line().HasSwitch(switches::kAllowPopupsDuringPageUnload));
 }
 
 // Helper class to mark "https://ntp.com/" as an isolated origin.
@@ -168,7 +231,7 @@ IN_PROC_BROWSER_TEST_F(IsolatedOriginNTPBrowserTest,
       contents->GetMainFrame()->GetProcess()->GetID()));
 }
 
-// Helper class to mark "https://ntp.com/" as an isolated origin.
+// Helper class to run tests on a simulated 512MB low-end device.
 class SitePerProcessMemoryThresholdBrowserTest : public InProcessBrowserTest {
  public:
   SitePerProcessMemoryThresholdBrowserTest() = default;
@@ -197,15 +260,27 @@ class SitePerProcessMemoryThresholdBrowserTest : public InProcessBrowserTest {
     return false;
   }
 
+  void SetUpOnMainThread() override {
+    InProcessBrowserTest::SetUpOnMainThread();
+
+    // Initializing the expected embedder origins at runtime is required for
+    // GetWebstoreLaunchURL(), which needs to have a proper ExtensionsClient
+    // initialized.
+#if !defined(OS_ANDROID)
+    expected_embedder_origins_.push_back(
+        url::Origin::Create(GaiaUrls::GetInstance()->gaia_url()));
+#endif
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+    expected_embedder_origins_.push_back(
+        url::Origin::Create(extension_urls::GetWebstoreLaunchURL()));
+#endif
+  }
+
  protected:
   // These are the origins we expect to be returned by
-  // content::SiteIsolationPolicy::GetIsolatedOrigins() even if
+  // content::ChildProcessSecurityPolicy::GetIsolatedOrigins() even if
   // ContentBrowserClient::ShouldDisableSiteIsolation() returns true.
-  const std::vector<url::Origin> kExpectedEmbedderOrigins = {
-#if !defined(OS_ANDROID)
-    url::Origin::Create(GaiaUrls::GetInstance()->gaia_url())
-#endif
-  };
+  std::vector<url::Origin> expected_embedder_origins_;
 
 #if defined(OS_ANDROID)
   // On Android we don't expect any trial origins because the 512MB
@@ -355,14 +430,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
   isolated_origins_feature.InitAndEnableFeatureWithParameters(
       features::kIsolateOrigins, {{features::kIsolateOriginsFieldTrialParamName,
                                    trial_origin.Serialize()}});
+  SiteIsolationPolicy::ApplyGlobalIsolatedOrigins();
 
-  std::vector<url::Origin> isolated_origins =
-      content::SiteIsolationPolicy::GetIsolatedOrigins();
-  EXPECT_EQ(kExpectedTrialOrigins, isolated_origins.size());
+  auto* cpsp = content::ChildProcessSecurityPolicy::GetInstance();
+  std::vector<url::Origin> isolated_origins = cpsp->GetIsolatedOrigins();
+  EXPECT_EQ(expected_embedder_origins_.size(), isolated_origins.size());
 
   // Verify that the expected embedder origins are present even though site
   // isolation has been disabled and the trial origins should not be present.
-  EXPECT_THAT(kExpectedEmbedderOrigins,
+  EXPECT_THAT(expected_embedder_origins_,
               ::testing::IsSubsetOf(isolated_origins));
 
   // Verify that the trial origin is not present.
@@ -387,11 +463,12 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
   isolated_origins_feature.InitAndEnableFeatureWithParameters(
       features::kIsolateOrigins, {{features::kIsolateOriginsFieldTrialParamName,
                                    trial_origin.Serialize()}});
+  SiteIsolationPolicy::ApplyGlobalIsolatedOrigins();
 
-  std::vector<url::Origin> isolated_origins =
-      content::SiteIsolationPolicy::GetIsolatedOrigins();
-  EXPECT_EQ(1u + kExpectedEmbedderOrigins.size(), isolated_origins.size());
-  EXPECT_THAT(kExpectedEmbedderOrigins,
+  auto* cpsp = content::ChildProcessSecurityPolicy::GetInstance();
+  std::vector<url::Origin> isolated_origins = cpsp->GetIsolatedOrigins();
+  EXPECT_EQ(1u + expected_embedder_origins_.size(), isolated_origins.size());
+  EXPECT_THAT(expected_embedder_origins_,
               ::testing::IsSubsetOf(isolated_origins));
 
   // Verify that the trial origin is present.
@@ -408,12 +485,13 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
   isolated_origins_feature.InitAndEnableFeatureWithParameters(
       features::kIsolateOrigins, {{features::kIsolateOriginsFieldTrialParamName,
                                    trial_origin.Serialize()}});
+  SiteIsolationPolicy::ApplyGlobalIsolatedOrigins();
 
-  std::vector<url::Origin> isolated_origins =
-      content::SiteIsolationPolicy::GetIsolatedOrigins();
-  EXPECT_EQ(kExpectedTrialOrigins + kExpectedEmbedderOrigins.size(),
+  auto* cpsp = content::ChildProcessSecurityPolicy::GetInstance();
+  std::vector<url::Origin> isolated_origins = cpsp->GetIsolatedOrigins();
+  EXPECT_EQ(kExpectedTrialOrigins + expected_embedder_origins_.size(),
             isolated_origins.size());
-  EXPECT_THAT(kExpectedEmbedderOrigins,
+  EXPECT_THAT(expected_embedder_origins_,
               ::testing::IsSubsetOf(isolated_origins));
 
   if (kExpectedTrialOrigins > 0) {
@@ -423,106 +501,6 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
     EXPECT_THAT(isolated_origins,
                 ::testing::Not(::testing::Contains(trial_origin)));
   }
-}
-
-class PolicyHeaderServiceBrowserTest : public InProcessBrowserTest {
- public:
-  PolicyHeaderServiceBrowserTest() = default;
-
-  void SetUpOnMainThread() override {
-    embedded_test_server()->RegisterRequestHandler(
-        base::BindRepeating(&PolicyHeaderServiceBrowserTest::HandleTestRequest,
-                            base::Unretained(this)));
-    ASSERT_TRUE(embedded_test_server()->Start());
-
-    // Forge a dummy DMServer URL.
-    dm_url_ = embedded_test_server()->GetURL("/DeviceManagement");
-
-    // At this point, the Profile is already initialized and it's too
-    // late to set the DMServer URL via command line flags, so directly
-    // inject it to the PolicyHeaderService.
-    policy::PolicyHeaderService* policy_header_service =
-        policy::PolicyHeaderServiceFactory::GetForBrowserContext(
-            browser()->profile());
-    policy_header_service->SetServerURLForTest(dm_url_.spec());
-    policy_header_service->SetHeaderForTest(kTestPolicyHeader);
-  }
-
-  std::unique_ptr<net::test_server::HttpResponse> HandleTestRequest(
-      const net::test_server::HttpRequest& request) {
-    last_request_headers_ = request.headers;
-
-    if (base::StartsWith(request.relative_url, kServerRedirectUrl,
-                         base::CompareCase::SENSITIVE)) {
-      // Extract the target URL and redirect there.
-      size_t query_string_pos = request.relative_url.find('?');
-      std::string redirect_target =
-          request.relative_url.substr(query_string_pos + 1);
-
-      std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
-          new net::test_server::BasicHttpResponse);
-      http_response->set_code(net::HTTP_MOVED_PERMANENTLY);
-      http_response->AddCustomHeader("Location", redirect_target);
-      return std::move(http_response);
-    } else if (request.relative_url == "/") {
-      std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
-          new net::test_server::BasicHttpResponse);
-      http_response->set_code(net::HTTP_OK);
-      http_response->set_content("Success");
-      return std::move(http_response);
-    }
-    return nullptr;
-  }
-
-  const GURL& dm_url() const { return dm_url_; }
-
-  const net::test_server::HttpRequest::HeaderMap& last_request_headers() const {
-    return last_request_headers_;
-  }
-
- private:
-  // The dummy URL for DMServer.
-  GURL dm_url_;
-
-  // List of request headers received by the embedded server.
-  net::test_server::HttpRequest::HeaderMap last_request_headers_;
-
-  DISALLOW_COPY_AND_ASSIGN(PolicyHeaderServiceBrowserTest);
-};
-
-IN_PROC_BROWSER_TEST_F(PolicyHeaderServiceBrowserTest, NoPolicyHeader) {
-  // When fetching non-DMServer URLs, we should not add a policy header to the
-  // request.
-  DCHECK(!embedded_test_server()->base_url().spec().empty());
-  ui_test_utils::NavigateToURL(browser(), embedded_test_server()->base_url());
-  auto iter = last_request_headers().find(policy::kChromePolicyHeader);
-  EXPECT_EQ(iter, last_request_headers().end());
-}
-
-IN_PROC_BROWSER_TEST_F(PolicyHeaderServiceBrowserTest, PolicyHeader) {
-  // When fetching a DMServer URL, we should add a policy header to the
-  // request.
-  ui_test_utils::NavigateToURL(browser(), dm_url());
-
-  auto iter = last_request_headers().find(policy::kChromePolicyHeader);
-  ASSERT_NE(iter, last_request_headers().end());
-  EXPECT_EQ(iter->second, kTestPolicyHeader);
-}
-
-IN_PROC_BROWSER_TEST_F(PolicyHeaderServiceBrowserTest,
-                       PolicyHeaderForRedirect) {
-  // Build up a URL that results in a redirect to the DMServer URL to make
-  // sure the policy header is still added.
-  std::string redirect_url;
-  redirect_url += kServerRedirectUrl;
-  redirect_url += "?";
-  redirect_url += dm_url().spec();
-  ui_test_utils::NavigateToURL(browser(),
-                               embedded_test_server()->GetURL(redirect_url));
-
-  auto iter = last_request_headers().find(policy::kChromePolicyHeader);
-  ASSERT_NE(iter, last_request_headers().end());
-  EXPECT_EQ(iter->second, kTestPolicyHeader);
 }
 
 // Helper class to test window creation from NTP.
@@ -592,5 +570,249 @@ IN_PROC_BROWSER_TEST_F(OpenWindowFromNTPBrowserTest,
   EXPECT_FALSE(instant_service->IsInstantProcess(
       opened_tab->GetMainFrame()->GetProcess()->GetID()));
 }
+
+class PrefersColorSchemeTest : public testing::WithParamInterface<bool>,
+                               public InProcessBrowserTest {
+ protected:
+  PrefersColorSchemeTest() : theme_client_(&test_theme_) {}
+
+  ~PrefersColorSchemeTest() {
+    CHECK_EQ(&theme_client_, SetBrowserClientForTesting(original_client_));
+  }
+
+  const char* ExpectedColorScheme() const {
+    return GetParam() ? "dark" : "light";
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    InProcessBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
+                                    "MediaQueryPrefersColorScheme");
+  }
+
+  void SetUpOnMainThread() override {
+    InProcessBrowserTest::SetUpOnMainThread();
+    original_client_ = SetBrowserClientForTesting(&theme_client_);
+  }
+
+ protected:
+  ui::TestNativeTheme test_theme_;
+
+ private:
+  content::ContentBrowserClient* original_client_ = nullptr;
+
+  class ChromeContentBrowserClientWithWebTheme
+      : public ChromeContentBrowserClient {
+   public:
+    explicit ChromeContentBrowserClientWithWebTheme(
+        const ui::NativeTheme* theme)
+        : theme_(theme) {}
+
+   protected:
+    const ui::NativeTheme* GetWebTheme() const override { return theme_; }
+
+   private:
+    const ui::NativeTheme* const theme_;
+  };
+
+  ChromeContentBrowserClientWithWebTheme theme_client_;
+};
+
+IN_PROC_BROWSER_TEST_P(PrefersColorSchemeTest, PrefersColorScheme) {
+  test_theme_.SetDarkMode(GetParam());
+  browser()
+      ->tab_strip_model()
+      ->GetActiveWebContents()
+      ->GetRenderViewHost()
+      ->OnWebkitPreferencesChanged();
+  ui_test_utils::NavigateToURL(
+      browser(),
+      ui_test_utils::GetTestUrl(
+          base::FilePath(base::FilePath::kCurrentDirectory),
+          base::FilePath(FILE_PATH_LITERAL("prefers-color-scheme.html"))));
+  base::string16 tab_title;
+  ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(), &tab_title));
+  EXPECT_EQ(base::ASCIIToUTF16(ExpectedColorScheme()), tab_title);
+}
+
+IN_PROC_BROWSER_TEST_P(PrefersColorSchemeTest, FeatureOverridesChromeSchemes) {
+  test_theme_.SetDarkMode(true);
+
+  base::test::ScopedFeatureList features;
+  features.InitWithFeatureState(features::kWebUIDarkMode, GetParam());
+
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIDownloadsURL));
+
+  bool matches;
+  ASSERT_TRUE(ExecuteScriptAndExtractBool(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      base::StringPrintf("window.domAutomationController.send(window."
+                         "matchMedia('(prefers-color-scheme: %s)').matches)",
+                         ExpectedColorScheme()),
+      &matches));
+  EXPECT_TRUE(matches);
+}
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+IN_PROC_BROWSER_TEST_P(PrefersColorSchemeTest, FeatureOverridesPdfUI) {
+  test_theme_.SetDarkMode(true);
+
+  base::test::ScopedFeatureList features;
+  features.InitWithFeatureState(features::kWebUIDarkMode, GetParam());
+
+  std::string pdf_extension_url(extensions::kExtensionScheme);
+  pdf_extension_url.append(url::kStandardSchemeSeparator);
+  pdf_extension_url.append(extension_misc::kPdfExtensionId);
+  GURL pdf_index = GURL(pdf_extension_url).Resolve("/index.html");
+  ui_test_utils::NavigateToURL(browser(), pdf_index);
+
+  bool matches;
+  ASSERT_TRUE(ExecuteScriptAndExtractBool(
+      browser()->tab_strip_model()->GetActiveWebContents(),
+      base::StringPrintf("window.domAutomationController.send(window."
+                         "matchMedia('(prefers-color-scheme: %s)').matches)",
+                         ExpectedColorScheme()),
+      &matches));
+  EXPECT_TRUE(matches);
+}
+#endif
+
+INSTANTIATE_TEST_SUITE_P(All, PrefersColorSchemeTest, testing::Bool());
+
+#if !defined(OS_MACOSX)
+class ForcedColorsTest : public testing::WithParamInterface<bool>,
+                         public InProcessBrowserTest {
+ protected:
+  ForcedColorsTest() : theme_client_(&test_theme_) {}
+
+  ~ForcedColorsTest() {
+    CHECK_EQ(&theme_client_, SetBrowserClientForTesting(original_client_));
+  }
+
+  const char* ExpectedForcedColors() const {
+    return GetParam() ? "active" : "none";
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    InProcessBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
+                                    "ForcedColors");
+  }
+
+  void SetUpOnMainThread() override {
+    InProcessBrowserTest::SetUpOnMainThread();
+    original_client_ = SetBrowserClientForTesting(&theme_client_);
+  }
+
+ protected:
+  ui::TestNativeTheme test_theme_;
+
+ private:
+  content::ContentBrowserClient* original_client_ = nullptr;
+
+  class ChromeContentBrowserClientWithWebTheme
+      : public ChromeContentBrowserClient {
+   public:
+    explicit ChromeContentBrowserClientWithWebTheme(
+        const ui::NativeTheme* theme)
+        : theme_(theme) {}
+
+   protected:
+    const ui::NativeTheme* GetWebTheme() const override { return theme_; }
+
+   private:
+    const ui::NativeTheme* const theme_;
+  };
+
+  ChromeContentBrowserClientWithWebTheme theme_client_;
+};
+
+IN_PROC_BROWSER_TEST_P(ForcedColorsTest, ForcedColors) {
+  test_theme_.SetUsesHighContrastColors(GetParam());
+  browser()
+      ->tab_strip_model()
+      ->GetActiveWebContents()
+      ->GetRenderViewHost()
+      ->OnWebkitPreferencesChanged();
+  ui_test_utils::NavigateToURL(
+      browser(), ui_test_utils::GetTestUrl(
+                     base::FilePath(base::FilePath::kCurrentDirectory),
+                     base::FilePath(FILE_PATH_LITERAL("forced-colors.html"))));
+  base::string16 tab_title;
+  ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(), &tab_title));
+  EXPECT_EQ(base::ASCIIToUTF16(ExpectedForcedColors()), tab_title);
+}
+
+INSTANTIATE_TEST_SUITE_P(All, ForcedColorsTest, testing::Bool());
+#endif  // !defined(OS_MACOSX)
+
+class ProtocolHandlerTest : public InProcessBrowserTest {
+ public:
+  ProtocolHandlerTest() = default;
+
+  void SetUpOnMainThread() override {
+    InProcessBrowserTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+    ASSERT_TRUE(embedded_test_server()->Start());
+  }
+
+ protected:
+  void AddProtocolHandler(const std::string& scheme,
+                          const std::string& redirect_template) {
+    protocol_handler_registry()->OnAcceptRegisterProtocolHandler(
+        ProtocolHandler::CreateProtocolHandler(scheme,
+                                               GURL(redirect_template)));
+  }
+
+  ProtocolHandlerRegistry* protocol_handler_registry() {
+    return ProtocolHandlerRegistryFactory::GetInstance()->GetForBrowserContext(
+        browser()->profile());
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ProtocolHandlerTest);
+};
+
+IN_PROC_BROWSER_TEST_F(ProtocolHandlerTest, CustomHandler) {
+  AddProtocolHandler("abc", "https://abc.xyz/?url=%s");
+
+  ui_test_utils::NavigateToURL(browser(), GURL("abc:something"));
+
+  base::string16 expected_title = base::ASCIIToUTF16("abc.xyz");
+  content::TitleWatcher title_watcher(
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
+  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
+}
+
+// This is a regression test for crbug.com/969177.
+IN_PROC_BROWSER_TEST_F(ProtocolHandlerTest, HandlersIgnoredWhenDisabled) {
+  AddProtocolHandler("abc", "https://abc.xyz/?url=%s");
+  protocol_handler_registry()->Disable();
+
+  ui_test_utils::NavigateToURL(browser(), GURL("abc:something"));
+
+  base::string16 tab_title;
+  ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(), &tab_title));
+  EXPECT_EQ(base::ASCIIToUTF16("about:blank"), tab_title);
+}
+
+#if defined(OS_CHROMEOS)
+// Tests that if a protocol handler is registered for a scheme, an external
+// program (another Chrome tab in this case) is not launched to handle the
+// navigation. This is a regression test for crbug.com/963133.
+IN_PROC_BROWSER_TEST_F(ProtocolHandlerTest, ExternalProgramNotLaunched) {
+  ui_test_utils::NavigateToURL(browser(), GURL("mailto:bob@example.com"));
+
+  // If an external program (Chrome) was launched, it will result in a second
+  // tab being opened.
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
+
+  // Make sure the protocol handler redirected the navigation.
+  base::string16 expected_title = base::ASCIIToUTF16("mail.google.com");
+  content::TitleWatcher title_watcher(
+      browser()->tab_strip_model()->GetActiveWebContents(), expected_title);
+  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
+}
+#endif
 
 }  // namespace content

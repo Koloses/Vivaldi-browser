@@ -29,6 +29,7 @@
 #include "chrome/browser/safe_browsing/chrome_cleaner/mock_chrome_cleaner_controller_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/srt_client_info_win.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/srt_field_trial_win.h"
+#include "chrome/browser/safe_browsing/chrome_cleaner/sw_reporter_invocation_win.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_switches.h"
@@ -41,7 +42,6 @@
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
-#include "components/variations/variations_params_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -154,8 +154,8 @@ IN_PROC_BROWSER_TEST_P(ReporterRunnerPolicyTest, CheckComponent) {
   // component installed.  Otherwise it should be installed.
   std::vector<std::string> component_ids =
       g_browser_process->component_updater()->GetComponentIDs();
-  bool sw_component_registered = base::ContainsValue(
-      component_ids, component_updater::kSwReporterComponentId);
+  bool sw_component_registered =
+      base::Contains(component_ids, component_updater::kSwReporterComponentId);
   ASSERT_EQ(policy_ != ReporterRunnerPolicy::kDisabled,
             sw_component_registered);
 }
@@ -192,18 +192,16 @@ class ReporterRunnerTest
         GetParam();
   }
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    variations::testing::VariationParamsManager::AppendVariationParams(
-        kSRTPromptTrial, kSRTPromptGroup, {{"Seed", incoming_seed_}},
-        command_line);
-  }
-
   void SetUpInProcessBrowserTestFixture() override {
     SetSwReporterTestingDelegate(this);
     EXPECT_CALL(policy_provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
+
+    scoped_feature_list_.InitAndEnableFeatureWithParameters(
+        kChromeCleanupInBrowserPromptFeature,
+        {{"Seed", incoming_seed_}, {"Group", kSRTPromptGroup}});
 
     switch (policy_state_) {
       case PolicyState::kNoLogs:
@@ -501,14 +499,6 @@ class ReporterRunnerTest
                                   SwReporterInvocationResult result) {
     EXPECT_EQ(expected_result, result);
     std::move(closure).Run();
-  }
-
-  OnReporterSequenceDone ExpectResultOnSequenceDoneCallback(
-      SwReporterInvocationResult expected_result,
-      base::OnceClosure closure) {
-    return base::BindOnce(&ReporterRunnerTest::ExpectResultOnSequenceDone,
-                          base::Unretained(this), expected_result,
-                          base::Passed(&closure));
   }
 
   bool PromptDialogShouldBeShown(SwReporterInvocationType invocation_type) {

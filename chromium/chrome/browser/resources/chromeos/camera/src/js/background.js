@@ -26,7 +26,7 @@ cca.bg.MIN_WIDTH = 768;
  * @type {number}
  * @const
  */
-cca.bg.INITIAL_ASPECT_RATIO = 1.3333333333;
+cca.bg.INITIAL_ASPECT_RATIO = 1.7777777777;
 
 /**
  * Top bar color of the window.
@@ -34,6 +34,22 @@ cca.bg.INITIAL_ASPECT_RATIO = 1.3333333333;
  * @const
  */
 cca.bg.TOPBAR_COLOR = '#000000';
+
+/**
+ * Whether the main AppWindow is created. It's used in test to ensure that we
+ * won't connect to the main.html target before the window is created, otherwise
+ * the window might disappear.
+ * @type {boolean}
+ * @deprecated This flag would be removed after we migrate CCA Tast tests.
+ */
+cca.bg.appWindowCreated = false;
+
+/**
+ * It's used in test to ensure that we won't connect to the main.html target
+ * before the window is created, otherwise the window might disappear.
+ * @type {?function(): undefined}
+ */
+cca.bg.onAppWindowCreatedForTesting = null;
 
 /**
  * Creates the window. Note, that only one window at once is supported.
@@ -73,6 +89,10 @@ cca.bg.create = function() {
         chrome.storage.local.set({maximized: inAppWindow.isMaximized()});
         chrome.storage.local.set({fullscreen: inAppWindow.isFullscreen()});
       });
+      cca.bg.appWindowCreated = true;
+      if (cca.bg.onAppWindowCreatedForTesting !== null) {
+        cca.bg.onAppWindowCreatedForTesting();
+      }
     });
   });
 };

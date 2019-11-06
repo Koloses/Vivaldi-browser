@@ -12,15 +12,13 @@
 #include "base/command_line.h"
 #include "base/debug/crash_logging.h"
 #include "base/no_destructor.h"
-#include "components/services/heap_profiling/public/cpp/client.h"
+#include "components/services/heap_profiling/public/cpp/profiling_client.h"
 #include "components/version_info/version_info.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_manager_connection.h"
-#include "content/public/common/simple_connection_filter.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/config/gpu_util.h"
 #include "ipc/ipc_message.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -33,7 +31,7 @@ void AwContentClient::AddAdditionalSchemes(Schemes* schemes) {
   schemes->allow_non_standard_schemes_in_origins = true;
 }
 
-base::string16 AwContentClient::GetLocalizedString(int message_id) const {
+base::string16 AwContentClient::GetLocalizedString(int message_id) {
   // TODO(boliu): Used only by WebKit, so only bundle those resources for
   // Android WebView.
   return l10n_util::GetStringUTF16(message_id);
@@ -41,17 +39,20 @@ base::string16 AwContentClient::GetLocalizedString(int message_id) const {
 
 base::StringPiece AwContentClient::GetDataResource(
     int resource_id,
-    ui::ScaleFactor scale_factor) const {
+    ui::ScaleFactor scale_factor) {
   // TODO(boliu): Used only by WebKit, so only bundle those resources for
   // Android WebView.
   return ui::ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
       resource_id, scale_factor);
 }
 
-base::RefCountedMemory* AwContentClient::GetDataResourceBytes(
-    int resource_id) const {
+base::RefCountedMemory* AwContentClient::GetDataResourceBytes(int resource_id) {
   return ui::ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
       resource_id);
+}
+
+bool AwContentClient::IsDataResourceGzipped(int resource_id) {
+  return ui::ResourceBundle::GetSharedInstance().IsGzipped(resource_id);
 }
 
 bool AwContentClient::CanSendWhileSwappedOut(const IPC::Message* message) {
@@ -80,19 +81,18 @@ media::MediaDrmBridgeClient* AwContentClient::GetMediaDrmBridgeClient() {
       AwResource::GetConfigKeySystemUuidMapping());
 }
 
-void AwContentClient::OnServiceManagerConnected(
-    content::ServiceManagerConnection* connection) {
-  // This creates a process-wide HeapProfiling::Client that listens for requests
-  // from the HeapProfilingService to start profiling the current process.
-  static base::NoDestructor<heap_profiling::Client> profiling_client;
-
-  std::unique_ptr<service_manager::BinderRegistry> registry(
-      new service_manager::BinderRegistry);
-  registry->AddInterface(
-      base::BindRepeating(&heap_profiling::Client::BindToInterface,
-                          base::Unretained(profiling_client.get())));
-  connection->AddConnectionFilter(
-      std::make_unique<content::SimpleConnectionFilter>(std::move(registry)));
+void AwContentClient::BindChildProcessInterface(
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle* receiving_handle) {
+  // This creates a process-wide heap_profiling::ProfilingClient that listens
+  // for requests from the HeapProfilingService to start profiling the current
+  // process.
+  static base::NoDestructor<heap_profiling::ProfilingClient> profiling_client;
+  if (interface_name == heap_profiling::ProfilingClient::Name_) {
+    profiling_client->BindToInterface(
+        mojo::PendingReceiver<heap_profiling::mojom::ProfilingClient>(
+            std::move(*receiving_handle)));
+  }
 }
 
 }  // namespace android_webview

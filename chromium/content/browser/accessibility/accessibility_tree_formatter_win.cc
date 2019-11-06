@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/accessibility/accessibility_tree_formatter.h"
+#include "content/browser/accessibility/accessibility_tree_formatter_base.h"
 
 #include <math.h>
 #include <oleacc.h>
@@ -37,7 +37,7 @@
 
 namespace content {
 
-class AccessibilityTreeFormatterWin : public AccessibilityTreeFormatter {
+class AccessibilityTreeFormatterWin : public AccessibilityTreeFormatterBase {
  public:
   AccessibilityTreeFormatterWin();
   ~AccessibilityTreeFormatterWin() override;
@@ -55,7 +55,7 @@ class AccessibilityTreeFormatterWin : public AccessibilityTreeFormatter {
       LONG window_x = 0,
       LONG window_y = 0);
 
-  void SetUpCommandLineForTestPass(base::CommandLine* command_line) override;
+  static void SetUpCommandLineForTestPass(base::CommandLine* command_line);
   void AddDefaultFilters(
       std::vector<PropertyFilter>* property_filters) override;
 
@@ -108,21 +108,22 @@ AccessibilityTreeFormatter::Create() {
 }
 
 // static
-std::vector<AccessibilityTreeFormatter::FormatterFactory>
+std::vector<AccessibilityTreeFormatter::TestPass>
 AccessibilityTreeFormatter::GetTestPasses() {
   // In addition to the 'Blink' pass, Windows includes two accessibility APIs
   // that need to be tested independently (MSAA & UIA).
   return {
-      &AccessibilityTreeFormatterBlink::CreateBlink,
-      &AccessibilityTreeFormatter::Create,
-      &AccessibilityTreeFormatterUia::CreateUia,
+      {"blink", &AccessibilityTreeFormatterBlink::CreateBlink, nullptr},
+      {"win", &AccessibilityTreeFormatter::Create,
+       &AccessibilityTreeFormatterWin::SetUpCommandLineForTestPass},
+      {"uia", &AccessibilityTreeFormatterUia::CreateUia,
+       &AccessibilityTreeFormatterUia::SetUpCommandLineForTestPass},
   };
 }
 
 void AccessibilityTreeFormatterWin::SetUpCommandLineForTestPass(
     base::CommandLine* command_line) {
-  base::CommandLine::ForCurrentProcess()->RemoveSwitch(
-      ::switches::kEnableExperimentalUIAutomation);
+  command_line->RemoveSwitch(::switches::kEnableExperimentalUIAutomation);
 }
 
 void AccessibilityTreeFormatterWin::AddDefaultFilters(
@@ -276,11 +277,14 @@ std::unique_ptr<base::DictionaryValue>
 AccessibilityTreeFormatterWin::BuildAccessibilityTree(
     BrowserAccessibility* start_node) {
   DCHECK(start_node);
+  DCHECK(start_node->instance_active());
+  BrowserAccessibilityManager* root_manager =
+      start_node->manager()->GetRootManager();
+  DCHECK(root_manager);
 
   base::win::ScopedVariant variant_self(CHILDID_SELF);
   LONG root_x, root_y, root_width, root_height;
-  BrowserAccessibility* root =
-      start_node->manager()->GetRootManager()->GetRoot();
+  BrowserAccessibility* root = root_manager->GetRoot();
   HRESULT hr = ToBrowserAccessibilityWin(root)->GetCOM()->accLocation(
       &root_x, &root_y, &root_width, &root_height, variant_self);
   DCHECK(SUCCEEDED(hr));
@@ -991,11 +995,11 @@ base::string16 AccessibilityTreeFormatterWin::ProcessTreeForOutput(
         bool did_pass_filters = false;
         if (strcmp(attribute_name, "size") == 0) {
           did_pass_filters = WriteAttribute(
-              false, FormatCoordinates("size", "width", "height", *dict_value),
+              false, FormatCoordinates(*dict_value, "size", "width", "height"),
               &line);
         } else if (strcmp(attribute_name, "location") == 0) {
           did_pass_filters = WriteAttribute(
-              false, FormatCoordinates("location", "x", "y", *dict_value),
+              false, FormatCoordinates(*dict_value, "location", "x", "y"),
               &line);
         }
         if (filtered_dict_result && did_pass_filters)

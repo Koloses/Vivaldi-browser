@@ -1,0 +1,1011 @@
+cc = clang
+cxx = clang++
+ar = ar
+ld = clang++
+
+rule regen
+  command = /usr/bin/python /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/build/gen.py
+  description = Regenerating ninja files
+
+build build.ninja: regen
+  generator = 1
+  depfile = build.ninja.d
+rule cc
+  command = $cc -MMD -MF $out.d $defines $includes $cflags $cflags_c -c $in -o $out
+  description = CC $out
+  depfile = $out.d
+  deps = gcc
+
+rule cxx
+  command = $cxx -MMD -MF $out.d $defines $includes $cflags $cflags_cc -c $in -o $out
+  description = CXX $out
+  depfile = $out.d
+  deps = gcc
+
+rule alink_thin
+  command = rm -f $out && $ar rcsT $out $in
+  description = AR $out
+
+rule link
+  command = $ld $ldflags -o $out -Wl,--start-group $in $libs -Wl,--end-group $solibs
+  description = LINK $out
+build base/callback_internal.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/callback_internal.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/command_line.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/command_line.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/environment.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/environment.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/file.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/file.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/file_enumerator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/file_enumerator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/file_path.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/file_path.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/file_path_constants.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/file_path_constants.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/file_util.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/file_util.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/scoped_file.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/scoped_file.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/scoped_temp_dir.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/scoped_temp_dir.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/json/json_parser.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/json/json_parser.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/json/json_reader.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/json/json_reader.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/json/json_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/json/json_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/json/string_escape.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/json/string_escape.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/logging.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/logging.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/md5.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/md5.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/memory/ref_counted.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/memory/ref_counted.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/memory/weak_ptr.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/memory/weak_ptr.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/sha1.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/sha1.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/strings/string_number_conversions.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/strings/string_number_conversions.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/strings/string_piece.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/strings/string_piece.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/strings/string_split.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/strings/string_split.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/strings/string_util.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/strings/string_util.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/strings/string_util_constants.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/strings/string_util_constants.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/strings/stringprintf.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/strings/stringprintf.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/strings/utf_string_conversion_utils.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/strings/utf_string_conversion_utils.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/strings/utf_string_conversions.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/strings/utf_string_conversions.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/third_party/icu/icu_utf.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/third_party/icu/icu_utf.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/timer/elapsed_timer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/timer/elapsed_timer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/value_iterators.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/value_iterators.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/values.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/values.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/file_enumerator_posix.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/file_enumerator_posix.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/file_posix.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/file_posix.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/files/file_util_posix.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/files/file_util_posix.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/posix/file_descriptor_shuffle.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/posix/file_descriptor_shuffle.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/posix/safe_strerror.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/posix/safe_strerror.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base/strings/string16.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/base/strings/string16.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build base.a: alink_thin base/callback_internal.o base/command_line.o base/environment.o base/files/file.o base/files/file_enumerator.o base/files/file_path.o base/files/file_path_constants.o base/files/file_util.o base/files/scoped_file.o base/files/scoped_temp_dir.o base/json/json_parser.o base/json/json_reader.o base/json/json_writer.o base/json/string_escape.o base/logging.o base/md5.o base/memory/ref_counted.o base/memory/weak_ptr.o base/sha1.o base/strings/string_number_conversions.o base/strings/string_piece.o base/strings/string_split.o base/strings/string_util.o base/strings/string_util_constants.o base/strings/stringprintf.o base/strings/utf_string_conversion_utils.o base/strings/utf_string_conversions.o base/third_party/icu/icu_utf.o base/timer/elapsed_timer.o base/value_iterators.o base/values.o base/files/file_enumerator_posix.o base/files/file_posix.o base/files/file_util_posix.o base/posix/file_descriptor_shuffle.o base/posix/safe_strerror.o base/strings/string16.o
+  libflags = 
+build tools/gn/action_target_generator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/action_target_generator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/action_values.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/action_values.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/analyzer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/analyzer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/args.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/args.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/binary_target_generator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/binary_target_generator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/builder.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/builder.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/builder_record.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/builder_record.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/build_settings.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/build_settings.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/bundle_data.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/bundle_data.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/bundle_data_target_generator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/bundle_data_target_generator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/bundle_file_rule.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/bundle_file_rule.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/c_include_iterator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/c_include_iterator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_analyze.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_analyze.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_args.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_args.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_check.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_check.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_clean.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_clean.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_desc.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_desc.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_format.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_format.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_gen.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_gen.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_help.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_help.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_meta.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_meta.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_ls.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_ls.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_path.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_path.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_refs.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_refs.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/commands.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/commands.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/compile_commands_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/compile_commands_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/config.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/config.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/config_values.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/config_values.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/config_values_extractors.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/config_values_extractors.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/config_values_generator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/config_values_generator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/copy_target_generator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/copy_target_generator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/create_bundle_target_generator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/create_bundle_target_generator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/deps_iterator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/deps_iterator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/desc_builder.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/desc_builder.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/eclipse_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/eclipse_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/err.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/err.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/escape.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/escape.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/exec_process.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/exec_process.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/filesystem_utils.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/filesystem_utils.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_exec_script.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_exec_script.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_foreach.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_foreach.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_forward_variables_from.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_forward_variables_from.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_get_label_info.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_get_label_info.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_get_path_info.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_get_path_info.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_get_target_outputs.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_get_target_outputs.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_process_file_template.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_process_file_template.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_read_file.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_read_file.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_rebase_path.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_rebase_path.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/functions.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/functions.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_set_defaults.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_set_defaults.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_set_default_toolchain.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_set_default_toolchain.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/functions_target.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/functions_target.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_template.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_template.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_toolchain.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_toolchain.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_write_file.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_write_file.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/generated_file_target_generator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/generated_file_target_generator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/group_target_generator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/group_target_generator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/header_checker.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/header_checker.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/import_manager.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/import_manager.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/inherited_libraries.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/inherited_libraries.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/input_conversion.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/input_conversion.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/input_file.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/input_file.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/input_file_manager.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/input_file_manager.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/item.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/item.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/json_project_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/json_project_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/label.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/label.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/label_pattern.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/label_pattern.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/lib_file.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/lib_file.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/loader.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/loader.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/location.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/location.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/metadata.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/metadata.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/metadata_walk.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/metadata_walk.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_action_target_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_action_target_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_binary_target_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_binary_target_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_build_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_build_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_bundle_data_target_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_bundle_data_target_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_copy_target_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_copy_target_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_create_bundle_target_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_create_bundle_target_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_generated_file_target_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_generated_file_target_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_group_target_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_group_target_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_target_command_util.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_target_command_util.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_target_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_target_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_toolchain_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_toolchain_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_utils.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_utils.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/operators.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/operators.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/output_conversion.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/output_conversion.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/output_file.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/output_file.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/parse_node_value_adapter.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/parse_node_value_adapter.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/parser.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/parser.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/parse_tree.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/parse_tree.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/path_output.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/path_output.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/pattern.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/pattern.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/pool.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/pool.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/qt_creator_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/qt_creator_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/runtime_deps.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/runtime_deps.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/scheduler.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/scheduler.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/scope.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/scope.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/scope_per_file_provider.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/scope_per_file_provider.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/settings.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/settings.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/setup.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/setup.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/source_dir.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/source_dir.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/source_file.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/source_file.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/source_file_type.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/source_file_type.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/standard_out.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/standard_out.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/string_utils.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/string_utils.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/substitution_list.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/substitution_list.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/substitution_pattern.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/substitution_pattern.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/substitution_type.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/substitution_type.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/substitution_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/substitution_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/switches.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/switches.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/target.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/target.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/target_generator.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/target_generator.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/template.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/template.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/token.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/token.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/tokenizer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/tokenizer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/tool.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/tool.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/toolchain.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/toolchain.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/trace.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/trace.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/value.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/value.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/value_extractors.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/value_extractors.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/variables.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/variables.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/visibility.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/visibility.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/visual_studio_utils.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/visual_studio_utils.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/visual_studio_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/visual_studio_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/xcode_object.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/xcode_object.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/xcode_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/xcode_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/xml_element_writer.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/xml_element_writer.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build util/exe_path.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/util/exe_path.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build util/msg_loop.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/util/msg_loop.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build util/semaphore.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/util/semaphore.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build util/sys_info.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/util/sys_info.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build util/ticks.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/util/ticks.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build util/worker_pool.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/util/worker_pool.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build gn_lib.a: alink_thin tools/gn/action_target_generator.o tools/gn/action_values.o tools/gn/analyzer.o tools/gn/args.o tools/gn/binary_target_generator.o tools/gn/builder.o tools/gn/builder_record.o tools/gn/build_settings.o tools/gn/bundle_data.o tools/gn/bundle_data_target_generator.o tools/gn/bundle_file_rule.o tools/gn/c_include_iterator.o tools/gn/command_analyze.o tools/gn/command_args.o tools/gn/command_check.o tools/gn/command_clean.o tools/gn/command_desc.o tools/gn/command_format.o tools/gn/command_gen.o tools/gn/command_help.o tools/gn/command_meta.o tools/gn/command_ls.o tools/gn/command_path.o tools/gn/command_refs.o tools/gn/commands.o tools/gn/compile_commands_writer.o tools/gn/config.o tools/gn/config_values.o tools/gn/config_values_extractors.o tools/gn/config_values_generator.o tools/gn/copy_target_generator.o tools/gn/create_bundle_target_generator.o tools/gn/deps_iterator.o tools/gn/desc_builder.o tools/gn/eclipse_writer.o tools/gn/err.o tools/gn/escape.o tools/gn/exec_process.o tools/gn/filesystem_utils.o tools/gn/function_exec_script.o tools/gn/function_foreach.o tools/gn/function_forward_variables_from.o tools/gn/function_get_label_info.o tools/gn/function_get_path_info.o tools/gn/function_get_target_outputs.o tools/gn/function_process_file_template.o tools/gn/function_read_file.o tools/gn/function_rebase_path.o tools/gn/functions.o tools/gn/function_set_defaults.o tools/gn/function_set_default_toolchain.o tools/gn/functions_target.o tools/gn/function_template.o tools/gn/function_toolchain.o tools/gn/function_write_file.o tools/gn/generated_file_target_generator.o tools/gn/group_target_generator.o tools/gn/header_checker.o tools/gn/import_manager.o tools/gn/inherited_libraries.o tools/gn/input_conversion.o tools/gn/input_file.o tools/gn/input_file_manager.o tools/gn/item.o tools/gn/json_project_writer.o tools/gn/label.o tools/gn/label_pattern.o tools/gn/lib_file.o tools/gn/loader.o tools/gn/location.o tools/gn/metadata.o tools/gn/metadata_walk.o tools/gn/ninja_action_target_writer.o tools/gn/ninja_binary_target_writer.o tools/gn/ninja_build_writer.o tools/gn/ninja_bundle_data_target_writer.o tools/gn/ninja_copy_target_writer.o tools/gn/ninja_create_bundle_target_writer.o tools/gn/ninja_generated_file_target_writer.o tools/gn/ninja_group_target_writer.o tools/gn/ninja_target_command_util.o tools/gn/ninja_target_writer.o tools/gn/ninja_toolchain_writer.o tools/gn/ninja_utils.o tools/gn/ninja_writer.o tools/gn/operators.o tools/gn/output_conversion.o tools/gn/output_file.o tools/gn/parse_node_value_adapter.o tools/gn/parser.o tools/gn/parse_tree.o tools/gn/path_output.o tools/gn/pattern.o tools/gn/pool.o tools/gn/qt_creator_writer.o tools/gn/runtime_deps.o tools/gn/scheduler.o tools/gn/scope.o tools/gn/scope_per_file_provider.o tools/gn/settings.o tools/gn/setup.o tools/gn/source_dir.o tools/gn/source_file.o tools/gn/source_file_type.o tools/gn/standard_out.o tools/gn/string_utils.o tools/gn/substitution_list.o tools/gn/substitution_pattern.o tools/gn/substitution_type.o tools/gn/substitution_writer.o tools/gn/switches.o tools/gn/target.o tools/gn/target_generator.o tools/gn/template.o tools/gn/token.o tools/gn/tokenizer.o tools/gn/tool.o tools/gn/toolchain.o tools/gn/trace.o tools/gn/value.o tools/gn/value_extractors.o tools/gn/variables.o tools/gn/visibility.o tools/gn/visual_studio_utils.o tools/gn/visual_studio_writer.o tools/gn/xcode_object.o tools/gn/xcode_writer.o tools/gn/xml_element_writer.o util/exe_path.o util/msg_loop.o util/semaphore.o util/sys_info.o util/ticks.o util/worker_pool.o
+  libflags = 
+build tools/gn/gn_main.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/gn_main.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build gn: link tools/gn/gn_main.o | base.a gn_lib.a
+  ldflags = -O3 -fdata-sections -ffunction-sections -Wl,--gc-sections -Wl,-strip-all -static-libstdc++ -Wl,--as-needed -pthread
+  solibs = -ldl
+  libs = base.a gn_lib.a
+build tools/gn/action_target_generator_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/action_target_generator_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/analyzer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/analyzer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/args_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/args_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/builder_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/builder_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/c_include_iterator_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/c_include_iterator_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/command_format_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/command_format_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/compile_commands_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/compile_commands_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/config_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/config_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/config_values_extractors_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/config_values_extractors_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/escape_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/escape_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/exec_process_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/exec_process_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/filesystem_utils_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/filesystem_utils_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_foreach_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_foreach_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_forward_variables_from_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_forward_variables_from_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_get_label_info_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_get_label_info_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_get_path_info_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_get_path_info_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_get_target_outputs_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_get_target_outputs_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_process_file_template_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_process_file_template_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_rebase_path_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_rebase_path_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_template_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_template_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_toolchain_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_toolchain_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/function_write_file_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/function_write_file_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/functions_target_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/functions_target_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/functions_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/functions_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/header_checker_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/header_checker_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/inherited_libraries_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/inherited_libraries_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/input_conversion_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/input_conversion_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/label_pattern_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/label_pattern_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/label_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/label_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/loader_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/loader_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/metadata_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/metadata_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/metadata_walk_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/metadata_walk_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_action_target_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_action_target_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_binary_target_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_binary_target_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_build_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_build_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_bundle_data_target_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_bundle_data_target_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_copy_target_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_copy_target_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_create_bundle_target_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_create_bundle_target_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_generated_file_target_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_generated_file_target_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_group_target_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_group_target_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_target_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_target_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/ninja_toolchain_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/ninja_toolchain_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/operators_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/operators_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/output_conversion_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/output_conversion_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/parse_tree_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/parse_tree_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/parser_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/parser_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/path_output_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/path_output_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/pattern_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/pattern_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/runtime_deps_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/runtime_deps_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/scope_per_file_provider_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/scope_per_file_provider_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/scope_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/scope_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/setup_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/setup_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/source_dir_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/source_dir_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/source_file_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/source_file_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/string_utils_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/string_utils_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/substitution_pattern_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/substitution_pattern_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/substitution_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/substitution_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/target_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/target_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/template_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/template_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/test_with_scheduler.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/test_with_scheduler.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/test_with_scope.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/test_with_scope.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/tokenizer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/tokenizer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/unique_vector_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/unique_vector_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/value_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/value_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/visibility_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/visibility_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/visual_studio_utils_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/visual_studio_utils_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/visual_studio_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/visual_studio_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/xcode_object_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/xcode_object_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build tools/gn/xml_element_writer_unittest.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/tools/gn/xml_element_writer_unittest.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build util/test/gn_test.o: cxx /home/server/vivaldi/Vivaldi-browser/thirdparty/gn/util/test/gn_test.cc
+  includes = -I/home/server/vivaldi/Vivaldi-browser/thirdparty/gn -I/home/server/vivaldi/Vivaldi-browser/outgn/bootstrap_Release
+  cflags = -DNDEBUG -O3 -fdata-sections -ffunction-sections -D_FILE_OFFSET_BITS=64 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -pthread -pipe -fno-exceptions -fno-rtti -fdiagnostics-color
+  cflags_cc = -std=c++14 -Wno-c++11-narrowing
+build gn_unittests: link tools/gn/action_target_generator_unittest.o tools/gn/analyzer_unittest.o tools/gn/args_unittest.o tools/gn/builder_unittest.o tools/gn/c_include_iterator_unittest.o tools/gn/command_format_unittest.o tools/gn/compile_commands_writer_unittest.o tools/gn/config_unittest.o tools/gn/config_values_extractors_unittest.o tools/gn/escape_unittest.o tools/gn/exec_process_unittest.o tools/gn/filesystem_utils_unittest.o tools/gn/function_foreach_unittest.o tools/gn/function_forward_variables_from_unittest.o tools/gn/function_get_label_info_unittest.o tools/gn/function_get_path_info_unittest.o tools/gn/function_get_target_outputs_unittest.o tools/gn/function_process_file_template_unittest.o tools/gn/function_rebase_path_unittest.o tools/gn/function_template_unittest.o tools/gn/function_toolchain_unittest.o tools/gn/function_write_file_unittest.o tools/gn/functions_target_unittest.o tools/gn/functions_unittest.o tools/gn/header_checker_unittest.o tools/gn/inherited_libraries_unittest.o tools/gn/input_conversion_unittest.o tools/gn/label_pattern_unittest.o tools/gn/label_unittest.o tools/gn/loader_unittest.o tools/gn/metadata_unittest.o tools/gn/metadata_walk_unittest.o tools/gn/ninja_action_target_writer_unittest.o tools/gn/ninja_binary_target_writer_unittest.o tools/gn/ninja_build_writer_unittest.o tools/gn/ninja_bundle_data_target_writer_unittest.o tools/gn/ninja_copy_target_writer_unittest.o tools/gn/ninja_create_bundle_target_writer_unittest.o tools/gn/ninja_generated_file_target_writer_unittest.o tools/gn/ninja_group_target_writer_unittest.o tools/gn/ninja_target_writer_unittest.o tools/gn/ninja_toolchain_writer_unittest.o tools/gn/operators_unittest.o tools/gn/output_conversion_unittest.o tools/gn/parse_tree_unittest.o tools/gn/parser_unittest.o tools/gn/path_output_unittest.o tools/gn/pattern_unittest.o tools/gn/runtime_deps_unittest.o tools/gn/scope_per_file_provider_unittest.o tools/gn/scope_unittest.o tools/gn/setup_unittest.o tools/gn/source_dir_unittest.o tools/gn/source_file_unittest.o tools/gn/string_utils_unittest.o tools/gn/substitution_pattern_unittest.o tools/gn/substitution_writer_unittest.o tools/gn/target_unittest.o tools/gn/template_unittest.o tools/gn/test_with_scheduler.o tools/gn/test_with_scope.o tools/gn/tokenizer_unittest.o tools/gn/unique_vector_unittest.o tools/gn/value_unittest.o tools/gn/visibility_unittest.o tools/gn/visual_studio_utils_unittest.o tools/gn/visual_studio_writer_unittest.o tools/gn/xcode_object_unittest.o tools/gn/xml_element_writer_unittest.o util/test/gn_test.o | base.a gn_lib.a
+  ldflags = -O3 -fdata-sections -ffunction-sections -Wl,--gc-sections -Wl,-strip-all -static-libstdc++ -Wl,--as-needed -pthread
+  solibs = -ldl
+  libs = base.a gn_lib.a

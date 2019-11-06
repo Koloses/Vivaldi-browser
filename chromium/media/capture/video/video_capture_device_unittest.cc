@@ -47,8 +47,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/fake_power_manager_client.h"
+#include "chromeos/dbus/power/power_manager_client.h"
 #include "media/capture/video/chromeos/camera_buffer_factory.h"
 #include "media/capture/video/chromeos/camera_hal_dispatcher_impl.h"
 #include "media/capture/video/chromeos/local_gpu_memory_buffer_manager.h"
@@ -63,12 +62,9 @@
   DISABLED_UsingRealWebcam_AllocateBadSize
 // We will always get YUYV from the Mac AVFoundation implementations.
 #define MAYBE_UsingRealWebcam_CaptureMjpeg DISABLED_UsingRealWebcam_CaptureMjpeg
-// TODO(crbug.com/923874).
-#define MAYBE_UsingRealWebcam_TakePhoto DISABLED_UsingRealWebcam_TakePhoto
-  // TODO(crbug.com/923874).
-#define MAYBE_UsingRealWebcam_GetPhotoState DISABLED_UsingRealWebcam_GetPhotoState
-  // TODO(crbug.com/923874).
-#define MAYBE_UsingRealWebcam_CaptureWithSize DISABLED_UsingRealWebcam_CaptureWithSize
+#define MAYBE_UsingRealWebcam_TakePhoto UsingRealWebcam_TakePhoto
+#define MAYBE_UsingRealWebcam_GetPhotoState UsingRealWebcam_GetPhotoState
+#define MAYBE_UsingRealWebcam_CaptureWithSize UsingRealWebcam_CaptureWithSize
 #define MAYBE_UsingRealWebcam_CheckPhotoCallbackRelease \
   UsingRealWebcam_CheckPhotoCallbackRelease
 #elif defined(OS_WIN)
@@ -85,7 +81,9 @@
   DISABLED_UsingRealWebcam_CheckPhotoCallbackRelease
 #elif defined(OS_ANDROID)
 #define MAYBE_UsingRealWebcam_AllocateBadSize UsingRealWebcam_AllocateBadSize
-#define MAYBE_UsingRealWebcam_CaptureMjpeg UsingRealWebcam_CaptureMjpeg
+// This format is not returned by VideoCaptureDeviceFactoryAndroid's
+// GetSupportedFormats
+#define MAYBE_UsingRealWebcam_CaptureMjpeg DISABLED_UsingRealWebcam_CaptureMjpeg
 #define MAYBE_UsingRealWebcam_TakePhoto UsingRealWebcam_TakePhoto
 #define MAYBE_UsingRealWebcam_GetPhotoState UsingRealWebcam_GetPhotoState
 #define MAYBE_UsingRealWebcam_CaptureWithSize UsingRealWebcam_CaptureWithSize
@@ -262,15 +260,15 @@ class VideoCaptureDeviceTest
 #if defined(OS_CHROMEOS)
     local_gpu_memory_buffer_manager_ =
         std::make_unique<LocalGpuMemoryBufferManager>();
-    dbus_setter_ = chromeos::DBusThreadManager::GetSetterForTesting();
     VideoCaptureDeviceFactoryChromeOS::SetGpuBufferManager(
         local_gpu_memory_buffer_manager_.get());
-    if (!CameraHalDispatcherImpl::GetInstance()->IsStarted()) {
+    if (media::ShouldUseCrosCameraService() &&
+        !CameraHalDispatcherImpl::GetInstance()->IsStarted()) {
       CameraHalDispatcherImpl::GetInstance()->Start(
           base::DoNothing::Repeatedly<
-              media::mojom::JpegDecodeAcceleratorRequest>(),
+              chromeos_camera::mojom::MjpegDecodeAcceleratorRequest>(),
           base::DoNothing::Repeatedly<
-              media::mojom::JpegEncodeAcceleratorRequest>());
+              chromeos_camera::mojom::JpegEncodeAcceleratorRequest>());
     }
 #endif
     video_capture_device_factory_ =
@@ -279,7 +277,7 @@ class VideoCaptureDeviceTest
 
   void SetUp() override {
 #if defined(OS_CHROMEOS)
-    chromeos::PowerManagerClient::Initialize();
+    chromeos::PowerManagerClient::InitializeFake();
 #endif
 #if defined(OS_ANDROID)
     static_cast<VideoCaptureDeviceFactoryAndroid*>(
@@ -305,17 +303,18 @@ class VideoCaptureDeviceTest
 #endif
 
   std::unique_ptr<MockVideoCaptureDeviceClient> CreateDeviceClient() {
-    auto result = std::make_unique<MockVideoCaptureDeviceClient>();
+    auto result = std::make_unique<NiceMockVideoCaptureDeviceClient>();
     ON_CALL(*result, OnError(_, _, _)).WillByDefault(Invoke(DumpError));
     EXPECT_CALL(*result, ReserveOutputBuffer(_, _, _, _)).Times(0);
     EXPECT_CALL(*result, DoOnIncomingCapturedBuffer(_, _, _, _)).Times(0);
-    EXPECT_CALL(*result, DoOnIncomingCapturedBufferExt(_, _, _, _, _, _))
+    EXPECT_CALL(*result, DoOnIncomingCapturedBufferExt(_, _, _, _, _, _, _))
         .Times(0);
-    ON_CALL(*result, OnIncomingCapturedData(_, _, _, _, _, _, _))
+    ON_CALL(*result, OnIncomingCapturedData(_, _, _, _, _, _, _, _, _))
         .WillByDefault(
             Invoke([this](const uint8_t* data, int length,
-                          const media::VideoCaptureFormat& frame_format, int,
-                          base::TimeTicks, base::TimeDelta, int) {
+                          const media::VideoCaptureFormat& frame_format,
+                          const gfx::ColorSpace&, int, bool, base::TimeTicks,
+                          base::TimeDelta, int) {
               ASSERT_GT(length, 0);
               ASSERT_TRUE(data);
               main_thread_task_runner_->PostTask(
@@ -341,7 +340,7 @@ class VideoCaptureDeviceTest
   void OnFrameCaptured(const VideoCaptureFormat& format) {
     last_format_ = format;
     if (run_loop_)
-      run_loop_->QuitClosure().Run();
+      run_loop_->Quit();
   }
 
   void WaitForCapturedFrame() {
@@ -472,7 +471,6 @@ class VideoCaptureDeviceTest
   VideoCaptureFormat last_format_;
 #if defined(OS_CHROMEOS)
   std::unique_ptr<LocalGpuMemoryBufferManager> local_gpu_memory_buffer_manager_;
-  std::unique_ptr<chromeos::DBusThreadManagerSetter> dbus_setter_;
 #endif
   std::unique_ptr<VideoCaptureDeviceFactory> video_capture_device_factory_;
 };
@@ -680,7 +678,7 @@ void VideoCaptureDeviceTest::RunCaptureMjpegTestCase() {
 
 #if defined(OS_WIN)
   base::win::Version version = base::win::GetVersion();
-  if (version >= base::win::VERSION_WIN10) {
+  if (version >= base::win::Version::WIN10) {
     VLOG(1) << "Skipped on Win10: http://crbug.com/570604, current: "
             << static_cast<int>(version);
     return;

@@ -92,9 +92,13 @@ void StartupAppLauncher::ContinueWithNetworkReady() {
 }
 
 void StartupAppLauncher::RestartLauncher() {
-  // Do not allow restarts after the launcher finishes kiosk apps installation.
-  if (ready_to_launch_)
+  // Do not allow restarts after the launcher finishes kiosk apps installation -
+  // notify the delegate that kiosk app is ready to launch, in case the launch
+  // was delayed, for example by network config dialog.
+  if (ready_to_launch_) {
+    delegate_->OnReadyToLaunch();
     return;
+  }
 
   // If the installer is still running in the background, we don't need to
   // restart the launch process. We will just wait until it completes and
@@ -423,9 +427,11 @@ void StartupAppLauncher::LaunchApp() {
   SYSLOG(INFO) << "Attempt to launch app.";
 
   // Always open the app in a window.
-  OpenApplication(AppLaunchParams(
-      profile_, extension, extensions::LAUNCH_CONTAINER_WINDOW,
-      WindowOpenDisposition::NEW_WINDOW, extensions::SOURCE_KIOSK));
+  OpenApplication(
+      AppLaunchParams(profile_, extension->id(),
+                      extensions::LaunchContainer::kLaunchContainerWindow,
+                      WindowOpenDisposition::NEW_WINDOW,
+                      extensions::AppLaunchSource::kSourceKiosk));
 
   KioskAppManager::Get()->InitSession(profile_, app_id_);
   session_manager::SessionManager::Get()->SessionStarted();

@@ -79,6 +79,8 @@ class UserEventSpecifics;
 class WalletMaskedCreditCard;
 class WalletMetadataSpecifics;
 class WalletPostalAddress;
+class WebAppSpecifics;
+class WifiConfigurationSpecifics;
 class WifiCredentialSpecifics;
 }  // namespace sync_pb
 
@@ -287,6 +289,12 @@ std::unique_ptr<base::DictionaryValue> WalletMetadataSpecificsToValue(
 
 std::unique_ptr<base::DictionaryValue> WalletPostalAddressToValue(
     const sync_pb::WalletPostalAddress& wallet_postal_address);
+
+std::unique_ptr<base::DictionaryValue> WebAppSpecificsToValue(
+    const sync_pb::WebAppSpecifics& web_app_specifics);
+
+std::unique_ptr<base::DictionaryValue> WifiConfigurationSpecificsToValue(
+    const sync_pb::WifiConfigurationSpecifics& wifi_configuration_specifics);
 
 std::unique_ptr<base::DictionaryValue> WifiCredentialSpecificsToValue(
     const sync_pb::WifiCredentialSpecifics& wifi_credential_specifics);

@@ -30,8 +30,7 @@ WebViewAutofillClientIOS::WebViewAutofillClientIOS(
     AutocompleteHistoryManager* autocomplete_history_manager,
     web::WebState* web_state,
     id<CWVAutofillClientIOSBridge> bridge,
-    identity::IdentityManager* identity_manager,
-    LegacyStrikeDatabase* legacy_strike_database,
+    signin::IdentityManager* identity_manager,
     StrikeDatabase* strike_database,
     scoped_refptr<AutofillWebDataService> autofill_web_data_service,
     syncer::SyncService* sync_service)
@@ -44,7 +43,6 @@ WebViewAutofillClientIOS::WebViewAutofillClientIOS(
       payments_client_(std::make_unique<payments::PaymentsClient>(
           base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
               web_state_->GetBrowserState()->GetURLLoaderFactory()),
-          pref_service_,
           identity_manager_,
           personal_data_manager_,
           web_state_->GetBrowserState()->IsOffTheRecord())),
@@ -54,7 +52,6 @@ WebViewAutofillClientIOS::WebViewAutofillClientIOS(
           personal_data_manager_,
           ios_web_view::ApplicationContext::GetInstance()
               ->GetApplicationLocale())),
-      legacy_strike_database_(legacy_strike_database),
       strike_database_(strike_database),
       autofill_web_data_service_(autofill_web_data_service),
       sync_service_(sync_service) {}
@@ -80,7 +77,7 @@ syncer::SyncService* WebViewAutofillClientIOS::GetSyncService() {
   return sync_service_;
 }
 
-identity::IdentityManager* WebViewAutofillClientIOS::GetIdentityManager() {
+signin::IdentityManager* WebViewAutofillClientIOS::GetIdentityManager() {
   return identity_manager_;
 }
 
@@ -90,10 +87,6 @@ FormDataImporter* WebViewAutofillClientIOS::GetFormDataImporter() {
 
 payments::PaymentsClient* WebViewAutofillClientIOS::GetPaymentsClient() {
   return payments_client_.get();
-}
-
-LegacyStrikeDatabase* WebViewAutofillClientIOS::GetLegacyStrikeDatabase() {
-  return legacy_strike_database_;
 }
 
 StrikeDatabase* WebViewAutofillClientIOS::GetStrikeDatabase() {
@@ -183,6 +176,10 @@ void WebViewAutofillClientIOS::ConfirmSaveCreditCardToCloud(
   DCHECK(options.show_prompt);
 }
 
+void WebViewAutofillClientIOS::CreditCardUploadCompleted(bool card_saved) {
+  NOTIMPLEMENTED();
+}
+
 void WebViewAutofillClientIOS::ConfirmCreditCardFillAssist(
     const CreditCard& card,
     base::OnceClosure callback) {}
@@ -201,6 +198,7 @@ void WebViewAutofillClientIOS::ShowAutofillPopup(
     base::i18n::TextDirection text_direction,
     const std::vector<Suggestion>& suggestions,
     bool /*unused_autoselect_first_suggestion*/,
+    PopupType popup_type,
     base::WeakPtr<AutofillPopupDelegate> delegate) {
   [bridge_ showAutofillPopup:suggestions popupDelegate:delegate];
 }

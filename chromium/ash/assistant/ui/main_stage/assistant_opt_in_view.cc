@@ -36,8 +36,9 @@ views::StyledLabel::RangeStyleInfo CreateStyleInfo(
   return style;
 }
 
-base::string16 GetAction(mojom::ConsentStatus consent_status) {
-  return consent_status == mojom::ConsentStatus::kUnauthorized
+base::string16 GetAction(int consent_status) {
+  return consent_status ==
+                 chromeos::assistant::prefs::ConsentStatus::kUnauthorized
              ? l10n_util::GetStringUTF16(
                    IDS_ASH_ASSISTANT_OPT_IN_ASK_ADMINISTRATOR)
              : l10n_util::GetStringUTF16(IDS_ASH_ASSISTANT_OPT_IN_GET_STARTED);
@@ -89,11 +90,11 @@ class AssistantOptInContainer : public views::Button {
 AssistantOptInView::AssistantOptInView(AssistantViewDelegate* delegate)
     : delegate_(delegate) {
   InitLayout();
-  delegate_->AddVoiceInteractionControllerObserver(this);
+  delegate_->AddAssistantPrefsObserver(this);
 }
 
 AssistantOptInView::~AssistantOptInView() {
-  delegate_->RemoveVoiceInteractionControllerObserver(this);
+  delegate_->RemoveAssistantPrefsObserver(this);
 }
 
 const char* AssistantOptInView::GetClassName() const {
@@ -113,8 +114,7 @@ void AssistantOptInView::ButtonPressed(views::Button* sender,
   delegate_->OnOptInButtonPressed();
 }
 
-void AssistantOptInView::OnVoiceInteractionConsentStatusUpdated(
-    mojom::ConsentStatus consent_status) {
+void AssistantOptInView::OnAssistantConsentStatusUpdated(int consent_status) {
   UpdateLabel(consent_status);
 }
 
@@ -125,11 +125,11 @@ void AssistantOptInView::InitLayout() {
 
   layout_manager->set_cross_axis_alignment(
       app_list_features::IsEmbeddedAssistantUIEnabled()
-          ? views::BoxLayout::CrossAxisAlignment::CROSS_AXIS_ALIGNMENT_CENTER
-          : views::BoxLayout::CrossAxisAlignment::CROSS_AXIS_ALIGNMENT_END);
+          ? views::BoxLayout::CrossAxisAlignment::kCenter
+          : views::BoxLayout::CrossAxisAlignment::kEnd);
 
   layout_manager->set_main_axis_alignment(
-      views::BoxLayout::MainAxisAlignment::MAIN_AXIS_ALIGNMENT_CENTER);
+      views::BoxLayout::MainAxisAlignment::kCenter);
 
   // Container.
   container_ = new AssistantOptInContainer(/*listener=*/this);
@@ -140,13 +140,13 @@ void AssistantOptInView::InitLayout() {
           gfx::Insets(0, kPaddingDip)));
 
   layout_manager->set_cross_axis_alignment(
-      views::BoxLayout::CrossAxisAlignment::CROSS_AXIS_ALIGNMENT_CENTER);
+      views::BoxLayout::CrossAxisAlignment::kCenter);
 
   AddChildView(container_);
 
   // Label.
   label_ = new views::StyledLabel(base::string16(), /*listener=*/nullptr);
-  label_->set_auto_color_readability_enabled(false);
+  label_->SetAutoColorReadabilityEnabled(false);
   label_->SetHorizontalAlignment(gfx::HorizontalAlignment::ALIGN_CENTER);
 
   container_->AddChildView(label_);
@@ -155,7 +155,7 @@ void AssistantOptInView::InitLayout() {
   UpdateLabel(delegate_->GetConsentStatus());
 }
 
-void AssistantOptInView::UpdateLabel(mojom::ConsentStatus consent_status) {
+void AssistantOptInView::UpdateLabel(int consent_status) {
   // First substitution string: "Unlock more Assistant features."
   const base::string16 unlock_features =
       l10n_util::GetStringUTF16(IDS_ASH_ASSISTANT_OPT_IN_UNLOCK_MORE_FEATURES);
@@ -181,6 +181,12 @@ void AssistantOptInView::UpdateLabel(mojom::ConsentStatus consent_status) {
       CreateStyleInfo(gfx::Font::Weight::BOLD));
 
   container_->SetAccessibleName(label_text);
+
+  // After updating the |label_| we need to ensure that it is remeasured and
+  // repainted to address a timing bug in which the AssistantOptInView was
+  // sometimes drawn in an invalid state (b/130758812).
+  container_->Layout();
+  container_->SchedulePaint();
 }
 
 }  // namespace ash

@@ -82,7 +82,7 @@ ShadowRoot::~ShadowRoot() = default;
 
 SlotAssignment& ShadowRoot::EnsureSlotAssignment() {
   if (!slot_assignment_)
-    slot_assignment_ = SlotAssignment::Create(*this);
+    slot_assignment_ = MakeGarbageCollected<SlotAssignment>(*this);
   return *slot_assignment_;
 }
 
@@ -223,14 +223,14 @@ void ShadowRoot::ChildrenChanged(const ChildrenChange& change) {
     CheckForSiblingStyleChanges(
         change.type == kElementRemoved ? kSiblingElementRemoved
                                        : kSiblingElementInserted,
-        ToElement(change.sibling_changed), change.sibling_before_change,
+        To<Element>(change.sibling_changed.Get()), change.sibling_before_change,
         change.sibling_after_change);
   }
 }
 
 StyleSheetList& ShadowRoot::StyleSheets() {
   if (!style_sheet_list_)
-    SetStyleSheets(StyleSheetList::Create(this));
+    SetStyleSheets(MakeGarbageCollected<StyleSheetList>(this));
   return *style_sheet_list_;
 }
 

@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
@@ -24,13 +25,16 @@ class Connector;
 namespace device {
 
 class FidoAuthenticator;
+class FidoDiscoveryFactory;
 class AuthenticatorGetAssertionResponse;
 
 class COMPONENT_EXPORT(DEVICE_FIDO) GetAssertionRequestHandler
-    : public FidoRequestHandler<AuthenticatorGetAssertionResponse> {
+    : public FidoRequestHandler<
+          std::vector<AuthenticatorGetAssertionResponse>> {
  public:
   GetAssertionRequestHandler(
       service_manager::Connector* connector,
+      FidoDiscoveryFactory* fido_discovery_factory,
       const base::flat_set<FidoTransportProtocol>& supported_transports,
       CtapGetAssertionRequest request_parameter,
       CompletionCallback completion_callback);
@@ -44,11 +48,14 @@ class COMPONENT_EXPORT(DEVICE_FIDO) GetAssertionRequestHandler
     kWaitingForPIN,
     kGetEphemeralKey,
     kRequestWithPIN,
+    kReadingMultipleResponses,
     kFinished,
   };
 
   // FidoRequestHandlerBase:
   void DispatchRequest(FidoAuthenticator* authenticator) override;
+  void AuthenticatorAdded(FidoDiscoveryBase* discovery,
+                          FidoAuthenticator* authenticator) override;
   void AuthenticatorRemoved(FidoDiscoveryBase* discovery,
                             FidoAuthenticator* authenticator) override;
 
@@ -56,6 +63,12 @@ class COMPONENT_EXPORT(DEVICE_FIDO) GetAssertionRequestHandler
       FidoAuthenticator* authenticator,
       CtapDeviceResponseCode response_code,
       base::Optional<AuthenticatorGetAssertionResponse> response);
+  void HandleNextResponse(
+      FidoAuthenticator* authenticator,
+      CtapDeviceResponseCode response_code,
+      base::Optional<AuthenticatorGetAssertionResponse> response);
+  void HandleTouch(FidoAuthenticator* authenticator);
+  void HandleInapplicableAuthenticator(FidoAuthenticator* authenticator);
   void OnRetriesResponse(CtapDeviceResponseCode status,
                          base::Optional<pin::RetriesResponse> response);
   void OnHavePIN(std::string pin);
@@ -73,6 +86,12 @@ class COMPONENT_EXPORT(DEVICE_FIDO) GetAssertionRequestHandler
   // requesting PIN etc. The object is owned by the underlying discovery object
   // and this pointer is cleared if it's removed during processing.
   FidoAuthenticator* authenticator_ = nullptr;
+  // responses_ holds the set of responses while they are incrementally read
+  // from the device. Only used when more than one response is returned.
+  std::vector<AuthenticatorGetAssertionResponse> responses_;
+  // remaining_responses_ contains the number of responses that remain to be
+  // read when multiple responses are returned.
+  size_t remaining_responses_ = 0;
   SEQUENCE_CHECKER(my_sequence_checker_);
   base::WeakPtrFactory<GetAssertionRequestHandler> weak_factory_;
 

@@ -41,14 +41,14 @@ const ConsentStatus = {
 Polymer({
   is: 'settings-google-assistant-page',
 
-  behaviors: [I18nBehavior, PrefsBehavior],
+  behaviors: [I18nBehavior, PrefsBehavior, WebUIListenerBehavior],
 
   properties: {
     /** @private */
-    assistantFeatureEnabled_: {
+    isAssistantAllowed_: {
       type: Boolean,
       value: function() {
-        return loadTimeData.getBoolean('enableAssistant');
+        return loadTimeData.getBoolean('isAssistantAllowed');
       },
     },
 
@@ -113,6 +113,7 @@ Polymer({
     'onPrefsChanged_(prefs.settings.voice_interaction.hotword.always_on.value)',
     `onPrefsChanged_(
       prefs.settings.voice_interaction.activity_control.consent_status.value)`,
+    'onPrefsChanged_(prefs.settings.assistant.disabled_by_policy.value)',
   ],
 
   /** @private {?settings.GoogleAssistantBrowserProxy} */
@@ -121,6 +122,15 @@ Polymer({
   /** @override */
   created: function() {
     this.browserProxy_ = settings.GoogleAssistantBrowserProxyImpl.getInstance();
+  },
+
+  /** @override */
+  ready: function() {
+    this.addWebUIListener('hotwordDeviceUpdated', (hasHotword) => {
+      this.hotwordDspAvailable_ = hasHotword;
+    });
+
+    chrome.send('initializeGoogleAssistantPage');
   },
 
   /**
@@ -151,7 +161,7 @@ Polymer({
 
   /** @private */
   onDspHotwordStateChange_: function() {
-    switch (Number(this.$$('#dspHotwordState').value)) {
+    switch (Number(this.$$('#dsp-hotword-state').value)) {
       case DspHotwordState.DEFAULT_ON:
         this.setPrefValue('settings.voice_interaction.hotword.enabled', true);
         this.setPrefValue(
@@ -187,10 +197,14 @@ Polymer({
 
   /** @private */
   onPrefsChanged_: function() {
+    if (this.getPref('settings.assistant.disabled_by_policy.value')) {
+      this.setPrefValue('settings.voice_interaction.enabled', false);
+      return;
+    }
+
     this.refreshDspHotwordState_();
 
     this.shouldShowVoiceMatchSettings_ =
-        loadTimeData.getBoolean('voiceMatchEnabled') &&
         this.getPref('settings.voice_interaction.hotword.enabled.value') &&
         (this.getPref(
           'settings.voice_interaction.activity_control.consent_status.value') ==
@@ -217,8 +231,8 @@ Polymer({
       this.dspHotwordState_ = DspHotwordState.DEFAULT_ON;
     }
 
-    if (this.$$('#dspHotwordState')) {
-      this.$$('#dspHotwordState').value = this.dspHotwordState_;
+    if (this.$$('#dsp-hotword-state')) {
+      this.$$('#dsp-hotword-state').value = this.dspHotwordState_;
     }
   },
 });

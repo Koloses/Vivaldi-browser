@@ -18,7 +18,7 @@ CupsPrintJob::CupsPrintJob(const Printer& printer,
       total_page_number_(total_page_number),
       weak_factory_(this) {}
 
-CupsPrintJob::~CupsPrintJob() {}
+CupsPrintJob::~CupsPrintJob() = default;
 
 std::string CupsPrintJob::GetUniqueId() const {
   return CreateUniqueId(printer_.id(), job_id_);
@@ -26,6 +26,10 @@ std::string CupsPrintJob::GetUniqueId() const {
 
 base::WeakPtr<CupsPrintJob> CupsPrintJob::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
+}
+
+bool CupsPrintJob::IsExpired() const {
+  return error_code_ == ErrorCode::PRINTER_UNREACHABLE;
 }
 
 // static
@@ -36,7 +40,7 @@ std::string CupsPrintJob::CreateUniqueId(const std::string& printer_id,
 
 bool CupsPrintJob::IsJobFinished() const {
   return state_ == CupsPrintJob::State::STATE_CANCELLED ||
-         state_ == CupsPrintJob::State::STATE_ERROR ||
+         state_ == CupsPrintJob::State::STATE_FAILED ||
          state_ == CupsPrintJob::State::STATE_DOCUMENT_DONE;
 }
 

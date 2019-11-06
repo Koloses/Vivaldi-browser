@@ -19,6 +19,7 @@ class SingleThreadTaskRunner;
 namespace blink {
 
 class WebMediaStream;
+class WebLocalFrame;
 
 // WebMediaStreamRendererFactory is used by WebMediaPlayerMS to create audio and
 // video feeds from a MediaStream provided an URL.
@@ -31,15 +32,14 @@ class WebMediaStreamRendererFactory {
   // Returns a WebMediaStreamVideoRenderer that uses the given task runners.
   // |io_task_runner| is used for passing video frames.
   virtual scoped_refptr<WebMediaStreamVideoRenderer> GetVideoRenderer(
-      const blink::WebMediaStream& web_stream,
-      const base::Closure& error_cb,
+      const WebMediaStream& web_stream,
       const WebMediaStreamVideoRenderer::RepaintCB& repaint_cb,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> main_render_task_runner) = 0;
 
   virtual scoped_refptr<WebMediaStreamAudioRenderer> GetAudioRenderer(
-      const blink::WebMediaStream& web_stream,
-      int render_frame_id,
+      const WebMediaStream& web_stream,
+      blink::WebLocalFrame* web_frame,
       const std::string& device_id) = 0;
 };
 

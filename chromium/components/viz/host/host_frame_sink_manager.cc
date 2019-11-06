@@ -19,8 +19,7 @@
 
 namespace viz {
 
-HostFrameSinkManager::HostFrameSinkManager()
-    : binding_(this), weak_ptr_factory_(this) {}
+HostFrameSinkManager::HostFrameSinkManager() : binding_(this) {}
 
 HostFrameSinkManager::~HostFrameSinkManager() = default;
 
@@ -223,11 +222,11 @@ bool HostFrameSinkManager::RegisterFrameSinkHierarchy(
                                                   child_frame_sink_id);
 
   FrameSinkData& child_data = frame_sink_data_map_[child_frame_sink_id];
-  DCHECK(!base::ContainsValue(child_data.parents, parent_frame_sink_id));
+  DCHECK(!base::Contains(child_data.parents, parent_frame_sink_id));
   child_data.parents.push_back(parent_frame_sink_id);
 
   FrameSinkData& parent_data = iter->second;
-  DCHECK(!base::ContainsValue(parent_data.children, child_frame_sink_id));
+  DCHECK(!base::Contains(parent_data.children, child_frame_sink_id));
   parent_data.children.push_back(child_frame_sink_id);
 
   return true;
@@ -238,11 +237,11 @@ void HostFrameSinkManager::UnregisterFrameSinkHierarchy(
     const FrameSinkId& child_frame_sink_id) {
   // Unregister and clear the stored parent.
   FrameSinkData& child_data = frame_sink_data_map_[child_frame_sink_id];
-  DCHECK(base::ContainsValue(child_data.parents, parent_frame_sink_id));
+  DCHECK(base::Contains(child_data.parents, parent_frame_sink_id));
   base::Erase(child_data.parents, parent_frame_sink_id);
 
   FrameSinkData& parent_data = frame_sink_data_map_[parent_frame_sink_id];
-  DCHECK(base::ContainsValue(parent_data.children, child_frame_sink_id));
+  DCHECK(base::Contains(parent_data.children, child_frame_sink_id));
   base::Erase(parent_data.children, child_frame_sink_id);
 
   frame_sink_manager_->UnregisterFrameSinkHierarchy(parent_frame_sink_id,
@@ -263,7 +262,7 @@ bool HostFrameSinkManager::IsFrameSinkHierarchyRegistered(
     const FrameSinkId& child_frame_sink_id) const {
   auto iter = frame_sink_data_map_.find(parent_frame_sink_id);
   return iter != frame_sink_data_map_.end() &&
-         base::ContainsValue(iter->second.children, child_frame_sink_id);
+         base::Contains(iter->second.children, child_frame_sink_id);
 }
 
 base::Optional<FrameSinkId> HostFrameSinkManager::FindRootFrameSinkId(
@@ -355,6 +354,10 @@ void HostFrameSinkManager::OnConnectionLost() {
   frame_sink_manager_ptr_.reset();
   frame_sink_manager_ = nullptr;
 
+  // Any cached back buffers are invalid once the connection to the
+  // FrameSinkManager is lost.
+  min_valid_cache_back_buffer_id_ = next_cache_back_buffer_id_;
+
   // CompositorFrameSinks are lost along with the connection to
   // mojom::FrameSinkManager.
   for (auto& map_entry : frame_sink_data_map_)
@@ -424,6 +427,32 @@ void HostFrameSinkManager::OnAggregatedHitTestRegionListUpdated(
   // stale data.
   for (HitTestRegionObserver& observer : observers_)
     observer.OnAggregatedHitTestRegionListUpdated(frame_sink_id, hit_test_data);
+}
+
+uint32_t HostFrameSinkManager::CacheBackBufferForRootSink(
+    const FrameSinkId& root_sink_id) {
+  auto it = frame_sink_data_map_.find(root_sink_id);
+  DCHECK(it != frame_sink_data_map_.end());
+  DCHECK(it->second.is_root);
+  DCHECK(it->second.IsFrameSinkRegistered());
+  DCHECK(frame_sink_manager_ptr_);
+
+  uint32_t cache_id = next_cache_back_buffer_id_++;
+  frame_sink_manager_ptr_->CacheBackBuffer(cache_id, root_sink_id);
+  return cache_id;
+}
+
+void HostFrameSinkManager::EvictCachedBackBuffer(uint32_t cache_id) {
+  DCHECK(frame_sink_manager_ptr_);
+
+  if (cache_id < min_valid_cache_back_buffer_id_)
+    return;
+
+  // This synchronous call ensures that the GL context/surface that draw to
+  // the platform window (eg. XWindow or HWND) get destroyed before the
+  // platform window is destroyed.
+  mojo::SyncCallRestrictions::ScopedAllowSyncCall allow_sync_call;
+  frame_sink_manager_ptr_->EvictBackBuffer(cache_id);
 }
 
 HostFrameSinkManager::FrameSinkData::FrameSinkData() = default;

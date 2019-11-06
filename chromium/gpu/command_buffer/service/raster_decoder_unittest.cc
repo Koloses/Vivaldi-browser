@@ -257,13 +257,6 @@ TEST_P(RasterDecoderManualInitTest, CopyTexSubImage2DValidateColorFormat) {
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
 }
 
-TEST_P(RasterDecoderTest, YieldAfterEndRasterCHROMIUM) {
-  GetDecoder()->SetUpForRasterCHROMIUMForTest();
-  cmds::EndRasterCHROMIUM end_raster_cmd;
-  end_raster_cmd.Init();
-  EXPECT_EQ(error::kDeferLaterCommands, ExecuteCmd(end_raster_cmd));
-}
-
 class RasterDecoderOOPTest : public testing::Test, DecoderClient {
  public:
   void SetUp() override {
@@ -289,6 +282,7 @@ class RasterDecoderOOPTest : public testing::Test, DecoderClient {
     context_state_->InitializeGL(GpuPreferences(), feature_info);
   }
   void TearDown() override {
+    context_state_->MakeCurrent(nullptr);
     context_state_ = nullptr;
     gl::init::ShutdownGL(false);
   }

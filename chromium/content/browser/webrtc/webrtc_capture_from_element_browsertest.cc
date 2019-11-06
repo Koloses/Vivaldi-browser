@@ -107,11 +107,9 @@ IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
   MakeTypicalCall("testCanvasCapture(drawWebGL);", kCanvasCaptureTestHtmlFile);
 }
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN)
 // https://crbug.com/869723
 // Flaky on Windows 10 with Viz (i.e. in viz_content_browsertests).
-// https://crbug.com/916928
-// Flaky on chromium.mac/Mac10.10 Tests
 #define MAYBE_VerifyCanvasCaptureOffscreenCanvasFrames \
   DISABLED_VerifyCanvasCaptureOffscreenCanvasFrames
 #else
@@ -148,22 +146,17 @@ IN_PROC_BROWSER_TEST_P(WebRtcCaptureFromElementBrowserTest,
                   kVideoAudioHtmlFile);
 }
 
+// https://crbug.com/986020.
 IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
-                       CaptureFromCanvas2DHandlesContextLoss) {
+                       DISABLED_CaptureFromCanvas2DHandlesContextLoss) {
   MakeTypicalCall("testCanvas2DContextLoss(true);",
                   kCanvasCaptureColorTestHtmlFile);
 }
 
-// See https://crbug.com/898286.
-#if defined(OS_ANDROID)
-#define MAYBE_CaptureFromOpaqueCanvas2DHandlesContextLoss \
-  DISABLED_CaptureFromOpaqueCanvas2DHandlesContextLoss
-#else
-#define MAYBE_CaptureFromOpaqueCanvas2DHandlesContextLoss \
-  CaptureFromOpaqueCanvas2DHandlesContextLoss
-#endif
+// Not supported on android https://crbug.com/898286.
+// Not supported on accelerated canvases https://crbug.com/954142.
 IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
-                       MAYBE_CaptureFromOpaqueCanvas2DHandlesContextLoss) {
+                       DISABLED_CaptureFromOpaqueCanvas2DHandlesContextLoss) {
   MakeTypicalCall("testCanvas2DContextLoss(false);",
                   kCanvasCaptureColorTestHtmlFile);
 }

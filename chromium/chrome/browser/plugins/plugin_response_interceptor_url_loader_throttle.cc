@@ -13,13 +13,11 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_utils.h"
-#include "content/public/browser/stream_info.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/common/transferrable_url_loader.mojom.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_attach_helper.h"
 #include "extensions/common/extension.h"
 #include "mojo/public/cpp/system/data_pipe.h"
-#include "services/network/public/cpp/features.h"
 
 PluginResponseInterceptorURLLoaderThrottle::
     PluginResponseInterceptorURLLoaderThrottle(
@@ -27,6 +25,15 @@ PluginResponseInterceptorURLLoaderThrottle::
         int resource_type,
         int frame_tree_node_id)
     : resource_context_(resource_context),
+      resource_type_(resource_type),
+      frame_tree_node_id_(frame_tree_node_id) {}
+
+PluginResponseInterceptorURLLoaderThrottle::
+    PluginResponseInterceptorURLLoaderThrottle(
+        content::BrowserContext* browser_context,
+        int resource_type,
+        int frame_tree_node_id)
+    : browser_context_(browser_context),
       resource_type_(resource_type),
       frame_tree_node_id_(frame_tree_node_id) {}
 
@@ -43,19 +50,17 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(
     return;
   }
 
-  // Don't intercept if the request went through the legacy resource loading
-  // path, i.e., ResourceDispatcherHost, since that path doesn't need response
-  // interception. ResourceDispatcherHost is only used if network service is
-  // disabled (in which case this throttle was created because
-  // ServiceWorkerServicification was enabled) and a service worker didn't
-  // handle the request.
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService) &&
-      !response_head->was_fetched_via_service_worker) {
-    return;
+  std::string extension_id;
+  if (resource_context_) {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+    extension_id = PluginUtils::GetExtensionIdForMimeType(
+        resource_context_, response_head->mime_type);
+  } else {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+    extension_id = PluginUtils::GetExtensionIdForMimeType(
+        browser_context_, response_head->mime_type);
   }
 
-  std::string extension_id = PluginUtils::GetExtensionIdForMimeType(
-      resource_context_, response_head->mime_type);
   if (extension_id.empty())
     return;
 
@@ -72,9 +77,13 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(
   uint32_t data_pipe_size = 64U;
   // Provide the MimeHandlerView code a chance to override the payload. This is
   // the case where the resource is handled by frame-based MimeHandlerView.
-  extensions::MimeHandlerViewAttachHelper::OverrideBodyForInterceptedResponse(
-      frame_tree_node_id_, response_url, response_head->mime_type, view_id,
-      &payload, &data_pipe_size);
+  *defer = extensions::MimeHandlerViewAttachHelper::
+      OverrideBodyForInterceptedResponse(
+          frame_tree_node_id_, response_url, response_head->mime_type, view_id,
+          &payload, &data_pipe_size,
+          base::BindOnce(
+              &PluginResponseInterceptorURLLoaderThrottle::ResumeLoad,
+              weak_factory_.GetWeakPtr()));
 
   mojo::DataPipe data_pipe(data_pipe_size);
   uint32_t len = static_cast<uint32_t>(payload.size());
@@ -108,12 +117,17 @@ void PluginResponseInterceptorURLLoaderThrottle::WillProcessResponse(
   transferrable_loader->head = std::move(deep_copied_response->head);
   transferrable_loader->head.intercepted_by_plugin = true;
 
-  bool embedded = resource_type_ != content::RESOURCE_TYPE_MAIN_FRAME;
+  bool embedded =
+      resource_type_ != static_cast<int>(content::ResourceType::kMainFrame);
   base::PostTaskWithTraits(
       FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(
           &extensions::StreamsPrivateAPI::SendExecuteMimeTypeHandlerEvent,
           extension_id, view_id, embedded, frame_tree_node_id_,
           -1 /* render_process_id */, -1 /* render_frame_id */,
-          nullptr /* stream */, std::move(transferrable_loader), response_url));
+          std::move(transferrable_loader), response_url));
+}
+
+void PluginResponseInterceptorURLLoaderThrottle::ResumeLoad() {
+  delegate_->Resume();
 }

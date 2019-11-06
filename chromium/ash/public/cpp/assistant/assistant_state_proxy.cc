@@ -35,14 +35,12 @@ void AssistantStateProxy::AddObserver(
     observer->OnVoiceInteractionContextEnabled(context_enabled_.value());
   if (hotword_enabled_.has_value())
     observer->OnVoiceInteractionHotwordEnabled(hotword_enabled_.value());
-  if (consent_status_.has_value())
-    observer->OnVoiceInteractionConsentStatusUpdated(consent_status_.value());
-  if (hotword_always_on_.has_value())
-    observer->OnVoiceInteractionHotwordAlwaysOn(hotword_always_on_.value());
   if (allowed_state_.has_value())
     observer->OnAssistantFeatureAllowedChanged(allowed_state_.value());
   if (locale_.has_value())
     observer->OnLocaleChanged(locale_.value());
+  if (arc_play_store_enabled_.has_value())
+    observer->OnArcPlayStoreEnabledChanged(arc_play_store_enabled_.value());
 
   observers_.AddObserver(observer);
 }
@@ -77,19 +75,6 @@ void AssistantStateProxy::OnVoiceInteractionHotwordEnabled(bool enabled) {
     observer.OnVoiceInteractionHotwordEnabled(hotword_enabled_.value());
 }
 
-void AssistantStateProxy::OnVoiceInteractionConsentStatusUpdated(
-    mojom::ConsentStatus consent_status) {
-  consent_status_ = consent_status;
-  for (auto& observer : observers_)
-    observer.OnVoiceInteractionConsentStatusUpdated(consent_status_.value());
-}
-
-void AssistantStateProxy::OnVoiceInteractionHotwordAlwaysOn(bool always_on) {
-  hotword_always_on_ = always_on;
-  for (auto& observer : observers_)
-    observer.OnVoiceInteractionHotwordAlwaysOn(hotword_always_on_.value());
-}
-
 void AssistantStateProxy::OnAssistantFeatureAllowedChanged(
     ash::mojom::AssistantAllowedState state) {
   allowed_state_ = state;
@@ -101,6 +86,20 @@ void AssistantStateProxy::OnLocaleChanged(const std::string& locale) {
   locale_ = locale;
   for (auto& observer : observers_)
     observer.OnLocaleChanged(locale_.value());
+}
+
+void AssistantStateProxy::OnArcPlayStoreEnabledChanged(bool enabled) {
+  arc_play_store_enabled_ = enabled;
+  for (auto& observer : observers_)
+    observer.OnArcPlayStoreEnabledChanged(arc_play_store_enabled_.value());
+}
+
+void AssistantStateProxy::OnLockedFullScreenStateChanged(bool enabled) {
+  locked_full_screen_enabled_ = enabled;
+  for (auto& observer : observers_) {
+    observer.OnLockedFullScreenStateChanged(
+        locked_full_screen_enabled_.value());
+  }
 }
 
 }  // namespace ash

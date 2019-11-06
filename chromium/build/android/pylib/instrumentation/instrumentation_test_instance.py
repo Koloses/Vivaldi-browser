@@ -381,14 +381,6 @@ class MissingJUnit4RunnerException(test_exception.TestException):
         'JUnit4 runner is not provided or specified in test apk manifest.')
 
 
-class UnmatchedFilterException(test_exception.TestException):
-  """Raised when a user specifies a filter that doesn't match any tests."""
-
-  def __init__(self, filter_str):
-    super(UnmatchedFilterException, self).__init__(
-        'Test filter "%s" matched no tests.' % filter_str)
-
-
 def GetTestName(test, sep='#'):
   """Gets the name of the given test.
 
@@ -842,10 +834,15 @@ class InstrumentationTestInstance(test_instance.TestInstance):
 
   #override
   def GetPreferredAbis(self):
-    ret = self._test_apk.GetAbis()
-    if not ret and self._apk_under_test:
-      ret = self._apk_under_test.GetAbis()
-    return ret
+    # We could alternatively take the intersection of what they all support,
+    # but it should never be the case that they support different things.
+    apks = [self._test_apk, self._apk_under_test] + self._additional_apks
+    for apk in apks:
+      if apk:
+        ret = apk.GetAbis()
+        if ret:
+          return ret
+    return []
 
   #override
   def SetUp(self):
@@ -882,7 +879,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     if self._test_filter and not filtered_tests:
       for t in inflated_tests:
         logging.debug('  %s', GetUniqueTestName(t))
-      raise UnmatchedFilterException(self._test_filter)
+      logging.warning('Unmatched Filter: %s', self._test_filter)
     return filtered_tests
 
   # pylint: disable=no-self-use

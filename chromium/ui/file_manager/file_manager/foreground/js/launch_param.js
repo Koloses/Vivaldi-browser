@@ -33,7 +33,8 @@ function LaunchParam(unformatted) {
    * @const
    */
   this.currentDirectoryURL = unformatted['currentDirectoryURL'] ?
-      unformatted['currentDirectoryURL'] : '';
+      unformatted['currentDirectoryURL'] :
+      '';
 
   /**
    * @type {string}
@@ -72,11 +73,16 @@ function LaunchParam(unformatted) {
    * @type {!SuggestAppDialogState}
    * @const
    */
-  this.suggestAppsDialogState =
-      unformatted['suggestAppsDialogState'] ?
+  this.suggestAppsDialogState = unformatted['suggestAppsDialogState'] ?
       unformatted['suggestAppsDialogState'] :
       {
         overrideCwsContainerUrlForTest: '',
         overrideCwsContainerOriginForTest: ''
       };
+
+  /**
+   * @type {boolean}
+   * @const
+   */
+  this.showAndroidPickerApps = !!unformatted['showAndroidPickerApps'];
 }

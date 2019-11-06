@@ -12,6 +12,7 @@
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/stl_util.h"
+#include "chrome/android/chrome_jni_headers/ChromeFeatureList_jni.h"
 #include "chrome/common/chrome_features.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill_assistant/browser/features.h"
@@ -20,22 +21,20 @@
 #include "components/feed/feed_feature_list.h"
 #include "components/invalidation/impl/invalidation_switches.h"
 #include "components/language/core/common/language_experiments.h"
-#include "components/ntp_snippets/contextual/contextual_suggestions_features.h"
 #include "components/ntp_snippets/features.h"
-#include "components/ntp_tiles/constants.h"
+#include "components/ntp_tiles/features.h"
 #include "components/offline_pages/core/offline_page_feature.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/payments/core/features.h"
 #include "components/previews/core/previews_features.h"
 #include "components/safe_browsing/features.h"
-#include "components/signin/core/browser/account_consistency_method.h"
+#include "components/signin/public/base/account_consistency_method.h"
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/unified_consent/feature.h"
 #include "content/public/common/content_features.h"
-#include "jni/ChromeFeatureList_jni.h"
 #include "media/base/media_switches.h"
 #include "services/device/public/cpp/device_features.h"
 #include "services/network/public/cpp/features.h"
@@ -60,27 +59,23 @@ const base::Feature* kFeaturesExposedToJava[] = {
     &autofill::features::kAutofillRefreshStyleAndroid,
     &autofill::features::kAutofillEnableCompanyName,
     &autofill_assistant::features::kAutofillAssistant,
-    &contextual_suggestions::kContextualSuggestionsButton,
-    &contextual_suggestions::kContextualSuggestionsIPHReverseScroll,
-    &contextual_suggestions::kContextualSuggestionsOptOut,
+    &autofill_assistant::features::kAutofillAssistantDirectActions,
+    &autofill::features::kTouchToFillAndroid,
     &download::features::kDownloadAutoResumptionNative,
     &download::features::kUseDownloadOfflineContentProvider,
-    &features::kAllowStartingServiceManagerOnly,
     &features::kAppNotificationStatusMessaging,
+    &features::kCaptionSettings,
     &features::kClearOldBrowsingData,
-    &features::kClipboardContentSetting,
     &features::kDownloadsLocationChange,
-    &features::kExperimentalAppBanners,
-    &features::kExperimentalUi,
     &features::kGenericSensorExtraClasses,
-    &features::kIncognitoStrings,
+    &features::kInstallableAmbientBadgeInfoBar,
     &features::kOverscrollHistoryNavigation,
     &features::kPermissionDelegation,
     &features::kPredictivePrefetchingAllowedOnAllConnectionTypes,
     &features::kPrioritizeBootstrapTasks,
     &features::kServiceWorkerPaymentApps,
+    &features::kSensorContentSetting,
     &features::kShowTrustedPublisherURL,
-    &features::kSSLCommittedInterstitials,
     &features::kUserActivationV2,
     &features::kWebAuth,
     &features::kWebPayments,
@@ -91,6 +86,7 @@ const base::Feature* kFeaturesExposedToJava[] = {
     &kAllowRemoteContextForNotifications,
     &kAndroidNightMode,
     &kAndroidNightModeCCT,
+    &kAndroidNightModeForQ,
     &kAndroidPayIntegrationV1,
     &kAndroidPayIntegrationV2,
     &kAndroidPaymentApps,
@@ -115,74 +111,90 @@ const base::Feature* kFeaturesExposedToJava[] = {
     &kChromeDuetFeature,
     &kChromeDuetAdaptive,
     &kDontAutoHideBrowserControls,
+    &kChromeDuetLabeled,
     &kChromeSmartSelection,
     &kCommandLineOnNonRooted,
+    &kContactsPickerSelectAll,
     &kContentSuggestionsScrollToLoad,
-    &kContentSuggestionsThumbnailDominantColor,
     &kContextualSearchDefinitions,
+    &kContextualSearchLongpressResolve,
     &kContextualSearchMlTapSuppression,
     &kContextualSearchSecondTap,
+    &kContextualSearchSimplifiedServer,
     &kContextualSearchTapDisableOverride,
+    &kContextualSearchTranslationModel,
     &kContextualSearchUnityIntegration,
-    &kCustomContextMenu,
-    &kDontPrefetchLibraries,
-    &kDownloadProgressInfoBar,
+    &kDirectActions,
+    &kDownloadLocationShowImageInGallery,
+    &kDownloadFileProvider,
     &kDownloadHomeV2,
     &kDownloadHomeShowStorageInfo,
+    &kDownloadProgressInfoBar,
+    &kDownloadRename,
+    &kDownloadTabManagementModule,
+    &kDrawVerticallyEdgeToEdge,
     &kEphemeralTab,
     &kExploreSites,
     &kHandleMediaIntents,
-    &kHideUserDataFromIncognitoNotifications,
     &kHomePageButtonForceEnabled,
     &kHomepageTile,
     &kHorizontalTabSwitcherAndroid,
+    &kIdentityDisc,
+    &kImmersiveUiMode,
     &kImprovedA2HS,
-    &kInflateToolbarOnBackgroundThread,
     &kInlineUpdateFlow,
     &kIntentBlockExternalFormRedirectsNoGesture,
     &kJellyBeanSupported,
-    &kLanguagesPreference,
-    &kModalPermissionDialogView,
-    &kNewContactsPicker,
     &kNewPhotoPicker,
+    &kNotificationSuspender,
     &kNoCreditCardAbort,
     &kNTPButton,
     &kNTPLaunchAfterInactivity,
     &kOmniboxSpareRenderer,
-    &kOmniboxVoiceSearchAlwaysVisible,
+    &kOverlayNewLayout,
     &kPayWithGoogleV1,
+    &kPhotoPickerVideoSupport,
     &kProgressBarThrottleFeature,
-    &kPwaImprovedSplashScreen,
-    &kPwaPersistentNotification,
     &kReachedCodeProfiler,
     &kReaderModeInCCT,
+    &kReorderBookmarks,
+    &kRevampedContextMenu,
     &kSearchReadyOmniboxFeature,
     &kSearchEnginePromoExistingDevice,
     &kSearchEnginePromoNewDevice,
+    &kServiceManagerForBackgroundPrefetch,
     &kServiceManagerForDownload,
-    &kSoleIntegration,
+    &kShoppingAssist,
     &kSpannableInlineAutocomplete,
     &kSpecialLocaleWrapper,
+    &kSpecialUserDecision,
+    &kSwapPixelFormatToFixConvertFromTranslucent,
+    &kTabEngagementReportingAndroid,
     &kTabGroupsAndroid,
+    &kTabGroupsUiImprovementsAndroid,
     &kTabGridLayoutAndroid,
     &kTabReparenting,
     &kTabSwitcherOnReturn,
+    &kTabToGTSAnimation,
     &kTrustedWebActivity,
     &kTrustedWebActivityPostMessage,
+    &kTrustedWebActivityNotificationDelegationEnrolment,
+    &kTwoPanesStartSurfaceAndroid,
+    &kUmaBackgroundSessions,
     &kUsageStatsFeature,
     &kVideoPersistence,
     &kVrBrowsingFeedback,
+    &kOfferWipeDataOnSignout,
     &network::features::kNetworkService,
+    &payments::features::kAlwaysAllowJustInTimePaymentApp,
     &payments::features::kReturnGooglePayInBasicCard,
+    &payments::features::kWebPaymentsExperimentalFeatures,
     &payments::features::kWebPaymentsMethodSectionOrderV2,
     &payments::features::kWebPaymentsModifiers,
     &payments::features::kWebPaymentsSingleAppUiSkip,
+    &payments::features::kWebPaymentsRedactShippingAddress,
     &language::kExplicitLanguageAsk,
     &ntp_snippets::kArticleSuggestionsFeature,
-    &ntp_snippets::kIncreasedVisibility,
-    &ntp_snippets::kNotificationsFeature,
-    &ntp_tiles::kSiteExplorationUiFeature,
-    &offline_pages::kBackgroundLoaderForDownloadsFeature,
     &offline_pages::kOfflineIndicatorFeature,
     &offline_pages::kOfflineIndicatorAlwaysHttpProbeFeature,
     &offline_pages::kOfflinePagesCTFeature,    // See crbug.com/620421.
@@ -193,15 +205,16 @@ const base::Feature* kFeaturesExposedToJava[] = {
     &offline_pages::kPrefetchingOfflinePagesFeature,
     &omnibox::kHideSteadyStateUrlScheme,
     &omnibox::kHideSteadyStateUrlTrivialSubdomains,
-    &omnibox::kOmniboxNewAnswerLayout,
     &omnibox::kOmniboxRichEntitySuggestions,
     &omnibox::kQueryInOmnibox,
+    &omnibox::kUIExperimentShowSuggestionFavicons,
+    &omnibox::kOmniboxSearchEngineLogo,
     &password_manager::features::kGooglePasswordManager,
-    &password_manager::features::kPasswordsKeyboardAccessory,
-    &previews::features::kDataSaverLiteModeRebranding,
+    &password_manager::features::kPasswordEditingAndroid,
+    &safe_browsing::kCaptureSafetyNetId,
     &signin::kMiceFeature,
     &switches::kSyncSendTabToSelf,
-    &translate::kTranslateAndroidManualTrigger,
+    &translate::kTranslateMobileManualTrigger,
     &unified_consent::kUnifiedConsent,
     &subresource_filter::kSafeBrowsingSubresourceFilter,
 };
@@ -228,6 +241,9 @@ const base::Feature kAndroidNightMode{"AndroidNightMode",
 const base::Feature kAndroidNightModeCCT{"AndroidNightModeCCT",
                                          base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kAndroidNightModeForQ{"AndroidNightModeForQ",
+                                          base::FEATURE_ENABLED_BY_DEFAULT};
+
 // TODO(rouslan): Remove this.
 const base::Feature kAndroidPayIntegrationV1{"AndroidPayIntegrationV1",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
@@ -250,7 +266,7 @@ const base::Feature kAndroidSearchEngineChoiceNotification{
     "AndroidSearchEngineChoiceNotification", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kAndroidSiteSettingsUIRefresh{
-    "AndroidSiteSettingsUIRefresh", base::FEATURE_DISABLED_BY_DEFAULT};
+    "AndroidSiteSettingsUIRefresh", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kAndroidWebContentsDarkMode{
     "AndroidWebContentsDarkMode", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -260,7 +276,7 @@ const base::Feature kBackgroundTaskComponentUpdate{
 
 const base::Feature kBackgroundTaskSchedulerForBackgroundSync{
     "BackgroundTaskSchedulerForBackgroundSync",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+    base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Used in downstream code.
 const base::Feature kCastDeviceFilter{"CastDeviceFilter",
@@ -289,8 +305,8 @@ const base::Feature kCCTModuleDexLoading{"CCTModuleDexLoading",
 const base::Feature kCCTModulePostMessage{"CCTModulePostMessage",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kCCTModuleUseIntentExtras{"CCTModuleUseIntentExtras",
-                                          base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kCCTModuleUseIntentExtras{
+    "CCTModuleUseIntentExtras", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kCCTPostMessageAPI{"CCTPostMessageAPI",
                                        base::FEATURE_ENABLED_BY_DEFAULT};
@@ -316,21 +332,26 @@ const base::Feature kChromeDuetAdaptive{"ChromeDuetAdaptive",
 const base::Feature kDontAutoHideBrowserControls{
     "DontAutoHideBrowserControls", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kChromeDuetLabeled{"ChromeDuetLabeled",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kChromeSmartSelection{"ChromeSmartSelection",
                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kCommandLineOnNonRooted{"CommandLineOnNonRooted",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kContactsPickerSelectAll{"ContactsPickerSelectAll",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kContentSuggestionsScrollToLoad{
     "ContentSuggestionsScrollToLoad", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kContentSuggestionsThumbnailDominantColor{
-    "ContentSuggestionsThumbnailDominantColor",
-    base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kContextualSearchDefinitions{
     "ContextualSearchDefinitions", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kContextualSearchLongpressResolve{
+    "ContextualSearchLongpressResolve", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kContextualSearchMlTapSuppression{
     "ContextualSearchMlTapSuppression", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -338,29 +359,47 @@ const base::Feature kContextualSearchMlTapSuppression{
 const base::Feature kContextualSearchSecondTap{
     "ContextualSearchSecondTap", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kContextualSearchSimplifiedServer{
+    "ContextualSearchSimplifiedServer", base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kContextualSearchTapDisableOverride{
     "ContextualSearchTapDisableOverride", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kContextualSearchTranslationModel{
+    "ContextualSearchTranslationModel", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kContextualSearchUnityIntegration{
     "ContextualSearchUnityIntegration", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kCustomContextMenu{"CustomContextMenu",
-                                       base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kDirectActions{"DirectActions",
+                                   base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kDontPrefetchLibraries{"DontPrefetchLibraries",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kDrawVerticallyEdgeToEdge{
+    "DrawVerticallyEdgeToEdge", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kDownloadAutoResumptionThrottling{
     "DownloadAutoResumptionThrottling", base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kDownloadLocationShowImageInGallery{
+    "DownloadLocationShowImageInGallery", base::FEATURE_ENABLED_BY_DEFAULT};
+
 const base::Feature kDownloadProgressInfoBar{"DownloadProgressInfoBar",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kDownloadFileProvider{"DownloadFileProvider",
+                                          base::FEATURE_ENABLED_BY_DEFAULT};
+
 const base::Feature kDownloadHomeV2{"DownloadHomeV2",
-                                    base::FEATURE_DISABLED_BY_DEFAULT};
+                                    base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kDownloadHomeShowStorageInfo{
     "DownloadHomeShowStorageInfo", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kDownloadRename{"DownloadRename",
+                                    base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kDownloadTabManagementModule{
+    "DownloadTabManagementModule", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kEphemeralTab{"EphemeralTab",
                                   base::FEATURE_DISABLED_BY_DEFAULT};
@@ -374,9 +413,6 @@ const base::Feature kForegroundNotificationManager{
 const base::Feature kHandleMediaIntents{"HandleMediaIntents",
                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kHideUserDataFromIncognitoNotifications{
-    "HideUserDataFromIncognitoNotifications", base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kHomePageButtonForceEnabled{
     "HomePageButtonForceEnabled", base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -386,6 +422,9 @@ const base::Feature kHomepageTile{"HomepageTile",
 const base::Feature kHorizontalTabSwitcherAndroid{
     "HorizontalTabSwitcherAndroid", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kIdentityDisc{"IdentityDisc",
+                                  base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Makes "Add to Home screen" in the app menu generate an APK for the shortcut
 // URL which opens Chrome in fullscreen.
 // This feature is kept around so that we have a kill-switch in case of server
@@ -393,8 +432,8 @@ const base::Feature kHorizontalTabSwitcherAndroid{
 const base::Feature kImprovedA2HS{"ImprovedA2HS",
                                   base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kInflateToolbarOnBackgroundThread{
-    "BackgroundToolbarInflation", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kImmersiveUiMode{"ImmersiveUiMode",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kInlineUpdateFlow{"InlineUpdateFlow",
                                       base::FEATURE_DISABLED_BY_DEFAULT};
@@ -406,23 +445,19 @@ const base::Feature kIntentBlockExternalFormRedirectsNoGesture{
 const base::Feature kJellyBeanSupported{"JellyBeanSupported",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kLanguagesPreference{"LanguagesPreference",
-                                         base::FEATURE_ENABLED_BY_DEFAULT};
-
-const base::Feature kModalPermissionDialogView{
-    "ModalPermissionDialogView", base::FEATURE_DISABLED_BY_DEFAULT};
-
 const base::Feature kSearchEnginePromoExistingDevice{
     "SearchEnginePromo.ExistingDevice", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kSearchEnginePromoNewDevice{
     "SearchEnginePromo.NewDevice", base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kNewContactsPicker{"NewContactsPicker",
-                                       base::FEATURE_DISABLED_BY_DEFAULT};
-
 const base::Feature kNewPhotoPicker{"NewPhotoPicker",
                                     base::FEATURE_ENABLED_BY_DEFAULT};
+
+// TODO(knollr): This is a temporary kill switch, it can be removed once we feel
+// okay about leaving it on.
+const base::Feature kNotificationSuspender{"NotificationSuspender",
+                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kNoCreditCardAbort{"NoCreditCardAbort",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
@@ -435,21 +470,20 @@ const base::Feature kNTPLaunchAfterInactivity{
 const base::Feature kOmniboxSpareRenderer{"OmniboxSpareRenderer",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kOmniboxVoiceSearchAlwaysVisible{
-    "OmniboxVoiceSearchAlwaysVisible", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kOverlayNewLayout{"OverlayNewLayout",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
 
 // TODO(rouslan): Remove this.
 const base::Feature kPayWithGoogleV1{"PayWithGoogleV1",
                                      base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kProgressBarThrottleFeature{
-    "ProgressBarThrottle", base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kPwaImprovedSplashScreen{"PwaImprovedSplashScreen",
+// TODO(finnur): Before enabling by default, the issue of where decoding should
+// take place needs to be resolved.
+const base::Feature kPhotoPickerVideoSupport{"PhotoPickerVideoSupport",
                                              base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kPwaPersistentNotification{
-    "PwaPersistentNotification", base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kProgressBarThrottleFeature{
+    "ProgressBarThrottle", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kReachedCodeProfiler{"ReachedCodeProfiler",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
@@ -457,14 +491,23 @@ const base::Feature kReachedCodeProfiler{"ReachedCodeProfiler",
 const base::Feature kReaderModeInCCT{"ReaderModeInCCT",
                                      base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kReorderBookmarks{"ReorderBookmarks",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kRevampedContextMenu{"RevampedContextMenu",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kSearchReadyOmniboxFeature{
-    "SearchReadyOmnibox", base::FEATURE_DISABLED_BY_DEFAULT};
+    "SearchReadyOmnibox", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kServiceManagerForBackgroundPrefetch{
+    "ServiceManagerForBackgroundPrefetch", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kServiceManagerForDownload{
     "ServiceManagerForDownload", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kSoleIntegration{"SoleIntegration",
-                                     base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kShoppingAssist{"ShoppingAssist",
+                                    base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kSpannableInlineAutocomplete{
     "SpannableInlineAutocomplete", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -472,8 +515,21 @@ const base::Feature kSpannableInlineAutocomplete{
 const base::Feature kSpecialLocaleWrapper{"SpecialLocaleWrapper",
                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kSpecialUserDecision{"SpecialUserDecision",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kSwapPixelFormatToFixConvertFromTranslucent{
+    "SwapPixelFormatToFixConvertFromTranslucent",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kTabEngagementReportingAndroid{
+    "TabEngagementReportingAndroid", base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kTabGroupsAndroid{"TabGroupsAndroid",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kTabGroupsUiImprovementsAndroid{
+    "TabGroupsUiImprovementsAndroid", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kTabGridLayoutAndroid{"TabGridLayoutAndroid",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
@@ -484,14 +540,28 @@ const base::Feature kTabReparenting{"TabReparenting",
 const base::Feature kTabSwitcherOnReturn{"TabSwitcherOnReturn",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kTabToGTSAnimation{"TabToGTSAnimation",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kTrustedWebActivity{"TrustedWebActivity",
                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kTrustedWebActivityPostMessage{
     "TrustedWebActivityPostMessage", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kTrustedWebActivityNotificationDelegationEnrolment{
+    "TrustedWebActivityNotificationDelegationAutoEnrolment",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kTwoPanesStartSurfaceAndroid{
+    "TwoPanesStartSurfaceAndroid", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// If enabled, keep logging and reporting UMA while chrome is backgrounded.
+const base::Feature kUmaBackgroundSessions{"UMABackgroundSessions",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kUsageStatsFeature{"UsageStats",
-                                       base::FEATURE_ENABLED_BY_DEFAULT};
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kUserMediaScreenCapturing{
     "UserMediaScreenCapturing", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -501,6 +571,9 @@ const base::Feature kVideoPersistence{"VideoPersistence",
 
 const base::Feature kVrBrowsingFeedback{"VrBrowsingFeedback",
                                         base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kOfferWipeDataOnSignout{"OfferWipeDataOnSignout",
+                                            base::FEATURE_ENABLED_BY_DEFAULT};
 
 static jboolean JNI_ChromeFeatureList_IsInitialized(JNIEnv* env) {
   return !!base::FeatureList::GetInstance();

@@ -450,6 +450,59 @@ void GL_BINDING_CALL MockGLInterface::Mock_glClearStencil(GLint s) {
   interface_->ClearStencil(s);
 }
 
+void GL_BINDING_CALL MockGLInterface::Mock_glClearTexImage(GLuint texture,
+                                                           GLint level,
+                                                           GLenum format,
+                                                           GLenum type,
+                                                           const GLvoid* data) {
+  MakeGlMockFunctionUnique("glClearTexImage");
+  interface_->ClearTexImage(texture, level, format, type, data);
+}
+
+void GL_BINDING_CALL
+MockGLInterface::Mock_glClearTexImageEXT(GLuint texture,
+                                         GLint level,
+                                         GLenum format,
+                                         GLenum type,
+                                         const GLvoid* data) {
+  MakeGlMockFunctionUnique("glClearTexImageEXT");
+  interface_->ClearTexImage(texture, level, format, type, data);
+}
+
+void GL_BINDING_CALL
+MockGLInterface::Mock_glClearTexSubImage(GLuint texture,
+                                         GLint level,
+                                         GLint xoffset,
+                                         GLint yoffset,
+                                         GLint zoffset,
+                                         GLint width,
+                                         GLint height,
+                                         GLint depth,
+                                         GLenum format,
+                                         GLenum type,
+                                         const GLvoid* data) {
+  MakeGlMockFunctionUnique("glClearTexSubImage");
+  interface_->ClearTexSubImage(texture, level, xoffset, yoffset, zoffset, width,
+                               height, depth, format, type, data);
+}
+
+void GL_BINDING_CALL
+MockGLInterface::Mock_glClearTexSubImageEXT(GLuint texture,
+                                            GLint level,
+                                            GLint xoffset,
+                                            GLint yoffset,
+                                            GLint zoffset,
+                                            GLint width,
+                                            GLint height,
+                                            GLint depth,
+                                            GLenum format,
+                                            GLenum type,
+                                            const GLvoid* data) {
+  MakeGlMockFunctionUnique("glClearTexSubImageEXT");
+  interface_->ClearTexSubImage(texture, level, xoffset, yoffset, zoffset, width,
+                               height, depth, format, type, data);
+}
+
 GLenum GL_BINDING_CALL
 MockGLInterface::Mock_glClientWaitSync(GLsync sync,
                                        GLbitfield flags,
@@ -1375,16 +1428,15 @@ MockGLInterface::Mock_glFramebufferTextureLayer(GLenum target,
 }
 
 void GL_BINDING_CALL
-MockGLInterface::Mock_glFramebufferTextureMultiviewLayeredANGLE(
-    GLenum target,
-    GLenum attachment,
-    GLuint texture,
-    GLint level,
-    GLint baseViewIndex,
-    GLsizei numViews) {
-  MakeGlMockFunctionUnique("glFramebufferTextureMultiviewLayeredANGLE");
-  interface_->FramebufferTextureMultiviewLayeredANGLE(
-      target, attachment, texture, level, baseViewIndex, numViews);
+MockGLInterface::Mock_glFramebufferTextureMultiviewOVR(GLenum target,
+                                                       GLenum attachment,
+                                                       GLuint texture,
+                                                       GLint level,
+                                                       GLint baseViewIndex,
+                                                       GLsizei numViews) {
+  MakeGlMockFunctionUnique("glFramebufferTextureMultiviewOVR");
+  interface_->FramebufferTextureMultiviewOVR(target, attachment, texture, level,
+                                             baseViewIndex, numViews);
 }
 
 void GL_BINDING_CALL MockGLInterface::Mock_glFrontFace(GLenum mode) {
@@ -2795,6 +2847,12 @@ MockGLInterface::Mock_glInvalidateSubFramebuffer(GLenum target,
                                        y, width, height);
 }
 
+void GL_BINDING_CALL
+MockGLInterface::Mock_glInvalidateTextureANGLE(GLenum target) {
+  MakeGlMockFunctionUnique("glInvalidateTextureANGLE");
+  interface_->InvalidateTextureANGLE(target);
+}
+
 GLboolean GL_BINDING_CALL MockGLInterface::Mock_glIsBuffer(GLuint buffer) {
   MakeGlMockFunctionUnique("glIsBuffer");
   return interface_->IsBuffer(buffer);
@@ -4177,6 +4235,20 @@ void GL_BINDING_CALL MockGLInterface::Mock_glTexImage2D(GLenum target,
 }
 
 void GL_BINDING_CALL
+MockGLInterface::Mock_glTexImage2DExternalANGLE(GLenum target,
+                                                GLint level,
+                                                GLint internalformat,
+                                                GLsizei width,
+                                                GLsizei height,
+                                                GLint border,
+                                                GLenum format,
+                                                GLenum type) {
+  MakeGlMockFunctionUnique("glTexImage2DExternalANGLE");
+  interface_->TexImage2DExternalANGLE(target, level, internalformat, width,
+                                      height, border, format, type);
+}
+
+void GL_BINDING_CALL
 MockGLInterface::Mock_glTexImage2DRobustANGLE(GLenum target,
                                               GLint level,
                                               GLint internalformat,
@@ -5060,6 +5132,14 @@ MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<GLFunctionPointerType>(Mock_glClearDepthf);
   if (strcmp(name, "glClearStencil") == 0)
     return reinterpret_cast<GLFunctionPointerType>(Mock_glClearStencil);
+  if (strcmp(name, "glClearTexImage") == 0)
+    return reinterpret_cast<GLFunctionPointerType>(Mock_glClearTexImage);
+  if (strcmp(name, "glClearTexImageEXT") == 0)
+    return reinterpret_cast<GLFunctionPointerType>(Mock_glClearTexImageEXT);
+  if (strcmp(name, "glClearTexSubImage") == 0)
+    return reinterpret_cast<GLFunctionPointerType>(Mock_glClearTexSubImage);
+  if (strcmp(name, "glClearTexSubImageEXT") == 0)
+    return reinterpret_cast<GLFunctionPointerType>(Mock_glClearTexSubImageEXT);
   if (strcmp(name, "glClientWaitSync") == 0)
     return reinterpret_cast<GLFunctionPointerType>(Mock_glClientWaitSync);
   if (strcmp(name, "glColorMask") == 0)
@@ -5325,9 +5405,9 @@ MockGLInterface::GetGLProcAddress(const char* name) {
   if (strcmp(name, "glFramebufferTextureLayer") == 0)
     return reinterpret_cast<GLFunctionPointerType>(
         Mock_glFramebufferTextureLayer);
-  if (strcmp(name, "glFramebufferTextureMultiviewLayeredANGLE") == 0)
+  if (strcmp(name, "glFramebufferTextureMultiviewOVR") == 0)
     return reinterpret_cast<GLFunctionPointerType>(
-        Mock_glFramebufferTextureMultiviewLayeredANGLE);
+        Mock_glFramebufferTextureMultiviewOVR);
   if (strcmp(name, "glFrontFace") == 0)
     return reinterpret_cast<GLFunctionPointerType>(Mock_glFrontFace);
   if (strcmp(name, "glGenBuffers") == 0)
@@ -5733,6 +5813,9 @@ MockGLInterface::GetGLProcAddress(const char* name) {
   if (strcmp(name, "glInvalidateSubFramebuffer") == 0)
     return reinterpret_cast<GLFunctionPointerType>(
         Mock_glInvalidateSubFramebuffer);
+  if (strcmp(name, "glInvalidateTextureANGLE") == 0)
+    return reinterpret_cast<GLFunctionPointerType>(
+        Mock_glInvalidateTextureANGLE);
   if (strcmp(name, "glIsBuffer") == 0)
     return reinterpret_cast<GLFunctionPointerType>(Mock_glIsBuffer);
   if (strcmp(name, "glIsEnabled") == 0)
@@ -6119,6 +6202,9 @@ MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<GLFunctionPointerType>(Mock_glTexBufferRangeOES);
   if (strcmp(name, "glTexImage2D") == 0)
     return reinterpret_cast<GLFunctionPointerType>(Mock_glTexImage2D);
+  if (strcmp(name, "glTexImage2DExternalANGLE") == 0)
+    return reinterpret_cast<GLFunctionPointerType>(
+        Mock_glTexImage2DExternalANGLE);
   if (strcmp(name, "glTexImage2DRobustANGLE") == 0)
     return reinterpret_cast<GLFunctionPointerType>(
         Mock_glTexImage2DRobustANGLE);

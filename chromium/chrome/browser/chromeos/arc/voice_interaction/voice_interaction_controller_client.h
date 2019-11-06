@@ -21,7 +21,8 @@ namespace arc {
 // state changes that does not have an observer interface.
 class VoiceInteractionControllerClient
     : public content::NotificationObserver,
-      public user_manager::UserManager::UserSessionStateObserver {
+      public user_manager::UserManager::UserSessionStateObserver,
+      public ArcSessionManager::Observer {
  public:
   class Observer {
    public:
@@ -36,17 +37,14 @@ class VoiceInteractionControllerClient
   // Notify the controller about state changes.
   void NotifyStatusChanged(ash::mojom::VoiceInteractionState state);
 
+  void NotifyLockedFullScreenStateChanged(bool enabled);
+
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
   const ash::mojom::VoiceInteractionState& voice_interaction_state() const {
     return voice_interaction_state_;
   }
-
-  // Testing methods.
-  void SetControllerForTesting(
-      ash::mojom::VoiceInteractionControllerPtr controller);
-  void FlushMojoForTesting();
 
  private:
   friend class VoiceInteractionControllerClientTest;
@@ -55,8 +53,6 @@ class VoiceInteractionControllerClient
   void NotifySettingsEnabled();
   void NotifyContextEnabled();
   void NotifyHotwordEnabled();
-  void NotifyHotwordAlwaysOn();
-  void NotifyConsentStatus();
   void NotifyFeatureAllowed();
   void NotifyNotificationEnabled();
   void NotifyLocaleChanged();
@@ -70,11 +66,10 @@ class VoiceInteractionControllerClient
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
+  // Override ArcSessionManager::Observer
+  void OnArcPlayStoreEnabledChanged(bool enabled) override;
+
   void SetProfile(Profile* profile);
-
-  void ConnectToVoiceInteractionController();
-
-  ash::mojom::VoiceInteractionControllerPtr voice_interaction_controller_;
 
   content::NotificationRegistrar notification_registrar_;
   std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;

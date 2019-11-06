@@ -20,6 +20,7 @@
 #include "components/omnibox/browser/location_bar_model.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/omnibox_popup_model.h"
+#include "components/omnibox/common/omnibox_focus_state.h"
 #include "ios/chrome/browser/autocomplete/autocomplete_scheme_classifier_impl.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/ui/omnibox/chrome_omnibox_client_ios.h"
@@ -31,7 +32,7 @@
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
-#include "ios/web/public/referrer.h"
+#include "ios/web/public/navigation/referrer.h"
 #import "net/base/mac/url_conversions.h"
 #include "skia/ext/skia_utils_ios.h"
 #include "ui/base/page_transition_types.h"
@@ -270,8 +271,15 @@ void OmniboxViewIOS::UpdatePopup() {
   if (model())
     model()->StartAutocomplete(current_selection_.length != 0,
                                prevent_inline_autocomplete);
+
+  UpdatePopupAppearance();
+}
+
+void OmniboxViewIOS::UpdatePopupAppearance() {
   DCHECK(popup_provider_);
   popup_provider_->SetTextAlignment([field_ bestTextAlignment]);
+  popup_provider_->SetSemanticContentAttribute(
+      [field_ bestSemanticContentAttribute]);
 }
 
 void OmniboxViewIOS::OnTemporaryTextMaybeChanged(
@@ -372,15 +380,18 @@ void OmniboxViewIOS::OnDidBeginEditing() {
   [field_ setText:[field_ text]];
   OnBeforePossibleChange();
 
+  // Make sure the omnibox popup's semantic content attribute is set correctly.
+  popup_provider_->SetSemanticContentAttribute(
+      [field_ bestSemanticContentAttribute]);
+
   if (model()) {
     // In the case where the user taps the fakebox on the Google landing page,
     // or from the secondary toolbar search button, the focus source is already
     // set to FAKEBOX or SEARCH_BUTTON respectively. Otherwise, set it to
     // OMNIBOX.
-    if (model()->focus_source() != OmniboxEditModel::FocusSource::FAKEBOX &&
-        model()->focus_source() !=
-            OmniboxEditModel::FocusSource::SEARCH_BUTTON) {
-      model()->set_focus_source(OmniboxEditModel::FocusSource::OMNIBOX);
+    if (model()->focus_source() != OmniboxFocusSource::FAKEBOX &&
+        model()->focus_source() != OmniboxFocusSource::SEARCH_BUTTON) {
+      model()->set_focus_source(OmniboxFocusSource::OMNIBOX);
     }
 
     model()->OnSetFocus(false);
@@ -427,13 +438,24 @@ bool OmniboxViewIOS::OnWillChange(NSRange range, NSString* new_text) {
     [field_ setClearingPreEditText:YES];
 
     // Exit the pre-editing state in OnWillChange() instead of OnDidChange(), as
-    // that allows IME to continue working.  The following code selects the text
-    // as if the pre-edit fake selection was real.
+    // that allows IME to continue working.
     [field_ exitPreEditState];
 
-    field_.selectedTextRange =
-        [field_ textRangeFromPosition:field_.beginningOfDocument
-                           toPosition:field_.endOfDocument];
+    if (@available(iOS 13, *)) {
+      // Exit pre-edit completely by setting the text to an empty string.
+      // On iOS 13, swiping keyboard acquires a lock that UITextField attempts
+      // to acquire when setSelectedTextRange: is called, causing a deadlock.
+      // Therefore this workaround is introduced. This probably introduces small
+      // issues with third-party keyboards, like crbug.com/875918 and
+      // crbug.com/873544. See crbug.com/988431 for more context.
+      [field_ setText:@""];
+    } else {
+      // The following code selects the text
+      // as if the pre-edit fake selection was real.
+      field_.selectedTextRange =
+          [field_ textRangeFromPosition:field_.beginningOfDocument
+                             toPosition:field_.endOfDocument];
+    }
 
     // Reset |range| to be of zero-length at location zero, as the field will be
     // now cleared.
@@ -564,7 +586,7 @@ void OmniboxViewIOS::OnAccept() {
 
   WindowOpenDisposition disposition = WindowOpenDisposition::CURRENT_TAB;
   if (model()) {
-    model()->AcceptInput(disposition, false);
+    model()->AcceptInput(disposition);
   }
   RevertAll();
 }
@@ -619,6 +641,8 @@ bool OmniboxViewIOS::OnCopy() {
 void OmniboxViewIOS::WillPaste() {
   if (model())
     model()->OnPaste();
+
+  [field_ exitPreEditState];
 }
 
 // static
@@ -776,7 +800,7 @@ int OmniboxViewIOS::GetIcon(bool offlinePage) const {
       return IDR_IOS_OMNIBOX_OFFLINE;
     }
     return GetIconForSecurityState(
-        controller()->GetLocationBarModel()->GetSecurityLevel(false));
+        controller()->GetLocationBarModel()->GetSecurityLevel());
   }
   return GetIconForAutocompleteMatchType(
       model() ? model()->CurrentMatch(nullptr).type
@@ -804,8 +828,12 @@ void OmniboxViewIOS::EmphasizeURLComponents() {
 #pragma mark - OmniboxPopupViewSuggestionsDelegate
 
 void OmniboxViewIOS::OnTopmostSuggestionImageChanged(
-    AutocompleteMatchType::Type type) {
-  [left_image_consumer_ setLeftImageForAutocompleteType:type];
+    AutocompleteMatchType::Type match_type,
+    base::Optional<SuggestionAnswer::AnswerType> answer_type,
+    GURL favicon_url) {
+  [left_image_consumer_ setLeftImageForAutocompleteType:match_type
+                                             answerType:answer_type
+                                             faviconURL:favicon_url];
 }
 
 void OmniboxViewIOS::OnResultsChanged(const AutocompleteResult& result) {

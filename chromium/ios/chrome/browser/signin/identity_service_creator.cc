@@ -6,18 +6,14 @@
 
 #include <memory>
 
-#include "components/signin/core/browser/signin_manager.h"
-#include "ios/chrome/browser/signin/account_tracker_service_factory.h"
 #include "ios/chrome/browser/signin/identity_manager_factory.h"
 #include "services/identity/identity_service.h"
 
 std::unique_ptr<service_manager::Service> CreateIdentityService(
     ios::ChromeBrowserState* browser_state,
     service_manager::mojom::ServiceRequest request) {
-  identity::IdentityManager* identity_manager =
+  signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForBrowserState(browser_state);
-  AccountTrackerService* account_tracker =
-      ios::AccountTrackerServiceFactory::GetForBrowserState(browser_state);
-  return std::make_unique<identity::IdentityService>(
-      identity_manager, account_tracker, std::move(request));
+  return std::make_unique<identity::IdentityService>(identity_manager,
+                                                     std::move(request));
 }

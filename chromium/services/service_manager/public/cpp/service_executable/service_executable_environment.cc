@@ -9,7 +9,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_current.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/task_scheduler/task_scheduler.h"
+#include "base/task/thread_pool/thread_pool.h"
 #include "build/build_config.h"
 #include "mojo/core/embedder/embedder.h"
 #include "mojo/public/cpp/platform/platform_channel.h"
@@ -25,20 +25,11 @@
 #include "services/service_manager/sandbox/linux/sandbox_linux.h"
 #endif
 
-#if defined(OS_MACOSX)
-#include "mojo/core/embedder/default_mach_broker.h"
-#endif
-
 namespace service_manager {
 
 ServiceExecutableEnvironment::ServiceExecutableEnvironment()
     : ipc_thread_("IPC Thread") {
   DCHECK(!base::MessageLoopCurrent::Get());
-
-#if defined(OS_MACOSX)
-  // Send our task port to the parent.
-  mojo::core::DefaultMachBroker::SendTaskPortToParent();
-#endif
 
 #if defined(OS_LINUX)
   const base::CommandLine& command_line =
@@ -62,7 +53,8 @@ ServiceExecutableEnvironment::ServiceExecutableEnvironment()
 
   mojo::core::Init();
 
-  base::TaskScheduler::CreateAndStartWithDefaultParams("StandaloneService");
+  base::ThreadPoolInstance::CreateAndStartWithDefaultParams(
+      "StandaloneService");
   ipc_thread_.StartWithOptions(
       base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
 

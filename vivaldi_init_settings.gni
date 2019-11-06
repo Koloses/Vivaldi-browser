@@ -24,10 +24,6 @@ declare_overrides() {
     }
   }
 
-  use_v8_context_snapshot = is_mac || is_win
-
-  exclude_unwind_tables = is_official_build
-
   # enable jumbo file compile
   use_jumbo_build = true
 
@@ -44,9 +40,18 @@ declare_overrides() {
     skip_archive_compression = is_component_build
   }
 
-  if (is_mac) { # && !is_component_build) {
-    # We need to force SDK 10.13 for Mac builds
-    # since Chromium don't compile with 10.14
-    mac_use_sdk = "10.13"
+  #if (is_mac) { # && !is_component_build) {
+  #  # We need to force SDK 10.13 for Mac builds
+  #  # since Chromium don't compile with 10.14
+  #  mac_use_sdk = "10.13"
+  #}
+
+  # Needed until we discover what is causing the unused argument during clcache
+  if (is_win && cc_wrapper != "") {
+    use_ghash = false
+  }
+
+  if (target_cpu == "arm" || target_cpu == "arm64") {
+    enable_openscreen = false
   }
 }

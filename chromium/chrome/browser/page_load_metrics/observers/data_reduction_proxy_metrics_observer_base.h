@@ -52,7 +52,7 @@ class DataReductionProxyMetricsObserverBase
   void OnLoadedResource(const page_load_metrics::ExtraRequestCompleteInfo&
                             extra_request_compelte_info) override;
   void OnResourceDataUseObserved(
-      FrameTreeNodeId frame_tree_node_id,
+      content::RenderFrameHost* rfh,
       const std::vector<page_load_metrics::mojom::ResourceDataUpdatePtr>&
           resources) override;
   void OnEventOccurred(const void* const event_key) override;
@@ -103,6 +103,9 @@ class DataReductionProxyMetricsObserverBase
   // page_load_metrics::PageLoadMetricsObserver:
   ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
                          ukm::SourceId source_id) final;
+
+  // Records UKM for the data_reduction_proxy event.
+  void RecordUKM(const page_load_metrics::PageLoadExtraInfo& info) const;
 
   // Sends the page load information to the pingback client.
   void SendPingback(const page_load_metrics::mojom::PageLoadTiming& timing,
@@ -184,10 +187,6 @@ class DataReductionProxyMetricsObserverBase
   // The number of main frame redirects that occurred before commit.
   uint32_t redirect_count_;
 
-  // The time when the navigation started. Used to estimate
-  // |navigation_start_to_main_frame_fetch_start_|.
-  base::Optional<base::TimeTicks> navigation_start_;
-
   // The time of the fetchStart of the main page HTML.
   base::Optional<base::TimeTicks> main_frame_fetch_start_;
 
@@ -197,7 +196,8 @@ class DataReductionProxyMetricsObserverBase
   // The status of an attempted lite page redirect preview.
   base::Optional<previews::ServerLitePageStatus> lite_page_redirect_status_;
 
-  base::WeakPtrFactory<DataReductionProxyMetricsObserverBase> weak_ptr_factory_;
+  base::WeakPtrFactory<DataReductionProxyMetricsObserverBase> weak_ptr_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyMetricsObserverBase);
 };

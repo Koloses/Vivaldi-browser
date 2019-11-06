@@ -10,13 +10,16 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
+#include "components/policy/core/common/features.h"
 #include "components/policy/core/common/policy_bundle.h"
 #include "components/policy/core/common/policy_map.h"
+#include "components/policy/core/common/policy_merger.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_constants.h"
 
@@ -70,10 +73,29 @@ void RemapProxyPolicies(PolicyMap* policies) {
   }
 }
 
+// Returns a list of string values of |policy|. Returns an empty array if
+// the values are not strings.
+std::set<std::string> GetStringListPolicyItems(const PolicyBundle& bundle,
+                                               const PolicyNamespace& space,
+                                               const std::string& policy) {
+  const PolicyMap& chrome_policies = bundle.Get(space);
+  const base::Value* items_ptr = chrome_policies.GetValue(policy);
+
+  std::set<std::string> items;
+
+  if (items_ptr) {
+    for (const auto& item : items_ptr->GetList()) {
+      if (item.is_string())
+        items.emplace(item.GetString());
+    }
+  }
+
+  return items;
+}
+
 }  // namespace
 
-PolicyServiceImpl::PolicyServiceImpl(Providers providers)
-    : update_task_ptr_factory_(this) {
+PolicyServiceImpl::PolicyServiceImpl(Providers providers) {
   providers_ = std::move(providers);
   for (int domain = 0; domain < POLICY_DOMAIN_SIZE; ++domain)
     initialization_complete_[domain] = true;
@@ -108,10 +130,8 @@ void PolicyServiceImpl::RemoveObserver(PolicyDomain domain,
                                        PolicyService::Observer* observer) {
   DCHECK(thread_checker_.CalledOnValidThread());
   auto it = observers_.find(domain);
-  if (it == observers_.end()) {
-    NOTREACHED();
+  if (it == observers_.end())
     return;
-  }
   it->second->RemoveObserver(observer);
   if (!it->second->might_have_observers()) {
     observers_.erase(it);
@@ -193,6 +213,35 @@ void PolicyServiceImpl::MergeAndTriggerUpdates() {
     RemapProxyPolicies(&provided_bundle.Get(chrome_namespace));
     bundle.MergeFrom(provided_bundle);
   }
+
+  // Merges all the mergeable policies
+  std::set<std::string> policy_lists_to_merge = GetStringListPolicyItems(
+      bundle, chrome_namespace, key::kPolicyListMultipleSourceMergeList);
+  std::set<std::string> policy_dictionaries_to_merge = GetStringListPolicyItems(
+      bundle, chrome_namespace, key::kPolicyDictionaryMultipleSourceMergeList);
+
+  const auto& chrome_policies = bundle.Get(chrome_namespace);
+  auto* value =
+      chrome_policies.GetValue(key::kExtensionInstallListsMergeEnabled);
+  if (value && value->GetBool()) {
+    policy_lists_to_merge.insert(key::kExtensionInstallForcelist);
+    policy_lists_to_merge.insert(key::kExtensionInstallBlacklist);
+    policy_lists_to_merge.insert(key::kExtensionInstallWhitelist);
+  }
+
+  PolicyListMerger policy_list_merger(std::move(policy_lists_to_merge));
+  PolicyDictionaryMerger policy_dictionary_merger(
+      std::move(policy_dictionaries_to_merge));
+
+  std::vector<PolicyMerger*> mergers{&policy_list_merger,
+                                     &policy_dictionary_merger};
+
+  PolicyGroupMerger policy_group_merger;
+  if (base::FeatureList::IsEnabled(features::kPolicyAtomicGroup))
+    mergers.push_back(&policy_group_merger);
+
+  for (auto it = bundle.begin(); it != bundle.end(); ++it)
+    it->second->MergeValues(mergers);
 
   // Swap first, so that observers that call GetPolicies() see the current
   // values.

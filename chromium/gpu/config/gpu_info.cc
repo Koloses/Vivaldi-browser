@@ -55,9 +55,13 @@ const char* ImageDecodeAcceleratorTypeToString(
   switch (type) {
     case gpu::ImageDecodeAcceleratorType::kJpeg:
       return "JPEG";
+    case gpu::ImageDecodeAcceleratorType::kWebP:
+      return "WebP";
     case gpu::ImageDecodeAcceleratorType::kUnknown:
       return "Unknown";
   }
+  NOTREACHED() << "Invalid ImageDecodeAcceleratorType.";
+  return "";
 }
 
 const char* ImageDecodeAcceleratorSubsamplingToString(
@@ -67,6 +71,8 @@ const char* ImageDecodeAcceleratorSubsamplingToString(
       return "4:2:0";
     case gpu::ImageDecodeAcceleratorSubsampling::k422:
       return "4:2:2";
+    case gpu::ImageDecodeAcceleratorSubsampling::k444:
+      return "4:4:4";
   }
 }
 
@@ -92,16 +98,6 @@ void EnumerateImageDecodeAcceleratorSupportedProfile(
 }
 
 #if defined(OS_WIN)
-void EnumerateOverlayCapability(const gpu::OverlayCapability& cap,
-                                gpu::GPUInfo::Enumerator* enumerator) {
-  std::string key_string = "overlayCap";
-  key_string += OverlayFormatToString(cap.format);
-  enumerator->BeginOverlayCapability();
-  enumerator->AddString(key_string.c_str(),
-                        cap.is_scaling_supported ? "SCALING" : "DIRECT");
-  enumerator->EndOverlayCapability();
-}
-
 void EnumerateDx12VulkanVersionInfo(const gpu::Dx12VulkanVersionInfo& info,
                                     gpu::GPUInfo::Enumerator* enumerator) {
   enumerator->BeginDx12VulkanVersionInfo();
@@ -119,22 +115,17 @@ void EnumerateDx12VulkanVersionInfo(const gpu::Dx12VulkanVersionInfo& info,
 namespace gpu {
 
 #if defined(OS_WIN)
-const char* OverlayFormatToString(OverlayFormat format) {
-  switch (format) {
-    case OverlayFormat::kBGRA:
-      return "BGRA";
-    case OverlayFormat::kYUY2:
-      return "YUY2";
-    case OverlayFormat::kNV12:
-      return "NV12";
+const char* OverlaySupportToString(gpu::OverlaySupport support) {
+  switch (support) {
+    case gpu::OverlaySupport::kNone:
+      return "NONE";
+    case gpu::OverlaySupport::kDirect:
+      return "DIRECT";
+    case gpu::OverlaySupport::kScaling:
+      return "SCALING";
   }
 }
-
-bool OverlayCapability::operator==(const OverlayCapability& other) const {
-  return format == other.format &&
-         is_scaling_supported == other.is_scaling_supported;
-}
-#endif
+#endif  // OS_WIN
 
 VideoDecodeAcceleratorCapabilities::VideoDecodeAcceleratorCapabilities()
     : flags(0) {}
@@ -186,7 +177,6 @@ GPUInfo::GPUInfo()
       amd_switchable(false),
       gl_reset_notification_strategy(0),
       software_rendering(false),
-      direct_rendering(true),
       sandboxed(false),
       in_process_gpu(true),
       passthrough_cmd_decoder(false),
@@ -243,7 +233,7 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
     std::string gl_ws_extensions;
     uint32_t gl_reset_notification_strategy;
     bool software_rendering;
-    bool direct_rendering;
+    std::string direct_rendering_version;
     bool sandboxed;
     bool in_process_gpu;
     bool passthrough_cmd_decoder;
@@ -251,7 +241,8 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
 #if defined(OS_WIN)
     bool direct_composition;
     bool supports_overlays;
-    OverlayCapabilities overlay_capabilities;
+    OverlaySupport yuy2_overlay_support;
+    OverlaySupport nv12_overlay_support;
     DxDiagNode dx_diagnostics;
     Dx12VulkanVersionInfo dx12_vulkan_version_info;
 #endif
@@ -287,8 +278,7 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
     EnumerateGPUDevice(secondary_gpu, enumerator);
 
   enumerator->BeginAuxAttributes();
-  enumerator->AddTimeDeltaInSecondsF("initializationTime",
-                                     initialization_time);
+  enumerator->AddTimeDeltaInSecondsF("initializationTime", initialization_time);
   enumerator->AddBool("optimus", optimus);
   enumerator->AddBool("amdSwitchable", amd_switchable);
   enumerator->AddString("pixelShaderVersion", pixel_shader_version);
@@ -306,7 +296,7 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
       static_cast<int>(gl_reset_notification_strategy));
   // TODO(kbr): add performance_stats.
   enumerator->AddBool("softwareRendering", software_rendering);
-  enumerator->AddBool("directRendering", direct_rendering);
+  enumerator->AddString("directRenderingVersion", direct_rendering_version);
   enumerator->AddBool("sandboxed", sandboxed);
   enumerator->AddBool("inProcessGpu", in_process_gpu);
   enumerator->AddBool("passthroughCmdDecoder", passthrough_cmd_decoder);
@@ -316,12 +306,16 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
 #if defined(OS_WIN)
   enumerator->AddBool("directComposition", direct_composition);
   enumerator->AddBool("supportsOverlays", supports_overlays);
-  for (const auto& cap : overlay_capabilities)
-    EnumerateOverlayCapability(cap, enumerator);
+  enumerator->AddString("yuy2OverlaySupport",
+                        OverlaySupportToString(yuy2_overlay_support));
+  enumerator->AddString("nv12OverlaySupport",
+                        OverlaySupportToString(nv12_overlay_support));
   EnumerateDx12VulkanVersionInfo(dx12_vulkan_version_info, enumerator);
 #endif
   enumerator->AddInt("videoDecodeAcceleratorFlags",
                      video_decode_accelerator_capabilities.flags);
+
+  // TODO(crbug.com/966839): Fix the two supported profile dumping below.
   for (const auto& profile :
        video_decode_accelerator_capabilities.supported_profiles)
     EnumerateVideoDecodeAcceleratorSupportedProfile(profile, enumerator);

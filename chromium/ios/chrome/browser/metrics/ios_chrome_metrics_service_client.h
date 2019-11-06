@@ -21,7 +21,7 @@
 #include "components/ukm/observers/history_delete_observer.h"
 #include "components/ukm/observers/sync_disable_observer.h"
 #import "ios/chrome/browser/metrics/incognito_web_state_observer.h"
-#include "ios/web/public/web_state/global_web_state_observer.h"
+#include "ios/web/public/deprecated/global_web_state_observer.h"
 
 class IOSChromeStabilityMetricsProvider;
 class PrefRegistrySimple;
@@ -77,6 +77,7 @@ class IOSChromeMetricsServiceClient : public IncognitoWebStateObserver,
   void OnRendererProcessCrash() override;
   bool SyncStateAllowsUkm() override;
   bool AreNotificationListenersEnabledOnAllProfiles() override;
+  std::string GetUploadSigningKey() override;
 
   // ukm::HistoryDeleteObserver:
   void OnHistoryDeleted() override;

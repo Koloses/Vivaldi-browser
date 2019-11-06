@@ -34,7 +34,6 @@ if (is_win) {
   ]
 }
 
-
 foreach (_target, _targets) {
   update_template_instance(_target) {
     sources += [ vivaldi_version_path ]
@@ -65,24 +64,13 @@ if (is_win) {
   }
 }
 
-if (!is_android) {
-  update_template_instance("//ppapi/proxy:proxy") {
+if (is_android) {
+  update_template_instance("//chrome/browser:browser") {
     if (!defined(jumbo_excluded_sources)) {
       jumbo_excluded_sources = []
     }
     jumbo_excluded_sources += [
-      "ppapi_command_buffer_proxy.cc",
-    ]
-  }
-}
-
-if (is_win) {
-  update_template_instance("//content/browser:browser") {
-    if (!defined(jumbo_excluded_sources)) {
-      jumbo_excluded_sources = []
-    }
-    jumbo_excluded_sources += [
-      "accessibility/accessibility_tree_formatter_win.cc",
+      "android/webapk/webapk_update_data_fetcher.cc",
     ]
   }
 }

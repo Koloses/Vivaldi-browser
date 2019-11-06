@@ -13,6 +13,7 @@
 #include "base/metrics/field_trial_params.h"
 #include "base/task_runner_util.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "build/buildflag.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "content/public/common/content_client.h"
@@ -21,8 +22,6 @@
 #include "content/renderer/media/render_media_log.h"
 #include "content/renderer/media/renderer_webmediaplayer_delegate.h"
 #include "content/renderer/media/stream/media_stream_renderer_factory_impl.h"
-#include "content/renderer/media/stream/webmediaplayer_ms.h"
-#include "content/renderer/media/web_media_element_source_utils.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
@@ -35,7 +34,6 @@
 #include "media/blink/resource_fetch_context.h"
 #include "media/blink/webencryptedmediaclient_impl.h"
 #include "media/blink/webmediaplayer_impl.h"
-#include "media/filters/context_3d.h"
 #include "media/media_buildflags.h"
 #include "media/renderers/decrypting_renderer_factory.h"
 #include "media/renderers/default_decoder_factory.h"
@@ -44,12 +42,13 @@
 #include "mojo/public/cpp/bindings/associated_interface_ptr.h"
 #include "services/service_manager/public/cpp/connect.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
+#include "services/viz/public/cpp/gpu/context_provider_command_buffer.h"
+#include "third_party/blink/public/platform/modules/mediastream/web_media_element_source_utils.h"
 #include "third_party/blink/public/platform/web_surface_layer_bridge.h"
 #include "third_party/blink/public/platform/web_video_frame_submitter.h"
 #include "third_party/blink/public/web/blink.h"
+#include "third_party/blink/public/web/modules/mediastream/webmediaplayer_ms.h"
 #include "third_party/blink/public/web/web_local_frame.h"
-#include "ui/base/ui_base_features.h"
 #include "url/origin.h"
 
 #if defined(OS_ANDROID)
@@ -65,10 +64,16 @@
 #include "content/renderer/media/media_interface_factory.h"
 #endif
 
-#if BUILDFLAG(ENABLE_MOJO_CDM)
+#if defined(OS_FUCHSIA)
+#include "media/cdm/fuchsia/fuchsia_cdm_factory.h"
+#elif BUILDFLAG(ENABLE_MOJO_CDM)
 #include "media/mojo/clients/mojo_cdm_factory.h"  // nogncheck
 #else
 #include "media/cdm/default_cdm_factory.h"
+#endif
+
+#if defined(OS_FUCHSIA) && BUILDFLAG(ENABLE_MOJO_CDM)
+#error "MojoCdm should be disabled for Fuchsia."
 #endif
 
 #if BUILDFLAG(ENABLE_MOJO_RENDERER)
@@ -141,17 +146,10 @@ namespace content {
 // static
 blink::WebMediaPlayer::SurfaceLayerMode
 MediaFactory::GetVideoSurfaceLayerMode() {
-  // Web tests do not support SurfaceLayer by default at the moment.
-  // See https://crbug.com/838128
-  content::RenderThreadImpl* render_thread =
-      content::RenderThreadImpl::current();
-  if (render_thread && render_thread->web_test_mode() &&
-      !render_thread->WebTestModeUsesDisplayCompositorPixelDump()) {
+#if defined(OS_ANDROID)
+  if (base::FeatureList::IsEnabled(media::kDisableSurfaceLayerForVideo))
     return blink::WebMediaPlayer::SurfaceLayerMode::kNever;
-  }
-
-  if (features::IsMultiProcessMash())
-    return blink::WebMediaPlayer::SurfaceLayerMode::kNever;
+#endif  // OS_ANDROID
 
   if (base::FeatureList::IsEnabled(media::kUseSurfaceLayerForVideo))
     return blink::WebMediaPlayer::SurfaceLayerMode::kAlways;
@@ -278,7 +276,7 @@ blink::WebMediaPlayer* MediaFactory::CreateMediaPlayer(
   blink::WebSecurityOrigin security_origin =
       render_frame_->GetWebFrame()->GetSecurityOrigin();
   blink::WebMediaStream web_stream =
-      GetWebMediaStreamFromWebMediaPlayerSource(source);
+      blink::GetWebMediaStreamFromWebMediaPlayerSource(source);
   if (!web_stream.IsNull())
     return CreateWebMediaPlayerForMediaStream(
         client, sink_id, security_origin, web_frame, layer_tree_view, settings);
@@ -295,7 +293,7 @@ blink::WebMediaPlayer* MediaFactory::CreateMediaPlayer(
 
   scoped_refptr<media::SwitchableAudioRendererSink> audio_renderer_sink =
       AudioDeviceFactory::NewSwitchableAudioRendererSink(
-          AudioDeviceFactory::kSourceMediaElement,
+          blink::WebAudioDeviceSourceType::kMediaElement,
           render_frame_->GetRoutingID(),
           media::AudioSinkParameters(0, sink_id.Utf8()));
 
@@ -442,7 +440,6 @@ MediaFactory::CreateRendererFactorySelector(
   // MediaPlayerRendererClientFactory setup.
   auto mojo_media_player_renderer_factory =
       std::make_unique<media::MojoRendererFactory>(
-          media::MojoRendererFactory::GetGpuFactoriesCB(),
           GetMediaInterfaceFactory());
 
   // Always give |factory_selector| a MediaPlayerRendererClient factory. WMPI
@@ -452,26 +449,30 @@ MediaFactory::CreateRendererFactorySelector(
       std::make_unique<MediaPlayerRendererClientFactory>(
           render_thread->compositor_task_runner(),
           std::move(mojo_media_player_renderer_factory),
-          base::Bind(&StreamTextureWrapperImpl::Create,
-                     render_thread->EnableStreamTextureCopy(),
-                     render_thread->GetStreamTexureFactory(),
-                     base::ThreadTaskRunnerHandle::Get())));
+          base::BindRepeating(&StreamTextureWrapperImpl::Create,
+                              render_thread->EnableStreamTextureCopy(),
+                              render_thread->GetStreamTexureFactory(),
+                              base::ThreadTaskRunnerHandle::Get())));
 
   factory_selector->SetUseMediaPlayer(use_media_player);
 
   // FlingingRendererClientFactory (FRCF) setup.
-  auto mojo_flinging_factory = std::make_unique<media::MojoRendererFactory>(
-      media::MojoRendererFactory::GetGpuFactoriesCB(),
-      GetMediaInterfaceFactory());
+  auto mojo_flinging_factory =
+      std::make_unique<media::MojoRendererFactory>(GetMediaInterfaceFactory());
 
   auto flinging_factory = std::make_unique<FlingingRendererClientFactory>(
       std::move(mojo_flinging_factory), std::move(client_wrapper));
 
-  // base::Unretained is safe here because |factory_selector| owns
-  // |flinging_factory|.
+  // base::Unretained() is safe here because |factory_selector| owns and
+  // outlives |flinging_factory|.
+  factory_selector->StartRequestRemotePlayStateCB(
+      base::BindOnce(&FlingingRendererClientFactory::SetRemotePlayStateChangeCB,
+                     base::Unretained(flinging_factory.get())));
+
+  // base::Unretained() is also safe here, for the same reasons.
   factory_selector->SetQueryIsFlingingActiveCB(
-      base::Bind(&FlingingRendererClientFactory::IsFlingingActive,
-                 base::Unretained(flinging_factory.get())));
+      base::BindRepeating(&FlingingRendererClientFactory::IsFlingingActive,
+                          base::Unretained(flinging_factory.get())));
 
   factory_selector->AddFactory(
       media::RendererFactorySelector::FactoryType::FLINGING,
@@ -483,8 +484,6 @@ MediaFactory::CreateRendererFactorySelector(
   use_mojo_renderer_factory = enable_mojo_renderer;
   if (use_mojo_renderer_factory) {
     auto mojo_renderer_factory = std::make_unique<media::MojoRendererFactory>(
-        base::Bind(&RenderThreadImpl::GetGpuFactories,
-                   base::Unretained(render_thread)),
         GetMediaInterfaceFactory());
 
     // The "default" MojoRendererFactory can be wrapped by a
@@ -551,19 +550,13 @@ blink::WebMediaPlayer* MediaFactory::CreateWebMediaPlayerForMediaStream(
     const cc::LayerTreeSettings& settings) {
   RenderThreadImpl* const render_thread = RenderThreadImpl::current();
 
-  scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner =
-      render_thread->compositor_task_runner();
-  if (!compositor_task_runner.get())
-    compositor_task_runner =
-        render_frame_->GetTaskRunner(blink::TaskType::kInternalMediaRealTime);
-
   scoped_refptr<base::SingleThreadTaskRunner>
       video_frame_compositor_task_runner;
   std::unique_ptr<blink::WebVideoFrameSubmitter> submitter =
       CreateSubmitter(&video_frame_compositor_task_runner, settings);
 
   DCHECK(layer_tree_view);
-  return new WebMediaPlayerMS(
+  return new blink::WebMediaPlayerMS(
       frame, client, GetWebMediaPlayerDelegate(),
       std::make_unique<RenderMediaLog>(
           url::Origin(security_origin).GetURL(),
@@ -624,10 +617,13 @@ media::CdmFactory* MediaFactory::GetCdmFactory() {
   if (cdm_factory_)
     return cdm_factory_.get();
 
-#if BUILDFLAG(ENABLE_MOJO_CDM)
-  cdm_factory_.reset(new media::MojoCdmFactory(GetMediaInterfaceFactory()));
+#if defined(OS_FUCHSIA)
+  cdm_factory_ = std::make_unique<media::FuchsiaCdmFactory>();
+#elif BUILDFLAG(ENABLE_MOJO_CDM)
+  cdm_factory_ =
+      std::make_unique<media::MojoCdmFactory>(GetMediaInterfaceFactory());
 #else
-  cdm_factory_.reset(new media::DefaultCdmFactory());
+  cdm_factory_ = std::make_unique<media::DefaultCdmFactory>();
 #endif  // BUILDFLAG(ENABLE_MOJO_CDM)
 
   return cdm_factory_.get();

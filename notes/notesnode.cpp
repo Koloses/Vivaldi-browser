@@ -45,7 +45,7 @@ std::unique_ptr<base::Value> Notes_Node::Encode(
 
   std::unique_ptr<base::DictionaryValue> value(new base::DictionaryValue());
 
-  std::string node_id = base::Int64ToString(id_);
+  std::string node_id = base::NumberToString(id_);
   value->SetString("id", node_id);
   checksummer->UpdateChecksum(node_id);
 
@@ -77,21 +77,21 @@ std::unique_ptr<base::Value> Notes_Node::Encode(
   value->SetString("type", type);
   checksummer->UpdateChecksum(type);
 
-  std::string temp = base::Int64ToString(creation_time_.ToInternalValue());
+  std::string temp = base::NumberToString(creation_time_.ToInternalValue());
   value->SetString("date_added", temp);
 
   if (type_ == FOLDER || type_ == TRASH || type_ == OTHER) {
-    std::unique_ptr<base::ListValue> children(new base::ListValue());
+    std::unique_ptr<base::ListValue> child_list(new base::ListValue());
 
-    for (int i = 0; i < child_count(); i++) {
-      children->Append(GetChild(i)->Encode(checksummer));
+    for (auto& it: children()) {
+      child_list->Append(it->Encode(checksummer));
     }
     if (extra_nodes) {
       for (auto* it : *extra_nodes) {
-        children->Append(it->Encode(checksummer));
+        child_list->Append(it->Encode(checksummer));
       }
     }
-    value->Set("children", std::move(children));
+    value->Set("children", std::move(child_list));
   } else if (type_ == NOTE) {
     value->SetString("content", content_);
     checksummer->UpdateChecksum(content_);
@@ -113,7 +113,7 @@ std::unique_ptr<base::Value> Notes_Node::Encode(
 
   if (sync_transaction_version() != kInvalidSyncTransactionVersion) {
     value->SetString(NotesCodec::kSyncTransactionVersion,
-                     base::Int64ToString(sync_transaction_version()));
+                     base::NumberToString(sync_transaction_version()));
   }
   return value;
 }
@@ -206,22 +206,22 @@ bool Notes_Node::Decode(const base::DictionaryValue& d_input,
     else
       type_ = FOLDER;
 
-    const base::ListValue* children = NULL;
+    const base::ListValue* child_list = NULL;
 
-    if (!d_input.GetList("children", &children))
+    if (!d_input.GetList("children", &child_list))
       return false;
 
-    for (size_t i = 0; i < children->GetSize(); i++) {
+    for (size_t i = 0; i < child_list->GetSize(); i++) {
       const base::DictionaryValue* item = NULL;
 
-      if (!children->GetDictionary(i, &item))
+      if (!child_list->GetDictionary(i, &item))
         return false;
 
       std::unique_ptr<Notes_Node> child = std::make_unique<Notes_Node>(0);
 
       child->Decode(*item, max_node_id, checksummer);
 
-      Add(std::move(child), child_count());
+      Add(std::move(child), children().size());
     }
   }
 

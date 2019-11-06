@@ -4,10 +4,12 @@
 
 #include "media/capture/video/chromeos/cros_image_capture_impl.h"
 
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "base/task/post_task.h"
+#include "media/base/bind_to_current_loop.h"
 
 namespace media {
 
@@ -16,30 +18,44 @@ CrosImageCaptureImpl::CrosImageCaptureImpl(ReprocessManager* reprocess_manager)
 
 CrosImageCaptureImpl::~CrosImageCaptureImpl() = default;
 
-void CrosImageCaptureImpl::BindRequest(
-    cros::mojom::CrosImageCaptureRequest request) {
-  bindings_.AddBinding(this, std::move(request));
-}
-
-void CrosImageCaptureImpl::GetSupportedEffects(
-    GetSupportedEffectsCallback callback) {
-  reprocess_manager_->GetSupportedEffects(
-      base::BindOnce(&CrosImageCaptureImpl::OnGetSupportedEffects,
-                     base::Unretained(this), std::move(callback)));
+void CrosImageCaptureImpl::GetCameraInfo(const std::string& device_id,
+                                         GetCameraInfoCallback callback) {
+  reprocess_manager_->GetCameraInfo(
+      device_id, media::BindToCurrentLoop(base::BindOnce(
+                     &CrosImageCaptureImpl::OnGotCameraInfo,
+                     base::Unretained(this), std::move(callback))));
 }
 
 void CrosImageCaptureImpl::SetReprocessOption(
+    const std::string& device_id,
     cros::mojom::Effect effect,
     SetReprocessOptionCallback callback) {
-  reprocess_manager_->SetReprocessOption(effect, std::move(callback));
+  reprocess_manager_->SetReprocessOption(
+      device_id, effect, media::BindToCurrentLoop(std::move(callback)));
 }
 
-void CrosImageCaptureImpl::OnGetSupportedEffects(
-    GetSupportedEffectsCallback callback,
-    base::flat_set<cros::mojom::Effect> supported_effects) {
-  std::vector<cros::mojom::Effect> effects(supported_effects.begin(),
-                                           supported_effects.end());
-  std::move(callback).Run(std::move(effects));
+void CrosImageCaptureImpl::SetFpsRange(const std::string& device_id,
+                                       const uint32_t stream_width,
+                                       const uint32_t stream_height,
+                                       const int32_t min_fps,
+                                       const int32_t max_fps,
+                                       SetFpsRangeCallback callback) {
+  reprocess_manager_->SetFpsRange(
+      device_id, stream_width, stream_height, min_fps, max_fps,
+      media::BindToCurrentLoop(std::move(callback)));
+}
+
+void CrosImageCaptureImpl::OnGotCameraInfo(
+    GetCameraInfoCallback callback,
+    cros::mojom::CameraInfoPtr camera_info) {
+  std::move(callback).Run(std::move(camera_info));
+}
+
+void CrosImageCaptureImpl::OnIntentHandled(
+    uint32_t intent_id,
+    bool is_success,
+    const std::vector<uint8_t>& captured_data) {
+  NOTREACHED() << "Should be handled in RendererFacingCrosImageCapture";
 }
 
 }  // namespace media

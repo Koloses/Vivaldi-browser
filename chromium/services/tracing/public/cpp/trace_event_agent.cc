@@ -18,8 +18,9 @@
 #include "base/trace_event/trace_log.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "services/tracing/public/cpp/perfetto/producer_client.h"
+#include "services/tracing/public/cpp/perfetto/perfetto_traced_process.h"
 #include "services/tracing/public/cpp/perfetto/trace_event_data_source.h"
+#include "services/tracing/public/cpp/stack_sampling/tracing_sampler_profiler.h"
 #include "services/tracing/public/cpp/trace_event_args_whitelist.h"
 #include "services/tracing/public/cpp/tracing_features.h"
 
@@ -56,15 +57,12 @@ TraceEventAgent::TraceEventAgent()
         base::BindRepeating(&IsMetadataWhitelisted));
   }
 
-  base::trace_event::TraceLog::GetInstance()->AddAsyncEnabledStateObserver(
-      weak_ptr_factory_.GetWeakPtr());
-
-  ProducerClient::Get()->AddDataSource(TraceEventDataSource::GetInstance());
+  PerfettoTracedProcess::Get()->AddDataSource(
+      TraceEventDataSource::GetInstance());
+  TracingSamplerProfiler::RegisterDataSource();
 }
 
-TraceEventAgent::~TraceEventAgent() {
-  DCHECK(!tracing_enabled_callback_);
-}
+TraceEventAgent::~TraceEventAgent() = default;
 
 void TraceEventAgent::GetCategories(std::set<std::string>* category_set) {
   for (size_t i = base::trace_event::BuiltinCategories::kVisibleCategoryStart;
@@ -78,15 +76,7 @@ void TraceEventAgent::AddMetadataGeneratorFunction(
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   metadata_generator_functions_.push_back(generator);
 
-  // Instantiate and register the metadata data source on the first
-  // call.
-  static TraceEventMetadataSource* metadata_source = []() {
-    static base::NoDestructor<TraceEventMetadataSource> instance;
-    ProducerClient::Get()->AddDataSource(instance.get());
-    return instance.get();
-  }();
-
-  metadata_source->AddGeneratorFunction(generator);
+  TraceEventMetadataSource::GetInstance()->AddGeneratorFunction(generator);
 }
 
 void TraceEventAgent::StartTracing(const std::string& config,
@@ -94,7 +84,6 @@ void TraceEventAgent::StartTracing(const std::string& config,
                                    StartTracingCallback callback) {
   DCHECK(!IsBoundForTesting() || !TracingUsesPerfettoBackend());
   DCHECK(!recorder_);
-  DCHECK(!tracing_enabled_callback_);
 #if defined(__native_client__)
   // NaCl and system times are offset by a bit, so subtract some time from
   // the captured timestamps. The value might be off by a bit due to messaging
@@ -136,30 +125,6 @@ void TraceEventAgent::RequestBufferStatus(
       base::trace_event::TraceLog::GetInstance()->GetStatus();
   std::move(callback).Run(status.event_capacity, status.event_count);
 }
-
-void TraceEventAgent::WaitForTracingEnabled(
-    Agent::WaitForTracingEnabledCallback callback) {
-  DCHECK(TracingUsesPerfettoBackend());
-  DCHECK(!tracing_enabled_callback_);
-  if (base::trace_event::TraceLog::GetInstance()->IsEnabled()) {
-    std::move(callback).Run();
-    return;
-  }
-
-  tracing_enabled_callback_ = std::move(callback);
-}
-
-// This callback will always come on the same sequence
-// that TraceLog::AddAsyncEnabledStateObserver was called
-// on to begin with, i.e. the same as any WaitForTracingEnabled()
-// calls are run on.
-void TraceEventAgent::OnTraceLogEnabled() {
-  if (tracing_enabled_callback_) {
-    std::move(tracing_enabled_callback_).Run();
-  }
-}
-
-void TraceEventAgent::OnTraceLogDisabled() {}
 
 void TraceEventAgent::OnTraceLogFlush(
     const scoped_refptr<base::RefCountedString>& events_str,

@@ -12,14 +12,15 @@
 #include "ios/chrome/browser/ui/util/rtl_geometry.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/url_loading/url_loading_params.h"
 #import "ios/chrome/browser/url_loading/url_loading_service.h"
 #import "ios/chrome/common/string_util.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
-#import "ios/web/public/navigation_manager.h"
-#include "ios/web/public/referrer.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#include "ios/web/public/navigation/referrer.h"
 #import "net/base/mac/url_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -348,8 +349,8 @@ NSAttributedString* FormatHTMLListForUILabel(NSString* listString) {
 
 // Triggers a navigation to the help page.
 - (void)learnMoreButtonPressed {
-  ChromeLoadParams params(GetUrlWithLang(GURL(kLearnMoreIncognitoUrl)));
-  _urlLoadingService->LoadUrlInCurrentTab(params);
+  _urlLoadingService->Load(UrlLoadParams::InCurrentTab(
+      GetUrlWithLang(GURL(kLearnMoreIncognitoUrl))));
 }
 
 // Adds views containing the text of the incognito page to |_stackView|.
@@ -378,6 +379,7 @@ NSAttributedString* FormatHTMLListForUILabel(NSString* listString) {
   subtitleLabel.adjustsFontForContentSizeCategory = YES;
 
   UIButton* learnMoreButton = [UIButton buttonWithType:UIButtonTypeCustom];
+  learnMoreButton.accessibilityTraits = UIAccessibilityTraitLink;
   [learnMoreButton
       setTitle:l10n_util::GetNSString(IDS_NEW_TAB_OTR_LEARN_MORE_LINK)
       forState:UIControlStateNormal];

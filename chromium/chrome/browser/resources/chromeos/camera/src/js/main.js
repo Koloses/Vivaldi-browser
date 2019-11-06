@@ -21,6 +21,33 @@ cca.App = function() {
   this.model_ = new cca.models.Gallery();
 
   /**
+   * @type {cca.ResolutionEventBroker}
+   * @private
+   */
+  this.resolBroker_ = new cca.ResolutionEventBroker();
+
+  /**
+   * @type {cca.device.PhotoResolPreferrer}
+   * @private
+   */
+  this.photoPreferrer_ = new cca.device.PhotoResolPreferrer(
+      this.resolBroker_, () => this.cameraView_.restart());
+
+  /**
+   * @type {cca.device.VideoConstraintsPreferrer}
+   * @private
+   */
+  this.videoPreferrer_ = new cca.device.VideoConstraintsPreferrer(
+      this.resolBroker_, () => this.cameraView_.restart());
+
+  /**
+   * @type {cca.device.DeviceInfoUpdater}
+   * @private
+   */
+  this.infoUpdater_ = new cca.device.DeviceInfoUpdater(
+      this.photoPreferrer_, this.videoPreferrer_);
+
+  /**
    * @type {cca.GalleryButton}
    * @private
    */
@@ -32,24 +59,37 @@ cca.App = function() {
    */
   this.browserView_ = new cca.views.Browser(this.model_);
 
+  /**
+   * @type {cca.views.Camera}
+   * @private
+   */
+  this.cameraView_ = new cca.views.Camera(
+      this.model_, this.infoUpdater_, this.photoPreferrer_,
+      this.videoPreferrer_);
+
   // End of properties. Seal the object.
   Object.seal(this);
 
   document.body.addEventListener('keydown', this.onKeyPressed_.bind(this));
 
   document.title = chrome.i18n.getMessage('name');
-  this.setupI18nElements_();
+  cca.util.setupI18nElements(document);
   this.setupToggles_();
 
   // Set up views navigation by their DOM z-order.
   cca.nav.setup([
-    new cca.views.Camera(this.model_),
+    this.cameraView_,
     new cca.views.MasterSettings(),
-    new cca.views.GridSettings(),
-    new cca.views.TimerSettings(),
+    new cca.views.BaseSettings('#gridsettings'),
+    new cca.views.BaseSettings('#timersettings'),
+    new cca.views.ResolutionSettings(
+        this.infoUpdater_, this.photoPreferrer_, this.videoPreferrer_,
+        this.resolBroker_),
+    new cca.views.BaseSettings('#photoresolutionsettings'),
+    new cca.views.BaseSettings('#videoresolutionsettings'),
     this.browserView_,
     new cca.views.Warning(),
-    new cca.views.Dialog(),
+    new cca.views.Dialog('#message-dialog'),
   ]);
 };
 
@@ -59,25 +99,6 @@ cca.App = function() {
  */
 cca.App.useGalleryApp = function() {
   return chrome.fileManagerPrivate && cca.state.get('ext-fs');
-};
-
-/**
- * Sets up i18n messages on elements by i18n attributes.
- * @private
- */
-cca.App.prototype.setupI18nElements_ = function() {
-  var getElements = (attr) => document.querySelectorAll('[' + attr + ']');
-  var getMessage = (element, attr) => chrome.i18n.getMessage(
-      element.getAttribute(attr));
-  var setAriaLabel = (element, attr) => element.setAttribute(
-      'aria-label', getMessage(element, attr));
-
-  getElements('i18n-content').forEach(
-      (element) => element.textContent = getMessage(element, 'i18n-content'));
-  getElements('i18n-aria').forEach(
-      (element) => setAriaLabel(element, 'i18n-aria'));
-  cca.tooltip.setup(getElements('i18n-label')).forEach(
-      (element) => setAriaLabel(element, 'i18n-label'));
 };
 
 /**
@@ -115,12 +136,12 @@ cca.App.prototype.setupToggles_ = function() {
       element.dispatchEvent(new Event('change')); // Trigger toggling css.
     };
     element.save = () => {
-      return key && chrome.storage.local.set(payload());
+      return key && cca.proxy.browserProxy.localStorageSet(payload());
     };
     if (key) {
       // Restore the previously saved state on startup.
-      chrome.storage.local.get(payload(),
-          (values) => element.toggleChecked(values[key]));
+      cca.proxy.browserProxy.localStorageGet(
+          payload(), (values) => element.toggleChecked(values[key]));
     }
   });
 };
@@ -133,12 +154,13 @@ cca.App.prototype.start = function() {
   cca.models.FileSystem.initialize(() => {
     // Prompt to migrate pictures if needed.
     var message = chrome.i18n.getMessage('migrate_pictures_msg');
-    return cca.nav.open('dialog', message, false).then((acked) => {
-      if (!acked) {
-        throw new Error('no-migrate');
-      }
-      ackMigrate = true;
-    });
+    return cca.nav.open('message-dialog', {message, cancellable: false})
+        .then((acked) => {
+          if (!acked) {
+            throw new Error('no-migrate');
+          }
+          ackMigrate = true;
+        });
   }).then((external) => {
     cca.state.set('ext-fs', external);
     this.model_.addObserver(this.galleryButton_);

@@ -29,9 +29,9 @@
 #include "base/callback.h"
 #include "base/optional.h"
 #include "base/single_thread_task_runner.h"
-#include "third_party/blink/public/mojom/loader/code_cache.mojom-shared.h"
-#include "third_party/blink/public/platform/web_data_consumer_handle.h"
-#include "third_party/blink/public/platform/web_scoped_virtual_time_pauser.h"
+#include "third_party/blink/public/mojom/loader/code_cache.mojom-blink.h"
+#include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
+#include "third_party/blink/renderer/platform/instrumentation/memory_pressure_listener.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/web_process_memory_dump.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cached_metadata_handler.h"
 #include "third_party/blink/renderer/platform/loader/fetch/integrity_metadata.h"
@@ -44,18 +44,20 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_status.h"
 #include "third_party/blink/renderer/platform/loader/fetch/text_resource_decoder_options.h"
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
-#include "third_party/blink/renderer/platform/memory_pressure_listener.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+
+namespace base {
+class Clock;
+}
 
 namespace blink {
 
@@ -86,7 +88,7 @@ enum class ResourceType : uint8_t {
   kVideo,
   kManifest,
   kMock,  // Only for testing
-  kLast = kMock
+  kMaxValue = kMock
 };
 
 // A resource that is held in the cache. Classes who want to use this object
@@ -168,8 +170,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
     return *error_;
   }
 
-  void SetIdentifier(unsigned long identifier) { identifier_ = identifier; }
-  unsigned long Identifier() const { return identifier_; }
+  uint64_t InspectorId() const { return LastResourceRequest().InspectorId(); }
 
   virtual bool ShouldIgnoreHTTPStatusCodeErrors() const { return false; }
 
@@ -177,6 +178,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
     return resource_request_;
   }
   const ResourceRequest& LastResourceRequest() const;
+  const ResourceResponse* LastResourceResponse() const;
 
   virtual void SetRevalidatingRequest(const ResourceRequest&);
 
@@ -245,13 +247,13 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   void SetLoader(ResourceLoader*);
   ResourceLoader* Loader() const { return loader_.Get(); }
 
-  bool ShouldBlockLoadEvent() const;
   bool IsLoadEventBlockingResourceType() const;
 
   // Computes the status of an object after loading. Updates the expire date on
   // the cache entry file
-  virtual void Finish(TimeTicks finish_time, base::SingleThreadTaskRunner*);
-  void FinishForTest() { Finish(TimeTicks(), nullptr); }
+  virtual void Finish(base::TimeTicks finish_time,
+                      base::SingleThreadTaskRunner*);
+  void FinishForTest() { Finish(base::TimeTicks(), nullptr); }
 
   virtual scoped_refptr<const SharedBuffer> ResourceBuffer() const {
     return data_;
@@ -267,7 +269,8 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
 
   virtual void ResponseReceived(const ResourceResponse&);
   virtual void ResponseBodyReceived(
-      ResponseBodyLoaderDrainableInterface& body_loader) {}
+      ResponseBodyLoaderDrainableInterface& body_loader,
+      scoped_refptr<base::SingleThreadTaskRunner> loader_task_runner) {}
   void SetResponse(const ResourceResponse&);
   const ResourceResponse& GetResponse() const { return response_; }
 
@@ -347,7 +350,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   virtual void DidDownloadData(uint64_t) {}
   virtual void DidDownloadToBlob(scoped_refptr<BlobDataHandle>) {}
 
-  TimeTicks LoadResponseEnd() const { return load_response_end_; }
+  base::TimeTicks LoadResponseEnd() const { return load_response_end_; }
 
   void SetEncodedDataLength(int64_t value) {
     response_.SetEncodedDataLength(value);
@@ -421,6 +424,9 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
   WebScopedVirtualTimePauser& VirtualTimePauser() {
     return virtual_time_pauser_;
   }
+
+  // The caller owns the |clock| which must outlive the Resource.
+  static void SetClockForTesting(const base::Clock* clock);
 
  protected:
   Resource(const ResourceRequest&, ResourceType, const ResourceLoaderOptions&);
@@ -531,9 +537,7 @@ class PLATFORM_EXPORT Resource : public GarbageCollectedFinalized<Resource>,
 
   base::Optional<ResourceError> error_;
 
-  TimeTicks load_response_end_;
-
-  unsigned long identifier_;
+  base::TimeTicks load_response_end_;
 
   size_t encoded_size_;
   size_t encoded_size_memory_usage_;

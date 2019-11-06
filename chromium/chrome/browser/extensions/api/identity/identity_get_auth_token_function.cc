@@ -23,15 +23,15 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/extensions/api/identity.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/signin_pref_names.h"
+#include "components/signin/public/base/signin_pref_names.h"
+#include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/accounts_in_cookie_jar_info.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/service_manager_connection.h"
 #include "extensions/common/extension_l10n_util.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "services/identity/public/cpp/scope_set.h"
-#include "services/identity/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/app_mode/app_mode_utils.h"
@@ -69,7 +69,8 @@ bool IsBrowserSigninAllowed(Profile* profile) {
 IdentityGetAuthTokenFunction::IdentityGetAuthTokenFunction()
     :
 #if defined(OS_CHROMEOS)
-      OAuth2TokenService::Consumer(kExtensionsIdentityAPIOAuthConsumerName),
+      OAuth2AccessTokenManager::Consumer(
+          kExtensionsIdentityAPIOAuthConsumerName),
 #endif
       interactive_(false),
       should_prompt_for_scopes_(false),
@@ -77,8 +78,7 @@ IdentityGetAuthTokenFunction::IdentityGetAuthTokenFunction()
       token_key_(/*extension_id=*/std::string(),
                  /*account_id=*/std::string(),
                  /*scopes=*/std::set<std::string>()),
-      scoped_identity_manager_observer_(this),
-      weak_ptr_factory_(this) {
+      scoped_identity_manager_observer_(this) {
 }
 
 IdentityGetAuthTokenFunction::~IdentityGetAuthTokenFunction() {
@@ -152,11 +152,10 @@ bool IdentityGetAuthTokenFunction::RunAsync() {
             weak_ptr_factory_.GetWeakPtr(), gaia_id));
   } else {
     // Get the AccountInfo for the account that the extension wishes to use.
-    GetMojoIdentityAccessor()->GetAccountInfoFromGaiaId(
-        gaia_id,
-        base::BindOnce(
-            &IdentityGetAuthTokenFunction::OnReceivedExtensionAccountInfo, this,
-            gaia_id));
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::UI},
+        base::BindOnce(&IdentityGetAuthTokenFunction::FetchExtensionAccountInfo,
+                       weak_ptr_factory_.GetWeakPtr(), gaia_id));
   }
 
   return true;
@@ -164,9 +163,9 @@ bool IdentityGetAuthTokenFunction::RunAsync() {
 
 void IdentityGetAuthTokenFunction::GetAuthTokenForPrimaryAccount(
     const std::string& extension_gaia_id) {
-  AccountInfo primary_account_info =
-      IdentityManagerFactory::GetForProfile(GetProfile())
-          ->GetPrimaryAccountInfo();
+  auto* identity_manager = IdentityManagerFactory::GetForProfile(GetProfile());
+  CoreAccountInfo primary_account_info =
+      identity_manager->GetPrimaryAccountInfo();
   bool primary_account_only = IsPrimaryAccountOnly();
 
   // Detect and handle the case where the extension is using an account other
@@ -178,21 +177,14 @@ void IdentityGetAuthTokenFunction::GetAuthTokenForPrimaryAccount(
     return;
   }
 
-  auto* identity_manager = IdentityManagerFactory::GetForProfile(GetProfile());
   if (primary_account_only || !primary_account_info.gaia.empty()) {
     // The extension is using the primary account.
-    ::identity::AccountState account_state;
-    account_state.has_refresh_token =
-        identity_manager->HasAccountWithRefreshToken(
-            primary_account_info.account_id);
-    OnReceivedExtensionAccountInfo(
-        primary_account_info.gaia,
-        base::Optional<AccountInfo>(primary_account_info), account_state);
+    OnReceivedExtensionAccountInfo(&primary_account_info);
   } else {
     // No primary account, try the first account in cookies.
     DCHECK_EQ(AccountListeningMode::kNotListening, account_listening_mode_);
     account_listening_mode_ = AccountListeningMode::kListeningCookies;
-    identity::AccountsInCookieJarInfo accounts_in_cookies =
+    signin::AccountsInCookieJarInfo accounts_in_cookies =
         identity_manager->GetAccountsInCookieJar();
     if (accounts_in_cookies.accounts_are_fresh) {
       OnAccountsInCookieUpdated(accounts_in_cookies,
@@ -203,11 +195,15 @@ void IdentityGetAuthTokenFunction::GetAuthTokenForPrimaryAccount(
   }
 }
 
+void IdentityGetAuthTokenFunction::FetchExtensionAccountInfo(
+    const std::string& gaia_id) {
+  OnReceivedExtensionAccountInfo(base::OptionalOrNullptr(
+      IdentityManagerFactory::GetForProfile(GetProfile())
+          ->FindAccountInfoForAccountWithRefreshTokenByGaiaId(gaia_id)));
+}
+
 void IdentityGetAuthTokenFunction::OnReceivedExtensionAccountInfo(
-    const std::string& extension_gaia_id,
-    const base::Optional<AccountInfo>& account_info,
-    const identity::AccountState& account_state) {
-  DCHECK(!account_info || (account_info->gaia == extension_gaia_id));
+    const CoreAccountInfo* account_info) {
   token_key_.account_id = account_info ? account_info->account_id : "";
 
 #if defined(OS_CHROMEOS)
@@ -228,7 +224,9 @@ void IdentityGetAuthTokenFunction::OnReceivedExtensionAccountInfo(
   }
 #endif
 
-  if (!account_state.has_refresh_token) {
+  if (!account_info ||
+      !IdentityManagerFactory::GetForProfile(GetProfile())
+           ->HasAccountWithRefreshToken(account_info->account_id)) {
     if (!ShouldStartSigninFlow()) {
       CompleteFunctionWithError(
           IsBrowserSigninAllowed(GetProfile())
@@ -244,7 +242,7 @@ void IdentityGetAuthTokenFunction::OnReceivedExtensionAccountInfo(
 }
 
 void IdentityGetAuthTokenFunction::OnAccountsInCookieUpdated(
-    const identity::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
+    const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
     const GoogleServiceAuthError& error) {
   if (account_listening_mode_ != AccountListeningMode::kListeningCookies)
     return;
@@ -261,15 +259,12 @@ void IdentityGetAuthTokenFunction::OnAccountsInCookieUpdated(
     // If the account is in auth error, it won't be in the identity manager.
     // Save the email now to use as email hint for the login prompt.
     email_for_default_web_account_ = account.email;
-    GetMojoIdentityAccessor()->GetAccountInfoFromGaiaId(
-        account.gaia_id,
-        base::BindOnce(
-            &IdentityGetAuthTokenFunction::OnReceivedExtensionAccountInfo, this,
-            account.gaia_id));
+    OnReceivedExtensionAccountInfo(base::OptionalOrNullptr(
+        IdentityManagerFactory::GetForProfile(GetProfile())
+            ->FindAccountInfoForAccountWithRefreshTokenByGaiaId(
+                account.gaia_id)));
   } else {
-    OnReceivedExtensionAccountInfo(
-        /*extension_gaia_id=*/std::string(), base::Optional<AccountInfo>(),
-        identity::AccountState());
+    OnReceivedExtensionAccountInfo(nullptr);
   }
 }
 
@@ -520,8 +515,6 @@ void IdentityGetAuthTokenFunction::OnMintTokenFailure(
       }
       break;
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
-    case GoogleServiceAuthError::ACCOUNT_DELETED:
-    case GoogleServiceAuthError::ACCOUNT_DISABLED:
       // TODO(courage): flush ticket and retry once
       if (ShouldStartSigninFlow()) {
         StartSigninFlow();
@@ -696,7 +689,7 @@ void IdentityGetAuthTokenFunction::OnGetAccessTokenComplete(
 
 #if defined(OS_CHROMEOS)
 void IdentityGetAuthTokenFunction::OnGetTokenSuccess(
-    const OAuth2TokenService::Request* request,
+    const OAuth2AccessTokenManager::Request* request,
     const OAuth2AccessTokenConsumer::TokenResponse& token_response) {
   device_access_token_request_.reset();
   OnGetAccessTokenComplete(token_response.access_token,
@@ -705,7 +698,7 @@ void IdentityGetAuthTokenFunction::OnGetTokenSuccess(
 }
 
 void IdentityGetAuthTokenFunction::OnGetTokenFailure(
-    const OAuth2TokenService::Request* request,
+    const OAuth2AccessTokenManager::Request* request,
     const GoogleServiceAuthError& error) {
   device_access_token_request_.reset();
   OnGetAccessTokenComplete(base::nullopt, base::Time(), error);
@@ -714,7 +707,7 @@ void IdentityGetAuthTokenFunction::OnGetTokenFailure(
 
 void IdentityGetAuthTokenFunction::OnAccessTokenFetchCompleted(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo access_token_info) {
+    signin::AccessTokenInfo access_token_info) {
   token_key_account_access_token_fetcher_.reset();
   if (error.state() == GoogleServiceAuthError::NONE) {
     OnGetAccessTokenComplete(access_token_info.token,
@@ -729,7 +722,6 @@ void IdentityGetAuthTokenFunction::OnIdentityAPIShutdown() {
   gaia_web_auth_flow_.reset();
   device_access_token_request_.reset();
   token_key_account_access_token_fetcher_.reset();
-  mojo_identity_accessor_.reset();
   scoped_identity_manager_observer_.RemoveAll();
   extensions::IdentityAPI::GetFactoryInstance()
       ->Get(GetProfile())
@@ -745,10 +737,10 @@ void IdentityGetAuthTokenFunction::StartDeviceAccessTokenRequest() {
       chromeos::DeviceOAuth2TokenServiceFactory::Get();
   // Since robot account refresh tokens are scoped down to [any-api] only,
   // request access token for [any-api] instead of login.
-  OAuth2TokenService::ScopeSet scopes;
+  OAuth2AccessTokenManager::ScopeSet scopes;
   scopes.insert(GaiaConstants::kAnyApiOAuth2Scope);
-  device_access_token_request_ =
-      service->StartRequest(service->GetRobotAccountId(), scopes, this);
+  device_access_token_request_ = service->StartAccessTokenRequest(
+      service->GetRobotAccountId(), scopes, this);
 }
 
 bool IdentityGetAuthTokenFunction::IsOriginWhitelistedInPublicSession() {
@@ -777,12 +769,11 @@ void IdentityGetAuthTokenFunction::StartTokenKeyAccountAccessTokenRequest() {
       token_key_account_access_token_fetcher_ =
           identity_manager->CreateAccessTokenFetcherForClient(
               token_key_.account_id, app_client_id, app_client_secret,
-              kExtensionsIdentityAPIOAuthConsumerName,
-              OAuth2TokenService::ScopeSet(),
+              kExtensionsIdentityAPIOAuthConsumerName, ::identity::ScopeSet(),
               base::BindOnce(
                   &IdentityGetAuthTokenFunction::OnAccessTokenFetchCompleted,
                   base::Unretained(this)),
-              identity::AccessTokenFetcher::Mode::kImmediate);
+              signin::AccessTokenFetcher::Mode::kImmediate);
       return;
     }
   }
@@ -795,7 +786,7 @@ void IdentityGetAuthTokenFunction::StartTokenKeyAccountAccessTokenRequest() {
           base::BindOnce(
               &IdentityGetAuthTokenFunction::OnAccessTokenFetchCompleted,
               base::Unretained(this)),
-          identity::AccessTokenFetcher::Mode::kImmediate);
+          signin::AccessTokenFetcher::Mode::kImmediate);
 }
 
 void IdentityGetAuthTokenFunction::StartGaiaRequest(
@@ -871,16 +862,6 @@ std::string IdentityGetAuthTokenFunction::GetOAuth2ClientId() const {
     client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
   }
   return client_id;
-}
-
-::identity::mojom::IdentityAccessor*
-IdentityGetAuthTokenFunction::GetMojoIdentityAccessor() {
-  if (!mojo_identity_accessor_.is_bound()) {
-    content::BrowserContext::GetConnectorFor(GetProfile())
-        ->BindInterface(::identity::mojom::kServiceName,
-                        mojo::MakeRequest(&mojo_identity_accessor_));
-  }
-  return mojo_identity_accessor_.get();
 }
 
 bool IdentityGetAuthTokenFunction::IsPrimaryAccountOnly() const {

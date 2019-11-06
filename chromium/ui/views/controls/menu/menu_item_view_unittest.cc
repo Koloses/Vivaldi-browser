@@ -15,6 +15,7 @@
 #include "ui/gfx/geometry/insets.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/controls/menu/test_menu_item_view.h"
 #include "ui/views/test/menu_test_utils.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/vector_icons.h"
@@ -22,13 +23,30 @@
 
 namespace views {
 
+TEST(MenuItemViewUnitTest, AddAndRemoveChildren) {
+  views::TestMenuItemView root_menu;
+  root_menu.set_owned_by_client();
+
+  auto* item = root_menu.AppendMenuItemWithLabel(0, base::string16());
+
+  views::SubmenuView* submenu = root_menu.GetSubmenu();
+  ASSERT_TRUE(submenu);
+  const auto menu_items = submenu->GetMenuItems();
+  ASSERT_EQ(1u, menu_items.size());
+  EXPECT_EQ(item, menu_items.front());
+
+  root_menu.RemoveMenuItem(item);
+
+  EXPECT_TRUE(submenu->GetMenuItems().empty());
+}
+
 namespace {
 
 // A simple View class that will match its height to the available width.
 class SquareView : public views::View {
  public:
-  SquareView() {}
-  ~SquareView() override {}
+  SquareView() = default;
+  ~SquareView() override = default;
 
  private:
   gfx::Size CalculatePreferredSize() const override { return gfx::Size(1, 1); }
@@ -37,23 +55,8 @@ class SquareView : public views::View {
 
 }  // namespace
 
-// A MenuItemView implementation with a public destructor (so we can clean up
-// in tests).
-class TestMenuItemView : public MenuItemView {
- public:
-  TestMenuItemView() : MenuItemView(NULL) {}
-  ~TestMenuItemView() override {}
-
-  void AddEmptyMenus() { MenuItemView::AddEmptyMenus(); }
-
-  void SetHasMnemonics(bool has_mnemonics) { has_mnemonics_ = has_mnemonics; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestMenuItemView);
-};
-
 TEST(MenuItemViewUnitTest, TestMenuItemViewWithFlexibleWidthChild) {
-  TestMenuItemView root_menu;
+  views::TestMenuItemView root_menu;
   root_menu.set_owned_by_client();
 
   // Append a normal MenuItemView.
@@ -92,7 +95,7 @@ TEST(MenuItemViewUnitTest, TestMenuItemViewWithFlexibleWidthChild) {
 // Tests that the top-level menu item with hidden children should contain the
 // "(empty)" menu item to display.
 TEST(MenuItemViewUnitTest, TestEmptyTopLevelWhenAllItemsAreHidden) {
-  TestMenuItemView root_menu;
+  views::TestMenuItemView root_menu;
   views::MenuItemView* item1 =
       root_menu.AppendMenuItemWithLabel(1, base::ASCIIToUTF16("item 1"));
   views::MenuItemView* item2 =
@@ -105,17 +108,17 @@ TEST(MenuItemViewUnitTest, TestEmptyTopLevelWhenAllItemsAreHidden) {
   SubmenuView* submenu = root_menu.GetSubmenu();
   ASSERT_TRUE(submenu);
 
-  EXPECT_EQ(2, submenu->child_count());
+  EXPECT_EQ(2u, submenu->children().size());
 
   // Adds any empty menu items to the menu, if needed.
   root_menu.AddEmptyMenus();
 
   // Because all of the submenu's children are hidden, an empty menu item should
   // have been added.
-  ASSERT_EQ(3, submenu->child_count());
-  MenuItemView* empty_item = static_cast<MenuItemView*>(submenu->child_at(0));
+  ASSERT_EQ(3u, submenu->children().size());
+  auto* empty_item = static_cast<MenuItemView*>(submenu->children().front());
   ASSERT_TRUE(empty_item);
-  ASSERT_EQ(MenuItemView::kEmptyMenuItemViewID, empty_item->id());
+  ASSERT_EQ(MenuItemView::kEmptyMenuItemViewID, empty_item->GetID());
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_APP_MENU_EMPTY_SUBMENU),
             empty_item->title());
 }
@@ -123,7 +126,7 @@ TEST(MenuItemViewUnitTest, TestEmptyTopLevelWhenAllItemsAreHidden) {
 // Tests that submenu with hidden children should contain the "(empty)" menu
 // item to display.
 TEST(MenuItemViewUnitTest, TestEmptySubmenuWhenAllChildItemsAreHidden) {
-  TestMenuItemView root_menu;
+  views::TestMenuItemView root_menu;
   MenuItemView* submenu_item =
       root_menu.AppendSubMenu(1, base::ASCIIToUTF16("My Submenu"));
   MenuItemView* child1 = submenu_item->AppendMenuItemWithLabel(
@@ -138,7 +141,7 @@ TEST(MenuItemViewUnitTest, TestEmptySubmenuWhenAllChildItemsAreHidden) {
   SubmenuView* submenu = submenu_item->GetSubmenu();
   ASSERT_TRUE(submenu);
 
-  EXPECT_EQ(2, submenu->child_count());
+  EXPECT_EQ(2u, submenu->children().size());
 
   // Adds any empty menu items to the menu, if needed.
   EXPECT_FALSE(submenu->HasEmptyMenuItemView());
@@ -146,26 +149,26 @@ TEST(MenuItemViewUnitTest, TestEmptySubmenuWhenAllChildItemsAreHidden) {
   EXPECT_TRUE(submenu->HasEmptyMenuItemView());
   // Because all of the submenu's children are hidden, an empty menu item should
   // have been added.
-  ASSERT_EQ(3, submenu->child_count());
-  MenuItemView* empty_item = static_cast<MenuItemView*>(submenu->child_at(0));
+  ASSERT_EQ(3u, submenu->children().size());
+  auto* empty_item = static_cast<MenuItemView*>(submenu->children().front());
   ASSERT_TRUE(empty_item);
   // Not allowed to add an duplicated empty menu item
   // if it already has an empty menu item.
   root_menu.AddEmptyMenus();
-  ASSERT_EQ(3, submenu->child_count());
-  ASSERT_EQ(MenuItemView::kEmptyMenuItemViewID, empty_item->id());
+  ASSERT_EQ(3u, submenu->children().size());
+  ASSERT_EQ(MenuItemView::kEmptyMenuItemViewID, empty_item->GetID());
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_APP_MENU_EMPTY_SUBMENU),
             empty_item->title());
 }
 
 TEST(MenuItemViewUnitTest, UseMnemonicOnPlatform) {
-  TestMenuItemView root_menu;
+  views::TestMenuItemView root_menu;
   views::MenuItemView* item1 =
       root_menu.AppendMenuItemWithLabel(1, base::ASCIIToUTF16("&Item 1"));
   views::MenuItemView* item2 =
       root_menu.AppendMenuItemWithLabel(2, base::ASCIIToUTF16("I&tem 2"));
 
-  root_menu.SetHasMnemonics(true);
+  root_menu.set_has_mnemonics(true);
 
   if (MenuConfig::instance().use_mnemonics) {
     EXPECT_EQ('i', item1->GetMnemonic());
@@ -215,7 +218,7 @@ TEST_F(MenuItemViewLayoutTest, ContainerLayoutRespectsMarginsAndPreferredSize) {
   const gfx::Size child_size(200, 50);
   const gfx::Insets child_margins(5, 10);
   child_view->SetPreferredSize(child_size);
-  child_view->SetProperty(kMarginsKey, new gfx::Insets(child_margins));
+  child_view->SetProperty(kMarginsKey, child_margins);
 
   PerformLayout();
 
@@ -264,7 +267,7 @@ TEST_F(MenuItemViewLayoutTest, ContainerLayoutPassesTrueWidth) {
   FakeView* child_view =
       test_item()->AddChildView(std::make_unique<FakeView>(child_size.width()));
   child_view->SetPreferredSize(child_size);
-  child_view->SetProperty(kMarginsKey, new gfx::Insets(child_margins));
+  child_view->SetProperty(kMarginsKey, child_margins);
 
   PerformLayout();
 
@@ -278,8 +281,8 @@ TEST_F(MenuItemViewLayoutTest, ContainerLayoutPassesTrueWidth) {
 
 class MenuItemViewPaintUnitTest : public ViewsTestBase {
  public:
-  MenuItemViewPaintUnitTest() {}
-  ~MenuItemViewPaintUnitTest() override {}
+  MenuItemViewPaintUnitTest() = default;
+  ~MenuItemViewPaintUnitTest() override = default;
 
   MenuItemView* menu_item_view() { return menu_item_view_; }
   MenuRunner* menu_runner() { return menu_runner_.get(); }
@@ -288,16 +291,16 @@ class MenuItemViewPaintUnitTest : public ViewsTestBase {
   // ViewsTestBase implementation.
   void SetUp() override {
     ViewsTestBase::SetUp();
-    menu_delegate_.reset(new test::TestMenuDelegate);
+    menu_delegate_ = std::make_unique<test::TestMenuDelegate>();
     menu_item_view_ = new MenuItemView(menu_delegate_.get());
 
-    widget_.reset(new Widget);
+    widget_ = std::make_unique<Widget>();
     Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
     params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     widget_->Init(params);
     widget_->Show();
 
-    menu_runner_.reset(new MenuRunner(menu_item_view_, 0));
+    menu_runner_ = std::make_unique<MenuRunner>(menu_item_view_, 0);
   }
 
   void TearDown() override {
@@ -330,7 +333,8 @@ TEST_F(MenuItemViewPaintUnitTest, MinorTextAndIconAssertionCoverage) {
   AddItem("Minor text and icon", base::ASCIIToUTF16("minor text"),
           &views::kMenuCheckIcon);
 
-  menu_runner()->RunMenuAt(widget(), nullptr, gfx::Rect(), MENU_ANCHOR_TOPLEFT,
+  menu_runner()->RunMenuAt(widget(), nullptr, gfx::Rect(),
+                           MenuAnchorPosition::kTopLeft,
                            ui::MENU_SOURCE_KEYBOARD);
 
   SkBitmap bitmap;

@@ -30,7 +30,8 @@ const char kFullscreenReshowHistogramName[] =
 // FullscreenControllerTestWindow ----------------------------------------------
 
 // A BrowserWindow used for testing FullscreenController. The behavior of this
-// mock is verfied manually by running FullscreenControllerStateInteractiveTest.
+// mock is verified manually by running
+// FullscreenControllerStateInteractiveTest.
 class FullscreenControllerTestWindow : public TestBrowserWindow,
                                        ExclusiveAccessContext {
  public:
@@ -215,7 +216,8 @@ class FullscreenControllerStateUnitTest : public BrowserWithTestWindowTest,
 
   // FullscreenControllerStateTest:
   void SetUp() override;
-  BrowserWindow* CreateBrowserWindow() override;
+  void TearDown() override;
+  std::unique_ptr<BrowserWindow> CreateBrowserWindow() override;
   void ChangeWindowFullscreenState() override;
   const char* GetWindowStateString() override;
   void VerifyWindowState() override;
@@ -224,21 +226,29 @@ class FullscreenControllerStateUnitTest : public BrowserWithTestWindowTest,
   // FullscreenControllerStateTest:
   bool ShouldSkipStateAndEventPair(State state, Event event) override;
   Browser* GetBrowser() override;
-  FullscreenControllerTestWindow* window_;
+  FullscreenControllerTestWindow* window_ = nullptr;
+
+  DISALLOW_COPY_AND_ASSIGN(FullscreenControllerStateUnitTest);
 };
 
-FullscreenControllerStateUnitTest::FullscreenControllerStateUnitTest()
-    : window_(NULL) {
-}
+FullscreenControllerStateUnitTest::FullscreenControllerStateUnitTest() =
+    default;
 
 void FullscreenControllerStateUnitTest::SetUp() {
   BrowserWithTestWindowTest::SetUp();
   window_->set_browser(browser());
 }
 
-BrowserWindow* FullscreenControllerStateUnitTest::CreateBrowserWindow() {
-  window_ = new FullscreenControllerTestWindow();
-  return window_;  // BrowserWithTestWindowTest takes ownership.
+void FullscreenControllerStateUnitTest::TearDown() {
+  FullscreenControllerStateTest::TearDown();
+  BrowserWithTestWindowTest::TearDown();
+}
+
+std::unique_ptr<BrowserWindow>
+FullscreenControllerStateUnitTest::CreateBrowserWindow() {
+  auto window = std::make_unique<FullscreenControllerTestWindow>();
+  window_ = window.get();
+  return window;
 }
 
 void FullscreenControllerStateUnitTest::ChangeWindowFullscreenState() {

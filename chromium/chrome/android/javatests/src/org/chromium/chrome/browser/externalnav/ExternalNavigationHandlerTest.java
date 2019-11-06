@@ -836,6 +836,37 @@ public class ExternalNavigationHandlerTest {
 
     @Test
     @SmallTest
+    public void testFallbackUrl_FallbackToWebApk() {
+        // IMDB app isn't installed.
+        mDelegate.setCanResolveActivityForExternalSchemes(false);
+
+        mDelegate.add(new IntentActivity(IMDB_WEBPAGE_FOR_TOM_HANKS, WEBAPK_PACKAGE_NAME)
+                              .withIsWebApk(true));
+        checkUrl(INTENT_URL_WITH_FALLBACK_URL)
+                .withReferrer(SEARCH_RESULT_URL_FOR_TOM_HANKS)
+                .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT, START_WEBAPK);
+    }
+
+    @Test
+    @SmallTest
+    public void testFallbackUrl_DontFallbackToWebApkMultipleHandlers() {
+        // IMDB app isn't installed.
+        mDelegate.setCanResolveActivityForExternalSchemes(false);
+
+        mDelegate.add(new IntentActivity(IMDB_WEBPAGE_FOR_TOM_HANKS, WEBAPK_PACKAGE_NAME)
+                              .withIsWebApk(true));
+        mDelegate.add(new IntentActivity(IMDB_WEBPAGE_FOR_TOM_HANKS, TEXT_APP_1_PACKAGE_NAME));
+        checkUrl(INTENT_URL_WITH_FALLBACK_URL)
+                .withReferrer(SEARCH_RESULT_URL_FOR_TOM_HANKS)
+                .expecting(OverrideUrlLoadingResult.OVERRIDE_WITH_CLOBBERING_TAB, IGNORE);
+        Assert.assertNull(mDelegate.startActivityIntent);
+        Assert.assertEquals(IMDB_WEBPAGE_FOR_TOM_HANKS, mDelegate.getNewUrlAfterClobbering());
+        Assert.assertEquals(
+                SEARCH_RESULT_URL_FOR_TOM_HANKS, mDelegate.getReferrerUrlForClobbering());
+    }
+
+    @Test
+    @SmallTest
     public void testFallbackUrl_IntentResolutionFails() {
         // IMDB app isn't installed.
         mDelegate.setCanResolveActivityForExternalSchemes(false);
@@ -1535,7 +1566,7 @@ public class ExternalNavigationHandlerTest {
 
     private static WebappInfo newWebappInfoFromScope(String scope) {
         return WebappInfo.create("", "", scope, null, null, null, WebDisplayMode.STANDALONE, 0, 0,
-                0, 0, null, false, false, false);
+                0, 0, false, false, false);
     }
 
     private static class IntentActivity {

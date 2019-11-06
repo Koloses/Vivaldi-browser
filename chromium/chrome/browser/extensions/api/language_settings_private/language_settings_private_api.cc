@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "base/containers/flat_set.h"
-#include "base/feature_list.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_split.h"
@@ -168,7 +167,7 @@ std::vector<std::string> GetSortedThirdPartyIMEs(
     auto it = descriptors.begin();
     while (it != descriptors.end() && descriptors.size()) {
       if (third_party_ime_set.count(it->id()) &&
-          base::ContainsValue(it->language_codes(), language)) {
+          base::Contains(it->language_codes(), language)) {
         ime_list.push_back(it->id());
         // Remove the added descriptor from the candidate list.
         it = descriptors.erase(it);
@@ -227,18 +226,15 @@ LanguageSettingsPrivateGetLanguageListFunction::Run() {
     language.native_display_name = entry.native_display_name;
 
     // Set optional fields only if they differ from the default.
-    if (base::ContainsKey(spellcheck_language_set, entry.code)) {
+    if (base::Contains(spellcheck_language_set, entry.code)) {
       language.supports_spellcheck.reset(new bool(true));
     }
     if (entry.supports_translate) {
       language.supports_translate.reset(new bool(true));
     }
-    if (base::FeatureList::IsEnabled(translate::kRegionalLocalesAsDisplayUI)) {
-      std::string temp_locale = entry.code;
-      if (language::ConvertToActualUILocale(&temp_locale)) {
-        language.supports_ui.reset(new bool(true));
-      }
-    } else if (base::ContainsKey(locale_set, entry.code)) {
+
+    std::string temp_locale = entry.code;
+    if (language::ConvertToActualUILocale(&temp_locale)) {
       language.supports_ui.reset(new bool(true));
     }
 #if defined(OS_CHROMEOS)
@@ -290,7 +286,7 @@ LanguageSettingsPrivateEnableLanguageFunction::Run() {
   std::string chrome_language = language_code;
   language::ToChromeLanguageSynonym(&chrome_language);
 
-  if (base::ContainsValue(languages, chrome_language)) {
+  if (base::Contains(languages, chrome_language)) {
     LOG(ERROR) << "Language " << chrome_language << " already enabled";
     return RespondNow(NoArguments());
   }
@@ -323,7 +319,7 @@ LanguageSettingsPrivateDisableLanguageFunction::Run() {
   std::string chrome_language = language_code;
   language::ToChromeLanguageSynonym(&chrome_language);
 
-  if (!base::ContainsValue(languages, chrome_language)) {
+  if (!base::Contains(languages, chrome_language)) {
     LOG(ERROR) << "Language " << chrome_language << " not enabled";
     return RespondNow(NoArguments());
   }

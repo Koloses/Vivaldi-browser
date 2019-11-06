@@ -23,7 +23,6 @@ class TestWebThreadBundle;
 
 namespace base {
 
-class MessageLoopBase;
 class MessageLoopImpl;
 
 namespace sequence_manager {
@@ -106,14 +105,6 @@ class BASE_EXPORT MessageLoopCurrent {
   // DestructionObserver is receiving a notification callback.
   void RemoveDestructionObserver(DestructionObserver* destruction_observer);
 
-  // Returns the name for the thread associated with this object.
-  std::string GetThreadName() const;
-
-  // Forwards to MessageLoop::task_runner().
-  // DEPRECATED(https://crbug.com/616447): Use ThreadTaskRunnerHandle::Get()
-  // instead of MessageLoopCurrent::Get()->task_runner().
-  scoped_refptr<SingleThreadTaskRunner> task_runner() const;
-
   // Forwards to MessageLoop::SetTaskRunner().
   // DEPRECATED(https://crbug.com/825327): only owners of the MessageLoop
   // instance should replace its TaskRunner.
@@ -172,7 +163,7 @@ class BASE_EXPORT MessageLoopCurrent {
     ~ScopedNestableTaskAllower();
 
    private:
-    MessageLoopBase* const loop_;
+    sequence_manager::internal::SequenceManagerImpl* const sequence_manager_;
     const bool old_state_;
   };
 
@@ -187,17 +178,12 @@ class BASE_EXPORT MessageLoopCurrent {
   bool IsIdleForTesting();
 
  protected:
-  // Binds |current| to the current thread. It will from then on be the
-  // MessageLoop driven by MessageLoopCurrent on this thread. This is only meant
-  // to be invoked by the MessageLoop itself.
-  static void BindToCurrentThreadInternal(MessageLoopBase* current);
+  explicit MessageLoopCurrent(
+      sequence_manager::internal::SequenceManagerImpl* sequence_manager)
+      : current_(sequence_manager) {}
 
-  // Unbinds |current| from the current thread. Must be invoked on the same
-  // thread that invoked |BindToCurrentThreadInternal(current)|. This is only
-  // meant to be invoked by the MessageLoop itself.
-  static void UnbindFromCurrentThreadInternal(MessageLoopBase* current);
-
-  explicit MessageLoopCurrent(MessageLoopBase* current) : current_(current) {}
+  static sequence_manager::internal::SequenceManagerImpl*
+  GetCurrentSequenceManagerImpl();
 
   friend class MessageLoopImpl;
   friend class MessagePumpLibeventTest;
@@ -207,12 +193,7 @@ class BASE_EXPORT MessageLoopCurrent {
   friend class MessageLoopTaskRunnerTest;
   friend class web::TestWebThreadBundle;
 
-  // Return the pointer to MessageLoop for internal needs.
-  // All other callers should call MessageLoopCurrent::Get().
-  // TODO(altimin): Remove this.
-  MessageLoopBase* ToMessageLoopBaseDeprecated() const { return current_; }
-
-  MessageLoopBase* current_;
+  sequence_manager::internal::SequenceManagerImpl* current_;
 };
 
 #if !defined(OS_NACL)
@@ -263,7 +244,8 @@ class BASE_EXPORT MessageLoopCurrentForUI : public MessageLoopCurrent {
 #endif
 
  private:
-  explicit MessageLoopCurrentForUI(MessageLoopBase* current)
+  explicit MessageLoopCurrentForUI(
+      sequence_manager::internal::SequenceManagerImpl* current)
       : MessageLoopCurrent(current) {}
 
   MessagePumpForUI* GetMessagePumpForUI() const;
@@ -319,7 +301,8 @@ class BASE_EXPORT MessageLoopCurrentForIO : public MessageLoopCurrent {
 #endif  // !defined(OS_NACL_SFI)
 
  private:
-  explicit MessageLoopCurrentForIO(MessageLoopBase* current)
+  explicit MessageLoopCurrentForIO(
+      sequence_manager::internal::SequenceManagerImpl* current)
       : MessageLoopCurrent(current) {}
 
   MessagePumpForIO* GetMessagePumpForIO() const;

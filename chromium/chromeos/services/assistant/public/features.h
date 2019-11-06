@@ -14,11 +14,11 @@ namespace features {
 
 // Enable Assistant Feedback UI.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::Feature kAssistantFeedbackUi;
+extern const base::Feature kAssistantAudioEraser;
 
-// Enables Assistant voice match enrollment.
+// Enable Assistant Feedback UI.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::Feature kAssistantVoiceMatch;
+extern const base::Feature kAssistantFeedbackUi;
 
 // Enables Assistant warmer welcome.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
@@ -44,6 +44,10 @@ extern const base::Feature kEnableClearCutLog;
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kEnableDspHotword;
 
+// Enables MediaSession Integration.
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+extern const base::Feature kEnableMediaSessionIntegration;
+
 // Enables stereo audio input.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kEnableStereoAudioInput;
@@ -51,6 +55,10 @@ extern const base::Feature kEnableStereoAudioInput;
 // Enables timer notifications.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kTimerNotification;
+
+// Enables Assistant alarm timer manager integration.
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+extern const base::Feature kEnableAssistantAlarmTimerManager;
 
 // Enables power management features i.e. Wake locks and wake up alarms.
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
@@ -68,11 +76,11 @@ extern const base::Feature kEnableTextQueriesWithClientDiscourseContext;
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 extern const base::Feature kTimerTicks;
 
-// Enables Assistant key remapping on keyboards.
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
-extern const base::Feature kAssistantKeyRemapping;
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsAlarmTimerManagerEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsAppSupportEnabled();
+
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsAudioEraserEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsClearCutLogEnabled();
 
@@ -83,7 +91,16 @@ COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsFeedbackUiEnabled();
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
 bool IsInAssistantNotificationsEnabled();
 
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsKeyRemappingEnabled();
+
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC)
+bool IsMediaSessionIntegrationEnabled();
+
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsPowerManagerEnabled();
+
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsRoutinesEnabled();
+
+COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsScreenContextQueryEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsStereoAudioInputEnabled();
 
@@ -92,12 +109,6 @@ COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsTimerNotificationEnabled();
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsTimerTicksEnabled();
 
 COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsWarmerWelcomeEnabled();
-
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsKeyRemappingEnabled();
-
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsScreenContextQueryEnabled();
-
-COMPONENT_EXPORT(ASSISTANT_SERVICE_PUBLIC) bool IsPowerManagerEnabled();
 
 }  // namespace features
 }  // namespace assistant

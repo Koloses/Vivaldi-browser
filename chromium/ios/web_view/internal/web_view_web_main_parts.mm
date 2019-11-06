@@ -53,8 +53,7 @@ void WebViewWebMainParts::PreCreateThreads() {
   std::string enable_features = base::JoinString(
       {autofill::features::kAutofillEnableAccountWalletStorage.name,
        autofill::features::kAutofillAlwaysShowServerCardsInSyncTransport.name,
-       switches::kSyncSupportSecondaryAccount.name,
-       switches::kSyncUSSAutofillWalletData.name},
+       switches::kSyncSupportSecondaryAccount.name},
       ",");
   std::string disabled_features = base::JoinString(
       {// Allows form_structure.cc to run heuristics on single field forms.
@@ -81,8 +80,11 @@ void WebViewWebMainParts::PreMainMessageLoopRun() {
 
 void WebViewWebMainParts::PostMainMessageLoopRun() {
   WebViewTranslateService::GetInstance()->Shutdown();
-  ApplicationContext::GetInstance()->SaveState();
+
+  // CWVWebViewConfiguration must destroy its WebViewBrowserStates before the
+  // threads are stopped by ApplicationContext.
   [CWVWebViewConfiguration shutDown];
+  ApplicationContext::GetInstance()->SaveState();
 }
 
 void WebViewWebMainParts::PostDestroyThreads() {

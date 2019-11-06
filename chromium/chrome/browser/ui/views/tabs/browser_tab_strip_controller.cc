@@ -29,6 +29,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
+#include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_drag_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
@@ -53,7 +54,7 @@
 #include "ui/views/widget/widget.h"
 #include "url/origin.h"
 
-#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
+#if BUILDFLAG(ENABLE_LEGACY_DESKTOP_IN_PRODUCT_HELP)
 #include "chrome/browser/feature_engagement/new_tab/new_tab_tracker.h"
 #include "chrome/browser/feature_engagement/new_tab/new_tab_tracker_factory.h"
 #endif
@@ -78,10 +79,10 @@ bool DetermineTabStripLayoutStacked(PrefService* prefs, bool* adjust_layout) {
 // Gets the source browser view during a tab dragging. Returns nullptr if there
 // is none.
 BrowserView* GetSourceBrowserViewInTabDragging() {
-  TabStrip* source_tabstrip = TabDragController::GetSourceTabStrip();
-  if (source_tabstrip) {
+  auto* source_context = TabDragController::GetSourceContext();
+  if (source_context) {
     gfx::NativeWindow source_window =
-        source_tabstrip->GetWidget()->GetNativeWindow();
+        source_context->AsView()->GetWidget()->GetNativeWindow();
     if (source_window)
       return BrowserView::GetBrowserViewForNativeWindow(source_window);
   }
@@ -103,14 +104,12 @@ class BrowserTabStripController::TabContextMenuContents
         views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU));
   }
 
-  void Cancel() {
-    controller_ = NULL;
-  }
+  void Cancel() { controller_ = nullptr; }
 
   void RunMenuAt(const gfx::Point& point, ui::MenuSourceType source_type) {
-    menu_runner_->RunMenuAt(tab_->GetWidget(), NULL,
+    menu_runner_->RunMenuAt(tab_->GetWidget(), nullptr,
                             gfx::Rect(point, gfx::Size()),
-                            views::MENU_ANCHOR_TOPLEFT, source_type);
+                            views::MenuAnchorPosition::kTopLeft, source_type);
   }
 
   // Overridden from ui::SimpleMenuModel::Delegate:
@@ -156,7 +155,7 @@ class BrowserTabStripController::TabContextMenuContents
 BrowserTabStripController::BrowserTabStripController(TabStripModel* model,
                                                      BrowserView* browser_view)
     : model_(model),
-      tabstrip_(NULL),
+      tabstrip_(nullptr),
       browser_view_(browser_view),
       hover_tab_selector_(model) {
   model_->SetTabStripUI(this);
@@ -317,30 +316,7 @@ void BrowserTabStripController::OnDropIndexUpdate(int index,
   }
 }
 
-bool BrowserTabStripController::IsCompatibleWith(TabStrip* other) const {
-  Profile* other_profile = other->controller()->GetProfile();
-  return other_profile == GetProfile();
-}
-
-NewTabButtonPosition BrowserTabStripController::GetNewTabButtonPosition()
-    const {
-  const std::string switch_value =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kNewTabButtonPosition);
-  if (switch_value == switches::kNewTabButtonPositionOppositeCaption)
-    return GetFrameView()->CaptionButtonsOnLeadingEdge() ? TRAILING : LEADING;
-  if (switch_value == switches::kNewTabButtonPositionLeading)
-    return LEADING;
-  if (switch_value == switches::kNewTabButtonPositionAfterTabs)
-    return AFTER_TABS;
-  if (switch_value == switches::kNewTabButtonPositionTrailing)
-    return TRAILING;
-
-  return AFTER_TABS;
-}
-
 void BrowserTabStripController::CreateNewTab() {
-#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
   // This must be called before AddTabAt() so that OmniboxFocused is called
   // after NewTabOpened. TODO(collinbaker): remove omnibox focusing from
   // triggering conditions (since it is always focused for new tabs) and move
@@ -348,11 +324,11 @@ void BrowserTabStripController::CreateNewTab() {
   auto* reopen_tab_iph = ReopenTabInProductHelpFactory::GetForProfile(
       browser_view_->browser()->profile());
   reopen_tab_iph->NewTabOpened();
-#endif
 
-  model_->delegate()->AddTabAt(GURL(), -1, true);
+  const auto group_id = model_->GetTabGroupForTab(model_->active_index());
+  model_->delegate()->AddTabAt(GURL(), -1, true, group_id);
 
-#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
+#if BUILDFLAG(ENABLE_LEGACY_DESKTOP_IN_PRODUCT_HELP)
   auto* new_tab_tracker =
       feature_engagement::NewTabTrackerFactory::GetInstance()->GetForProfile(
           browser_view_->browser()->profile());
@@ -368,7 +344,7 @@ void BrowserTabStripController::CreateNewTabWithLocation(
   AutocompleteMatch match;
   AutocompleteClassifierFactory::GetForProfile(GetProfile())
       ->Classify(location, false, false, metrics::OmniboxEventProto::BLANK,
-                 &match, NULL);
+                 &match, nullptr);
   if (match.destination_url.is_valid())
     model_->delegate()->AddTabAt(match.destination_url, -1, true);
 }
@@ -413,6 +389,16 @@ void BrowserTabStripController::OnStoppedDraggingTabs() {
     browser_view_->TabDraggingStatusChanged(/*is_dragging=*/false);
   if (source_browser_view && !TabDragController::IsActive())
     source_browser_view->TabDraggingStatusChanged(/*is_dragging=*/false);
+}
+
+const TabGroupData* BrowserTabStripController::GetDataForGroup(
+    TabGroupId group) const {
+  return model_->GetDataForGroup(group);
+}
+
+std::vector<int> BrowserTabStripController::ListTabsInGroup(
+    TabGroupId group) const {
+  return model_->ListTabsInGroup(group);
 }
 
 bool BrowserTabStripController::IsFrameCondensed() const {
@@ -471,41 +457,42 @@ void BrowserTabStripController::OnTabStripModelChanged(
     const TabStripSelectionChange& selection) {
   switch (change.type()) {
     case TabStripModelChange::kInserted: {
-      for (const auto& delta : change.deltas()) {
-        DCHECK(delta.insert.contents);
-        DCHECK(model_->ContainsIndex(delta.insert.index));
-        AddTab(delta.insert.contents, delta.insert.index,
-               selection.new_contents == delta.insert.contents);
+      for (const auto& contents : change.GetInsert()->contents) {
+        DCHECK(model_->ContainsIndex(contents.index));
+        AddTab(contents.contents, contents.index,
+               selection.new_contents == contents.contents);
       }
       break;
     }
     case TabStripModelChange::kRemoved: {
-      for (const auto& delta : change.deltas()) {
-        // Cancel any pending tab transition.
+      for (const auto& contents : change.GetRemove()->contents) {
         hover_tab_selector_.CancelTabTransition();
-
-        tabstrip_->RemoveTabAt(delta.remove.contents, delta.remove.index,
-                               delta.remove.contents == selection.old_contents);
+        tabstrip_->RemoveTabAt(contents.contents, contents.index,
+                               contents.contents == selection.old_contents);
       }
       break;
     }
     case TabStripModelChange::kMoved: {
-      for (const auto& delta : change.deltas()) {
-        // Cancel any pending tab transition.
-        hover_tab_selector_.CancelTabTransition();
+      auto* move = change.GetMove();
+      // Cancel any pending tab transition.
+      hover_tab_selector_.CancelTabTransition();
 
-        // A move may have resulted in the pinned state changing, so pass in a
-        // TabRendererData.
-        tabstrip_->MoveTab(
-            delta.move.from_index, delta.move.to_index,
-            TabRendererDataFromModel(delta.move.contents, delta.move.to_index,
-                                     EXISTING_TAB));
-      }
+      // A move may have resulted in the pinned state changing, so pass in a
+      // TabRendererData.
+      tabstrip_->MoveTab(move->from_index, move->to_index,
+                         TabRendererDataFromModel(
+                             move->contents, move->to_index, EXISTING_TAB));
       break;
     }
     case TabStripModelChange::kReplaced: {
-      for (const auto& delta : change.deltas())
-        SetTabDataAt(delta.replace.new_contents, delta.replace.index);
+      auto* replace = change.GetReplace();
+      SetTabDataAt(replace->new_contents, replace->index);
+      break;
+    }
+    case TabStripModelChange::kGroupChanged: {
+      auto* group_change = change.GetGroupChange();
+      tabstrip_->ChangeTabGroup(group_change->index, group_change->old_group,
+                                group_change->new_group);
       break;
     }
     case TabStripModelChange::kSelectionOnly:
@@ -568,11 +555,16 @@ TabRendererData BrowserTabStripController::TabRendererDataFromModel(
     int model_index,
     TabStatus tab_status) {
   TabRendererData data;
-  TabUIHelper* tab_ui_helper = TabUIHelper::FromWebContents(contents);
+  TabUIHelper* const tab_ui_helper = TabUIHelper::FromWebContents(contents);
   data.favicon = tab_ui_helper->GetFavicon().AsImageSkia();
+  ThumbnailTabHelper* const thumbnail_tab_helper =
+      ThumbnailTabHelper::FromWebContents(contents);
+  if (thumbnail_tab_helper)
+    data.thumbnail = thumbnail_tab_helper->thumbnail();
   data.network_state = TabNetworkStateForWebContents(contents);
   data.title = tab_ui_helper->GetTitle();
-  data.url = contents->GetURL();
+  data.visible_url = contents->GetVisibleURL();
+  data.last_committed_url = contents->GetLastCommittedURL();
   data.crashed_status = contents->GetCrashedStatus();
   data.incognito = contents->GetBrowserContext()->IsOffTheRecord();
   data.pinned = model_->IsTabPinned(model_index);

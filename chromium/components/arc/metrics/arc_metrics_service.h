@@ -6,6 +6,7 @@
 #define COMPONENTS_ARC_METRICS_ARC_METRICS_SERVICE_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/macros.h"
@@ -14,12 +15,13 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/power/power_manager_client.h"
 #include "components/arc/common/metrics.mojom.h"
 #include "components/arc/common/process.mojom.h"
-#include "components/arc/connection_observer.h"
+#include "components/arc/session/connection_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/session_manager/core/session_manager_observer.h"
+#include "ui/events/ozone/gamepad/gamepad_observer.h"
 #include "ui/wm/public/activation_change_observer.h"
 
 class BrowserContextKeyedServiceFactory;
@@ -47,7 +49,8 @@ class ArcMetricsService : public KeyedService,
                           public wm::ActivationChangeObserver,
                           public session_manager::SessionManagerObserver,
                           public chromeos::PowerManagerClient::Observer,
-                          public mojom::MetricsHost {
+                          public mojom::MetricsHost,
+                          public ui::GamepadObserver {
  public:
   // Delegate for handling window focus observation that is used to track ARC
   // app usage metrics.
@@ -105,6 +108,9 @@ class ArcMetricsService : public KeyedService,
   // chromeos::PowerManagerClient::Observer overrides.
   void ScreenIdleStateChanged(
       const power_manager::ScreenIdleState& proto) override;
+
+  // ui::GamepadObserver overrides.
+  void OnGamepadEvent(const ui::GamepadEvent& event) override;
 
   // ArcAppListPrefs::Observer callbacks which are called through
   // ArcMetricsServiceProxy.
@@ -190,6 +196,8 @@ class ArcMetricsService : public KeyedService,
   base::TimeDelta engagement_time_total_;
   base::TimeDelta engagement_time_foreground_;
   base::TimeDelta engagement_time_background_;
+
+  bool gamepad_interaction_recorded_ = false;
 
   // Always keep this the last member of this class to make sure it's the
   // first thing to be destructed.

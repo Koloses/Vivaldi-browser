@@ -13,16 +13,13 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/pending_task.h"
 #include "base/run_loop.h"
-#include "base/sampling_heap_profiler/sampling_heap_profiler.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
 #include "base/system/sys_info.h"
 #include "base/task/sequence_manager/sequence_manager.h"
 #include "base/threading/platform_thread.h"
 #include "base/timer/hi_res_timer_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "components/tracing/common/tracing_sampler_profiler.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/service_manager/service_manager_connection_impl.h"
@@ -30,6 +27,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/public/renderer/render_thread.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
@@ -37,6 +35,7 @@
 #include "mojo/public/cpp/bindings/mojo_buildflags.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "services/service_manager/sandbox/switches.h"
+#include "services/tracing/public/cpp/stack_sampling/tracing_sampler_profiler.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/webrtc_overrides/init_webrtc.h"  // nogncheck
 #include "ui/base/ui_base_switches.h"
@@ -82,10 +81,12 @@ std::unique_ptr<base::MessagePump> CreateMainThreadMessagePump() {
   // As long as scrollbars on Mac are painted with Cocoa, the message pump
   // needs to be backed by a Foundation-level loop to process NSTimers. See
   // http://crbug.com/306348#c24 for details.
-  return std::make_unique<base::MessagePumpNSRunLoop>();
+  return base::MessagePump::Create(base::MessagePump::Type::NS_RUNLOOP);
+#elif defined(OS_FUCHSIA)
+  // Allow FIDL APIs on renderer main thread.
+  return base::MessagePump::Create(base::MessagePump::Type::IO);
 #else
-  return base::MessageLoop::CreateMessagePumpForType(
-      base::MessageLoop::TYPE_DEFAULT);
+  return base::MessagePump::Create(base::MessagePump::Type::DEFAULT);
 #endif
 }
 
@@ -102,18 +103,6 @@ int RendererMain(const MainFunctionParams& parameters) {
       kTraceEventRendererProcessSortIndex);
 
   const base::CommandLine& command_line = parameters.command_line;
-
-  base::SamplingHeapProfiler::Init();
-  if (command_line.HasSwitch(switches::kSamplingHeapProfiler)) {
-    base::SamplingHeapProfiler* profiler = base::SamplingHeapProfiler::Get();
-    unsigned sampling_interval = 0;
-    bool parsed = base::StringToUint(
-        command_line.GetSwitchValueASCII(switches::kSamplingHeapProfiler),
-        &sampling_interval);
-    if (parsed && sampling_interval > 0)
-      profiler->SetSamplingInterval(sampling_interval * 1024);
-    profiler->Start();
-  }
 
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool;
@@ -142,6 +131,10 @@ int RendererMain(const MainFunctionParams& parameters) {
   RendererMainPlatformDelegate platform(parameters);
 
   base::PlatformThread::SetName("CrRendererMain");
+
+  // Force main thread initialization. When the implementation is based on a
+  // better means of determining which is the main thread, remove.
+  RenderThread::IsMainThread();
 
 #if defined(OS_ANDROID)
   // If we have any pending LibraryLoader histograms, record them.
@@ -197,8 +190,7 @@ int RendererMain(const MainFunctionParams& parameters) {
                          std::move(main_thread_scheduler));
 
     // Setup tracing sampler profiler as early as possible.
-    auto tracing_sampler_profiler =
-        tracing::TracingSamplerProfiler::CreateOnMainThread();
+    tracing::TracingSamplerProfiler::CreateForCurrentThread();
 
     if (need_sandbox)
       should_run_loop = platform.EnableSandbox();

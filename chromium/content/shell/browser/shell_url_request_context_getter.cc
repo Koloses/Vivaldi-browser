@@ -29,8 +29,6 @@
 #include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/ct_policy_status.h"
 #include "net/cookies/cookie_store.h"
-#include "net/dns/host_resolver.h"
-#include "net/dns/mapped_host_resolver.h"
 #include "net/http/http_network_session.h"
 #include "net/net_buildflags.h"
 #include "net/proxy_resolution/proxy_config_service.h"
@@ -89,14 +87,12 @@ ShellURLRequestContextGetter::ShellURLRequestContextGetter(
     const base::FilePath& base_path,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     ProtocolHandlerMap* protocol_handlers,
-    URLRequestInterceptorScopedVector request_interceptors,
-    net::NetLog* net_log)
+    URLRequestInterceptorScopedVector request_interceptors)
     : ignore_certificate_errors_(ignore_certificate_errors),
       off_the_record_(off_the_record),
       shut_down_(false),
       base_path_(base_path),
       io_task_runner_(std::move(io_task_runner)),
-      net_log_(net_log),
       request_interceptors_(std::move(request_interceptors)) {
   // Must first be created on the UI thread.
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -136,7 +132,7 @@ std::unique_ptr<net::CertVerifier>
 ShellURLRequestContextGetter::GetCertVerifier() {
   if (g_cert_verifier_for_testing)
     return std::make_unique<WrappedCertVerifierForTesting>();
-  return net::CertVerifier::CreateDefault();
+  return net::CertVerifier::CreateDefault(/*cert_net_fetcher=*/nullptr);
 }
 
 std::unique_ptr<net::ProxyConfigService>
@@ -162,10 +158,10 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         *base::CommandLine::ForCurrentProcess();
 
     net::URLRequestContextBuilder builder;
-    builder.set_net_log(net_log_);
+    net::NetLog* net_log = nullptr;
     builder.set_network_delegate(CreateNetworkDelegate());
     std::unique_ptr<net::CookieStore> cookie_store =
-        CreateCookieStore(CookieStoreConfig(), net_log_);
+        CreateCookieStore(CookieStoreConfig(), net_log);
     builder.SetCookieStore(std::move(cookie_store));
     builder.set_accept_language(GetAcceptLanguages());
     builder.set_user_agent(GetShellUserAgent());
@@ -198,14 +194,8 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         ignore_certificate_errors_;
     builder.set_http_network_session_params(network_session_params);
 
-    if (command_line.HasSwitch(network::switches::kHostResolverRules)) {
-      std::unique_ptr<net::MappedHostResolver> mapped_host_resolver(
-          new net::MappedHostResolver(
-              net::HostResolver::CreateDefaultResolver(net_log_)));
-      mapped_host_resolver->SetRulesFromString(command_line.GetSwitchValueASCII(
-          network::switches::kHostResolverRules));
-      builder.set_host_resolver(std::move(mapped_host_resolver));
-    }
+    builder.set_host_mapping_rules(command_line.GetSwitchValueASCII(
+        network::switches::kHostResolverRules));
 
     // Keep ProtocolHandlers added in sync with
     // ShellContentBrowserClient::IsHandledURL().

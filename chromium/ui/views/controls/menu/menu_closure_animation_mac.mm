@@ -28,7 +28,7 @@ MenuClosureAnimationMac::MenuClosureAnimationMac(MenuItemView* item,
       menu_(menu),
       step_(AnimationStep::kStart) {}
 
-MenuClosureAnimationMac::~MenuClosureAnimationMac() {}
+MenuClosureAnimationMac::~MenuClosureAnimationMac() = default;
 
 void MenuClosureAnimationMac::Start() {
   DCHECK_EQ(step_, AnimationStep::kStart);
@@ -39,7 +39,7 @@ void MenuClosureAnimationMac::Start() {
     step_ = AnimationStep::kFading;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(&MenuClosureAnimationMac::AdvanceAnimation,
-                                  base::Unretained(this)));
+                                  AsWeakPtr()));
     return;
   }
   AdvanceAnimation();

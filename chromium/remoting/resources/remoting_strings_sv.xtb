@@ -70,6 +70,11 @@ Du hittar mer information om sekretess i Googles sekretesspolicy (http://goo.gl/
 <translation id="2366718077645204424">Det går inte att nå värden. Detta beror troligen på konfigurationen av nätverket som du använder.</translation>
 <translation id="2370754117186920852"><ph name="OPTIONAL_OFFLINE_REASON" />  Var senast uppe på webben <ph name="RELATIVE_TIMESTAMP" />.</translation>
 <translation id="2405928220797050937">Den här appen stöds inte längre. Använd <ph name="LINK_BEGIN" />webbappen Chrome Remote Desktop<ph name="LINK_END" /> så att du får de senaste funktionerna och säkerhetsuppdateringarna.</translation>
+<translation id="2431841749166974386">Ett konfigureringssteg återstår innan du kan fjärrstyra den här datorn med <ph name="PRODUCT_NAME" />.
+
+Du aktiverar funktionen genom att öppna inställningspanelen Säkerhet och sekretess med <ph name="BUTTON_NAME" /> och markera kryssrutan <ph name="SERVICE_SCRIPT_NAME" />.
+
+Om <ph name="SERVICE_SCRIPT_NAME" /> redan har markerats kan du behöva ta bort det och lägga till det igen.</translation>
 <translation id="2499160551253595098">Hjälp oss att förbättra Chrome Remote Desktop genom att låta oss samla in användningsstatistik och felrapporter.</translation>
 <translation id="2509394361235492552">Ansluten till <ph name="HOSTNAME" /></translation>
 <translation id="2512228156274966424">Obs! Om du vill vara säker på att alla kortkommandon är tillgängliga kan du ställa in Chrome Remote Desktop på Öppna som fönster.</translation>
@@ -126,8 +131,6 @@ Du hittar mer information om sekretess i Googles sekretesspolicy (http://goo.gl/
 <translation id="3695446226812920698">Läs mer</translation>
 <translation id="3718805989288361841">Det finns ett fel i principinställningarna för Chrome Remote Desktop. Kontakta systemadministratören om du behöver hjälp.</translation>
 <translation id="3776024066357219166">Chrome Remote Desktop-sessionen har avslutats.</translation>
-<translation id="3846148461359626420">• Förbättrad panorering och zoomning på iPhone X.
-• Stabilitetsförbättringar och felkorrigeringar.</translation>
 <translation id="3870154837782082782">Google Inc.</translation>
 <translation id="3884839335308961732">Bekräfta ditt konto och pinkoden nedan för att tillåta åtkomst via Chrome Remote Desktop.</translation>
 <translation id="3897092660631435901">Meny</translation>
@@ -153,6 +156,7 @@ Du hittar mer information om sekretess i Googles sekretesspolicy (http://goo.gl/
 <translation id="4240294130679914010">Chromoting Host Uninstaller</translation>
 <translation id="4277463233460010382">Den här datorn är konfigurerad för att tillåta att en eller flera klienter ansluter utan att en pinkod måste anges.</translation>
 <translation id="4277736576214464567">Koden är ogiltig. Försök igen.</translation>
+<translation id="4281844954008187215">Användarvillkor</translation>
 <translation id="4361728918881830843">Om du vill aktivera fjärranslutning till en annan dator installerar du Chrome Remote Desktop på den och klickar på <ph name="BUTTON_NAME" />.</translation>
 <translation id="4394049700291259645">Inaktivera</translation>
 <translation id="4405930547258349619">Huvudbibliotek</translation>
@@ -195,9 +199,6 @@ dator</translation>
 <translation id="4973800994433240357">När du laddar ned installationsprogrammet för fjärranslutningsvärden Chromoting godkänner du Googles <ph name="LINK_BEGIN" />användarvillkor<ph name="LINK_END" />.</translation>
 <translation id="4974476491460646149">Anslutningen till <ph name="HOSTNAME" /> kopplades från</translation>
 <translation id="4985296110227979402">Du måste först konfigurera datorn för fjärråtkomst</translation>
-<translation id="5059773780693835145">Ett konfigureringssteg återstår innan du kan fjärrstyra den här datorn med <ph name="PRODUCT_NAME" />.
-
-Du aktiverar funktionen genom att öppna inställningspanelen Säkerhet och sekretess med <ph name="BUTTON_NAME" /> och markera kryssrutan <ph name="SERVICE_SCRIPT_NAME" />.</translation>
 <translation id="5064360042339518108"><ph name="HOSTNAME" /> (offline)</translation>
 <translation id="5070121137485264635">Fjärrvärden kräver att du autentiserar via en tredje parts webbplats. Om du vill fortsätta måste du ge Chrome Remote Desktop ytterligare behörigheter att komma åt den här adressen:</translation>
 <translation id="507204348399810022">Är du säker på att du vill inaktivera fjärranslutningar till <ph name="HOSTNAME" />?</translation>
@@ -287,6 +288,7 @@ Du aktiverar funktionen genom att öppna inställningspanelen Säkerhet och sekr
 <translation id="7116737094673640201">Välkommen till Chrome Remote Desktop</translation>
 <translation id="7144878232160441200">Försök igen</translation>
 <translation id="7149517134817561223">Program som används för att skicka kommandon till värddatorn för Chrome Remote Desktop.</translation>
+<translation id="7213491505512310433">Stabilitetsförbättringar och felkorrigeringar</translation>
 <translation id="7215059001581613786">Ange en PIN-kod som består av minst sex siffror.</translation>
 <translation id="7312846573060934304">Värden är offline.</translation>
 <translation id="7319983568955948908">Sluta dela</translation>
@@ -340,13 +342,12 @@ Du aktiverar funktionen genom att öppna inställningspanelen Säkerhet och sekr
 <translation id="8525306231823319788">Helskärm</translation>
 <translation id="8548209692293300397">Du har tidigare loggat in som <ph name="USER_NAME" /> (<ph name="USER_EMAIL" />). Om du vill kunna ansluta till de datorer som sparats i det kontot <ph name="LINK_BEGIN" />loggar du in i Google Chrome<ph name="LINK_END" /> med det kontot och installerar om Chrome Remote Desktop.</translation>
 <translation id="8642984861538780905">OK</translation>
-<translation id="8705151241155781642">• Stöd för Android 9.0 Pie har lagts till.
-• Stöd för att ändra fjärrdatorns upplösning så att den motsvarar skärmen på Android-enheten.</translation>
 <translation id="8712909229180978490">Jag ser inte mina sparade filer online på Google Drive.</translation>
 <translation id="8743328882720071828">Vill du tillåta att <ph name="CLIENT_USERNAME" /> ser och styr din dator?</translation>
 <translation id="8747048596626351634">Sessionen kraschade eller gick inte att starta. Om ~/.chrome-remote-desktop-session finns på fjärrdatorn kontrollerar du att det som startas med den filen är en process som körs under lång tid i förgrunden, som en skrivbordsmiljö eller fönsterhanterare.</translation>
 <translation id="8759753423332885148">Läs mer.</translation>
 <translation id="8791202241915690908">Ladda ned installationsprogrammet för fjärranslutningsvärden Chromoting</translation>
+<translation id="8804164990146287819">Sekretesspolicy</translation>
 <translation id="894763922177556086">Bra</translation>
 <translation id="895780780740011433">För Windows 7 eller senare</translation>
 <translation id="897805526397249209">Om du vill aktivera fjärranslutningar till en annan dator installerar du Chromoting på datorn och klickar på <ph name="BUTTON_NAME" />.</translation>

@@ -10,10 +10,13 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media/cast_remoting_connector.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
+#include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 #include "chrome/browser/net/system_network_context_manager.h"
 #include "components/mirroring/browser/single_client_video_capture_host.h"
 #include "components/mirroring/mojom/cast_message_channel.mojom.h"
@@ -27,9 +30,9 @@
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/system_connector.h"
 #include "content/public/browser/video_capture_device_launcher.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/service_manager_connection.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -40,10 +43,13 @@ using content::BrowserThread;
 
 namespace mirroring {
 
+// Default resolution constraint.
+constexpr gfx::Size kMaxResolution(1920, 1080);
+
 namespace {
 
 void CreateVideoCaptureHostOnIO(const std::string& device_id,
-                                blink::MediaStreamType type,
+                                blink::mojom::MediaStreamType type,
                                 media::mojom::VideoCaptureHostRequest request) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   scoped_refptr<base::SingleThreadTaskRunner> device_task_runner =
@@ -60,20 +66,20 @@ void CreateVideoCaptureHostOnIO(const std::string& device_id,
       std::move(request));
 }
 
-blink::MediaStreamType ConvertVideoStreamType(
+blink::mojom::MediaStreamType ConvertVideoStreamType(
     content::DesktopMediaID::Type type) {
   switch (type) {
     case content::DesktopMediaID::TYPE_NONE:
-      return blink::MediaStreamType::MEDIA_NO_SERVICE;
+      return blink::mojom::MediaStreamType::NO_SERVICE;
     case content::DesktopMediaID::TYPE_WEB_CONTENTS:
-      return blink::MediaStreamType::MEDIA_GUM_TAB_VIDEO_CAPTURE;
+      return blink::mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE;
     case content::DesktopMediaID::TYPE_SCREEN:
     case content::DesktopMediaID::TYPE_WINDOW:
-      return blink::MediaStreamType::MEDIA_GUM_DESKTOP_VIDEO_CAPTURE;
+      return blink::mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE;
   }
 
   // To suppress compiler warning on Windows.
-  return blink::MediaStreamType::MEDIA_NO_SERVICE;
+  return blink::mojom::MediaStreamType::NO_SERVICE;
 }
 
 // Get the content::WebContents associated with the given |id|.
@@ -97,35 +103,15 @@ content::DesktopMediaID BuildMediaIdForWebContents(
   return media_id;
 }
 
-// Clamped resolution constraint to the screen size.
-gfx::Size GetCaptureResolutionConstraint() {
-  // Default resolution constraint.
-  constexpr gfx::Size kMaxResolution(1920, 1080);
+// Returns the size of the primary display in pixels, or base::nullopt if it
+// cannot be determined.
+base::Optional<gfx::Size> GetScreenResolution() {
   display::Screen* screen = display::Screen::GetScreen();
   if (!screen) {
     DVLOG(1) << "Cannot get the Screen object.";
-    return kMaxResolution;
+    return base::nullopt;
   }
-  const gfx::Size screen_resolution = screen->GetPrimaryDisplay().size();
-  const int width_step = 160;
-  const int height_step = 90;
-  int clamped_width = 0;
-  int clamped_height = 0;
-  if (kMaxResolution.height() * screen_resolution.width() <
-      kMaxResolution.width() * screen_resolution.height()) {
-    clamped_width = std::min(kMaxResolution.width(), screen_resolution.width());
-    clamped_width = clamped_width - (clamped_width % width_step);
-    clamped_height = clamped_width * height_step / width_step;
-  } else {
-    clamped_height =
-        std::min(kMaxResolution.height(), screen_resolution.height());
-    clamped_height = clamped_height - (clamped_height % height_step);
-    clamped_width = clamped_height * width_step / height_step;
-  }
-
-  clamped_width = std::max(clamped_width, width_step);
-  clamped_height = std::max(clamped_height, height_step);
-  return gfx::Size(clamped_width, clamped_height);
+  return screen->GetPrimaryDisplay().GetSizeInPixel();
 }
 
 }  // namespace
@@ -201,15 +187,55 @@ void CastMirroringServiceHost::Start(
   }
 
   // Connect to the Mirroring Service.
-  service_manager::Connector* connector =
-      content::ServiceManagerConnection::GetForProcess()->GetConnector();
-  connector->BindInterface(mojom::kServiceName, &mirroring_service_);
+  content::GetSystemConnector()->BindInterface(mojom::kServiceName,
+                                               &mirroring_service_);
   mojom::ResourceProviderPtr provider;
   resource_provider_binding_.Bind(mojo::MakeRequest(&provider));
   mirroring_service_->Start(
       std::move(session_params), GetCaptureResolutionConstraint(),
       std::move(observer), std::move(provider), std::move(outbound_channel),
       std::move(inbound_channel));
+
+  ShowCaptureIndicator();
+}
+
+// static
+gfx::Size CastMirroringServiceHost::GetCaptureResolutionConstraint() {
+  base::Optional<gfx::Size> screen_resolution = GetScreenResolution();
+  if (screen_resolution) {
+    return GetClampedResolution(screen_resolution.value());
+  } else {
+    return kMaxResolution;
+  }
+}
+
+// static
+gfx::Size CastMirroringServiceHost::GetClampedResolution(
+    gfx::Size screen_resolution) {
+  // Use landscape mode dimensions for screens in portrait mode.
+  if (screen_resolution.height() > screen_resolution.width()) {
+    screen_resolution =
+        gfx::Size(screen_resolution.height(), screen_resolution.width());
+  }
+  const int width_step = 160;
+  const int height_step = 90;
+  int clamped_width = 0;
+  int clamped_height = 0;
+  if (kMaxResolution.height() * screen_resolution.width() <
+      kMaxResolution.width() * screen_resolution.height()) {
+    clamped_width = std::min(kMaxResolution.width(), screen_resolution.width());
+    clamped_width = clamped_width - (clamped_width % width_step);
+    clamped_height = clamped_width * height_step / width_step;
+  } else {
+    clamped_height =
+        std::min(kMaxResolution.height(), screen_resolution.height());
+    clamped_height = clamped_height - (clamped_height % height_step);
+    clamped_width = clamped_height * width_step / height_step;
+  }
+
+  clamped_width = std::max(clamped_width, width_step);
+  clamped_height = std::max(clamped_height, height_step);
+  return gfx::Size(clamped_width, clamped_height);
 }
 
 void CastMirroringServiceHost::GetVideoCaptureHost(
@@ -279,6 +305,21 @@ void CastMirroringServiceHost::ConnectToRemotingSource(
 void CastMirroringServiceHost::WebContentsDestroyed() {
   audio_stream_creator_.reset();
   mirroring_service_.reset();
+}
+
+void CastMirroringServiceHost::ShowCaptureIndicator() {
+  if (source_media_id_.type != content::DesktopMediaID::TYPE_WEB_CONTENTS ||
+      !web_contents()) {
+    return;
+  }
+  const blink::MediaStreamDevice device(
+      ConvertVideoStreamType(source_media_id_.type),
+      source_media_id_.ToString(), /* name */ std::string());
+  media_stream_ui_ = MediaCaptureDevicesDispatcher::GetInstance()
+                         ->GetMediaStreamCaptureIndicator()
+                         ->RegisterMediaStream(web_contents(), {device});
+  media_stream_ui_->OnStarted(base::OnceClosure(),
+                              content::MediaStreamUI::SourceCallback());
 }
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)

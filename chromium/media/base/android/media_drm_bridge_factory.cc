@@ -70,9 +70,9 @@ void MediaDrmBridgeFactory::Create(
   // MediaDrmStorage may be lazy created in MediaDrmStorageBridge.
   storage_ = std::make_unique<MediaDrmStorageBridge>();
 
-  // TODO(xhwang): We should always try per-origin provisioning as long as it's
-  // supported regardless of whether persistent license is enabled or not.
-  if (!MediaDrmBridge::IsPersistentLicenseTypeSupported(key_system)) {
+  if (!MediaDrmBridge::IsPerOriginProvisioningSupported()) {
+    // Per-origin provisioning isn't supported, so proceed without specifying an
+    // origin ID.
     CreateMediaDrmBridge("");
     return;
   }
@@ -114,7 +114,7 @@ void MediaDrmBridgeFactory::CreateMediaDrmBridge(const std::string& origin_id) {
     return;
   }
 
-  media_drm_bridge_->SetMediaCryptoReadyCB(base::BindRepeating(
+  media_drm_bridge_->SetMediaCryptoReadyCB(base::BindOnce(
       &MediaDrmBridgeFactory::OnMediaCryptoReady, weak_factory_.GetWeakPtr()));
 }
 

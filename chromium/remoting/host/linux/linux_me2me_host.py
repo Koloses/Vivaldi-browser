@@ -1419,6 +1419,9 @@ Web Store: https://chrome.google.com/remotedesktop"""
   parser.add_argument("--watch-resolution", dest="watch_resolution",
                       type=int, nargs=2, default=False, action="store",
                       help=argparse.SUPPRESS)
+  parser.add_argument("--skip-config-upgrade", dest="skip_config_upgrade",
+                      default=False, action="store_true",
+                      help="Skip running the config upgrade tool.")
   parser.add_argument(dest="args", nargs="*", help=argparse.SUPPRESS)
   options = parser.parse_args()
 
@@ -1584,6 +1587,15 @@ Web Store: https://chrome.google.com/remotedesktop"""
 
   # Register an exit handler to clean up session process and the PID file.
   atexit.register(cleanup)
+
+  # Run the config upgrade tool, to update the refresh token if needed.
+  # TODO(lambroslambrou): Respect CHROME_REMOTE_DESKTOP_HOST_EXTRA_PARAMS
+  # and the GOOGLE_CLIENT... variables, and fix the tool to work in a
+  # test environment.
+  if not options.skip_config_upgrade:
+    args = [HOST_BINARY_PATH, "--upgrade-token",
+            "--host-config=%s" % config_file]
+    subprocess.check_call(args);
 
   # Load the initial host configuration.
   host_config = Config(config_file)
@@ -1756,6 +1768,9 @@ Web Store: https://chrome.google.com/remotedesktop"""
         # Nothing to do for Mac-only status 104 (login screen unsupported)
         elif os.WEXITSTATUS(status) == 105:
           logging.info("Username is blocked by policy - exiting.")
+          return 0
+        elif os.WEXITSTATUS(status) == 106:
+          logging.info("Host has been deleted - exiting.")
           return 0
         else:
           logging.info("Host exited with status %s." % os.WEXITSTATUS(status))

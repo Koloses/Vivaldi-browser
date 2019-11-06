@@ -127,7 +127,9 @@ class MetricsService : public base::HistogramFlattener {
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
   // Called when the application is going into background mode.
-  void OnAppEnterBackground();
+  // If |keep_recording_in_background| is true, UMA is still recorded and
+  // reported while in the background.
+  void OnAppEnterBackground(bool keep_recording_in_background = false);
 
   // Called when the application is coming out of background mode.
   void OnAppEnterForeground();
@@ -392,7 +394,7 @@ class MetricsService : public base::HistogramFlattener {
 
   // Weak pointers factory used to post task on different threads. All weak
   // pointers managed by this factory have the same lifetime as MetricsService.
-  base::WeakPtrFactory<MetricsService> self_ptr_factory_;
+  base::WeakPtrFactory<MetricsService> self_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
 };

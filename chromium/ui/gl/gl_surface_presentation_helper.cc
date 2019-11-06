@@ -70,8 +70,24 @@ bool GLSurfacePresentationHelper::GetFrameTimestampInfoIfAvailable(
   DCHECK(frame.timer || frame.fence || egl_timestamp_client_);
 
   if (egl_timestamp_client_) {
-    return egl_timestamp_client_->GetFrameTimestampInfoIfAvailable(
+    bool result = egl_timestamp_client_->GetFrameTimestampInfoIfAvailable(
         timestamp, interval, flags, frame.frame_id);
+
+    // Workaround null timestamp by setting it to TimeTicks::Now() snapped to
+    // the next vsync interval. See
+    // https://bugs.chromium.org/p/chromium/issues/detail?id=966638 for more
+    // details.
+    if (result && timestamp->is_null()) {
+      *timestamp = base::TimeTicks::Now();
+      *interval = vsync_interval_;
+      *flags = 0;
+      if (!vsync_interval_.is_zero()) {
+        *timestamp =
+            timestamp->SnappedToNextTick(vsync_timebase_, vsync_interval_);
+        *flags = gfx::PresentationFeedback::kVSync;
+      }
+    }
+    return result;
   } else if (frame.timer) {
     if (!frame.timer->IsAvailable())
       return false;
@@ -139,15 +155,14 @@ void GLSurfacePresentationHelper::Frame::Destroy(bool has_context) {
 
 GLSurfacePresentationHelper::GLSurfacePresentationHelper(
     gfx::VSyncProvider* vsync_provider)
-    : vsync_provider_(vsync_provider), weak_ptr_factory_(this) {}
+    : vsync_provider_(vsync_provider) {}
 
 GLSurfacePresentationHelper::GLSurfacePresentationHelper(
     base::TimeTicks timebase,
     base::TimeDelta interval)
     : vsync_provider_(nullptr),
       vsync_timebase_(timebase),
-      vsync_interval_(interval),
-      weak_ptr_factory_(this) {}
+      vsync_interval_(interval) {}
 
 GLSurfacePresentationHelper::~GLSurfacePresentationHelper() {
   // Discard pending frames and run presentation callback with empty

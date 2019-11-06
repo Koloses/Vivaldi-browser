@@ -4,21 +4,161 @@
 
 #include "chrome/browser/vr/service/browser_xr_runtime.h"
 
+#include <algorithm>
+#include <utility>
+
 #include "base/bind.h"
 #include "chrome/browser/vr/service/xr_device_impl.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "device/vr/vr_device.h"
+#include "ui/gfx/transform.h"
+#include "ui/gfx/transform_util.h"
 
 namespace vr {
 
-BrowserXRRuntime::BrowserXRRuntime(device::mojom::XRRuntimePtr runtime,
+bool IsValidStandingTransform(const gfx::Transform& transform) {
+  if (!transform.IsInvertible() || transform.HasPerspective())
+    return false;
+
+  gfx::DecomposedTransform decomp;
+  if (!DecomposeTransform(&decomp, transform))
+    return false;
+
+  float kEpsilon = 0.1f;
+  float kMaxTranslate = 1000000;  // Maximum 1000km translation.
+  if (abs(decomp.perspective[3] - 1) > kEpsilon) {
+    // If testing with unexpectedly high values, catch on debug builds rather
+    // than silently change data.  On release builds its better to be safe and
+    // validate.
+    DCHECK(false);
+    return false;
+  }
+  for (int i = 0; i < 3; ++i) {
+    if (abs(decomp.scale[i] - 1) > kEpsilon)
+      return false;
+    if (abs(decomp.skew[i]) > kEpsilon)
+      return false;
+    if (abs(decomp.perspective[i]) > kEpsilon)
+      return false;
+    if (abs(decomp.translate[i]) > kMaxTranslate)
+      return false;
+  }
+
+  // Only rotate and translate.
+  return true;
+}
+
+device::mojom::VREyeParametersPtr ValidateEyeParameters(
+    const device::mojom::VREyeParameters* eye) {
+  if (!eye)
+    return nullptr;
+  device::mojom::VREyeParametersPtr ret = device::mojom::VREyeParameters::New();
+  // FOV
+  float kDefaultFOV = 45;
+  ret->field_of_view = device::mojom::VRFieldOfView::New();
+  if (eye->field_of_view->up_degrees < 90 &&
+      eye->field_of_view->up_degrees > -90 &&
+      eye->field_of_view->up_degrees > -eye->field_of_view->down_degrees &&
+      eye->field_of_view->down_degrees < 90 &&
+      eye->field_of_view->down_degrees > -90 &&
+      eye->field_of_view->down_degrees > -eye->field_of_view->up_degrees &&
+      eye->field_of_view->left_degrees < 90 &&
+      eye->field_of_view->left_degrees > -90 &&
+      eye->field_of_view->left_degrees > -eye->field_of_view->right_degrees &&
+      eye->field_of_view->right_degrees < 90 &&
+      eye->field_of_view->right_degrees > -90 &&
+      eye->field_of_view->right_degrees > -eye->field_of_view->left_degrees) {
+    ret->field_of_view->up_degrees = eye->field_of_view->up_degrees;
+    ret->field_of_view->down_degrees = eye->field_of_view->down_degrees;
+    ret->field_of_view->left_degrees = eye->field_of_view->left_degrees;
+    ret->field_of_view->right_degrees = eye->field_of_view->right_degrees;
+  } else {
+    ret->field_of_view->up_degrees = kDefaultFOV;
+    ret->field_of_view->down_degrees = kDefaultFOV;
+    ret->field_of_view->left_degrees = kDefaultFOV;
+    ret->field_of_view->right_degrees = kDefaultFOV;
+  }
+
+  // Offset
+  float kMaxOffset = 10;
+  if (abs(eye->offset.x()) < kMaxOffset && abs(eye->offset.y()) < kMaxOffset &&
+      abs(eye->offset.z()) < kMaxOffset) {
+    ret->offset = eye->offset;
+  } else {
+    ret->offset = gfx::Vector3dF(0, 0, 0);
+  }
+
+  // Renderwidth/height
+  uint32_t kMaxSize = 16384;
+  uint32_t kMinSize = 2;
+  // DCHECK on debug builds to catch legitimate large sizes, but clamp on
+  // release builds to ensure valid state.
+  DCHECK(eye->render_width < kMaxSize);
+  DCHECK(eye->render_height < kMaxSize);
+  ret->render_width = std::max(std::min(kMaxSize, eye->render_width), kMinSize);
+  ret->render_height =
+      std::max(std::min(kMaxSize, eye->render_height), kMinSize);
+  return ret;
+}
+
+device::mojom::VRDisplayInfoPtr ValidateVRDisplayInfo(
+    const device::mojom::VRDisplayInfo* info,
+    device::mojom::XRDeviceId id) {
+  if (!info)
+    return nullptr;
+
+  device::mojom::VRDisplayInfoPtr ret = device::mojom::VRDisplayInfo::New();
+
+  // Rather than just cloning everything, we copy over each field and validate
+  // individually.  This ensures new fields don't bypass validation.
+  ret->id = id;
+  ret->display_name = info->display_name;
+  DCHECK(info->capabilities);  // Ensured by mojo.
+  ret->capabilities = device::mojom::VRDisplayCapabilities::New(
+      info->capabilities->has_position,
+      info->capabilities->has_external_display, info->capabilities->can_present,
+      info->capabilities->can_provide_environment_integration);
+
+  if (info->stage_parameters &&
+      IsValidStandingTransform(info->stage_parameters->standing_transform)) {
+    ret->stage_parameters = device::mojom::VRStageParameters::New(
+        info->stage_parameters->standing_transform,
+        info->stage_parameters->size_x, info->stage_parameters->size_z,
+        info->stage_parameters->bounds);
+  }
+
+  ret->left_eye = ValidateEyeParameters(info->left_eye.get());
+  ret->right_eye = ValidateEyeParameters(info->right_eye.get());
+
+  float kMinFramebufferScale = 0.1f;
+  float kMaxFramebufferScale = 1.0f;
+  if (info->webvr_default_framebuffer_scale <= kMaxFramebufferScale &&
+      info->webvr_default_framebuffer_scale >= kMinFramebufferScale) {
+    ret->webvr_default_framebuffer_scale =
+        info->webvr_default_framebuffer_scale;
+  } else {
+    ret->webvr_default_framebuffer_scale = 1;
+  }
+
+  if (info->webxr_default_framebuffer_scale <= kMaxFramebufferScale &&
+      info->webxr_default_framebuffer_scale >= kMinFramebufferScale) {
+    ret->webxr_default_framebuffer_scale =
+        info->webxr_default_framebuffer_scale;
+  } else {
+    ret->webxr_default_framebuffer_scale = 1;
+  }
+  return ret;
+}
+
+BrowserXRRuntime::BrowserXRRuntime(device::mojom::XRDeviceId id,
+                                   device::mojom::XRRuntimePtr runtime,
                                    device::mojom::VRDisplayInfoPtr display_info)
-    : runtime_(std::move(runtime)),
-      display_info_(std::move(display_info)),
-      binding_(this),
-      weak_ptr_factory_(this) {
+    : id_(id),
+      runtime_(std::move(runtime)),
+      display_info_(ValidateVRDisplayInfo(display_info.get(), id)),
+      binding_(this) {
   device::mojom::XRRuntimeEventListenerAssociatedPtr listener;
   binding_.Bind(mojo::MakeRequest(&listener));
 
@@ -42,7 +182,7 @@ void BrowserXRRuntime::ExitVrFromPresentingRendererDevice() {
 void BrowserXRRuntime::OnDisplayInfoChanged(
     device::mojom::VRDisplayInfoPtr vr_device_info) {
   bool had_display_info = !!display_info_;
-  display_info_ = std::move(vr_device_info);
+  display_info_ = ValidateVRDisplayInfo(vr_device_info.get(), id_);
   if (had_display_info) {
     for (XRDeviceImpl* device : renderer_device_connections_) {
       device->RuntimesChanged();
@@ -125,7 +265,7 @@ void BrowserXRRuntime::ExitPresent(XRDeviceImpl* device) {
 void BrowserXRRuntime::RequestSession(
     XRDeviceImpl* device,
     const device::mojom::XRRuntimeSessionOptionsPtr& options,
-    device::mojom::XRDevice::RequestSessionCallback callback) {
+    RequestSessionCallback callback) {
   // base::Unretained is safe because we won't be called back after runtime_ is
   // destroyed.
   runtime_->RequestSession(
@@ -138,7 +278,7 @@ void BrowserXRRuntime::RequestSession(
 void BrowserXRRuntime::OnRequestSessionResult(
     base::WeakPtr<XRDeviceImpl> device,
     device::mojom::XRRuntimeSessionOptionsPtr options,
-    device::mojom::XRDevice::RequestSessionCallback callback,
+    RequestSessionCallback callback,
     device::mojom::XRSessionPtr session,
     device::mojom::XRSessionControllerPtr immersive_session_controller) {
   if (session && device) {
@@ -192,13 +332,8 @@ void BrowserXRRuntime::InitializeAndGetDisplayInfo(
     return;
   }
 
-  int render_process_id =
-      render_frame_host ? render_frame_host->GetProcess()->GetID() : -1;
-  int render_frame_id =
-      render_frame_host ? render_frame_host->GetRoutingID() : -1;
   pending_initialization_callbacks_.push_back(std::move(callback));
   runtime_->EnsureInitialized(
-      render_process_id, render_frame_id,
       base::BindOnce(&BrowserXRRuntime::OnInitialized, base::Unretained(this)));
 }
 

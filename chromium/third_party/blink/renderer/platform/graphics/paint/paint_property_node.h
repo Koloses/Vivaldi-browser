@@ -5,9 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_PAINT_PROPERTY_NODE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_PAINT_PROPERTY_NODE_H_
 
+#include <algorithm>
+#include <iosfwd>
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/json/json_values.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -16,14 +19,38 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #endif
 
-#include <iosfwd>
-
 namespace blink {
 
 class ClipPaintPropertyNode;
 class EffectPaintPropertyNode;
 class ScrollPaintPropertyNode;
 class TransformPaintPropertyNode;
+
+// Used to report whether and how paint properties have changed. The order is
+// important - it must go from no change to the most significant change.
+enum class PaintPropertyChangeType : unsigned char {
+  // Nothing has changed.
+  kUnchanged,
+  // We only changed values that are either mutated by compositor animations
+  // which are updated automatically during the compositor-side animation tick,
+  // or have been updated directly on the associated compositor node during the
+  // PrePaint lifecycle phase.
+  kChangedOnlyCompositedValues,
+  // We only changed values that don't require re-raster (e.g. compositor
+  // element id changed).
+  kChangedOnlyNonRerasterValues,
+  // We only changed values and not the hierarchy of the tree, and we know that
+  // the value changes are 'simple' in that they don't cause cascading changes.
+  // For example, they do not cause a new render surface to be created, which
+  // may otherwise cause tree changes elsewhere. An example of this is opacity
+  // changing in the [0, 1) range.
+  kChangedOnlySimpleValues,
+  // We only changed values and not the hierarchy of the tree, but nothing is
+  // known about the kind of value change.
+  kChangedOnlyValues,
+  // We have directly modified the tree topology by adding or removing a node.
+  kNodeAddedOrRemoved,
+};
 
 // Returns the lowest common ancestor in the paint property tree.
 template <typename NodeType>
@@ -61,6 +88,8 @@ const NodeType* SafeUnalias(const NodeType* node) {
 
 template <typename NodeType>
 class PaintPropertyNode : public RefCounted<NodeType> {
+  USING_FAST_MALLOC(PaintPropertyNode);
+
  public:
   // Parent property node, or nullptr if this is the root node.
   const NodeType* Parent() const { return parent_.get(); }
@@ -77,7 +106,7 @@ class PaintPropertyNode : public RefCounted<NodeType> {
   void ClearChangedToRoot() const { ClearChangedTo(nullptr); }
   void ClearChangedTo(const NodeType* node) const {
     for (auto* n = this; n && n != node; n = n->Parent())
-      n->changed_ = false;
+      n->changed_ = PaintPropertyChangeType::kUnchanged;
   }
 
   // Returns true if this node is an alias for its parent. A parent alias is a
@@ -95,6 +124,11 @@ class PaintPropertyNode : public RefCounted<NodeType> {
     return *node;
   }
 
+  void CompositorSimpleValuesUpdated() const {
+    if (changed_ == PaintPropertyChangeType::kChangedOnlySimpleValues)
+      changed_ = PaintPropertyChangeType::kChangedOnlyCompositedValues;
+  }
+
   String ToString() const {
     auto s = static_cast<const NodeType*>(this)->ToJSON()->ToJSONString();
 #if DCHECK_IS_ON()
@@ -102,6 +136,20 @@ class PaintPropertyNode : public RefCounted<NodeType> {
 #else
     return s;
 #endif
+  }
+
+  int CcNodeId(int sequence_number) const {
+    return cc_sequence_number_ == sequence_number ? cc_node_id_ : -1;
+  }
+  void SetCcNodeId(int sequence_number, int id) const {
+    cc_sequence_number_ = sequence_number;
+    cc_node_id_ = id;
+  }
+
+  PaintPropertyChangeType NodeChanged() const { return changed_; }
+  bool NodeChangeAffectsRaster() const {
+    return changed_ != PaintPropertyChangeType::kUnchanged &&
+           changed_ != PaintPropertyChangeType::kChangedOnlyNonRerasterValues;
   }
 
 #if DCHECK_IS_ON()
@@ -113,40 +161,37 @@ class PaintPropertyNode : public RefCounted<NodeType> {
 
  protected:
   PaintPropertyNode(const NodeType* parent, bool is_parent_alias = false)
-      : parent_(parent),
-        is_parent_alias_(is_parent_alias),
-        changed_(!!parent) {}
+      : is_parent_alias_(is_parent_alias),
+        changed_(parent ? PaintPropertyChangeType::kNodeAddedOrRemoved
+                        : PaintPropertyChangeType::kUnchanged),
+        parent_(parent) {}
 
-  bool SetParent(const NodeType* parent) {
+  PaintPropertyChangeType SetParent(const NodeType* parent) {
     DCHECK(!IsRoot());
     DCHECK(parent != this);
     if (parent == parent_)
-      return false;
+      return PaintPropertyChangeType::kUnchanged;
 
     parent_ = parent;
-    static_cast<NodeType*>(this)->SetChanged();
-    return true;
-  }
-  bool HasParentChanged(const NodeType* parent) const {
-    return parent != parent_;
+    static_cast<NodeType*>(this)->AddChanged(
+        PaintPropertyChangeType::kChangedOnlyValues);
+    return PaintPropertyChangeType::kChangedOnlyValues;
   }
 
-  void SetChanged() {
+  void AddChanged(PaintPropertyChangeType changed) {
     DCHECK(!IsRoot());
-    changed_ = true;
+    changed_ = std::max(changed_, changed);
   }
-  bool NodeChanged() const { return changed_; }
 
  private:
   friend class PaintPropertyNodeTest;
   // Object paint properties can set the parent directly for an alias update.
   friend class ObjectPaintProperties;
 
-  scoped_refptr<const NodeType> parent_;
   // Indicates whether this node is an alias for its parent. Parent aliases are
   // nodes that do not affect rendering and are ignored for the purposes of
   // display item list generation.
-  bool is_parent_alias_ = false;
+  bool is_parent_alias_;
 
   // Indicates that the paint property value changed in the last update in the
   // prepaint lifecycle step. This is used for raster invalidation and damage
@@ -154,7 +199,14 @@ class PaintPropertyNode : public RefCounted<NodeType> {
   // BlinkGenPropertyTrees, this is cleared explicitly at the end of paint (see:
   // LocalFrameView::RunPaintLifecyclePhase), otherwise this is cleared through
   // PaintController::FinishCycle.
-  mutable bool changed_ = true;
+  mutable PaintPropertyChangeType changed_;
+
+  scoped_refptr<const NodeType> parent_;
+
+  // Caches the id of the associated cc property node. It's valid only when
+  // cc_sequence_number_ matches the sequence number of the cc property tree.
+  mutable int cc_node_id_ = -1;
+  mutable int cc_sequence_number_ = 0;
 
 #if DCHECK_IS_ON()
   String debug_name_;
@@ -224,7 +276,15 @@ String PaintPropertyNode<NodeType>::ToTreeString() const {
 template <typename NodeType>
 std::ostream& operator<<(std::ostream& os,
                          const PaintPropertyNode<NodeType>& node) {
-  return os << static_cast<const NodeType&>(node).ToString().Utf8().data();
+  return os << static_cast<const NodeType&>(node).ToString().Utf8();
+}
+
+PLATFORM_EXPORT const char* PaintPropertyChangeTypeToString(
+    PaintPropertyChangeType);
+
+inline std::ostream& operator<<(std::ostream& os,
+                                PaintPropertyChangeType change) {
+  return os << PaintPropertyChangeTypeToString(change);
 }
 
 }  // namespace blink

@@ -9,7 +9,7 @@
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/ash_typography.h"
 #include "ash/resources/vector_icons/vector_icons.h"
-#include "ash/session/session_controller.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/system/session/logout_confirmation_controller.h"
@@ -31,22 +31,18 @@
 
 namespace ash {
 
-LogoutButtonTray::LogoutButtonTray(Shelf* shelf)
-    : shelf_(shelf),
-      container_(new TrayContainer(shelf)),
-      button_(views::MdTextButton::Create(this,
-                                          base::string16(),
-                                          CONTEXT_LAUNCHER_BUTTON)),
-      show_logout_button_in_tray_(false) {
+LogoutButtonTray::LogoutButtonTray(Shelf* shelf) : shelf_(shelf) {
   DCHECK(shelf);
   Shell::Get()->session_controller()->AddObserver(this);
   SetLayoutManager(std::make_unique<views::FillLayout>());
-  AddChildView(container_);
+  container_ = AddChildView(std::make_unique<TrayContainer>(shelf));
 
-  button_->SetProminent(true);
-  button_->SetBgColorOverride(gfx::kGoogleRed700);
+  auto button = views::MdTextButton::Create(this, base::string16(),
+                                            CONTEXT_LAUNCHER_BUTTON);
+  button->SetProminent(true);
+  button->SetBgColorOverride(gfx::kGoogleRed700);
 
-  container_->AddChildView(button_);
+  button_ = container_->AddChildView(std::move(button));
   SetVisible(false);
 }
 
@@ -106,6 +102,10 @@ void LogoutButtonTray::OnActiveUserPrefServiceChanged(PrefService* prefs) {
 void LogoutButtonTray::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   View::GetAccessibleNodeData(node_data);
   node_data->SetName(button_->GetText());
+}
+
+const char* LogoutButtonTray::GetClassName() const {
+  return "LogoutButtonTray";
 }
 
 void LogoutButtonTray::UpdateShowLogoutButtonInTray() {

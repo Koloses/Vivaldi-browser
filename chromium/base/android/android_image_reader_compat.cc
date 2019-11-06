@@ -10,11 +10,17 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 
+// Helper function to log errors from dlsym. Calling DLOG(ERROR) inside a macro
+// crashes clang code coverage. https://crbug.com/843356
+static void LogDlsymError(const char* func) {
+  DLOG(ERROR) << "Unable to load function " << func;
+}
+
 #define LOAD_FUNCTION(lib, func)                            \
   do {                                                      \
     func##_ = reinterpret_cast<p##func>(dlsym(lib, #func)); \
     if (!func##_) {                                         \
-      DLOG(ERROR) << "Unable to load function " << #func;   \
+      LogDlsymError(#func);                                 \
       return false;                                         \
     }                                                       \
   } while (0)
@@ -74,6 +80,7 @@ bool AndroidImageReader::LoadFunctions() {
   LOAD_FUNCTION(libmediandk, AImageReader_getFormat);
   LOAD_FUNCTION(libmediandk, AImageReader_getWindow);
   LOAD_FUNCTION(libmediandk, AImageReader_acquireLatestImageAsync);
+  LOAD_FUNCTION(libmediandk, AImageReader_acquireNextImageAsync);
 
   void* libandroid = dlopen("libandroid.so", RTLD_NOW);
   if (libandroid == nullptr) {
@@ -148,6 +155,13 @@ media_status_t AndroidImageReader::AImageReader_acquireLatestImageAsync(
     AImage** image,
     int* acquireFenceFd) {
   return AImageReader_acquireLatestImageAsync_(reader, image, acquireFenceFd);
+}
+
+media_status_t AndroidImageReader::AImageReader_acquireNextImageAsync(
+    AImageReader* reader,
+    AImage** image,
+    int* acquireFenceFd) {
+  return AImageReader_acquireNextImageAsync_(reader, image, acquireFenceFd);
 }
 
 jobject AndroidImageReader::ANativeWindow_toSurface(JNIEnv* env,

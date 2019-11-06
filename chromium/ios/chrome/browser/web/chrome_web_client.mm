@@ -10,7 +10,9 @@
 #include "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/dom_distiller/core/url_constants.h"
-#include "components/services/unzip/public/interfaces/constants.mojom.h"
+#include "components/services/patch/patch_service.h"
+#include "components/services/patch/public/mojom/constants.mojom.h"
+#include "components/services/unzip/public/mojom/constants.mojom.h"
 #include "components/services/unzip/unzip_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
@@ -24,14 +26,15 @@
 #include "ios/chrome/browser/reading_list/features.h"
 #import "ios/chrome/browser/reading_list/offline_page_tab_helper.h"
 #include "ios/chrome/browser/ssl/ios_ssl_error_handler.h"
+#import "ios/chrome/browser/ui/elements/windowed_container_view.h"
 #include "ios/chrome/browser/web/chrome_overlay_manifests.h"
 #import "ios/chrome/browser/web/error_page_util.h"
 #include "ios/public/provider/chrome/browser/browser_url_rewriter_provider.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/public/provider/chrome/browser/voice/audio_session_controller.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_provider.h"
-#include "ios/web/public/browser_url_rewriter.h"
-#include "ios/web/public/service_names.mojom.h"
+#include "ios/web/public/navigation/browser_url_rewriter.h"
+#include "ios/web/public/service/service_names.mojom.h"
 #include "ios/web/public/user_agent.h"
 #include "net/http/http_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -148,13 +151,20 @@ base::RefCountedMemory* ChromeWebClient::GetDataResourceBytes(
       resource_id);
 }
 
+bool ChromeWebClient::IsDataResourceGzipped(int resource_id) const {
+  return ui::ResourceBundle::GetSharedInstance().IsGzipped(resource_id);
+}
+
 base::Optional<service_manager::Manifest>
 ChromeWebClient::GetServiceManifestOverlay(base::StringPiece name) {
   if (name == web::mojom::kBrowserServiceName)
     return GetChromeWebBrowserOverlayManifest();
-  if (name == web::mojom::kPackagedServicesServiceName)
-    return GetChromeWebPackagedServicesOverlayManifest();
   return base::nullopt;
+}
+
+std::vector<service_manager::Manifest>
+ChromeWebClient::GetExtraServiceManifests() {
+  return GetChromeWebPackagedServicesOverlayManifest().packaged_services;
 }
 
 void ChromeWebClient::GetAdditionalWebUISchemes(
@@ -236,8 +246,19 @@ std::unique_ptr<service_manager::Service> ChromeWebClient::HandleServiceRequest(
     // The Unzip service is used by the component updater.
     return std::make_unique<unzip::UnzipService>(std::move(request));
   }
+  if (service_name == patch::mojom::kServiceName) {
+    // The Patch service is used by the component updater.
+    return std::make_unique<patch::PatchService>(std::move(request));
+  }
 
   return nullptr;
+}
+
+UIView* ChromeWebClient::GetWindowedContainer() {
+  if (!windowed_container_) {
+    windowed_container_ = [[WindowedContainerView alloc] init];
+  }
+  return windowed_container_;
 }
 
 std::string ChromeWebClient::GetProduct() const {

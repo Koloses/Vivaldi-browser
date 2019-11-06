@@ -76,8 +76,7 @@ UITextField<TextFieldStyling>* ChromeBrowserProvider::CreateStyledTextField(
 void ChromeBrowserProvider::InitializeCastService(
     TabModel* main_tab_model) const {}
 
-void ChromeBrowserProvider::AttachTabHelpers(web::WebState* web_state,
-                                             Tab* tab) const {}
+void ChromeBrowserProvider::AttachTabHelpers(web::WebState* web_state) const {}
 
 VoiceSearchProvider* ChromeBrowserProvider::GetVoiceSearchProvider() const {
   return nullptr;
@@ -89,8 +88,7 @@ AppDistributionProvider* ChromeBrowserProvider::GetAppDistributionProvider()
 }
 
 id<LogoVendor> ChromeBrowserProvider::CreateLogoVendor(
-    ios::ChromeBrowserState* browser_state,
-    id<UrlLoader> loader) const {
+    ios::ChromeBrowserState* browser_state) const {
   return nil;
 }
 
@@ -99,6 +97,10 @@ OmahaServiceProvider* ChromeBrowserProvider::GetOmahaServiceProvider() const {
 }
 
 UserFeedbackProvider* ChromeBrowserProvider::GetUserFeedbackProvider() const {
+  return nullptr;
+}
+
+SpecialUserProvider* ChromeBrowserProvider::GetSpecialUserProvider() const {
   return nullptr;
 }
 
@@ -112,6 +114,10 @@ FullscreenProvider* ChromeBrowserProvider::GetFullscreenProvider() const {
 
 BrowserURLRewriterProvider*
 ChromeBrowserProvider::GetBrowserURLRewriterProvider() const {
+  return nullptr;
+}
+
+OverridesProvider* ChromeBrowserProvider::GetOverridesProvider() const {
   return nullptr;
 }
 

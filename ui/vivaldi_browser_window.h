@@ -30,12 +30,6 @@
 #include "ui/views/win/scoped_fullscreen_visibility.h"
 #endif
 
-namespace vivaldi {
-void DispatchEvent(Profile* profile,
-                   const std::string& event_name,
-                   std::unique_ptr<base::ListValue> event_args);
-}
-
 class Browser;
 
 #if defined(OS_WIN)
@@ -118,17 +112,17 @@ class VivaldiAppWindowContentsImpl : public AppWindowContents,
       content::MediaResponseCallback callback) override;
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
-                                  blink::MediaStreamType type) override;
-  gfx::Size EnterPictureInPicture(content::WebContents* web_contents,
+                                  blink::mojom::MediaStreamType type) override;
+  content::PictureInPictureResult EnterPictureInPicture(content::WebContents* web_contents,
                                   const viz::SurfaceId& surface_id,
                                   const gfx::Size& natural_size) override;
   void ExitPictureInPicture() override;
-
   void PrintCrossProcessSubframe(
       content::WebContents* web_contents,
       const gfx::Rect& rect,
       int document_cookie,
       content::RenderFrameHost* subframe_host) const override;
+  void ActivateContents(content::WebContents* contents) override;
 
  private:
   // content::WebContentsObserver
@@ -234,7 +228,9 @@ class VivaldiBrowserWindow
   // infobars::InfoBarContainer::Delegate
   void InfoBarContainerStateChanged(bool is_animating) override;
 
-  // BrowserWindow:
+  //
+  // BrowserWindow overrides
+  //
   void Show() override;
   void ShowInactive() override {}
   void Hide() override;
@@ -245,8 +241,6 @@ class VivaldiBrowserWindow
   void Deactivate() override;
   bool IsActive() const override;
   void FlashFrame(bool flash) override {}
-  bool IsAlwaysOnTop() const override;
-  void SetAlwaysOnTop(bool always_on_top) override {}
   gfx::NativeWindow GetNativeWindow() const override;
   StatusBubble* GetStatusBubble() override;
   void UpdateTitleBar() override;
@@ -289,8 +283,8 @@ class VivaldiBrowserWindow
   bool HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) override;
   gfx::Size GetContentsSize() const override;
+  void SetContentsSize(const gfx::Size& size) override {}
   void ShowEmojiPanel() override;
-
   bool IsBookmarkBarVisible() const override;
   bool IsBookmarkBarAnimating() const override;
   bool IsTabStripEditable() const override;
@@ -316,7 +310,8 @@ class VivaldiBrowserWindow
       Profile* profile,
       content::WebContents* web_contents,
       const GURL& url,
-      const security_state::SecurityInfo& security_info,
+      security_state::SecurityLevel security_level,
+      const security_state::VisibleSecurityState& visible_security_state,
       gfx::Point pos) override;
   void CutCopyPaste(int command_id) override {}
   void SetTopControlsShownRatio(content::WebContents* web_contents,
@@ -330,11 +325,9 @@ class VivaldiBrowserWindow
   void ShowHatsBubbleFromAppMenuButton() override {}
 #endif
   bool CanUserExitFullscreen() const override;
-
-  FindBar* CreateFindBar() override;
+  std::unique_ptr<FindBar> CreateFindBar() override;
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
       override;
-  int GetRenderViewHeightInsetWithDetachedBookmarkBar() override;
   void ExecuteExtensionCommand(const extensions::Extension* extension,
                                const extensions::Command& command) override;
   autofill::SaveCardBubbleView* ShowSaveCreditCardBubble(
@@ -345,6 +338,31 @@ class VivaldiBrowserWindow
       const base::string16& email,
       base::OnceCallback<void(bool)> start_sync_callback) override {}
   void OnTabRestored(int command_id) override {}
+  PageActionIconContainer* GetOmniboxPageActionIconContainer() override;
+  PageActionIconContainer* GetToolbarPageActionIconContainer() override;
+  autofill::LocalCardMigrationBubble* ShowLocalCardMigrationBubble(
+    content::WebContents* contents,
+    autofill::LocalCardMigrationBubbleController* controller,
+    bool is_user_gesture) override;
+  void OnTabDetached(content::WebContents* contents, bool was_active) override {
+  }
+  void TabDraggingStatusChanged(bool is_dragging) override {}
+  void UpdateToolbarVisibility(bool visible, bool animate) override {}
+  // Shows in-product help for the given feature.
+  void ShowInProductHelpPromo(InProductHelpFeature iph_feature) override {}
+  void UpdateFrameColor() override {}
+#if !defined(OS_ANDROID)
+  void ShowIntentPickerBubble(
+    std::vector<apps::IntentPickerAppInfo> app_info,
+    bool show_stay_in_chrome,
+    bool show_remember_selection,
+    IntentPickerResponse callback) override {}
+#endif
+  send_tab_to_self::SendTabToSelfBubbleView* ShowSendTabToSelfBubble(
+    content::WebContents* contents,
+    send_tab_to_self::SendTabToSelfBubbleController* controller,
+    bool is_user_gesture) override;
+  // BrowserWindow overrides end
 
   // web_modal::WebContentsModalDialogManagerDelegate implementation.
   void SetWebContentsBlocked(content::WebContents* web_contents,
@@ -391,6 +409,10 @@ class VivaldiBrowserWindow
 
   bool IsToolbarShowing() const override;
 
+  ClickToCallDialog* ShowClickToCallDialog(
+    content::WebContents* contents,
+    ClickToCallSharingDialogController* controller) override;
+
   void UpdateDraggableRegions(
       const std::vector<extensions::DraggableRegion>& regions);
 
@@ -407,6 +429,9 @@ class VivaldiBrowserWindow
   void OnDocumentLoaded() override;
   void OnPositionChanged() override;
   void FocusInactivePopupForAccessibility() override {}
+
+  void NavigationStateChanged(content::WebContents* source,
+    content::InvalidateTypes changed_flags);
 
   // Enable or disable fullscreen mode.
   void SetFullscreen(bool enable);
@@ -432,23 +457,11 @@ class VivaldiBrowserWindow
   WindowType type() {
     return window_type_;
   }
-  PageActionIconContainer* GetPageActionIconContainer() override;
-  autofill::LocalCardMigrationBubble* ShowLocalCardMigrationBubble(
-    content::WebContents* contents,
-    autofill::LocalCardMigrationBubbleController* controller,
-    bool is_user_gesture) override;
 
-  void OnTabDetached(content::WebContents* contents, bool was_active) override {
-  }
+  ExtensionsContainer* GetExtensionsContainer() override;
 
-  void TabDraggingStatusChanged(bool is_dragging) override {}
-
-  void UpdateToolbarVisibility(bool visible, bool animate) override {}
-
-#if BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
-  // Shows in-product help for the given feature.
-  void ShowInProductHelpPromo(InProductHelpFeature iph_feature) override {}
-#endif
+  ui::ZOrderLevel GetZOrderLevel() const override;
+  void SetZOrderLevel(ui::ZOrderLevel order) override {}
 
  protected:
   void DestroyBrowser() override;
@@ -487,6 +500,8 @@ class VivaldiBrowserWindow
     ~VivaldiPageActionIconContainer() override;
 
     void UpdatePageActionIcon(PageActionIconType type) override;
+
+    void ExecutePageActionIconForTesting(PageActionIconType type) override;
 
    private:
     Profile* profile_ = nullptr;

@@ -30,8 +30,8 @@
 #include "net/base/upload_data_stream.h"
 #include "net/url_request/url_request.h"
 
-#include "net/third_party/quic/tools/quic_backend_response.h"
-#include "net/third_party/quic/tools/quic_simple_server_backend.h"
+#include "net/third_party/quiche/src/quic/tools/quic_backend_response.h"
+#include "net/third_party/quiche/src/quic/tools/quic_simple_server_backend.h"
 #include "net/third_party/quiche/src/spdy/core/spdy_header_block.h"
 #include "net/tools/quic/quic_http_proxy_backend.h"
 
@@ -102,6 +102,7 @@ class QuicHttpProxyBackendStream : public net::URLRequest::Delegate {
       net::URLRequest* request,
       net::SSLCertRequestInfo* cert_request_info) override;
   void OnSSLCertificateError(net::URLRequest* request,
+                             int net_error,
                              const net::SSLInfo& ssl_info,
                              bool fatal) override;
   void OnResponseStarted(net::URLRequest* request, int net_error) override;
@@ -155,7 +156,7 @@ class QuicHttpProxyBackendStream : public net::URLRequest::Delegate {
   bool headers_set_;
   std::unique_ptr<quic::QuicBackendResponse> quic_response_;
 
-  base::WeakPtrFactory<QuicHttpProxyBackendStream> weak_factory_;
+  base::WeakPtrFactory<QuicHttpProxyBackendStream> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(QuicHttpProxyBackendStream);
 };

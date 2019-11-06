@@ -9,6 +9,7 @@
 
 #include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/ash_pref_names.h"
+#include "ash/public/cpp/ash_prefs.h"
 #include "ash/public/interfaces/constants.mojom.h"
 #include "ash/public/interfaces/cros_display_config.mojom.h"
 #include "base/bind.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/base/locale_util.h"
+#include "chrome/browser/chromeos/child_accounts/parent_access_code/parent_access_service.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_syncer.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
@@ -33,7 +35,6 @@
 #include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
-#include "chrome/browser/ui/ash/ash_shell_init.h"
 #include "chrome/browser/ui/ash/system_tray_client.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
@@ -55,7 +56,7 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "third_party/blink/public/platform/web_speech_synthesis_constants.h"
 #include "third_party/cros_system_api/dbus/update_engine/dbus-constants.h"
@@ -142,11 +143,8 @@ Preferences::Preferences(input_method::InputMethodManager* input_method_manager)
       input_method_manager_(input_method_manager),
       user_(NULL),
       user_is_primary_(false) {
-  // |manager_connection| or |connector| may be null in tests.
-  content::ServiceManagerConnection* manager_connection =
-      content::ServiceManagerConnection::GetForProcess();
-  service_manager::Connector* connector =
-      manager_connection ? manager_connection->GetConnector() : nullptr;
+  // |connector| may be null in tests.
+  service_manager::Connector* connector = content::GetSystemConnector();
   if (connector) {
     connector->BindInterface(ash::mojom::kServiceName,
                              &cros_display_config_ptr_);
@@ -179,7 +177,7 @@ void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
   // Carrier deal notification shown count defaults to 0.
   registry->RegisterIntegerPref(prefs::kCarrierDealPromoShown, 0);
 
-  AshShellInit::RegisterDisplayPrefs(registry);
+  ash::RegisterLocalStatePrefs(registry);
 }
 
 // static
@@ -232,6 +230,8 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
   registry->RegisterBooleanPref(prefs::kLabsMediaplayerEnabled, false);
   registry->RegisterBooleanPref(prefs::kLabsAdvancedFilesystemEnabled, false);
+  registry->RegisterBooleanPref(prefs::kAppReinstallRecommendationEnabled,
+                                false);
 
   // TODO(jamescook): Move ownership and registration into ash. This will need
   // changes to policy::RecommendationRestorer which requires that prefs are
@@ -292,9 +292,16 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterBooleanPref(
       ash::prefs::kAccessibilityAutoclickRevertToLeftClick, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterBooleanPref(
+      ash::prefs::kAccessibilityAutoclickStabilizePosition, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterIntegerPref(
       ash::prefs::kAccessibilityAutoclickMovementThreshold,
       ash::kDefaultAutoclickMovementThreshold,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterIntegerPref(
+      ash::prefs::kAccessibilityAutoclickMenuPosition,
+      static_cast<int>(ash::kDefaultAutoclickMenuPosition),
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterBooleanPref(
       ash::prefs::kAccessibilityVirtualKeyboardEnabled, false,
@@ -316,6 +323,37 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterBooleanPref(
       ash::prefs::kAccessibilitySwitchAccessEnabled, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterListPref(
+      ash::prefs::kAccessibilitySwitchAccessSelectKeyCodes,
+      base::Value(std::vector<base::Value>()),
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterIntegerPref(
+      ash::prefs::kAccessibilitySwitchAccessSelectSetting,
+      ash::kSwitchAccessAssignmentNone,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterListPref(
+      ash::prefs::kAccessibilitySwitchAccessNextKeyCodes,
+      base::Value(std::vector<base::Value>()),
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterIntegerPref(
+      ash::prefs::kAccessibilitySwitchAccessNextSetting,
+      ash::kSwitchAccessAssignmentNone,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterListPref(
+      ash::prefs::kAccessibilitySwitchAccessPreviousKeyCodes,
+      base::Value(std::vector<base::Value>()),
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterIntegerPref(
+      ash::prefs::kAccessibilitySwitchAccessPreviousSetting,
+      ash::kSwitchAccessAssignmentNone,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterBooleanPref(
+      ash::prefs::kAccessibilitySwitchAccessAutoScanEnabled, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
+  registry->RegisterIntegerPref(
+      ash::prefs::kAccessibilitySwitchAccessAutoScanSpeedMs,
+      ash::kDefaultSwitchAccessAutoScanSpeed.InMilliseconds(),
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
   registry->RegisterBooleanPref(
       ash::prefs::kShouldAlwaysShowAccessibilityMenu, false,
@@ -532,6 +570,9 @@ void Preferences::RegisterProfilePrefs(
 
   registry->RegisterBooleanPref(prefs::kTPMFirmwareUpdateCleanupDismissed,
                                 false);
+
+  registry->RegisterBooleanPref(prefs::kStartupBrowserWindowLaunchSuppressed,
+                                false);
 }
 
 void Preferences::InitUserPrefs(sync_preferences::PrefServiceSyncable* prefs) {
@@ -587,6 +628,7 @@ void Preferences::InitUserPrefs(sync_preferences::PrefServiceSyncable* prefs) {
   pref_change_registrar_.Add(prefs::kResolveTimezoneByGeolocationMethod,
                              callback);
   pref_change_registrar_.Add(prefs::kUse24HourClock, callback);
+  pref_change_registrar_.Add(prefs::kParentAccessCodeConfig, callback);
   for (auto* remap_pref : kLanguageRemapPrefs)
     pref_change_registrar_.Add(remap_pref, callback);
 }
@@ -940,6 +982,22 @@ void Preferences::ApplyPreferences(ApplyReason reason,
     const bool value = prefs_->GetBoolean(prefs::kUse24HourClock);
     user_manager::known_user::SetBooleanPref(user_->GetAccountId(),
                                              prefs::kUse24HourClock, value);
+  }
+
+  if (pref_name == prefs::kParentAccessCodeConfig ||
+      reason != REASON_PREF_CHANGED) {
+    const base::Value* value =
+        prefs_->GetDictionary(prefs::kParentAccessCodeConfig);
+    if (value && prefs_->IsManagedPreference(prefs::kParentAccessCodeConfig) &&
+        user_->IsChild()) {
+      user_manager::known_user::SetPref(user_->GetAccountId(),
+                                        prefs::kKnownUserParentAccessCodeConfig,
+                                        value->Clone());
+      parent_access::ParentAccessService::Get().LoadConfigForUser(user_);
+    } else {
+      user_manager::known_user::RemovePref(
+          user_->GetAccountId(), prefs::kKnownUserParentAccessCodeConfig);
+    }
   }
 
   for (auto* remap_pref : kLanguageRemapPrefs) {

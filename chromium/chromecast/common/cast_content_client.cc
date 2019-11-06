@@ -5,6 +5,8 @@
 #include "chromecast/common/cast_content_client.h"
 
 #include <stdint.h>
+#include <memory>
+#include <utility>
 
 #include "base/strings/stringprintf.h"
 #include "base/system/sys_info.h"
@@ -23,6 +25,12 @@
 
 #if defined(OS_ANDROID)
 #include "chromecast/common/media/cast_media_drm_bridge_client.h"
+#endif
+
+#if !defined(OS_FUCHSIA)
+#include "base/no_destructor.h"
+#include "components/services/heap_profiling/public/cpp/profiling_client.h"  // nogncheck
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #endif
 
 namespace chromecast {
@@ -105,24 +113,22 @@ void CastContentClient::AddAdditionalSchemes(Schemes* schemes) {
 #endif
 }
 
-base::string16 CastContentClient::GetLocalizedString(int message_id) const {
+base::string16 CastContentClient::GetLocalizedString(int message_id) {
   return l10n_util::GetStringUTF16(message_id);
 }
 
 base::StringPiece CastContentClient::GetDataResource(
     int resource_id,
-    ui::ScaleFactor scale_factor) const {
+    ui::ScaleFactor scale_factor) {
   return ui::ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
       resource_id, scale_factor);
 }
 
-base::RefCountedMemory* CastContentClient::GetDataResourceBytes(
-    int resource_id) const {
-  return ui::ResourceBundle::GetSharedInstance().LoadLocalizedResourceBytes(
-      resource_id);
+bool CastContentClient::IsDataResourceGzipped(int resource_id) {
+  return ui::ResourceBundle::GetSharedInstance().IsGzipped(resource_id);
 }
 
-gfx::Image& CastContentClient::GetNativeImageNamed(int resource_id) const {
+gfx::Image& CastContentClient::GetNativeImageNamed(int resource_id) {
   return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       resource_id);
 }
@@ -132,6 +138,19 @@ gfx::Image& CastContentClient::GetNativeImageNamed(int resource_id) const {
   return new media::CastMediaDrmBridgeClient();
 }
 #endif  // OS_ANDROID
+
+void CastContentClient::BindChildProcessInterface(
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle* receiving_handle) {
+#if !defined(OS_FUCHSIA)
+  static base::NoDestructor<heap_profiling::ProfilingClient> profiling_client;
+  if (interface_name == heap_profiling::ProfilingClient::Name_) {
+    profiling_client->BindToInterface(
+        mojo::PendingReceiver<heap_profiling::mojom::ProfilingClient>(
+            std::move(*receiving_handle)));
+  }
+#endif  // !defined(OS_FUCHSIA)
+}
 
 }  // namespace shell
 }  // namespace chromecast

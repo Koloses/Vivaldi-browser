@@ -62,6 +62,7 @@ Main.Main = class {
     console.timeStamp('Main._loaded');
     await Runtime.appStarted();
     Runtime.setPlatform(Host.platform());
+    Runtime.setL10nCallback(ls);
     InspectorFrontendHost.getPreferences(this._gotPreferences.bind(this));
   }
 
@@ -108,6 +109,11 @@ Main.Main = class {
     Runtime.experiments.register('applyCustomStylesheet', 'Allow custom UI themes');
     Runtime.experiments.register('sourcesPrettyPrint', 'Automatically pretty print in the Sources Panel');
     Runtime.experiments.register('backgroundServices', 'Background web platform feature events', true);
+    Runtime.experiments.register('backgroundServicesNotifications', 'Background services section for Notifications');
+    Runtime.experiments.register('backgroundServicesPaymentHandler', 'Background services section for Payment Handler');
+    Runtime.experiments.register('backgroundServicesPushMessaging', 'Background services section for Push Messaging');
+    Runtime.experiments.register(
+        'backgroundServicesPeriodicBackgroundSync', 'Background services section for Periodic Background Sync');
     Runtime.experiments.register('blackboxJSFramesOnTimeline', 'Blackbox JavaScript frames on Timeline', true);
     Runtime.experiments.register('emptySourceMapAutoStepping', 'Empty sourcemap auto-stepping');
     Runtime.experiments.register('inputEventsOnTimelineOverview', 'Input events on Timeline overview', true);
@@ -117,6 +123,7 @@ Main.Main = class {
     Runtime.experiments.register('samplingHeapProfilerTimeline', 'Sampling heap profiler timeline', true);
     Runtime.experiments.register('sourceDiff', 'Source diff');
     Runtime.experiments.register('splitInDrawer', 'Split in drawer', true);
+    Runtime.experiments.register('spotlight', 'Spotlight', true);
     Runtime.experiments.register('terminalInDrawer', 'Terminal in drawer', true);
 
     // Timeline
@@ -128,7 +135,11 @@ Main.Main = class {
     Runtime.experiments.register('timelineWebGL', 'Timeline: WebGL-based flamechart');
 
     Runtime.experiments.cleanUpStaleExperiments();
-    Runtime.experiments.setDefaultExperiments([]);
+    const enabledExperiments = Runtime.queryParam('enabledExperiments');
+    if (enabledExperiments)
+      Runtime.experiments.setServerEnabledExperiments(enabledExperiments.split(';'));
+    Runtime.experiments.setDefaultExperiments(
+        ['backgroundServices', 'backgroundServicesNotifications', 'backgroundServicesPushMessaging']);
 
     if (Host.isUnderTest() && Runtime.queryParam('test').includes('live-line-level-heap-profile.js'))
       Runtime.experiments.enableForTest('liveHeapProfile');
@@ -145,7 +156,7 @@ Main.Main = class {
     // Request filesystems early, we won't create connections until callback is fired. Things will happen in parallel.
     Persistence.isolatedFileSystemManager = new Persistence.IsolatedFileSystemManager();
 
-    const themeSetting = Common.settings.createSetting('uiTheme', 'default');
+    const themeSetting = Common.settings.createSetting('uiTheme', 'systemPreferred');
     UI.initializeUIUtils(document, themeSetting);
     themeSetting.addChangeListener(Components.reload.bind(Components));
 
@@ -265,9 +276,34 @@ Main.Main = class {
     Main.Main.time('Main._lateInitialization');
     this._registerShortcuts();
     Extensions.extensionServer.initializeExtensions();
-    for (const extension of self.runtime.extensions('late-initialization'))
-      extension.instance().then(instance => (/** @type {!Common.Runnable} */ (instance)).run());
+    const extensions = self.runtime.extensions('late-initialization');
+    const promises = [];
+    for (const extension of extensions) {
+      const setting = extension.descriptor()['setting'];
+      if (!setting || Common.settings.moduleSetting(setting).get()) {
+        promises.push(extension.instance().then(instance => (/** @type {!Common.Runnable} */ (instance)).run()));
+        continue;
+      }
+      /**
+       * @param {!Common.Event} event
+       */
+      async function changeListener(event) {
+        if (!event.data)
+          return;
+        Common.settings.moduleSetting(setting).removeChangeListener(changeListener);
+        (/** @type {!Common.Runnable} */ (await extension.instance())).run();
+      }
+      Common.settings.moduleSetting(setting).addChangeListener(changeListener);
+    }
+    this._lateInitDonePromise = Promise.all(promises);
     Main.Main.timeEnd('Main._lateInitialization');
+  }
+
+  /**
+   * @return {!Promise}
+   */
+  lateInitDonePromiseForTest() {
+    return this._lateInitDonePromise;
   }
 
   _registerForwardedShortcuts() {

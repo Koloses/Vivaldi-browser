@@ -15,7 +15,7 @@
 namespace base {
 class DictionaryValue;
 class Value;
-}
+}  // namespace base
 
 struct Session;
 class Status;
@@ -26,7 +26,8 @@ typedef base::Callback<Status(Session* session,
                               WebView* web_view,
                               const base::DictionaryValue&,
                               std::unique_ptr<base::Value>*,
-                              Timeout*)> WindowCommand;
+                              Timeout*)>
+    WindowCommand;
 
 // Execute a Window Command on the target window.
 Status ExecuteWindowCommand(const WindowCommand& command,
@@ -54,6 +55,13 @@ Status ExecuteExecuteAsyncScript(Session* session,
                                  const base::DictionaryValue& params,
                                  std::unique_ptr<base::Value>* value,
                                  Timeout* timeout);
+
+// Creates a new window/tab.
+Status ExecuteNewWindow(Session* session,
+                        WebView* web_view,
+                        const base::DictionaryValue& params,
+                        std::unique_ptr<base::Value>* value,
+                        Timeout* timeout);
 
 // Changes the targeted frame for the given session.
 Status ExecuteSwitchToFrame(Session* session,
@@ -203,12 +211,6 @@ Status ExecuteTouchScroll(Session* session,
                           const base::DictionaryValue& params,
                           std::unique_ptr<base::Value>* value,
                           Timeout* timeout);
-
-Status ExecuteTouchPinch(Session* session,
-                         WebView* web_view,
-                         const base::DictionaryValue& params,
-                         std::unique_ptr<base::Value>* value,
-                         Timeout* timeout);
 
 Status ExecuteSendCommand(Session* session,
                           WebView* web_view,
@@ -426,7 +428,7 @@ Status ExecuteStopCasting(Session* session,
                           std::unique_ptr<base::Value>* value,
                           Timeout* timeout);
 
-// Returns a list of names of Cast sinks that are available.
+// Returns a list of Cast sinks that are available.
 Status ExecuteGetSinks(Session* session,
                        WebView* web_view,
                        const base::DictionaryValue& params,

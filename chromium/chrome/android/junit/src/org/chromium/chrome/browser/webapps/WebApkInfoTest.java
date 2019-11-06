@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.webapps;
 import android.content.Intent;
 import android.content.res.AssetManager;
 import android.content.res.Resources;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Browser;
@@ -25,8 +26,10 @@ import org.chromium.chrome.browser.ShortcutSource;
 import org.chromium.content_public.common.ScreenOrientationValues;
 import org.chromium.webapk.lib.common.WebApkConstants;
 import org.chromium.webapk.lib.common.WebApkMetaDataKeys;
+import org.chromium.webapk.lib.common.splash.SplashLayout;
 import org.chromium.webapk.test.WebApkTestHelper;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -84,11 +87,20 @@ public class WebApkInfoTest {
             return mIdValueMap.get(id);
         }
 
+        @Override
+        public int getColor(int id, Resources.Theme theme) {
+            return Integer.parseInt(getString(id));
+        }
+
         public void addStringForTesting(
                 String name, String defType, String defPackage, int identifier, String value) {
             String key = getKey(name, defType, defPackage);
             mStringIdMap.put(key, identifier);
             mIdValueMap.put(identifier, value);
+        }
+
+        public void addColorForTesting(String name, String defPackage, int identifier, int value) {
+            addStringForTesting(name, "color", defPackage, identifier, Integer.toString(value));
         }
 
         private String getKey(String name, String defType, String defPackage) {
@@ -419,6 +431,33 @@ public class WebApkInfoTest {
     }
 
     /**
+     * Test that ShortcutSource#SHARE_TARGET is rewritten to
+     * ShortcutSource#WEBAPK_SHARE_TARGET_FILE if the WebAPK is launched as a result of user sharing
+     * a binary file.
+     */
+    @Test
+    public void testOverrideShareTargetSourceIfLaunchedFromFileSharing() {
+        Bundle bundle = new Bundle();
+        bundle.putString(WebApkMetaDataKeys.START_URL, START_URL);
+        WebApkTestHelper.registerWebApkWithMetaData(
+                WEBAPK_PACKAGE_NAME, bundle, null /* shareTargetMetaData */);
+
+        Intent intent = new Intent();
+        intent.putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, WEBAPK_PACKAGE_NAME);
+        intent.putExtra(ShortcutHelper.EXTRA_URL, START_URL);
+
+        intent.putExtra(WebApkConstants.EXTRA_WEBAPK_SELECTED_SHARE_TARGET_ACTIVITY_CLASS_NAME,
+                "something");
+        ArrayList<Uri> uris = new ArrayList<>();
+        uris.add(Uri.parse("mock-uri-3"));
+        intent.putExtra(Intent.EXTRA_STREAM, uris);
+        intent.putExtra(ShortcutHelper.EXTRA_SOURCE, ShortcutSource.WEBAPK_SHARE_TARGET);
+
+        WebApkInfo info = WebApkInfo.create(intent);
+        Assert.assertEquals(ShortcutSource.WEBAPK_SHARE_TARGET_FILE, info.source());
+    }
+
+    /**
      * Test when a distributor is not specified, the default distributor value for a WebAPK
      * installed by Chrome is |WebApkInfo.WebApkDistributor.BROWSER|, while for an Unbound WebAPK is
      * |WebApkInfo.WebApkDistributor.Other|.
@@ -462,5 +501,58 @@ public class WebApkInfoTest {
 
         Assert.assertNotNull(info.shareTarget());
         Assert.assertEquals("", info.shareTarget().getAction());
+    }
+
+    /**
+     * Test that {@link WebApkInfo#backgroundColorFallbackToDefault()} uses
+     * {@link SplashLayout#getDefaultBackgroundColor()} as the default background color if there is
+     * no default background color in the WebAPK's resources.
+     */
+    @Test
+    public void testBackgroundColorFallbackToDefaultNoCustomDefault() {
+        Bundle bundle = new Bundle();
+        bundle.putString(WebApkMetaDataKeys.START_URL, START_URL);
+        bundle.putString(WebApkMetaDataKeys.BACKGROUND_COLOR,
+                ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING + "L");
+        WebApkTestHelper.registerWebApkWithMetaData(WEBAPK_PACKAGE_NAME, bundle, null);
+
+        Intent intent = new Intent();
+        intent.putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, WEBAPK_PACKAGE_NAME);
+        intent.putExtra(ShortcutHelper.EXTRA_URL, START_URL);
+
+        WebApkInfo info = WebApkInfo.create(intent);
+        Assert.assertEquals(SplashLayout.getDefaultBackgroundColor(RuntimeEnvironment.application),
+                info.backgroundColorFallbackToDefault());
+    }
+
+    /**
+     * Test that {@link WebApkInfo#backgroundColorFallbackToDefault()} uses the default
+     * background color from the WebAPK's resources if present.
+     */
+    @Test
+    public void testBackgroundColorFallbackToDefaultWebApkHasCustomDefault() {
+        final int defaultBackgroundColorResourceId = 1;
+        final int defaultBackgroundColorInWebApk = 42;
+
+        Bundle bundle = new Bundle();
+        bundle.putString(WebApkMetaDataKeys.START_URL, START_URL);
+        bundle.putString(WebApkMetaDataKeys.BACKGROUND_COLOR,
+                ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING + "L");
+        bundle.putInt(
+                WebApkMetaDataKeys.DEFAULT_BACKGROUND_COLOR_ID, defaultBackgroundColorResourceId);
+        WebApkTestHelper.registerWebApkWithMetaData(WEBAPK_PACKAGE_NAME, bundle, null);
+
+        FakeResources res = new FakeResources();
+        res.addColorForTesting("mockResource", WEBAPK_PACKAGE_NAME,
+                defaultBackgroundColorResourceId, defaultBackgroundColorInWebApk);
+        WebApkTestHelper.setResource(WEBAPK_PACKAGE_NAME, res);
+
+        Intent intent = new Intent();
+        intent.putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, WEBAPK_PACKAGE_NAME);
+        intent.putExtra(ShortcutHelper.EXTRA_URL, START_URL);
+
+        WebApkInfo info = WebApkInfo.create(intent);
+        Assert.assertEquals(
+                defaultBackgroundColorInWebApk, info.backgroundColorFallbackToDefault());
     }
 }

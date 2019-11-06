@@ -17,7 +17,6 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/omnibox/browser/autocomplete_provider_client.h"
 #include "components/omnibox/browser/autocomplete_provider_listener.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
@@ -32,6 +31,7 @@
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 // SuggestionDeletionHandler -------------------------------------------------
 
@@ -109,9 +109,6 @@ SuggestionDeletionHandler::SuggestionDeletionHandler(
       client->IsOffTheRecord() ? variations::InIncognito::kYes
                                : variations::InIncognito::kNo,
       request.get());
-  // TODO(https://crbug.com/808498) re-add data use measurement once
-  // SimpleURLLoader supports it.
-  // data_use_measurement::DataUseUserData::OMNIBOX
   deletion_fetcher_ =
       network::SimpleURLLoader::Create(std::move(request), traffic_annotation);
   deletion_fetcher_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
@@ -170,6 +167,28 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
 }
 
 // static
+AutocompleteMatch BaseSearchProvider::CreateOnDeviceSearchSuggestion(
+    AutocompleteProvider* autocomplete_provider,
+    const AutocompleteInput& input,
+    const base::string16& suggestion,
+    int relevance,
+    const TemplateURL* template_url,
+    const SearchTermsData& search_terms_data,
+    int accepted_suggestion) {
+  SearchSuggestionParser::SuggestResult suggest_result(
+      suggestion, AutocompleteMatchType::SEARCH_SUGGEST,
+      /*subtype_identifier=*/271, /*from_keyword_provider=*/false, relevance,
+      /*relevance_from_server=*/false,
+      base::CollapseWhitespace(input.text(), false));
+  // On device providers are asynchronous.
+  suggest_result.set_received_after_last_keystroke(true);
+  return CreateSearchSuggestion(
+      autocomplete_provider, input, /*in_keyword_mode=*/false, suggest_result,
+      template_url, search_terms_data, accepted_suggestion,
+      /*append_extra_query_params_from_command_line=*/true);
+}
+
+// static
 void BaseSearchProvider::AppendSuggestClientToAdditionalQueryParams(
     const TemplateURL* template_url,
     const SearchTermsData& search_terms_data,
@@ -191,8 +210,8 @@ void BaseSearchProvider::DeleteMatch(const AutocompleteMatch& match) {
   if (!match.GetAdditionalInfo(BaseSearchProvider::kDeletionUrlKey).empty()) {
     deletion_handlers_.push_back(std::make_unique<SuggestionDeletionHandler>(
         client(), match.GetAdditionalInfo(BaseSearchProvider::kDeletionUrlKey),
-        base::Bind(&BaseSearchProvider::OnDeletionComplete,
-                   base::Unretained(this))));
+        base::BindRepeating(&BaseSearchProvider::OnDeletionComplete,
+                            base::Unretained(this))));
   }
 
   const TemplateURL* template_url =
@@ -361,7 +380,8 @@ bool BaseSearchProvider::CanSendURL(
     const TemplateURL* template_url,
     metrics::OmniboxEventProto::PageClassification page_classification,
     const SearchTermsData& search_terms_data,
-    AutocompleteProviderClient* client) {
+    AutocompleteProviderClient* client,
+    bool sending_search_terms) {
   // Make sure we are sending the suggest request through a cryptographically
   // secure channel to prevent exposing the current page URL or personalized
   // results without encryption.
@@ -398,8 +418,22 @@ bool BaseSearchProvider::CanSendURL(
   if (!scheme_allowed)
     return false;
 
-  if (!client->IsPersonalizedUrlDataCollectionActive())
-    return false;
+  // If URL data collection is off, forbid sending the current page URL to the
+  // suggest endpoint - unless both of these hold:
+  //  * The suggest endpoint and current page must be same-origin. In that
+  //    case, the suggest endpoint could have already logged the current URL
+  //    when the user accessed it from the server.
+  //  * The search terms must be empty. When the user is typing new search
+  //    terms, Chrome should not leak to the endpoint which tab the user is
+  //    looking at. On-focus suggest requests don't contain a query.
+  if (!client->IsPersonalizedUrlDataCollectionActive()) {
+    bool safe_to_send_url_without_data_collection_active =
+        url::IsSameOriginWith(current_page_url, suggest_url) &&
+        !sending_search_terms;
+
+    if (!safe_to_send_url_without_data_collection_active)
+      return false;
+  }
 
   return true;
 }
@@ -473,9 +507,8 @@ void BaseSearchProvider::AddMatchToMap(
                                      i.first->second.duplicate_matches.end());
       i.first->second.duplicate_matches.clear();
       match.duplicate_matches.push_back(i.first->second);
-      i.first->second = match;
+      i.first->second = std::move(match);
     } else {
-      i.first->second.duplicate_matches.push_back(match);
       if (match.keyword == i.first->second.keyword) {
         // Old and new matches are from the same search provider. It is okay to
         // record one match's prefetch data onto a different match (for the same
@@ -495,6 +528,7 @@ void BaseSearchProvider::AddMatchToMap(
         if (should_prefetch)
           i.first->second.RecordAdditionalInfo(kSuggestMetadataKey, metadata);
       }
+      i.first->second.duplicate_matches.push_back(std::move(match));
     }
     // Copy over answer data from lower-ranking item, if necessary.
     // This depends on the lower-ranking item always being added last - see

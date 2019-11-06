@@ -249,6 +249,7 @@ hooks = [
                 'chromium/third_party/depot_tools/download_from_google_storage.py',
                 '--no_resume',
                 '--no_auth',
+                '--num_threads=4',
                 '--bucket', 'chromium-browser-clang/orderfiles',
                 '-d', 'chromium/chrome/build',
     ],
@@ -286,12 +287,6 @@ hooks = [
                 'chromium/tools/perf/fetch_benchmark_deps.py',
                 '-f',
     ],
-  },
-  {
-    'name': 'Fetch Android AFDO profile',
-    'pattern': '.',
-    'condition': 'checkout_android or checkout_linux',
-    'action': ['python', "-u", 'chromium/chrome/android/profiles/update_afdo_profile.py'],
   },
   {
     'name': 'gvr_static_shim_android_arm_1',

@@ -29,17 +29,19 @@
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 #include <stdint.h>
+
 #include <memory>
+#include <string>
+#include <utility>
 
 #include "net/base/url_util.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/known_ports.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
+#include "third_party/blink/renderer/platform/weborigin/origin_access_entry.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/weborigin/url_security_origin_map.h"
-#include "third_party/blink/renderer/platform/wtf/hex_number.h"
-#include "third_party/blink/renderer/platform/wtf/not_found.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
@@ -217,13 +219,19 @@ scoped_refptr<SecurityOrigin> SecurityOrigin::CreateOpaque(
 scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromUrlOrigin(
     const url::Origin& origin) {
   const url::SchemeHostPort& tuple = origin.GetTupleOrPrecursorTupleIfOpaque();
-  DCHECK(String::FromUTF8(tuple.scheme().c_str()).ContainsOnlyASCIIOrEmpty());
-  DCHECK(String::FromUTF8(tuple.host().c_str()).ContainsOnlyASCIIOrEmpty());
+  DCHECK(String::FromUTF8(tuple.scheme()).ContainsOnlyASCIIOrEmpty());
+  DCHECK(String::FromUTF8(tuple.host()).ContainsOnlyASCIIOrEmpty());
 
   scoped_refptr<SecurityOrigin> tuple_origin;
   if (!tuple.IsInvalid()) {
-    tuple_origin = Create(String::FromUTF8(tuple.scheme().c_str()),
-                          String::FromUTF8(tuple.host().c_str()), tuple.port());
+    String scheme = String::FromUTF8(tuple.scheme());
+    String host = String::FromUTF8(tuple.host());
+    uint16_t port = tuple.port();
+
+    // url::Origin is percent encoded and SecurityOrigin is percent decoded.
+    host = DecodeURLEscapeSequences(host, DecodeURLMode::kUTF8OrIsomorphic);
+
+    tuple_origin = Create(scheme, host, port);
   }
   base::Optional<base::UnguessableToken> nonce_if_opaque =
       origin.GetNonceForSerialization();
@@ -238,10 +246,8 @@ scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromUrlOrigin(
 
 url::Origin SecurityOrigin::ToUrlOrigin() const {
   const SecurityOrigin* unmasked = GetOriginOrPrecursorOriginIfOpaque();
-  std::string scheme =
-      StringUTF8Adaptor(unmasked->protocol_).AsStringPiece().as_string();
-  std::string host =
-      StringUTF8Adaptor(unmasked->host_).AsStringPiece().as_string();
+  std::string scheme = unmasked->protocol_.Utf8();
+  std::string host = unmasked->host_.Utf8();
   uint16_t port = unmasked->effective_port_;
   if (nonce_if_opaque_) {
     url::Origin result = url::Origin::CreateOpaqueFromNormalizedPrecursorTuple(
@@ -264,6 +270,16 @@ void SecurityOrigin::SetDomainFromDOM(const String& new_domain) {
   domain_ = new_domain;
 }
 
+String SecurityOrigin::RegistrableDomain() const {
+  if (IsOpaque())
+    return String();
+
+  OriginAccessEntry entry(
+      *this, network::mojom::CorsDomainMatchMode::kAllowRegistrableDomains);
+  String domain = entry.registrable_domain();
+  return domain.IsEmpty() ? String() : domain;
+}
+
 bool SecurityOrigin::IsSecure(const KURL& url) {
   if (SchemeRegistry::ShouldTreatURLSchemeAsSecure(url.Protocol()))
     return true;
@@ -273,7 +289,7 @@ bool SecurityOrigin::IsSecure(const KURL& url) {
                                     ExtractInnerURL(url).Protocol()))
     return true;
 
-  if (SecurityPolicy::IsUrlWhiteListedTrustworthy(url))
+  if (SecurityPolicy::IsUrlTrustworthySafelisted(url))
     return true;
 
   return false;
@@ -433,6 +449,10 @@ bool SecurityOrigin::CanDisplay(const KURL& url) const {
 }
 
 bool SecurityOrigin::IsPotentiallyTrustworthy() const {
+  // TODO(lukasza): The code below can hopefully be eventually deleted and
+  // IsOriginPotentiallyTrustworthy can be used instead (from
+  // //services/network/public/cpp/is_potentially_trustworthy.h).
+
   DCHECK_NE(protocol_, "data");
 
   if (IsOpaque())
@@ -443,7 +463,7 @@ bool SecurityOrigin::IsPotentiallyTrustworthy() const {
     return true;
   }
 
-  if (SecurityPolicy::IsOriginWhiteListedTrustworthy(*this))
+  if (SecurityPolicy::IsOriginTrustworthySafelisted(*this))
     return true;
 
   return false;
@@ -479,7 +499,7 @@ bool SecurityOrigin::IsLocalhost() const {
   // We special-case "[::1]" here because `net::HostStringIsLocalhost` expects a
   // canonicalization that excludes the braces; a simple string comparison is
   // simpler than trying to adjust Blink's canonicalization.
-  return host_ == "[::1]" || net::HostStringIsLocalhost(host_.Ascii().data());
+  return host_ == "[::1]" || net::HostStringIsLocalhost(host_.Ascii());
 }
 
 String SecurityOrigin::ToString() const {
@@ -627,9 +647,8 @@ String SecurityOrigin::CanonicalizeHost(const String& host, bool* success) {
   url::RawCanonOutputT<char> canon_output;
   if (host.Is8Bit()) {
     StringUTF8Adaptor utf8(host);
-    *success =
-        url::CanonicalizeHost(utf8.Data(), url::Component(0, utf8.length()),
-                              &canon_output, &out_host);
+    *success = url::CanonicalizeHost(
+        utf8.data(), url::Component(0, utf8.size()), &canon_output, &out_host);
   } else {
     *success = url::CanonicalizeHost(host.Characters16(),
                                      url::Component(0, host.length()),

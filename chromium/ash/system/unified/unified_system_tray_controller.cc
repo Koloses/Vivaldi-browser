@@ -6,8 +6,9 @@
 
 #include "ash/metrics/user_metrics_action.h"
 #include "ash/metrics/user_metrics_recorder.h"
-#include "ash/multi_profile_uma.h"
-#include "ash/session/session_controller.h"
+#include "ash/public/cpp/pagination/pagination_controller.h"
+#include "ash/public/cpp/system_tray_client.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/system/accessibility/accessibility_feature_pod_controller.h"
 #include "ash/system/accessibility/unified_accessibility_detailed_view_controller.h"
@@ -31,6 +32,7 @@
 #include "ash/system/night_light/night_light_feature_pod_controller.h"
 #include "ash/system/rotation/rotation_lock_feature_pod_controller.h"
 #include "ash/system/tray/system_tray_item_uma_type.h"
+#include "ash/system/tray/tray_constants.h"
 #include "ash/system/unified/detailed_view_controller.h"
 #include "ash/system/unified/feature_pod_button.h"
 #include "ash/system/unified/feature_pod_controller_base.h"
@@ -39,8 +41,9 @@
 #include "ash/system/unified/unified_system_tray_bubble.h"
 #include "ash/system/unified/unified_system_tray_model.h"
 #include "ash/system/unified/unified_system_tray_view.h"
-#include "ash/system/unified/user_chooser_view.h"
+#include "ash/system/unified/user_chooser_detailed_view_controller.h"
 #include "ash/wm/lock_state_controller.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/numerics/ranges.h"
@@ -59,6 +62,10 @@ const int kDragThreshold = 200;
 
 }  // namespace
 
+// TODO(amehfooz): Add histograms for pagination metrics in system tray.
+void RecordPageSwitcherSourceByEventType(ui::EventType type,
+                                         bool is_tablet_mode) {}
+
 UnifiedSystemTrayController::UnifiedSystemTrayController(
     UnifiedSystemTrayModel* model,
     UnifiedSystemTrayBubble* bubble)
@@ -68,6 +75,15 @@ UnifiedSystemTrayController::UnifiedSystemTrayController(
   animation_->Reset(model->IsExpandedOnOpen() ? 1.0 : 0.0);
   animation_->SetSlideDuration(kExpandAnimationDurationMs);
   animation_->SetTweenType(gfx::Tween::EASE_IN_OUT);
+
+  model_->pagination_model()->SetTransitionDurations(
+      kUnifiedSystemTrayPageTransitionDurationMs,
+      kUnifiedSystemTrayOverScrollPageTransitionDurationMs);
+
+  pagination_controller_ = std::make_unique<PaginationController>(
+      model_->pagination_model(), PaginationController::SCROLL_AXIS_HORIZONTAL,
+      base::BindRepeating(&RecordPageSwitcherSourceByEventType),
+      Shell::Get()->tablet_mode_controller()->InTabletMode());
 
   Shell::Get()->metrics()->RecordUserMetricsAction(UMA_STATUS_AREA_MENU_OPENED);
   UMA_HISTOGRAM_BOOLEAN("ChromeOS.SystemTray.IsExpandedOnOpen",
@@ -92,31 +108,6 @@ UnifiedSystemTrayView* UnifiedSystemTrayController::CreateView() {
   return unified_view_;
 }
 
-void UnifiedSystemTrayController::HandleUserSwitch(int user_index) {
-  // Do not switch users when the log screen is presented.
-  SessionController* controller = Shell::Get()->session_controller();
-  if (controller->IsUserSessionBlocked())
-    return;
-
-  // |user_index| must be in range (0, number_of_user). Note 0 is excluded
-  // because it represents the active user and SwitchUser should not be called
-  // for such case.
-  DCHECK_GT(user_index, 0);
-  DCHECK_LT(user_index, controller->NumberOfLoggedInUsers());
-
-  MultiProfileUMA::RecordSwitchActiveUser(
-      MultiProfileUMA::SWITCH_ACTIVE_USER_BY_TRAY);
-  controller->SwitchActiveUser(
-      controller->GetUserSession(user_index)->user_info->account_id);
-  CloseBubble();
-}
-
-void UnifiedSystemTrayController::HandleAddUserAction() {
-  MultiProfileUMA::RecordSigninUser(MultiProfileUMA::SIGNIN_USER_BY_TRAY);
-  Shell::Get()->session_controller()->ShowMultiProfileLogin();
-  CloseBubble();
-}
-
 void UnifiedSystemTrayController::HandleSignOutAction() {
   Shell::Get()->metrics()->RecordUserMetricsAction(UMA_STATUS_AREA_SIGN_OUT);
   if (Shell::Get()->session_controller()->IsDemoSession())
@@ -127,12 +118,11 @@ void UnifiedSystemTrayController::HandleSignOutAction() {
 void UnifiedSystemTrayController::HandleLockAction() {
   Shell::Get()->metrics()->RecordUserMetricsAction(UMA_TRAY_LOCK_SCREEN);
   Shell::Get()->session_controller()->LockScreen();
-  CloseBubble();
 }
 
 void UnifiedSystemTrayController::HandleSettingsAction() {
   Shell::Get()->metrics()->RecordUserMetricsAction(UMA_TRAY_SETTINGS);
-  Shell::Get()->system_tray_model()->client_ptr()->ShowSettings();
+  Shell::Get()->system_tray_model()->client()->ShowSettings();
 }
 
 void UnifiedSystemTrayController::HandlePowerAction() {
@@ -140,6 +130,11 @@ void UnifiedSystemTrayController::HandlePowerAction() {
   Shell::Get()->lock_state_controller()->RequestShutdown(
       ShutdownReason::TRAY_SHUT_DOWN_BUTTON);
   CloseBubble();
+}
+
+void UnifiedSystemTrayController::HandlePageSwitchAction(int page) {
+  // TODO(amehfooz) Record Pagination Metrics here.
+  model_->pagination_model()->SelectPage(page, true);
 }
 
 void UnifiedSystemTrayController::HandleOpenDateTimeSettingsAction() {
@@ -155,7 +150,7 @@ void UnifiedSystemTrayController::HandleOpenDateTimeSettingsAction() {
 void UnifiedSystemTrayController::HandleEnterpriseInfoAction() {
   UMA_HISTOGRAM_ENUMERATION("ChromeOS.SystemTray.OpenHelpPageForManaged",
                             MANAGED_TYPE_ENTERPRISE, MANAGED_TYPE_COUNT);
-  Shell::Get()->system_tray_model()->client_ptr()->ShowEnterpriseInfo();
+  Shell::Get()->system_tray_model()->client()->ShowEnterpriseInfo();
 }
 
 void UnifiedSystemTrayController::ToggleExpanded() {
@@ -231,11 +226,11 @@ void UnifiedSystemTrayController::Fling(int velocity) {
 }
 
 void UnifiedSystemTrayController::ShowUserChooserView() {
-  if (!IsUserChooserEnabled())
+  if (!UserChooserDetailedViewController::IsUserChooserEnabled())
     return;
   animation_->Reset(1.0);
   UpdateExpandedAmount();
-  unified_view_->SetDetailedView(new UserChooserView(this));
+  ShowDetailedView(std::make_unique<UserChooserDetailedViewController>(this));
 }
 
 void UnifiedSystemTrayController::ShowNetworkDetailedView(bool force) {
@@ -299,7 +294,7 @@ void UnifiedSystemTrayController::TransitionToMainView(bool restore_focus) {
   detailed_view_controller_.reset();
   unified_view_->ResetDetailedView();
   if (restore_focus)
-    unified_view_->RestoreFeaturePodFocus();
+    unified_view_->RestoreFocus();
 }
 
 void UnifiedSystemTrayController::CloseBubble() {
@@ -313,24 +308,6 @@ void UnifiedSystemTrayController::EnsureExpanded() {
     unified_view_->ResetDetailedView();
   }
   animation_->Show();
-}
-
-bool UnifiedSystemTrayController::IsUserChooserEnabled() const {
-  // Don't allow user add or switch when CancelCastingDialog is open.
-  // See http://crrev.com/291276 and http://crbug.com/353170.
-  if (Shell::IsSystemModalWindowOpen())
-    return false;
-
-  // Don't allow at login, lock or when adding a multi-profile user.
-  SessionController* session = Shell::Get()->session_controller();
-  if (session->IsUserSessionBlocked())
-    return false;
-
-  // Don't show if we cannot add or switch users.
-  if (session->GetAddUserPolicy() != AddUserSessionPolicy::ALLOWED &&
-      session->NumberOfLoggedInUsers() <= 1)
-    return false;
-  return true;
 }
 
 void UnifiedSystemTrayController::AnimationEnded(
@@ -366,13 +343,22 @@ void UnifiedSystemTrayController::InitFeaturePods() {
   AddFeaturePodItem(std::make_unique<LocaleFeaturePodController>(this));
 
   // If you want to add a new feature pod item, add here.
+
+  if (Shell::Get()->tablet_mode_controller()->InTabletMode()) {
+    UMA_HISTOGRAM_COUNTS_100("ChromeOS.SystemTray.Tablet.FeaturePodCountOnOpen",
+                             unified_view_->GetVisibleFeaturePodCount());
+  } else {
+    UMA_HISTOGRAM_COUNTS_100("ChromeOS.SystemTray.FeaturePodCountOnOpen",
+                             unified_view_->GetVisibleFeaturePodCount());
+  }
 }
 
 void UnifiedSystemTrayController::AddFeaturePodItem(
     std::unique_ptr<FeaturePodControllerBase> controller) {
   DCHECK(unified_view_);
   FeaturePodButton* button = controller->CreateButton();
-  button->SetExpandedAmount(IsExpanded() ? 1.0 : 0.0);
+  button->SetExpandedAmount(IsExpanded() ? 1.0 : 0.0,
+                            false /* fade_icon_button */);
 
   // Record DefaultView.VisibleRows UMA.
   SystemTrayItemUmaType uma_type = controller->GetUmaType();
@@ -391,7 +377,7 @@ void UnifiedSystemTrayController::ShowDetailedView(
   animation_->Reset(1.0);
   UpdateExpandedAmount();
 
-  unified_view_->SaveFeaturePodFocus();
+  unified_view_->SaveFocus();
   views::FocusManager* manager = unified_view_->GetFocusManager();
   if (manager && manager->GetFocusedView())
     manager->ClearFocus();
@@ -399,7 +385,9 @@ void UnifiedSystemTrayController::ShowDetailedView(
   unified_view_->SetDetailedView(controller->CreateView());
   detailed_view_controller_ = std::move(controller);
 
-  bubble_->UpdateBubble();
+  // |bubble_| may be null in tests.
+  if (bubble_)
+    bubble_->UpdateBubble();
 }
 
 void UnifiedSystemTrayController::UpdateExpandedAmount() {

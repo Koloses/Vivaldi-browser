@@ -26,6 +26,7 @@
 #include "ipc/ipc_test_sink.h"
 #include "media/media_buildflags.h"
 #include "mojo/public/cpp/bindings/associated_interface_ptr.h"
+#include "net/base/network_isolation_key.h"
 #include "services/service_manager/public/cpp/identity.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
@@ -122,9 +123,6 @@ class MockRenderProcessHost : public RenderProcessHost {
   void FilterURL(bool empty_allowed, GURL* url) override;
   void EnableAudioDebugRecordings(const base::FilePath& file) override;
   void DisableAudioDebugRecordings() override;
-  void SetEchoCanceller3(
-      bool enable,
-      base::OnceCallback<void(bool, const std::string&)> callback) override;
   WebRtcStopRtpDumpCallback StartRtpDump(
       bool incoming,
       bool outgoing,
@@ -139,15 +137,16 @@ class MockRenderProcessHost : public RenderProcessHost {
   const base::TimeTicks& GetInitTimeForNavigationMetrics() override;
   bool IsProcessBackgrounded() override;
   size_t GetKeepAliveRefCount() const;
-  void IncrementKeepAliveRefCount(KeepAliveClientType) override;
-  void DecrementKeepAliveRefCount(KeepAliveClientType) override;
+  void IncrementKeepAliveRefCount() override;
+  void DecrementKeepAliveRefCount() override;
   void DisableKeepAliveRefCount() override;
   bool IsKeepAliveRefCountDisabled() override;
-  void PurgeAndSuspend() override;
   void Resume() override;
   mojom::Renderer* GetRendererInterface() override;
   void CreateURLLoaderFactory(
       const base::Optional<url::Origin>& origin,
+      const WebPreferences* preferences,
+      const net::NetworkIsolationKey& network_isolation_key,
       network::mojom::TrustedURLLoaderHeaderClientPtrInfo header_client,
       network::mojom::URLLoaderFactoryRequest request) override;
 
@@ -237,7 +236,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   network::mojom::URLLoaderFactory* url_loader_factory_;
   blink::mojom::CacheStorageRequest cache_storage_request_;
   blink::mojom::IDBFactoryRequest idb_factory_request_;
-  base::WeakPtrFactory<MockRenderProcessHost> weak_ptr_factory_;
+  base::WeakPtrFactory<MockRenderProcessHost> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(MockRenderProcessHost);
 };
@@ -249,7 +248,7 @@ class MockRenderProcessHostFactory : public RenderProcessHostFactory {
 
   RenderProcessHost* CreateRenderProcessHost(
       BrowserContext* browser_context,
-      SiteInstance* site_instance) const override;
+      SiteInstance* site_instance) override;
 
   // Removes the given MockRenderProcessHost from the MockRenderProcessHost list
   // without deleting it. When a test deletes a MockRenderProcessHost, we need

@@ -6,16 +6,15 @@
 
 #include <utility>
 
-#include "ash/public/cpp/shell_window_ids.h"
 #include "base/bind.h"
 #include "base/feature_list.h"
+#include "components/exo/input_trace.h"
 #include "components/exo/pointer_delegate.h"
 #include "components/exo/pointer_gesture_pinch_delegate.h"
 #include "components/exo/relative_pointer_delegate.h"
 #include "components/exo/shell_surface_util.h"
 #include "components/exo/surface.h"
 #include "components/exo/wm_helper.h"
-#include "components/exo/wm_helper_chromeos.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "ui/aura/client/capture_client.h"
@@ -30,6 +29,10 @@
 #include "ui/gfx/geometry/vector2d_conversions.h"
 #include "ui/gfx/transform_util.h"
 #include "ui/views/widget/widget.h"
+
+#if defined(OS_CHROMEOS)
+#include "ash/public/cpp/shell_window_ids.h"
+#endif
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/cursor_factory_ozone.h"
@@ -78,6 +81,15 @@ display::ManagedDisplayInfo GetCaptureDisplayInfo() {
   return capture_info;
 }
 
+int GetContainerIdForMouseCursor() {
+#if defined(OS_CHROMEOS)
+  return ash::kShellWindowId_MouseCursorContainer;
+#else
+  NOTIMPLEMENTED();
+  return -1;
+#endif
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -91,9 +103,8 @@ Pointer::Pointer(PointerDelegate* delegate)
       capture_ratio_(GetCaptureDisplayInfo().GetDensityRatio()),
       cursor_capture_source_id_(base::UnguessableToken::Create()),
       cursor_capture_weak_ptr_factory_(this) {
-  WMHelperChromeOS* helper = WMHelperChromeOS::GetInstance();
+  WMHelper* helper = WMHelper::GetInstance();
   helper->AddPreTargetHandler(this);
-  helper->AddDisplayConfigurationObserver(this);
   // TODO(sky): CursorClient does not exist in mash
   // yet. https://crbug.com/631103.
   aura::client::CursorClient* cursor_client = helper->GetCursorClient();
@@ -111,8 +122,7 @@ Pointer::~Pointer() {
     pinch_delegate_->OnPointerDestroying(this);
   if (relative_pointer_delegate_)
     relative_pointer_delegate_->OnPointerDestroying(this);
-  WMHelperChromeOS* helper = WMHelperChromeOS::GetInstance();
-  helper->RemoveDisplayConfigurationObserver(this);
+  WMHelper* helper = WMHelper::GetInstance();
   helper->RemovePreTargetHandler(this);
   // TODO(sky): CursorClient does not exist in mash
   // yet. https://crbug.com/631103.
@@ -183,21 +193,35 @@ void Pointer::SetCursorType(ui::CursorType cursor_type) {
 }
 
 void Pointer::SetGesturePinchDelegate(PointerGesturePinchDelegate* delegate) {
+  // For the |pinch_delegate_| (and |relative_pointer_delegate_| below) it is
+  // possible to bind multiple extensions to the same pointer interface (not
+  // that this is a particularly reasonable thing to do). When that happens we
+  // choose to only keep a single binding alive, so we simulate pointer
+  // destruction for the previous binding.
+  if (pinch_delegate_)
+    pinch_delegate_->OnPointerDestroying(this);
   pinch_delegate_ = delegate;
 }
 
-void Pointer::EnablePointerCapture(RelativePointerDelegate* delegate) {
+void Pointer::RegisterRelativePointerDelegate(
+    RelativePointerDelegate* delegate) {
+  if (relative_pointer_delegate_)
+    relative_pointer_delegate_->OnPointerDestroying(this);
+  relative_pointer_delegate_ = delegate;
+}
+
+void Pointer::UnregisterRelativePointerDelegate(
+    RelativePointerDelegate* delegate) {
+  DCHECK(relative_pointer_delegate_ == delegate);
+  relative_pointer_delegate_ = nullptr;
+}
+
+void Pointer::EnablePointerCapture() {
   if (!base::FeatureList::IsEnabled(kPointerCapture))
     return;
 
-  if (!delegate) {
-    DLOG(ERROR) << "Failed to enable pointer capture: "
-                   "relative pointer delegate is null";
-    return;
-  }
-
   // If pointer capture is already enabled, disable it first.
-  if (relative_pointer_delegate_)
+  if (capture_window_)
     DisablePointerCapture();
 
   // TODO(b/124059008): Find the correct window to set capture.
@@ -233,7 +257,6 @@ void Pointer::EnablePointerCapture(RelativePointerDelegate* delegate) {
   cursor_client->HideCursor();
   cursor_client->LockCursor();
 
-  relative_pointer_delegate_ = delegate;
   location_when_pointer_capture_enabled_ = gfx::ToRoundedPoint(location_);
 
   if (ShouldMoveToCenter())
@@ -242,7 +265,7 @@ void Pointer::EnablePointerCapture(RelativePointerDelegate* delegate) {
 
 void Pointer::DisablePointerCapture() {
   // Early out if pointer capture is not enabled.
-  if (!relative_pointer_delegate_)
+  if (!capture_window_)
     return;
 
   auto* capture_client = WMHelper::GetInstance()->GetCaptureClient();
@@ -265,8 +288,6 @@ void Pointer::DisablePointerCapture() {
   focus_surface_ = nullptr;
   location_when_pointer_capture_enabled_.reset();
   UpdateCursor();
-
-  relative_pointer_delegate_ = nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -316,8 +337,9 @@ void Pointer::OnMouseEvent(ui::MouseEvent* event) {
   if (!focus_surface_)
     return;
 
-  if (event->IsMouseEvent() &&
-      event->type() != ui::ET_MOUSE_EXITED &&
+  TRACE_EXO_INPUT_EVENT(event);
+
+  if (event->IsMouseEvent() && event->type() != ui::ET_MOUSE_EXITED &&
       event->type() != ui::ET_MOUSE_CAPTURE_CHANGED) {
     // Generate motion event if location changed. We need to check location
     // here as mouse movement can generate both "moved" and "entered" events
@@ -333,8 +355,12 @@ void Pointer::OnMouseEvent(ui::MouseEvent* event) {
     if (!same_location) {
       if (relative_pointer_delegate_)
         HandleRelativePointerMotion(event->time_stamp(), location_in_root);
-      else
+      if (capture_window_) {
+        if (ShouldMoveToCenter())
+          MoveCursorToCenterOfActiveDisplay();
+      } else {
         delegate_->OnPointerMotion(event->time_stamp(), location_in_target);
+      }
       location_ = location_in_root;
       delegate_->OnPointerFrame();
     }
@@ -420,6 +446,8 @@ void Pointer::OnGestureEvent(ui::GestureEvent* event) {
   if (!focus_surface_ || !pinch_delegate_)
     return;
 
+  TRACE_EXO_INPUT_EVENT(event);
+
   switch (event->type()) {
     case ui::ET_GESTURE_PINCH_BEGIN:
       pinch_delegate_->OnPointerPinchBegin(event->unique_touch_event_id(),
@@ -447,7 +475,7 @@ void Pointer::OnGestureEvent(ui::GestureEvent* event) {
 void Pointer::OnCaptureChanged(aura::Window* lost_capture,
                                aura::Window* gained_capture) {
   // Note: This observer is only set when pointer capture in enabled.
-  if (relative_pointer_delegate_ && gained_capture != capture_window_)
+  if (capture_window_ && gained_capture != capture_window_)
     DisablePointerCapture();
 }
 
@@ -463,6 +491,11 @@ void Pointer::OnCursorSizeChanged(ui::CursorSize cursor_size) {
 }
 
 void Pointer::OnCursorDisplayChanged(const display::Display& display) {
+  UpdatePointerSurface(root_surface());
+  auto info = GetCaptureDisplayInfo();
+  capture_scale_ = info.device_scale_factor();
+  capture_ratio_ = info.GetDensityRatio();
+
   auto* cursor_client = WMHelper::GetInstance()->GetCursorClient();
   // TODO(crbug.com/631103): CursorClient does not exist in mash yet.
   if (!cursor_client)
@@ -482,18 +515,8 @@ void Pointer::OnCursorDisplayChanged(const display::Display& display) {
 
 void Pointer::OnWindowFocused(aura::Window* gained_focus,
                               aura::Window* lost_focus) {
-  if (relative_pointer_delegate_)
+  if (capture_window_)
     DisablePointerCapture();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// ash::WindowTreeHostManager::Observer overrides:
-
-void Pointer::OnDisplayConfigurationChanged() {
-  UpdatePointerSurface(root_surface());
-  auto info = GetCaptureDisplayInfo();
-  capture_scale_ = info.device_scale_factor();
-  capture_ratio_ = info.GetDensityRatio();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -545,7 +568,7 @@ void Pointer::UpdatePointerSurface(Surface* surface) {
     // snapshot. Where in the tree is not important but we might as well use
     // the cursor container.
     WMHelper::GetInstance()
-        ->GetPrimaryDisplayContainer(ash::kShellWindowId_MouseCursorContainer)
+        ->GetPrimaryDisplayContainer(GetContainerIdForMouseCursor())
         ->AddChild(host_window());
     SetRootSurface(surface);
   }
@@ -707,8 +730,6 @@ void Pointer::HandleRelativePointerMotion(base::TimeTicks time_stamp,
   gfx::PointF delta(location_in_root.x() - location_.x(),
                     location_in_root.y() - location_.y());
   relative_pointer_delegate_->OnPointerRelativeMotion(time_stamp, delta);
-  if (ShouldMoveToCenter())
-    MoveCursorToCenterOfActiveDisplay();
 }
 
 }  // namespace exo

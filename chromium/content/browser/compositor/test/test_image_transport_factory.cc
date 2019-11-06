@@ -95,6 +95,12 @@ TestImageTransportFactory::SharedMainThreadContextProvider() {
   return shared_main_context_provider_;
 }
 
+scoped_refptr<viz::RasterContextProvider>
+TestImageTransportFactory::SharedMainThreadRasterContextProvider() {
+  NOTIMPLEMENTED();
+  return nullptr;
+}
+
 gpu::GpuMemoryBufferManager*
 TestImageTransportFactory::GetGpuMemoryBufferManager() {
   return &gpu_memory_buffer_manager_;
@@ -136,17 +142,6 @@ viz::FrameSinkId TestImageTransportFactory::AllocateFrameSinkId() {
 viz::HostFrameSinkManager*
 TestImageTransportFactory::GetHostFrameSinkManager() {
   return &host_frame_sink_manager_;
-}
-
-viz::FrameSinkManagerImpl* TestImageTransportFactory::GetFrameSinkManager() {
-  if (enable_viz_) {
-    // Nothing should use FrameSinkManagerImpl with VizDisplayCompositor
-    // enabled.
-    NOTREACHED();
-    return nullptr;
-  }
-
-  return frame_sink_manager_impl_.get();
 }
 
 void TestImageTransportFactory::DisableGpuCompositing() {

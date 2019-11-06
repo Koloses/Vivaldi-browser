@@ -12,6 +12,9 @@
 #include "base/metrics/user_metrics.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
+#include "chrome/android/chrome_jni_headers/UmaSessionStats_jni.h"
+#include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/metrics/android_profile_session_durations_service.h"
 #include "chrome/browser/android/metrics/android_profile_session_durations_service_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -27,7 +30,6 @@
 #include "components/variations/hashing.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
-#include "jni/UmaSessionStats_jni.h"
 
 using base::android::ConvertJavaStringToUTF8;
 using base::android::JavaParamRef;
@@ -90,8 +92,11 @@ void UmaSessionStats::UmaEndSession(JNIEnv* env,
     DCHECK(g_browser_process);
     // Tell the metrics services they were cleanly shutdown.
     metrics::MetricsService* metrics = g_browser_process->metrics_service();
-    if (metrics)
-      metrics->OnAppEnterBackground();
+    if (metrics) {
+      const bool keep_reporting =
+          base::FeatureList::IsEnabled(chrome::android::kUmaBackgroundSessions);
+      metrics->OnAppEnterBackground(keep_reporting);
+    }
     ukm::UkmService* ukm_service =
         g_browser_process->GetMetricsServicesManager()->GetUkmService();
     if (ukm_service)
@@ -238,21 +243,6 @@ static void JNI_UmaSessionStats_RegisterSyntheticFieldTrial(
   std::string trial_name(ConvertJavaStringToUTF8(env, jtrial_name));
   std::string group_name(ConvertJavaStringToUTF8(env, jgroup_name));
   UmaSessionStats::RegisterSyntheticFieldTrial(trial_name, group_name);
-}
-
-static void JNI_UmaSessionStats_RecordMultiWindowSession(
-    JNIEnv*,
-    jint area_percent,
-    jint instance_count) {
-  UMA_HISTOGRAM_PERCENTAGE("MobileStartup.MobileMultiWindowSession",
-                           area_percent);
-  // Make sure the bucket count is the same as the range.  This currently
-  // expects no more than 10 simultaneous multi window instances.
-  UMA_HISTOGRAM_CUSTOM_COUNTS("MobileStartup.MobileMultiWindowInstances",
-                              instance_count,
-                              1 /* min */,
-                              10 /* max */,
-                              10 /* bucket count */);
 }
 
 static void JNI_UmaSessionStats_RecordTabCountPerLoad(

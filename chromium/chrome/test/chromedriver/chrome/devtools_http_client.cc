@@ -34,8 +34,7 @@ WebViewInfo::WebViewInfo(const WebViewInfo& other) = default;
 WebViewInfo::~WebViewInfo() {}
 
 bool WebViewInfo::IsFrontend() const {
-  return base::StartsWith(url, "chrome-devtools://",
-                          base::CompareCase::SENSITIVE);
+  return base::StartsWith(url, "devtools://", base::CompareCase::SENSITIVE);
 }
 
 bool WebViewInfo::IsInactiveBackgroundPage() const {
@@ -156,10 +155,8 @@ const DeviceMetrics* DevToolsHttpClient::device_metrics() {
 }
 
 bool DevToolsHttpClient::IsBrowserWindow(const WebViewInfo& view) const {
-  return base::ContainsKey(*window_types_, view.type) ||
-         (view.type == WebViewInfo::kOther &&
-          (view.url == "chrome://print/" ||
-           view.url == "chrome://media-router/"));
+  return base::Contains(*window_types_, view.type) ||
+         (view.type == WebViewInfo::kOther && view.url == "chrome://print/");
 }
 
 Status DevToolsHttpClient::CloseFrontends(const std::string& for_client_id) {

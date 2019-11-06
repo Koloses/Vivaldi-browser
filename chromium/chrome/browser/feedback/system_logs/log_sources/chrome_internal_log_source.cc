@@ -15,11 +15,12 @@
 #include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/driver/about_sync_util.h"
 #include "components/sync/driver/sync_service.h"
@@ -38,7 +39,7 @@
 #include "chromeos/dbus/util/version_loader.h"
 #include "chromeos/system/statistics_provider.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "services/service_manager/public/cpp/connector.h"
 #endif
 
@@ -196,9 +197,8 @@ void PopulateEntriesAsync(SystemLogsResponse* response) {
 ChromeInternalLogSource::ChromeInternalLogSource()
     : SystemLogsSource("ChromeInternal") {
 #if defined(OS_CHROMEOS)
-  content::ServiceManagerConnection::GetForProcess()
-      ->GetConnector()
-      ->BindInterface(ash::mojom::kServiceName, &cros_display_config_ptr_);
+  content::GetSystemConnector()->BindInterface(ash::mojom::kServiceName,
+                                               &cros_display_config_ptr_);
 #endif
 }
 
@@ -350,12 +350,15 @@ void ChromeInternalLogSource::PopulatePowerApiLogs(
 
 void ChromeInternalLogSource::PopulateDataReductionProxyLogs(
     SystemLogsResponse* response) {
-  PrefService* prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
-  bool is_data_reduction_proxy_enabled =
-      prefs->HasPrefPath(prefs::kDataSaverEnabled) &&
-      prefs->GetBoolean(prefs::kDataSaverEnabled);
+  data_reduction_proxy::DataReductionProxySettings*
+      data_reduction_proxy_settings =
+          DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
+              ProfileManager::GetActiveUserProfile());
+  bool data_saver_enabled =
+      data_reduction_proxy_settings &&
+      data_reduction_proxy_settings->IsDataReductionProxyEnabled();
   response->emplace(kDataReductionProxyKey,
-                    is_data_reduction_proxy_enabled ? "enabled" : "disabled");
+                    data_saver_enabled ? "enabled" : "disabled");
 }
 
 #if defined(OS_CHROMEOS)

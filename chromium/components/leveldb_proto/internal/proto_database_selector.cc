@@ -63,7 +63,7 @@ void ProtoDatabaseSelector::InitWithDatabase(
 void ProtoDatabaseSelector::InitUniqueOrShared(
     const std::string& client_name,
     base::FilePath db_dir,
-    const leveldb_env::Options& options,
+    const leveldb_env::Options& unique_db_options,
     bool use_shared_db,
     scoped_refptr<base::SequencedTaskRunner> callback_task_runner,
     Callbacks::InitStatusCallback callback) {
@@ -71,8 +71,26 @@ void ProtoDatabaseSelector::InitUniqueOrShared(
   init_status_ = InitStatus::IN_PROGRESS;
   unique_database_dir_ = db_dir;
   client_name_ = client_name;
-  auto unique_db =
-      std::make_unique<UniqueProtoDatabase>(db_dir, options, task_runner_);
+
+  if (unique_database_dir_.empty()) {
+    DCHECK(!use_shared_db) << "Opening in memory shared db is not supported";
+    // In case we set up field trials by mistake, ignore the use shared flag and
+    // return unique db.
+    use_shared_db = false;
+  }
+
+  auto unique_options = unique_db_options;
+  // There are two Init methods, one that receives Options for its unique DB and
+  // another that uses CreateSimpleOptions() to open the unique DB. In case a
+  // shared DB needs to be used then we don't need to create a new unique DB if
+  // it doesn't exist. In case a unique DB needs to be used then we don't change
+  // the create_if_missing parameter, because it may have been set by a client.
+  if (use_shared_db) {
+    unique_options.create_if_missing = false;
+  }
+
+  auto unique_db = std::make_unique<UniqueProtoDatabase>(db_dir, unique_options,
+                                                         task_runner_);
   auto* unique_db_ptr = unique_db.get();
   unique_db_ptr->Init(
       client_name, base::BindOnce(&ProtoDatabaseSelector::OnInitUniqueDB, this,
@@ -104,8 +122,9 @@ void ProtoDatabaseSelector::OnInitUniqueDB(
     unique_db.reset();
 
   // If no SharedProtoDatabaseProvider is set then we use the unique DB (if it
-  // opened correctly).
-  if (!db_provider_) {
+  // opened correctly). If in memory db is requested then do not try to migrate
+  // data from shared db, which was the behavior when only unique db existed.
+  if (!db_provider_ || unique_database_dir_.empty()) {
     db_ = std::move(unique_db);
     std::move(callback).Run(status);
     OnInitDone();

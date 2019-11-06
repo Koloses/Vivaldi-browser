@@ -152,7 +152,7 @@ class TestBoundDelegate final : public InjectableTestDelegate {
   }
 
  private:
-  void Run(bool application_tasks_allowed) override {
+  void Run(bool application_tasks_allowed, TimeDelta timeout) override {
     if (nested_run_allowing_tasks_incoming_) {
       EXPECT_TRUE(RunLoop::IsNestedOnCurrentThread());
       EXPECT_TRUE(application_tasks_allowed);
@@ -283,10 +283,127 @@ TEST_P(RunLoopTest, QuitWhenIdleClosure) {
   run_loop_.Run();
 }
 
+TEST_P(RunLoopTest, RunWithTimeout) {
+  // SimpleSingleThreadTaskRunner doesn't support delayed tasks.
+  if (GetParam() == RunLoopTestType::kTestDelegate)
+    return;
+
+  bool task1_run = false;
+  bool task2_run = false;
+  bool task3_run = false;
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task1_run = true; }),
+      TimeDelta::FromMilliseconds(10));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task2_run = true; }),
+      TimeDelta::FromMilliseconds(20));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task3_run = true; }),
+      TimeDelta::FromSeconds(10));
+
+  run_loop_.RunWithTimeout(TimeDelta::FromMilliseconds(20));
+  EXPECT_TRUE(task1_run);
+  EXPECT_TRUE(task2_run);
+  EXPECT_FALSE(task3_run);
+}
+
+// TODO(https://crbug.com/970187): This test is inherently flaky.
+TEST_P(RunLoopTest, DISABLED_NestedRunWithTimeout) {
+  // SimpleSingleThreadTaskRunner doesn't support delayed tasks.
+  if (GetParam() == RunLoopTestType::kTestDelegate)
+    return;
+
+  bool task1_run = false;
+  bool task2_run = false;
+  bool task3_run = false;
+  bool task4_run = false;
+  bool task5_run = false;
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task1_run = true; }),
+      TimeDelta::FromMilliseconds(10));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() {
+        task2_run = true;
+        EXPECT_FALSE(task3_run);
+        RunLoop nested_run_loop(RunLoop::Type::kNestableTasksAllowed);
+        nested_run_loop.RunWithTimeout(TimeDelta::FromMilliseconds(20));
+        EXPECT_TRUE(task3_run);
+        EXPECT_TRUE(task4_run);
+      }),
+      TimeDelta::FromMilliseconds(20));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task3_run = true; }),
+      TimeDelta::FromMilliseconds(30));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task4_run = true; }),
+      TimeDelta::FromMilliseconds(40));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task5_run = true; }),
+      TimeDelta::FromSeconds(10));
+
+  run_loop_.RunWithTimeout(TimeDelta::FromMilliseconds(40));
+  EXPECT_TRUE(task1_run);
+  EXPECT_TRUE(task2_run);
+  EXPECT_TRUE(task3_run);
+  EXPECT_TRUE(task4_run);
+  EXPECT_FALSE(task5_run);
+}
+
+TEST_P(RunLoopTest, NestedRunWithTimeoutWhereInnerLoopHasALongerTimeout) {
+  // SimpleSingleThreadTaskRunner doesn't support delayed tasks.
+  if (GetParam() == RunLoopTestType::kTestDelegate)
+    return;
+
+  bool task1_run = false;
+  bool task2_run = false;
+  bool task3_run = false;
+  bool task4_run = false;
+  bool task5_run = false;
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task1_run = true; }),
+      TimeDelta::FromMilliseconds(10));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() {
+        task2_run = true;
+        EXPECT_FALSE(task3_run);
+        RunLoop nested_run_loop(RunLoop::Type::kNestableTasksAllowed);
+        nested_run_loop.RunWithTimeout(TimeDelta::FromMilliseconds(50));
+        EXPECT_TRUE(task3_run);
+        EXPECT_TRUE(task4_run);
+      }),
+      TimeDelta::FromMilliseconds(20));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task3_run = true; }),
+      TimeDelta::FromMilliseconds(30));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task4_run = true; }),
+      TimeDelta::FromMilliseconds(40));
+
+  ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, BindLambdaForTesting([&]() { task5_run = true; }),
+      TimeDelta::FromMilliseconds(50));
+
+  run_loop_.RunWithTimeout(TimeDelta::FromMilliseconds(40));
+  EXPECT_TRUE(task1_run);
+  EXPECT_TRUE(task2_run);
+  EXPECT_TRUE(task3_run);
+  EXPECT_TRUE(task4_run);
+  EXPECT_TRUE(task5_run);
+}
+
 // Verify that the QuitWhenIdleClosure() can run after the RunLoop has been
 // deleted. It should have no effect.
 TEST_P(RunLoopTest, QuitWhenIdleClosureAfterRunLoopScope) {
-  Closure quit_when_idle_closure;
+  RepeatingClosure quit_when_idle_closure;
   {
     RunLoop run_loop;
     quit_when_idle_closure = run_loop.QuitWhenIdleClosure();
@@ -496,7 +613,7 @@ TEST_P(RunLoopTest, NestingObservers) {
 
   RunLoop::AddNestingObserverOnCurrentThread(&nesting_observer);
 
-  const RepeatingClosure run_nested_loop = Bind([]() {
+  const RepeatingClosure run_nested_loop = BindRepeating([]() {
     RunLoop nested_run_loop(RunLoop::Type::kNestableTasksAllowed);
     ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
                                             nested_run_loop.QuitClosure());

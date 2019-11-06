@@ -41,7 +41,8 @@ class LayerTreeFrameSinkHolder : public cc::LayerTreeFrameSinkClient,
   void SubmitCompositorFrame(viz::CompositorFrame frame);
   void DidNotProduceFrame(const viz::BeginFrameAck& ack);
 
-  base::WeakPtr<LayerTreeFrameSinkHolder> GetWeakPtr();
+  // Returns true if owned LayerTreeFrameSink has been lost.
+  bool is_lost() const { return is_lost_; }
 
   FrameSinkResourceManager* resource_manager() { return &resource_manager_; }
 
@@ -56,7 +57,6 @@ class LayerTreeFrameSinkHolder : public cc::LayerTreeFrameSinkClient,
       uint32_t presentation_token,
       const gfx::PresentationFeedback& feedback) override;
   void DidLoseLayerTreeFrameSink() override;
-  void DidNotNeedBeginFrame() override {}
   void OnDraw(const gfx::Transform& transform,
               const gfx::Rect& viewport,
               bool resourceless_software_draw,
@@ -83,11 +83,10 @@ class LayerTreeFrameSinkHolder : public cc::LayerTreeFrameSinkClient,
   std::vector<viz::ResourceId> last_frame_resources_;
   viz::FrameTokenGenerator next_frame_token_;
 
+  bool is_lost_ = false;
   bool delete_pending_ = false;
 
   WMHelper::LifetimeManager* lifetime_manager_ = nullptr;
-
-  base::WeakPtrFactory<LayerTreeFrameSinkHolder> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerTreeFrameSinkHolder);
 };

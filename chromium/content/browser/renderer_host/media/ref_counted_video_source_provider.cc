@@ -12,8 +12,7 @@ RefCountedVideoSourceProvider::RefCountedVideoSourceProvider(
     base::OnceClosure destruction_cb)
     : source_provider_(std::move(source_provider)),
       device_factory_provider_(std::move(device_factory_provider)),
-      destruction_cb_(std::move(destruction_cb)),
-      weak_ptr_factory_(this) {}
+      destruction_cb_(std::move(destruction_cb)) {}
 
 RefCountedVideoSourceProvider::~RefCountedVideoSourceProvider() {
   std::move(destruction_cb_).Run();
@@ -26,6 +25,10 @@ RefCountedVideoSourceProvider::GetWeakPtr() {
 
 void RefCountedVideoSourceProvider::ShutdownServiceAsap() {
   device_factory_provider_->ShutdownServiceAsap();
+}
+
+void RefCountedVideoSourceProvider::SetRetryCount(int32_t count) {
+  device_factory_provider_->SetRetryCount(count);
 }
 
 void RefCountedVideoSourceProvider::ReleaseProviderForTesting() {

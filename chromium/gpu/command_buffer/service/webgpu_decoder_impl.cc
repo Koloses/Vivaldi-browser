@@ -4,37 +4,115 @@
 
 #include "gpu/command_buffer/service/webgpu_decoder_impl.h"
 
+#include <dawn_native/DawnNative.h>
+#include <dawn_wire/WireServer.h>
+
+#include <algorithm>
 #include <memory>
+#include <vector>
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/trace_event/trace_event.h"
+#include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/common/webgpu_cmd_format.h"
 #include "gpu/command_buffer/common/webgpu_cmd_ids.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
+#include "gpu/command_buffer/service/decoder_client.h"
+#include "gpu/command_buffer/service/shared_image_factory.h"
+#include "gpu/command_buffer/service/shared_image_manager.h"
+#include "gpu/command_buffer/service/shared_image_representation.h"
 #include "gpu/command_buffer/service/webgpu_decoder.h"
+#include "ipc/ipc_channel.h"
 
 namespace gpu {
 namespace webgpu {
+
+namespace {
+
+constexpr size_t kMaxWireBufferSize =
+    std::min(IPC::Channel::kMaximumMessageSize,
+             static_cast<size_t>(1024 * 1024));
+
+class WireServerCommandSerializer : public dawn_wire::CommandSerializer {
+ public:
+  explicit WireServerCommandSerializer(DecoderClient* client);
+  ~WireServerCommandSerializer() override = default;
+  void* GetCmdSpace(size_t size) final;
+  bool Flush() final;
+
+ private:
+  DecoderClient* client_;
+  std::vector<uint8_t> buffer_;
+  size_t put_offset_;
+};
+
+WireServerCommandSerializer::WireServerCommandSerializer(DecoderClient* client)
+    : client_(client), buffer_(kMaxWireBufferSize), put_offset_(0) {}
+
+void* WireServerCommandSerializer::GetCmdSpace(size_t size) {
+  // TODO(enga): Handle chunking commands if size > kMaxWireBufferSize.
+  if (size > kMaxWireBufferSize) {
+    NOTREACHED();
+    return nullptr;
+  }
+
+  // |next_offset| should never be more than kMaxWireBufferSize +
+  // kMaxWireBufferSize.
+  DCHECK_LE(put_offset_, kMaxWireBufferSize);
+  DCHECK_LE(size, kMaxWireBufferSize);
+  static_assert(base::CheckAdd(kMaxWireBufferSize, kMaxWireBufferSize)
+                    .IsValid<uint32_t>(),
+                "");
+  uint32_t next_offset = put_offset_ + size;
+
+  if (next_offset > buffer_.size()) {
+    Flush();
+    // TODO(enga): Keep track of how much command space the application is using
+    // and adjust the buffer size accordingly.
+
+    DCHECK_EQ(put_offset_, 0u);
+    next_offset = size;
+  }
+
+  uint8_t* ptr = &buffer_[put_offset_];
+  put_offset_ = next_offset;
+  return ptr;
+}
+
+bool WireServerCommandSerializer::Flush() {
+  if (put_offset_ > 0) {
+    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("gpu.dawn"),
+                 "WireServerCommandSerializer::Flush", "bytes", put_offset_);
+
+    static uint32_t return_trace_id = 0;
+    TRACE_EVENT_FLOW_BEGIN0(TRACE_DISABLED_BY_DEFAULT("gpu.dawn"),
+                            "DawnReturnCommands", return_trace_id++);
+
+    client_->HandleReturnData(base::make_span(buffer_.data(), put_offset_));
+    put_offset_ = 0;
+  }
+  return true;
+}
+
+}  // namespace
 
 class WebGPUDecoderImpl final : public WebGPUDecoder {
  public:
   WebGPUDecoderImpl(DecoderClient* client,
                     CommandBufferServiceBase* command_buffer_service,
+                    SharedImageManager* shared_image_manager,
+                    MemoryTracker* memory_tracker,
                     gles2::Outputter* outputter);
   ~WebGPUDecoderImpl() override;
+
+  // WebGPUDecoder implementation
+  ContextResult Initialize() override;
 
   // DecoderContext implementation.
   base::WeakPtr<DecoderContext> AsWeakPtr() override {
     NOTIMPLEMENTED();
     return nullptr;
-  }
-  ContextResult Initialize(
-      const scoped_refptr<gl::GLSurface>& surface,
-      const scoped_refptr<gl::GLContext>& context,
-      bool offscreen,
-      const gles2::DisallowedFeatures& disallowed_features,
-      const ContextCreationAttribs& attrib_helper) override {
-    return ContextResult::kSuccess;
   }
   const gles2::ContextState* GetContextState() override {
     NOTREACHED();
@@ -92,9 +170,21 @@ class WebGPUDecoderImpl final : public WebGPUDecoder {
   bool HasPendingQueries() const override { return false; }
   void ProcessPendingQueries(bool did_finish) override {}
   bool HasMoreIdleWork() const override { return false; }
-  void PerformIdleWork() override { NOTREACHED(); }
-  bool HasPollingWork() const override { return false; }
-  void PerformPollingWork() override { NOTREACHED(); }
+  void PerformIdleWork() override {}
+
+  // TODO(crbug.com/940985): Optimize so that this only returns true when
+  // deviceTick is needed.
+  bool HasPollingWork() const override { return true; }
+
+  void PerformPollingWork() override {
+    DCHECK(dawn_device_);
+    DCHECK(wire_serializer_);
+    TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("gpu.dawn"),
+                 "WebGPUDecoderImpl::PerformPollingWork");
+    dawn_procs_.deviceTick(dawn_device_);
+    wire_serializer_->Flush();
+  }
+
   TextureBase* GetTextureBase(uint32_t client_id) override {
     NOTREACHED();
     return nullptr;
@@ -234,6 +324,22 @@ class WebGPUDecoderImpl final : public WebGPUDecoder {
   // only if not returning an error.
   error::Error current_decoder_error_ = error::kNoError;
 
+  DawnDevice CreateDefaultDevice();
+
+  std::unique_ptr<SharedImageRepresentationFactory>
+      shared_image_representation_factory_;
+  // Map from the <ID, generation> pair for a wire texture to the shared image
+  // representation for it.
+  base::flat_map<std::tuple<uint32_t, uint32_t>,
+                 std::unique_ptr<SharedImageRepresentationDawn>>
+      associated_shared_image_map_;
+
+  std::unique_ptr<WireServerCommandSerializer> wire_serializer_;
+  std::unique_ptr<dawn_native::Instance> dawn_instance_;
+  DawnProcTable dawn_procs_;
+  DawnDevice dawn_device_ = nullptr;
+  std::unique_ptr<dawn_wire::WireServer> wire_server_;
+
   DISALLOW_COPY_AND_ASSIGN(WebGPUDecoderImpl);
 };
 
@@ -252,17 +358,96 @@ constexpr WebGPUDecoderImpl::CommandInfo WebGPUDecoderImpl::command_info[] = {
 WebGPUDecoder* CreateWebGPUDecoderImpl(
     DecoderClient* client,
     CommandBufferServiceBase* command_buffer_service,
+    SharedImageManager* shared_image_manager,
+    MemoryTracker* memory_tracker,
     gles2::Outputter* outputter) {
-  return new WebGPUDecoderImpl(client, command_buffer_service, outputter);
+  return new WebGPUDecoderImpl(client, command_buffer_service,
+                               shared_image_manager, memory_tracker, outputter);
 }
 
 WebGPUDecoderImpl::WebGPUDecoderImpl(
     DecoderClient* client,
     CommandBufferServiceBase* command_buffer_service,
+    SharedImageManager* shared_image_manager,
+    MemoryTracker* memory_tracker,
     gles2::Outputter* outputter)
-    : WebGPUDecoder(client, command_buffer_service, outputter) {}
+    : WebGPUDecoder(client, command_buffer_service, outputter),
+      shared_image_representation_factory_(
+          std::make_unique<SharedImageRepresentationFactory>(
+              shared_image_manager,
+              memory_tracker)),
+      wire_serializer_(new WireServerCommandSerializer(client)),
+      dawn_instance_(new dawn_native::Instance()),
+      dawn_procs_(dawn_native::GetProcs()) {}
 
-WebGPUDecoderImpl::~WebGPUDecoderImpl() {}
+WebGPUDecoderImpl::~WebGPUDecoderImpl() {
+  associated_shared_image_map_.clear();
+
+  // Reset the wire server first so all objects are destroyed before the device.
+  // TODO(enga): Handle Device/Context lost.
+  wire_server_ = nullptr;
+  if (dawn_device_ != nullptr) {
+    dawn_procs_.deviceRelease(dawn_device_);
+  }
+}
+
+ContextResult WebGPUDecoderImpl::Initialize() {
+  dawn_device_ = CreateDefaultDevice();
+  if (dawn_device_ == nullptr) {
+    return ContextResult::kFatalFailure;
+  }
+
+  dawn_wire::WireServerDescriptor descriptor = {};
+  descriptor.device = dawn_device_;
+  descriptor.procs = &dawn_procs_;
+  descriptor.serializer = wire_serializer_.get();
+
+  wire_server_ = std::make_unique<dawn_wire::WireServer>(descriptor);
+
+  return ContextResult::kSuccess;
+}
+
+DawnDevice WebGPUDecoderImpl::CreateDefaultDevice() {
+  dawn_instance_->DiscoverDefaultAdapters();
+  std::vector<dawn_native::Adapter> adapters = dawn_instance_->GetAdapters();
+
+  dawn_native::Adapter integrated_gpu_adapter = {};
+  dawn_native::Adapter cpu_adapter = {};
+  dawn_native::Adapter unknown_adapter = {};
+
+  for (dawn_native::Adapter adapter : adapters) {
+    if (adapter.GetBackendType() != dawn_native::BackendType::Null &&
+        adapter.GetBackendType() != dawn_native::BackendType::OpenGL) {
+      switch (adapter.GetDeviceType()) {
+        case dawn_native::DeviceType::DiscreteGPU:
+          // For now, we always prefer the discrete GPU
+          return adapter.CreateDevice();
+        case dawn_native::DeviceType::IntegratedGPU:
+          integrated_gpu_adapter = adapter;
+          break;
+        case dawn_native::DeviceType::CPU:
+          cpu_adapter = adapter;
+          break;
+        case dawn_native::DeviceType::Unknown:
+          unknown_adapter = adapter;
+          break;
+        default:
+          NOTREACHED();
+          break;
+      }
+    }
+  }
+  if (integrated_gpu_adapter) {
+    return integrated_gpu_adapter.CreateDevice();
+  }
+  if (cpu_adapter) {
+    return cpu_adapter.CreateDevice();
+  }
+  if (unknown_adapter) {
+    return unknown_adapter.CreateDevice();
+  }
+  return nullptr;
+}
 
 const char* WebGPUDecoderImpl::GetCommandName(unsigned int command_id) const {
   if (command_id >= kFirstWebGPUCommand && command_id < kNumCommands) {
@@ -337,9 +522,133 @@ error::Error WebGPUDecoderImpl::DoCommands(unsigned int num_commands,
   return result;
 }
 
-error::Error WebGPUDecoderImpl::HandleDummy(uint32_t immediate_data_size,
-                                            const volatile void* cmd_data) {
-  DLOG(ERROR) << "WebGPUDecoderImpl::HandleDummy";
+error::Error WebGPUDecoderImpl::HandleDawnCommands(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile webgpu::cmds::DawnCommands& c =
+      *static_cast<const volatile webgpu::cmds::DawnCommands*>(cmd_data);
+
+  uint32_t size = static_cast<uint32_t>(c.size);
+  uint32_t commands_shm_id = static_cast<uint32_t>(c.commands_shm_id);
+  uint32_t commands_shm_offset = static_cast<uint32_t>(c.commands_shm_offset);
+
+  const volatile char* shm_commands = GetSharedMemoryAs<const volatile char*>(
+      commands_shm_id, commands_shm_offset, size);
+  if (shm_commands == nullptr) {
+    return error::kOutOfBounds;
+  }
+
+  TRACE_EVENT_FLOW_END0(
+      TRACE_DISABLED_BY_DEFAULT("gpu.dawn"), "DawnCommands",
+      (static_cast<uint64_t>(commands_shm_id) << 32) + commands_shm_offset);
+
+  TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("gpu.dawn"),
+               "WebGPUDecoderImpl::HandleDawnCommands", "bytes", size);
+  std::vector<char> commands(shm_commands, shm_commands + size);
+  if (!wire_server_->HandleCommands(commands.data(), size)) {
+    NOTREACHED();
+    return error::kLostContext;
+  }
+  wire_serializer_->Flush();
+  return error::kNoError;
+}
+
+error::Error WebGPUDecoderImpl::HandleAssociateMailboxImmediate(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile webgpu::cmds::AssociateMailboxImmediate& c =
+      *static_cast<const volatile webgpu::cmds::AssociateMailboxImmediate*>(
+          cmd_data);
+
+  uint32_t device_id = static_cast<uint32_t>(c.device_id);
+  uint32_t device_generation = static_cast<uint32_t>(c.device_generation);
+  uint32_t id = static_cast<uint32_t>(c.id);
+  uint32_t generation = static_cast<uint32_t>(c.generation);
+  uint32_t usage = static_cast<DawnTextureUsageBit>(c.usage);
+
+  // Unpack the mailbox
+  if (sizeof(Mailbox) > immediate_data_size) {
+    return error::kOutOfBounds;
+  }
+  volatile const GLbyte* mailbox_bytes =
+      gles2::GetImmediateDataAs<volatile const GLbyte*>(c, sizeof(Mailbox),
+                                                        immediate_data_size);
+  if (mailbox_bytes == nullptr) {
+    return error::kOutOfBounds;
+  }
+  Mailbox mailbox = Mailbox::FromVolatile(
+      *reinterpret_cast<const volatile Mailbox*>(mailbox_bytes));
+  DLOG_IF(ERROR, !mailbox.Verify())
+      << "AssociateMailbox was passed an invalid mailbox";
+
+  // TODO(cwallez@chromium.org): Use device_id/generation when the decoder
+  // supports multiple devices.
+  if (device_id != 0 || device_generation != 0) {
+    DLOG(ERROR) << "AssociateMailbox: Invalid device ID";
+    return error::kInvalidArguments;
+  }
+
+  static constexpr uint32_t kAllowedTextureUsages = static_cast<uint32_t>(
+      DAWN_TEXTURE_USAGE_BIT_COPY_SRC | DAWN_TEXTURE_USAGE_BIT_COPY_DST |
+      DAWN_TEXTURE_USAGE_BIT_SAMPLED |
+      DAWN_TEXTURE_USAGE_BIT_OUTPUT_ATTACHMENT);
+  if (usage & ~kAllowedTextureUsages) {
+    DLOG(ERROR) << "AssociateMailbox: Invalid usage";
+    return error::kInvalidArguments;
+  }
+  DawnTextureUsageBit dawn_usage = static_cast<DawnTextureUsageBit>(usage);
+
+  // Create a DawnTexture from the mailbox.
+  std::unique_ptr<SharedImageRepresentationDawn> shared_image =
+      shared_image_representation_factory_->ProduceDawn(mailbox, dawn_device_);
+  if (!shared_image) {
+    DLOG(ERROR) << "AssociateMailbox: Couldn't produce shared image";
+    return error::kInvalidArguments;
+  }
+
+  DawnTexture texture = shared_image->BeginAccess(dawn_usage);
+  if (!texture) {
+    DLOG(ERROR) << "AssociateMailbox: Couldn't begin shared image access";
+    return error::kInvalidArguments;
+  }
+
+  // Inject the texture in the dawn_wire::Server and remember which shared image
+  // it is associated with.
+  if (!wire_server_->InjectTexture(texture, id, generation)) {
+    DLOG(ERROR) << "AssociateMailbox: Invalid texture ID";
+    return error::kInvalidArguments;
+  }
+
+  std::tuple<uint32_t, uint32_t> id_and_generation{id, generation};
+  auto insertion = associated_shared_image_map_.emplace(
+      id_and_generation, std::move(shared_image));
+
+  // InjectTexture already validated that the (ID, generation) can't have been
+  // registered before.
+  DCHECK(insertion.second);
+
+  return error::kNoError;
+}
+
+error::Error WebGPUDecoderImpl::HandleDissociateMailbox(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile webgpu::cmds::DissociateMailbox& c =
+      *static_cast<const volatile webgpu::cmds::DissociateMailbox*>(cmd_data);
+
+  uint32_t texture_id = static_cast<uint32_t>(c.texture_id);
+  uint32_t texture_generation = static_cast<uint32_t>(c.texture_generation);
+
+  std::tuple<uint32_t, uint32_t> id_and_generation{texture_id,
+                                                   texture_generation};
+  auto it = associated_shared_image_map_.find(id_and_generation);
+  if (it == associated_shared_image_map_.end()) {
+    DLOG(ERROR) << "DissociateMailbox: Invalid texture ID";
+    return error::kInvalidArguments;
+  }
+
+  it->second->EndAccess();
+  associated_shared_image_map_.erase(it);
   return error::kNoError;
 }
 

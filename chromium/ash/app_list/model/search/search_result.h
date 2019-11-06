@@ -14,7 +14,6 @@
 
 #include "ash/app_list/model/app_list_model_export.h"
 #include "ash/public/cpp/app_list/app_list_types.h"
-#include "ash/public/interfaces/app_list.mojom.h"
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
@@ -38,6 +37,8 @@ class APP_LIST_MODEL_EXPORT SearchResult {
   using Tags = ash::SearchResultTags;
   using Action = ash::SearchResultAction;
   using Actions = ash::SearchResultActions;
+  using DisplayLocation = ash::SearchResultDisplayLocation;
+  using DisplayIndex = ash::SearchResultDisplayIndex;
 
   SearchResult();
   virtual ~SearchResult();
@@ -107,6 +108,23 @@ class APP_LIST_MODEL_EXPORT SearchResult {
     metadata_->result_type = result_type;
   }
 
+  DisplayLocation display_location() const {
+    return metadata_->display_location;
+  }
+  void set_display_location(DisplayLocation display_location) {
+    metadata_->display_location = display_location;
+  }
+
+  DisplayIndex display_index() const { return metadata_->display_index; }
+  void set_display_index(DisplayIndex display_index) {
+    metadata_->display_index = display_index;
+  }
+
+  int result_subtype() const { return metadata_->result_subtype; }
+  void set_result_subtype(int result_subtype) {
+    metadata_->result_subtype = result_subtype;
+  }
+
   int distance_from_origin() { return distance_from_origin_; }
   void set_distance_from_origin(int distance) {
     distance_from_origin_ = distance;
@@ -145,12 +163,12 @@ class APP_LIST_MODEL_EXPORT SearchResult {
   // Invokes a custom action on the result. It does nothing by default.
   virtual void InvokeAction(int action_index, int event_flags);
 
-  void SetMetadata(ash::mojom::SearchResultMetadataPtr metadata);
-  ash::mojom::SearchResultMetadataPtr TakeMetadata() {
+  void SetMetadata(std::unique_ptr<ash::SearchResultMetadata> metadata);
+  std::unique_ptr<ash::SearchResultMetadata> TakeMetadata() {
     return std::move(metadata_);
   }
-  ash::mojom::SearchResultMetadataPtr CloneMetadata() const {
-    return metadata_->Clone();
+  std::unique_ptr<ash::SearchResultMetadata> CloneMetadata() const {
+    return std::make_unique<ash::SearchResultMetadata>(*metadata_);
   }
 
  protected:
@@ -170,7 +188,7 @@ class APP_LIST_MODEL_EXPORT SearchResult {
   int percent_downloaded_ = 0;
   bool is_visible_ = true;
 
-  ash::mojom::SearchResultMetadataPtr metadata_;
+  std::unique_ptr<ash::SearchResultMetadata> metadata_;
 
   base::ObserverList<SearchResultObserver>::Unchecked observers_;
 

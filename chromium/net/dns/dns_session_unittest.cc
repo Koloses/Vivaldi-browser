@@ -45,12 +45,12 @@ class TestClientSocketFactory : public ClientSocketFactory {
   }
 
   std::unique_ptr<SSLClientSocket> CreateSSLClientSocket(
+      SSLClientContext* context,
       std::unique_ptr<StreamSocket> stream_socket,
       const HostPortPair& host_and_port,
-      const SSLConfig& ssl_config,
-      const SSLClientSocketContext& context) override {
+      const SSLConfig& ssl_config) override {
     NOTIMPLEMENTED();
-    return std::unique_ptr<SSLClientSocket>();
+    return nullptr;
   }
 
   std::unique_ptr<ProxyClientSocket> CreateProxyClientSocket(
@@ -63,7 +63,6 @@ class TestClientSocketFactory : public ClientSocketFactory {
       bool using_spdy,
       NextProto negotiated_protocol,
       ProxyDelegate* proxy_delegate,
-      bool is_https_proxy,
       const NetworkTrafficAnnotationTag& traffic_annotation) override {
     NOTIMPLEMENTED();
     return nullptr;
@@ -143,7 +142,7 @@ void DnsSessionTest::Initialize(unsigned num_servers) {
 
   session_ =
       new DnsSession(config_, std::unique_ptr<DnsSocketPool>(dns_socket_pool),
-                     base::Bind(&base::RandInt), NULL /* NetLog */);
+                     base::Bind(&base::RandInt), nullptr /* NetLog */);
 
   events_.clear();
 }

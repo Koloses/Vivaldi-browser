@@ -8,12 +8,15 @@
 #include <memory>
 #include <vector>
 
+#include "android_webview/browser/gfx/aw_gl_surface.h"
 #include "base/memory/ref_counted.h"
+#include "components/viz/common/frame_timing_details_map.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "components/viz/common/surfaces/frame_sink_id_allocator.h"
 #include "components/viz/common/surfaces/local_surface_id_allocation.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "components/viz/service/display/display_client.h"
+#include "gpu/command_buffer/service/shared_context_state.h"
 #include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
 #include "ui/gfx/color_space.h"
 
@@ -23,8 +26,8 @@ class Size;
 class Transform;
 }
 
-namespace gpu {
-class SharedContextState;
+namespace gl {
+class GLShareGroup;
 }
 
 namespace viz {
@@ -55,6 +58,9 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
 
   void AddChildId(const viz::SurfaceId& child_id);
   void RemoveChildId(const viz::SurfaceId& child_id);
+  bool is_using_vulkan() const {
+    return shared_context_state_ && shared_context_state_->GrContextIsVulkan();
+  }
 
  private:
   friend class base::RefCounted<SurfacesInstance>;
@@ -70,15 +76,15 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
   void DisplayDidReceiveCALayerParams(
       const gfx::CALayerParams& ca_layer_params) override {}
   void DisplayDidCompleteSwapWithSize(const gfx::Size& pixel_size) override {}
-  void DidSwapAfterSnapshotRequestReceived(
-      const std::vector<ui::LatencyInfo>& latency_info) override {}
+  void SetPreferredFrameInterval(base::TimeDelta interval) override {}
+  base::TimeDelta GetPreferredFrameIntervalForFrameSinkId(
+      const viz::FrameSinkId& id) override;
 
   // viz::mojom::CompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck(
       const std::vector<viz::ReturnedResource>& resources) override;
   void OnBeginFrame(const viz::BeginFrameArgs& args,
-                    const base::flat_map<uint32_t, gfx::PresentationFeedback>&
-                        feedbacks) override;
+                    const viz::FrameTimingDetailsMap& timing_details) override;
   void OnBeginFramePausedChanged(bool paused) override;
   void ReclaimResources(
       const std::vector<viz::ReturnedResource>& resources) override;
@@ -91,6 +97,7 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
 
   viz::FrameSinkId frame_sink_id_;
 
+  scoped_refptr<AwGLSurface> gl_surface_;
   std::unique_ptr<viz::FrameSinkManagerImpl> frame_sink_manager_;
   std::unique_ptr<viz::BeginFrameSource> begin_frame_source_;
   std::unique_ptr<viz::Display> display_;
@@ -105,6 +112,7 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
 
   gfx::Size surface_size_;
 
+  scoped_refptr<gl::GLShareGroup> share_group_;
   scoped_refptr<gpu::SharedContextState> shared_context_state_;
 
   DISALLOW_COPY_AND_ASSIGN(SurfacesInstance);

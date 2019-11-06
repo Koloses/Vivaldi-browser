@@ -15,6 +15,7 @@
 #include "base/callback.h"
 #include "base/containers/stack.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -35,7 +36,9 @@
 #include "content/browser/appcache/mock_appcache_policy.h"
 #include "content/browser/appcache/mock_appcache_service.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/common/content_features.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_response_headers.h"
@@ -178,8 +181,8 @@ class AppCacheRequestHandlerTest
   };
 
   static void SetUpTestCase() {
-    thread_bundle_.reset(
-        new TestBrowserThreadBundle(TestBrowserThreadBundle::REAL_IO_THREAD));
+    thread_bundle_ = std::make_unique<TestBrowserThreadBundle>(
+        TestBrowserThreadBundle::REAL_IO_THREAD);
     io_task_runner_ =
         base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
   }
@@ -194,8 +197,14 @@ class AppCacheRequestHandlerTest
   AppCacheRequestHandlerTest()
       : host_(nullptr), request_(nullptr), request_handler_type_(GetParam()) {
     AppCacheRequestHandler::SetRunningInTests(true);
-    if (request_handler_type_ == URLLOADER)
-      feature_list_.InitAndEnableFeature(network::features::kNetworkService);
+    if (request_handler_type_ == URLLOADER) {
+      // TODO(http://crbug.com/824840): Enable NavigationLoaderOnUI for these
+      // tests.
+      feature_list_.InitWithFeatures({network::features::kNetworkService},
+                                     {features::kNavigationLoaderOnUI});
+    } else {
+      feature_list_.InitAndDisableFeature(network::features::kNetworkService);
+    }
   }
 
   ~AppCacheRequestHandlerTest() {
@@ -204,9 +213,9 @@ class AppCacheRequestHandlerTest
 
   template <class Method>
   void RunTestOnIOThread(Method method) {
-    test_finished_event_.reset(new base::WaitableEvent(
+    test_finished_event_ = std::make_unique<base::WaitableEvent>(
         base::WaitableEvent::ResetPolicy::AUTOMATIC,
-        base::WaitableEvent::InitialState::NOT_SIGNALED));
+        base::WaitableEvent::InitialState::NOT_SIGNALED);
     io_task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&AppCacheRequestHandlerTest::MethodWrapper<Method>,
@@ -216,22 +225,21 @@ class AppCacheRequestHandlerTest
 
   void SetUpTest() {
     DCHECK(io_task_runner_->BelongsToCurrentThread());
-    mock_service_.reset(new MockAppCacheService);
+    mock_service_ = std::make_unique<MockAppCacheService>();
     // Initializes URLRequestContext on the IO thread.
-    empty_context_.reset(new net::URLRequestContext);
+    empty_context_ = std::make_unique<net::URLRequestContext>();
     mock_service_->set_request_context(empty_context_.get());
-    mock_policy_.reset(new MockAppCachePolicy);
+    mock_policy_ = std::make_unique<MockAppCachePolicy>();
     mock_service_->set_appcache_policy(mock_policy_.get());
-    backend_impl_ = std::make_unique<AppCacheBackendImpl>(mock_service_.get(),
-                                                          kMockProcessId);
-    const int kHostId = 1;
+    const auto kHostId = base::UnguessableToken::Create();
     const int kRenderFrameId = 2;
-    blink::mojom::AppCacheFrontendPtr frontend;
-    mojo::MakeRequest(&frontend);
-    backend_impl_->RegisterHost(mojo::MakeRequest(&host_ptr_),
-                                std::move(frontend), kHostId, kRenderFrameId);
-    host_ = backend_impl_->GetHost(kHostId);
-    job_factory_.reset(new MockURLRequestJobFactory());
+    mojo::PendingRemote<blink::mojom::AppCacheFrontend> frontend_remote;
+    ignore_result(frontend_remote.InitWithNewPipeAndPassReceiver());
+    mock_service_->RegisterHostForFrame(
+        host_remote_.BindNewPipeAndPassReceiver(), std::move(frontend_remote),
+        kHostId, kRenderFrameId, kMockProcessId, GetBadMessageCallback());
+    host_ = mock_service_->GetHost(kHostId);
+    job_factory_ = std::make_unique<MockURLRequestJobFactory>();
     empty_context_->set_job_factory(job_factory_.get());
   }
 
@@ -244,9 +252,9 @@ class AppCacheRequestHandlerTest
     handler_.reset();
     request_ = nullptr;
     url_request_.reset();
-    backend_impl_.reset();
     mock_service_.reset();
     mock_policy_.reset();
+    host_remote_.reset();
     job_factory_.reset();
     empty_context_.reset();
     host_ = nullptr;
@@ -310,7 +318,7 @@ class AppCacheRequestHandlerTest
                        base::Unretained(this)));
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah"), host_,
-                                        RESOURCE_TYPE_MAIN_FRAME));
+                                        ResourceType::kMainFrame));
     EXPECT_TRUE(handler_.get());
 
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
@@ -351,7 +359,7 @@ class AppCacheRequestHandlerTest
                        base::Unretained(this)));
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah"), host_,
-                                        RESOURCE_TYPE_MAIN_FRAME));
+                                        ResourceType::kMainFrame));
     EXPECT_TRUE(handler_.get());
 
     mock_storage()->SimulateFindMainResource(
@@ -393,7 +401,7 @@ class AppCacheRequestHandlerTest
         base::Unretained(this)));
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah"), host_,
-                                        RESOURCE_TYPE_MAIN_FRAME));
+                                        ResourceType::kMainFrame));
     EXPECT_TRUE(handler_.get());
 
     mock_storage()->SimulateFindMainResource(
@@ -413,8 +421,8 @@ class AppCacheRequestHandlerTest
     net::HttpResponseInfo info;
     std::string headers =
         base::StringPrintf("HTTP/1.1 %i Muffin\r\n\r\n", response_code);
-    info.headers = new net::HttpResponseHeaders(
-        net::HttpUtil::AssembleRawHeaders(headers.c_str(), headers.length()));
+    info.headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+        net::HttpUtil::AssembleRawHeaders(headers));
 
     if (request_handler_type_ == URLREQUEST) {
       job_factory_->SetJob(std::make_unique<MockURLRequestJob>(
@@ -487,7 +495,7 @@ class AppCacheRequestHandlerTest
         base::Unretained(this)));
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/fallback-override"),
-                                        host_, RESOURCE_TYPE_MAIN_FRAME));
+                                        host_, ResourceType::kMainFrame));
     EXPECT_TRUE(handler_.get());
 
     mock_storage()->SimulateFindMainResource(
@@ -526,7 +534,7 @@ class AppCacheRequestHandlerTest
         "x-chromium-appcache-fallback-override: disallow-fallback\0"
         "\0";
     net::HttpResponseInfo info;
-    info.headers = new net::HttpResponseHeaders(
+    info.headers = base::MakeRefCounted<net::HttpResponseHeaders>(
         std::string(kOverrideHeaders, base::size(kOverrideHeaders)));
     SimulateResponseInfo(info);
 
@@ -547,7 +555,7 @@ class AppCacheRequestHandlerTest
 
   void SubResource_Miss_WithNoCacheSelected() {
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     // We avoid creating handler when possible, sub-resource requests are not
     // subject to retrieval from an appcache when there's no associated cache.
     EXPECT_FALSE(handler_.get());
@@ -563,7 +571,7 @@ class AppCacheRequestHandlerTest
     host_->AssociateCompleteCache(MakeNewCache());
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());
 
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
@@ -588,7 +596,7 @@ class AppCacheRequestHandlerTest
     host_->set_preferred_manifest_url(cache->owning_group()->manifest_url());
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
     EXPECT_TRUE(job());
@@ -616,7 +624,7 @@ class AppCacheRequestHandlerTest
         AppCacheEntry(AppCacheEntry::EXPLICIT, 1), AppCacheEntry(), false);
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
     EXPECT_TRUE(job());
@@ -642,7 +650,7 @@ class AppCacheRequestHandlerTest
         AppCacheEntry(), AppCacheEntry(AppCacheEntry::EXPLICIT, 1), false);
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
     EXPECT_FALSE(job());
@@ -669,7 +677,7 @@ class AppCacheRequestHandlerTest
         AppCacheEntry(), AppCacheEntry(AppCacheEntry::EXPLICIT, 1), false);
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
     EXPECT_FALSE(job());
@@ -697,7 +705,7 @@ class AppCacheRequestHandlerTest
                                             true);
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
     EXPECT_FALSE(job());
@@ -720,10 +728,10 @@ class AppCacheRequestHandlerTest
         AppCacheEntry(AppCacheEntry::EXPLICIT, 1), AppCacheEntry(), false);
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());
 
-    backend_impl_->UnregisterHost(1);
+    mock_service_->EraseHost(host_->host_id());
     host_ = nullptr;
 
     EXPECT_FALSE(handler_->MaybeLoadResource(nullptr));
@@ -741,14 +749,14 @@ class AppCacheRequestHandlerTest
     host_->pending_selected_cache_id_ = 1;
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());
 
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
     EXPECT_TRUE(job());
     EXPECT_TRUE(job()->IsWaiting());
 
-    backend_impl_->UnregisterHost(1);
+    mock_service_->EraseHost(host_->host_id());
     host_ = nullptr;
 
     if (request_handler_type_ == URLREQUEST) {
@@ -771,12 +779,11 @@ class AppCacheRequestHandlerTest
         AppCacheEntry(AppCacheEntry::EXPLICIT, 1), AppCacheEntry(), false);
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
     EXPECT_TRUE(job());
 
-    backend_impl_.reset();
     mock_service_.reset();
     mock_policy_.reset();
     host_ = nullptr;
@@ -799,7 +806,7 @@ class AppCacheRequestHandlerTest
     host_->pending_selected_cache_id_ = 1;
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("ftp://blah/"), host_,
-                                        RESOURCE_TYPE_SUB_RESOURCE));
+                                        ResourceType::kSubResource));
     EXPECT_TRUE(handler_.get());  // we could redirect to http (conceivably)
 
     EXPECT_FALSE(handler_->MaybeLoadResource(nullptr));
@@ -814,7 +821,7 @@ class AppCacheRequestHandlerTest
 
   void CanceledRequest() {
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_MAIN_FRAME));
+                                        ResourceType::kMainFrame));
     EXPECT_TRUE(handler_.get());
 
     SetAppCacheJob(handler_->MaybeLoadResource(nullptr));
@@ -850,7 +857,7 @@ class AppCacheRequestHandlerTest
                        base::Unretained(this)));
 
     EXPECT_TRUE(CreateRequestAndHandler(GURL("http://blah/"), host_,
-                                        RESOURCE_TYPE_MAIN_FRAME));
+                                        ResourceType::kMainFrame));
     EXPECT_TRUE(handler_.get());
 
     mock_policy_->can_load_return_value_ = false;
@@ -893,6 +900,13 @@ class AppCacheRequestHandlerTest
     return cache;
   }
 
+  mojo::ReportBadMessageCallback GetBadMessageCallback() {
+    return base::BindOnce(&AppCacheRequestHandlerTest::OnBadMessage,
+                          base::Unretained(this));
+  }
+
+  void OnBadMessage(const std::string& reason) { NOTREACHED(); }
+
   MockAppCacheStorage* mock_storage() {
     return reinterpret_cast<MockAppCacheStorage*>(mock_service_->storage());
   }
@@ -904,8 +918,7 @@ class AppCacheRequestHandlerTest
       url_request_ = empty_context_->CreateRequest(
           url, net::DEFAULT_PRIORITY, &delegate_, TRAFFIC_ANNOTATION_FOR_TESTS);
 
-      std::unique_ptr<AppCacheRequest> request =
-          AppCacheURLRequest::Create(url_request_.get());
+      auto request = std::make_unique<AppCacheURLRequest>(url_request_.get());
       request_ = request.get();
       handler_ =
           host->CreateRequestHandler(std::move(request), resource_type, false);
@@ -914,8 +927,8 @@ class AppCacheRequestHandlerTest
       network::ResourceRequest resource_request;
       resource_request.url = url;
       resource_request.method = "GET";
-      std::unique_ptr<AppCacheRequest> request =
-          AppCacheURLLoaderRequest::Create(resource_request);
+      auto request =
+          std::make_unique<AppCacheURLLoaderRequest>(resource_request);
       request_ = request.get();
       handler_ =
           host->CreateRequestHandler(std::move(request), resource_type, false);
@@ -929,10 +942,9 @@ class AppCacheRequestHandlerTest
   std::unique_ptr<base::WaitableEvent> test_finished_event_;
   base::stack<base::OnceClosure> task_stack_;
   std::unique_ptr<MockAppCacheService> mock_service_;
-  std::unique_ptr<AppCacheBackendImpl> backend_impl_;
   std::unique_ptr<MockAppCachePolicy> mock_policy_;
   AppCacheHost* host_;
-  blink::mojom::AppCacheHostPtr host_ptr_;
+  mojo::Remote<blink::mojom::AppCacheHost> host_remote_;
   std::unique_ptr<net::URLRequestContext> empty_context_;
   std::unique_ptr<MockURLRequestJobFactory> job_factory_;
   MockURLRequestDelegate delegate_;

@@ -40,15 +40,14 @@ BrowserAccessibilityAuraLinux::GetNativeViewAccessible() {
   return node_->GetNativeViewAccessible();
 }
 
-void BrowserAccessibilityAuraLinux::OnDataChanged() {
-  BrowserAccessibility::OnDataChanged();
-
-  DCHECK(node_);
-  node_->DataChanged();
-}
-
 void BrowserAccessibilityAuraLinux::UpdatePlatformAttributes() {
   GetNode()->UpdateHypertext();
+}
+
+void BrowserAccessibilityAuraLinux::OnDataChanged() {
+  BrowserAccessibility::OnDataChanged();
+  DCHECK(node_);
+  node_->EnsureAtkObjectIsValid();
 }
 
 bool BrowserAccessibilityAuraLinux::IsNative() const {
@@ -56,7 +55,11 @@ bool BrowserAccessibilityAuraLinux::IsNative() const {
 }
 
 base::string16 BrowserAccessibilityAuraLinux::GetText() const {
-  return GetNode()->AXPlatformNodeAuraLinux::GetText();
+  return GetHypertext();
+}
+
+base::string16 BrowserAccessibilityAuraLinux::GetHypertext() const {
+  return GetNode()->AXPlatformNodeAuraLinux::GetHypertext();
 }
 
 ui::AXPlatformNode* BrowserAccessibilityAuraLinux::GetFromNodeID(int32_t id) {

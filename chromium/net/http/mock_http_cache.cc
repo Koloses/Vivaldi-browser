@@ -11,9 +11,11 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/feature_list.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "net/base/features.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_cache_writers.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -52,8 +54,13 @@ int GetTestModeForEntry(const std::string& key) {
   // If we split the cache by top frame origin, then the origin is prepended to
   // the key. Skip to the second url in the key.
   if (base::StartsWith(url, "_dk_", base::CompareCase::SENSITIVE)) {
-    auto const pos = url.find("\nhttp");
+    auto const pos = url.find(" http");
     url = url.substr(pos + 1);
+    if (base::FeatureList::IsEnabled(
+            net::features::kAppendFrameOriginToNetworkIsolationKey)) {
+      auto const pos = url.find(" http");
+      url = url.substr(pos + 1);
+    }
   }
 
   const MockTransaction* t = FindMockTransaction(GURL(url));
@@ -343,7 +350,7 @@ void MockDiskEntry::IgnoreCallbacks(bool value) {
     return;
   ignore_callbacks_ = value;
   if (!value)
-    StoreAndDeliverCallbacks(false, NULL, CompletionOnceCallback(), 0);
+    StoreAndDeliverCallbacks(false, nullptr, CompletionOnceCallback(), 0);
 }
 
 MockDiskEntry::~MockDiskEntry() = default;
@@ -404,7 +411,8 @@ bool MockDiskEntry::ignore_callbacks_ = false;
 //-----------------------------------------------------------------------------
 
 MockDiskCache::MockDiskCache()
-    : open_count_(0),
+    : Backend(DISK_CACHE),
+      open_count_(0),
       create_count_(0),
       doomed_count_(0),
       max_file_size_(std::numeric_limits<int>::max()),
@@ -420,10 +428,6 @@ MockDiskCache::MockDiskCache()
 
 MockDiskCache::~MockDiskCache() {
   ReleaseAll();
-}
-
-CacheType MockDiskCache::GetCacheType() const {
-  return DISK_CACHE;
 }
 
 int32_t MockDiskCache::GetEntryCount() const {
@@ -728,7 +732,7 @@ disk_cache::Backend* MockHttpCache::backend() {
   disk_cache::Backend* backend;
   int rv = http_cache_.GetBackend(&backend, cb.callback());
   rv = cb.GetResult(rv);
-  return (rv == OK) ? backend : NULL;
+  return (rv == OK) ? backend : nullptr;
 }
 
 MockDiskCache* MockHttpCache::disk_cache() {
@@ -864,10 +868,7 @@ int MockBackendNoCbFactory::CreateBackend(
 //-----------------------------------------------------------------------------
 
 MockBlockingBackendFactory::MockBlockingBackendFactory()
-    : backend_(NULL),
-      block_(true),
-      fail_(false) {
-}
+    : backend_(nullptr), block_(true), fail_(false) {}
 
 MockBlockingBackendFactory::~MockBlockingBackendFactory() = default;
 
@@ -892,7 +893,7 @@ void MockBlockingBackendFactory::FinishCreation() {
     if (!fail_)
       backend_->reset(new MockDiskCache());
     // Running the callback might delete |this|.
-    base::ResetAndReturn(&callback_).Run(Result());
+    std::move(callback_).Run(Result());
   }
 }
 

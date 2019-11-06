@@ -8,10 +8,10 @@
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "chrome/browser/ui/tabs/tab_network_state.h"
-#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/linear_animation.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/paint_throbber.h"
+#include "ui/views/animation/animation_delegate_views.h"
 #include "ui/views/view.h"
 
 namespace base {
@@ -29,7 +29,7 @@ struct TabRendererData;
 // the width is TabIcon::GetIdealWidth(), and the height goes down to the
 // bottom of the enclosing view (this is so the crashed tab can animate out of
 // the bottom).
-class TabIcon : public views::View, public gfx::AnimationDelegate {
+class TabIcon : public views::View, public views::AnimationDelegateViews {
  public:
   // Attention indicator types (use as a bitmask). There is only one visual
   // representation, but the state of each of these is tracked separately and
@@ -75,7 +75,7 @@ class TabIcon : public views::View, public gfx::AnimationDelegate {
   void OnPaint(gfx::Canvas* canvas) override;
   void OnThemeChanged() override;
 
-  // gfx::AnimationDelegate:
+  // views::AnimationDelegateViews:
   void AnimationProgressed(const gfx::Animation* animation) override;
   void AnimationEnded(const gfx::Animation* animation) override;
 
@@ -123,6 +123,8 @@ class TabIcon : public views::View, public gfx::AnimationDelegate {
   bool is_crashed_ = false;
   int attention_types_ = 0;  // Bitmask of AttentionType.
 
+  const bool use_new_loading_animation_;
+
   // Value from last call to SetNetworkState. When true, the network loading
   // animation will not be shown.
   bool inhibit_loading_animation_ = false;
@@ -160,6 +162,8 @@ class TabIcon : public views::View, public gfx::AnimationDelegate {
   bool can_paint_to_layer_ = false;
 
   SkColor bg_color_ = SK_ColorBLACK;
+
+  bool has_tab_renderer_data_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TabIcon);
 };

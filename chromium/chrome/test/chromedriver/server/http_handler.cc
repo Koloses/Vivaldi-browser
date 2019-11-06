@@ -33,6 +33,7 @@
 #include "chrome/test/chromedriver/session_thread_map.h"
 #include "chrome/test/chromedriver/util.h"
 #include "chrome/test/chromedriver/version.h"
+#include "chrome/test/chromedriver/webauthn_commands.h"
 #include "net/server/http_server_request_info.h"
 #include "net/server/http_server_response_info.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -49,6 +50,13 @@ namespace {
 const char kLocalStorage[] = "localStorage";
 const char kSessionStorage[] = "sessionStorage";
 const char kShutdownPath[] = "shutdown";
+
+bool w3cMode(const std::string& session_id,
+             const SessionThreadMap& session_thread_map) {
+  if (session_id.length() > 0 && session_thread_map.count(session_id) > 0)
+    return session_thread_map.at(session_id)->w3cMode();
+  return kW3CDefault;
+}
 
 }  // namespace
 
@@ -108,18 +116,14 @@ CommandMapping::~CommandMapping() {}
 HttpHandler::HttpHandler(const std::string& url_base)
     : url_base_(url_base),
       received_shutdown_(false),
-      command_map_(new CommandMap()),
-      weak_ptr_factory_(this) {}
+      command_map_(new CommandMap()) {}
 
 HttpHandler::HttpHandler(
     const base::Closure& quit_func,
     const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     const std::string& url_base,
     int adb_port)
-    : quit_func_(quit_func),
-      url_base_(url_base),
-      received_shutdown_(false),
-      weak_ptr_factory_(this) {
+    : quit_func_(quit_func), url_base_(url_base), received_shutdown_(false) {
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool autorelease_pool;
 #endif
@@ -184,6 +188,9 @@ HttpHandler::HttpHandler(
       CommandMapping(
           kDelete, "session/:sessionId/window",
           WrapToCommand("CloseWindow", base::BindRepeating(&ExecuteClose))),
+      CommandMapping(
+          kPost, "session/:sessionId/window/new",
+          WrapToCommand("NewWindow", base::BindRepeating(&ExecuteNewWindow))),
       CommandMapping(
           kPost, "session/:sessionId/window",
           WrapToCommand("SwitchToWindow",
@@ -474,12 +481,14 @@ HttpHandler::HttpHandler(
                                    base::BindRepeating(&ExecuteElementEquals),
                                    false /*w3c_standard_command*/)),
 
-      // No W3C equivalent.
+      // No W3C equivalent. Allowed in W3C mode due to active usage by some APIs
+      // and the difficulty for clients to provide an equivalent implementation.
+      // This endpoint is mentioned in an appendix of W3C spec
+      // (https://www.w3.org/TR/webdriver/#element-displayedness).
       CommandMapping(
           kGet, "session/:sessionId/element/:id/displayed",
           WrapToCommand("IsElementDisplayed",
-                        base::BindRepeating(&ExecuteIsElementDisplayed),
-                        false /*w3c_standard_command*/)),
+                        base::BindRepeating(&ExecuteIsElementDisplayed))),
 
       // No W3C equivalent.
       CommandMapping(
@@ -501,20 +510,6 @@ HttpHandler::HttpHandler(
                      WrapToCommand("GetElementSize",
                                    base::BindRepeating(&ExecuteGetElementSize),
                                    false /*w3c_standard_command*/)),
-
-      // No W3C equivalent.
-      CommandMapping(
-          kGet, "session/:sessionId/orientation",
-          WrapToCommand("GetScreenOrientation",
-                        base::BindRepeating(&ExecuteGetScreenOrientation),
-                        false /*w3c_standard_command*/)),
-
-      // No W3C equivalent.
-      CommandMapping(
-          kPost, "session/:sessionId/orientation",
-          WrapToCommand("SetScreenOrientation",
-                        base::BindRepeating(&ExecuteSetScreenOrientation),
-                        false /*w3c_standard_command*/)),
 
       // Similar to W3C GET /session/:sessionId/alert/text.
       CommandMapping(
@@ -704,13 +699,14 @@ HttpHandler::HttpHandler(
                                                        kSessionStorage),
                                    false /*w3c_standard_command*/)),
 
-      // No W3C equivalent.
+      // No W3C equivalent, temporarily enabled until clients start using
+      // "session/:sessionId/se/log".
+      // Superseded by "session/:sessionId/se/log".
       CommandMapping(
           kPost, "session/:sessionId/log",
-          WrapToCommand("GetLog", base::BindRepeating(&ExecuteGetLog),
-                        false /*w3c_standard_command*/)),
+          WrapToCommand("GetLog", base::BindRepeating(&ExecuteGetLog))),
 
-      // No W3C equivalent.
+      // No W3C equivalent. Superseded by "session/:sessionId/se/log/types".
       CommandMapping(
           kGet, "session/:sessionId/log/types",
           WrapToCommand("GetLogTypes",
@@ -742,6 +738,61 @@ HttpHandler::HttpHandler(
           kPost, "session/:sessionId/network_connection",
           WrapToCommand("SetNetworkConnection",
                         base::BindRepeating(&ExecuteSetNetworkConnection))),
+
+      // Extension for WebAuthn API:
+      // TODO(nsatragno): Update the link to the official spec once it lands.
+      // https://github.com/w3c/webauthn/pull/1256
+      CommandMapping(kPost, "session/:sessionId/webauthn/authenticator",
+                     WrapToCommand("AddVirtualAuthenticator",
+                                   base::BindRepeating(
+                                       &ExecuteWebAuthnCommand,
+                                       base::BindRepeating(
+                                           &ExecuteAddVirtualAuthenticator)))),
+      CommandMapping(
+          kDelete, "session/:sessionId/webauthn/authenticator/:authenticatorId",
+          WrapToCommand(
+              "RemoveVirtualAuthenticator",
+              base::BindRepeating(
+                  &ExecuteWebAuthnCommand,
+                  base::BindRepeating(&ExecuteRemoveVirtualAuthenticator)))),
+
+      //
+      // Non-standard extension commands
+      //
+
+      // Commands to access Chrome logs, defined by agreement with Selenium.
+      // Using "se" prefix for "Selenium".
+      CommandMapping(
+          kPost, "session/:sessionId/se/log",
+          WrapToCommand("GetLog", base::BindRepeating(&ExecuteGetLog))),
+      CommandMapping(
+          kGet, "session/:sessionId/se/log/types",
+          WrapToCommand("GetLogTypes",
+                        base::BindRepeating(&ExecuteGetAvailableLogTypes))),
+      // Command is used by Selenium Java tests
+      CommandMapping(
+          kPost, "session/:sessionId/file",
+          WrapToCommand("UploadFile", base::BindRepeating(&ExecuteUploadFile))),
+      // Command is used by Ruby OSS mode
+      // No W3C equivalent.
+      CommandMapping(kGet, "session/:sessionId/element/:id/value",
+                     WrapToCommand("GetElementValue",
+                                   base::BindRepeating(&ExecuteGetElementValue),
+                                   false /*w3c_standard_command*/)),
+      // Command is used by Selenium Java tests
+      CommandMapping(
+          kGet, kShutdownPath,
+          base::BindRepeating(
+              &ExecuteQuitAll,
+              WrapToCommand("QuitAll", base::BindRepeating(&ExecuteQuit, true)),
+              &session_thread_map_)),
+      // Command is used by Selenium Java tests
+      CommandMapping(
+          kPost, kShutdownPath,
+          base::BindRepeating(
+              &ExecuteQuitAll,
+              WrapToCommand("QuitAll", base::BindRepeating(&ExecuteQuit, true)),
+              &session_thread_map_)),
 
       //
       // ChromeDriver specific extension commands.
@@ -802,7 +853,8 @@ HttpHandler::HttpHandler(
                         base::BindRepeating(&ExecuteGetIssueMessage))),
 
       //
-      // Commands of unknown origins.
+      // Commands used for internal testing only.
+      // They are used in run_py_tests.py
       //
 
       CommandMapping(kGet, "session/:sessionId/alert",
@@ -811,46 +863,9 @@ HttpHandler::HttpHandler(
                                        &ExecuteAlertCommand,
                                        base::BindRepeating(&ExecuteGetAlert)))),
       CommandMapping(
-          kPost, "session/:sessionId/file",
-          WrapToCommand("UploadFile", base::BindRepeating(&ExecuteUploadFile))),
-      CommandMapping(
-          kGet, "session/:sessionId/element/:id/value",
-          WrapToCommand("GetElementValue",
-                        base::BindRepeating(&ExecuteGetElementValue))),
-      CommandMapping(
-          kPost, "session/:sessionId/element/:id/hover",
-          WrapToCommand("HoverElement",
-                        base::BindRepeating(&ExecuteHoverOverElement))),
-      CommandMapping(
-          kDelete, "session/:sessionId/orientation",
-          WrapToCommand("DeleteScreenOrientation",
-                        base::BindRepeating(&ExecuteDeleteScreenOrientation))),
-      CommandMapping(
-          kGet, kShutdownPath,
-          base::BindRepeating(
-              &ExecuteQuitAll,
-              WrapToCommand("QuitAll", base::BindRepeating(&ExecuteQuit, true)),
-              &session_thread_map_)),
-      CommandMapping(
-          kPost, kShutdownPath,
-          base::BindRepeating(
-              &ExecuteQuitAll,
-              WrapToCommand("QuitAll", base::BindRepeating(&ExecuteQuit, true)),
-              &session_thread_map_)),
-      CommandMapping(
           kGet, "session/:sessionId/is_loading",
           WrapToCommand("IsLoading", base::BindRepeating(&ExecuteIsLoading))),
-      CommandMapping(
-          kGet, "session/:sessionId/autoreport",
-          WrapToCommand("IsAutoReporting",
-                        base::BindRepeating(&ExecuteIsAutoReporting))),
-      CommandMapping(
-          kPost, "session/:sessionId/autoreport",
-          WrapToCommand("SetAutoReporting",
-                        base::BindRepeating(&ExecuteSetAutoReporting))),
-      CommandMapping(
-          kPost, "session/:sessionId/touch/pinch",
-          WrapToCommand("TouchPinch", base::BindRepeating(&ExecuteTouchPinch))),
+
   };
   command_map_.reset(new CommandMap(commands, commands + base::size(commands)));
 }
@@ -912,11 +927,11 @@ void HttpHandler::HandleCommand(
   CommandMap::const_iterator iter = command_map_->begin();
   while (true) {
     if (iter == command_map_->end()) {
-      if (kW3CDefault) {
+      if (w3cMode(session_id, session_thread_map_)) {
         PrepareResponse(
             trimmed_path, send_response_func,
             Status(kUnknownCommand, "unknown command: " + trimmed_path),
-            nullptr, session_id, kW3CDefault);
+            nullptr, session_id, true);
       } else {
         std::unique_ptr<net::HttpServerResponseInfo> response(
             new net::HttpServerResponseInfo(net::HTTP_NOT_FOUND));
@@ -937,10 +952,10 @@ void HttpHandler::HandleCommand(
     std::unique_ptr<base::Value> parsed_body =
         base::JSONReader::ReadDeprecated(request.data);
     if (!parsed_body || !parsed_body->GetAsDictionary(&body_params)) {
-      if (kW3CDefault) {
+      if (w3cMode(session_id, session_thread_map_)) {
         PrepareResponse(trimmed_path, send_response_func,
                         Status(kInvalidArgument, "missing command parameters"),
-                        nullptr, session_id, kW3CDefault);
+                        nullptr, session_id, true);
       } else {
         std::unique_ptr<net::HttpServerResponseInfo> response(
             new net::HttpServerResponseInfo(net::HTTP_BAD_REQUEST));
@@ -950,12 +965,13 @@ void HttpHandler::HandleCommand(
       return;
     }
     params.MergeDictionary(body_params);
-  } else if (kW3CDefault && iter->method == kPost) {
+  } else if (iter->method == kPost &&
+             w3cMode(session_id, session_thread_map_)) {
     // Data in JSON format is required for POST requests. See step 5 of
     // https://www.w3.org/TR/2018/REC-webdriver1-20180605/#processing-model.
     PrepareResponse(trimmed_path, send_response_func,
                     Status(kInvalidArgument, "missing command parameters"),
-                    nullptr, session_id, kW3CDefault);
+                    nullptr, session_id, true);
     return;
   }
 
@@ -1060,6 +1076,9 @@ HttpHandler::PrepareStandardResponse(
     case kInvalidSelector:
       response.reset(new net::HttpServerResponseInfo(net::HTTP_BAD_REQUEST));
       break;
+    case kInvalidSessionId:
+      response.reset(new net::HttpServerResponseInfo(net::HTTP_NOT_FOUND));
+      break;
     case kJavaScriptError:
       response.reset(
           new net::HttpServerResponseInfo(net::HTTP_INTERNAL_SERVER_ERROR));
@@ -1085,7 +1104,7 @@ HttpHandler::PrepareStandardResponse(
       break;
     case kScriptTimeout:
       response.reset(
-          new net::HttpServerResponseInfo(net::HTTP_REQUEST_TIMEOUT));
+          new net::HttpServerResponseInfo(net::HTTP_INTERNAL_SERVER_ERROR));
       break;
     case kSessionNotCreated:
       response.reset(
@@ -1127,11 +1146,16 @@ HttpHandler::PrepareStandardResponse(
     case kNoSuchExecutionContext:
       response.reset(new net::HttpServerResponseInfo(net::HTTP_BAD_REQUEST));
       break;
-    case kInvalidSessionId:
     case kChromeNotReachable:
     case kDisconnected:
     case kForbidden:
     case kTabCrashed:
+      response.reset(
+          new net::HttpServerResponseInfo(net::HTTP_INTERNAL_SERVER_ERROR));
+      break;
+
+    default:
+      DCHECK(false);
       response.reset(
           new net::HttpServerResponseInfo(net::HTTP_INTERNAL_SERVER_ERROR));
       break;
@@ -1142,25 +1166,22 @@ HttpHandler::PrepareStandardResponse(
 
   base::DictionaryValue body_params;
   if (status.IsError()){
-    // Separates status default message from additional details.
-    std::string error;
-    std::string message(status.message());
-    std::string::size_type separator = message.find_first_of(":\n");
-    if (separator == std::string::npos) {
-      error = message;
-      message.clear();
-    } else {
-      error = message.substr(0, separator);
-      separator++;
-      while (separator < message.length() && message[separator] == ' ')
-        separator++;
-      message = message.substr(separator);
-    }
     std::unique_ptr<base::DictionaryValue> inner_params(
         new base::DictionaryValue());
-    inner_params->SetString("error", error);
-    inner_params->SetString("message", message);
+    inner_params->SetString("error", StatusCodeToString(status.code()));
+    inner_params->SetString("message", status.message());
     inner_params->SetString("stacktrace", status.stack_trace());
+    // According to
+    // https://www.w3.org/TR/2018/REC-webdriver1-20180605/#dfn-annotated-unexpected-alert-open-error
+    // error UnexpectedAlertOpen should contain 'data.text' with alert text
+    if (status.code() == kUnexpectedAlertOpen) {
+      const std::string& message = status.message();
+      unsigned first = message.find("{");
+      unsigned last = message.find_last_of("}");
+      std::string alertText = message.substr(first, last-first);
+      alertText = alertText.substr(alertText.find(":") + 2);
+      inner_params->SetString("data.text", alertText);
+    }
     body_params.SetDictionary("value", std::move(inner_params));
   } else {
     body_params.Set("value", std::move(value));

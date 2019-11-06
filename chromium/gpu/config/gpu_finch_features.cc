@@ -43,7 +43,7 @@ const base::Feature kAndroidSurfaceControl{"AndroidSurfaceControl",
 // Enable GPU Rasterization by default. This can still be overridden by
 // --force-gpu-rasterization or --disable-gpu-rasterization.
 #if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_CHROMEOS) || \
-    defined(OS_ANDROID)
+    defined(OS_ANDROID) || defined(OS_FUCHSIA)
 // DefaultEnableGpuRasterization has launched on Mac, Windows, ChromeOS, and
 // Android.
 const base::Feature kDefaultEnableGpuRasterization{
@@ -58,21 +58,41 @@ const base::Feature kDefaultEnableGpuRasterization{
 const base::Feature kDefaultEnableOopRasterization{
     "DefaultEnableOopRasterization", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Use the passthrough command decoder by default.  This can be overridden with
-// the --use-cmd-decoder=passthrough or --use-cmd-decoder=validating flags.
-const base::Feature kDefaultPassthroughCommandDecoder{
-    "DefaultPassthroughCommandDecoder", base::FEATURE_DISABLED_BY_DEFAULT};
-
-
-// Overrides preferred overlay format to NV12 instead of YUY2.
-const base::Feature kDirectCompositionPreferNV12Overlays{
-    "DirectCompositionPreferNV12Overlays", base::FEATURE_ENABLED_BY_DEFAULT};
-
 // Allow putting a video swapchain underneath the main swapchain, so overlays
 // can be used even if there are controls on top of the video. It can be
 // enabled only when overlay is supported.
 const base::Feature kDirectCompositionUnderlays{
-    "DirectCompositionUnderlays", base::FEATURE_DISABLED_BY_DEFAULT};
+    "DirectCompositionUnderlays", base::FEATURE_ENABLED_BY_DEFAULT};
+
+#if defined(OS_WIN)
+// Use a high priority for GPU process on Windows.
+const base::Feature kGpuProcessHighPriorityWin{
+    "GpuProcessHighPriorityWin", base::FEATURE_DISABLED_BY_DEFAULT};
+#endif
+
+// Use ThreadPriority::DISPLAY for GPU main, viz compositor and IO threads.
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+const base::Feature kGpuUseDisplayThreadPriority{
+    "GpuUseDisplayThreadPriority", base::FEATURE_ENABLED_BY_DEFAULT};
+#else
+const base::Feature kGpuUseDisplayThreadPriority{
+    "GpuUseDisplayThreadPriority", base::FEATURE_DISABLED_BY_DEFAULT};
+#endif
+
+// Allow GPU watchdog to keep waiting for ackowledgement if one is already
+// issued from the monitored thread.
+const base::Feature kGpuWatchdogNoTerminationAwaitingAcknowledge{
+    "GpuWatchdogNoTerminationAwaitingAcknowledge",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Gpu watchdog V2 to simplify the logic and reduce GPU hangs
+const base::Feature kGpuWatchdogV2{"GpuWatchdogV2",
+                                   base::FEATURE_DISABLED_BY_DEFAULT};
+
+#if defined(OS_MACOSX)
+// Enable use of Metal for OOP rasterization.
+const base::Feature kMetal{"Metal", base::FEATURE_DISABLED_BY_DEFAULT};
+#endif
 
 // Causes us to use the SharedImageManager, removing support for the old
 // mailbox system. Any consumers of the GPU process using the old mailbox
@@ -84,11 +104,6 @@ const base::Feature kSharedImageManager{"SharedImageManager",
 // for all GPUs
 const base::Feature kUseDCOverlaysForSoftwareProtectedVideo{
     "UseDCOverlaysForSoftwareProtectedVideo",
-    base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Use decode swap chain created from compatible video decoder buffers.
-const base::Feature kDirectCompositionUseNV12DecodeSwapChain{
-    "DirectCompositionUseNV12DecodeSwapChain",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Controls the decode acceleration of JPEG images (as opposed to camera

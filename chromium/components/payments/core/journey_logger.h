@@ -6,6 +6,7 @@
 #define COMPONENTS_PAYMENTS_CORE_JOURNEY_LOGGER_H_
 
 #include <string>
+#include <unordered_map>
 
 #include "base/macros.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
@@ -40,6 +41,7 @@ class JourneyLogger {
     COMPLETION_STATUS_COMPLETED = 0,
     COMPLETION_STATUS_USER_ABORTED = 1,
     COMPLETION_STATUS_OTHER_ABORTED = 2,
+    COMPLETION_STATUS_COULD_NOT_SHOW = 3,
     COMPLETION_STATUS_MAX,
   };
 
@@ -96,7 +98,12 @@ class JourneyLogger {
     // not called, or the user was in incognito mode.
     EVENT_HAS_ENROLLED_INSTRUMENT_TRUE = 1 << 21,
     EVENT_HAS_ENROLLED_INSTRUMENT_FALSE = 1 << 22,
-    EVENT_ENUM_MAX = 2097152,
+    // True when a NotShownReason is set.
+    EVENT_COULD_NOT_SHOW = 1 << 23,
+    EVENT_NEEDS_COMPLETION_CONTACT_INFO = 1 << 24,
+    EVENT_NEEDS_COMPLETION_PAYMENT = 1 << 25,
+    EVENT_NEEDS_COMPLETION_SHIPPING = 1 << 26,
+    EVENT_ENUM_MAX = 1 << 27,
   };
 
   // The reason why the Payment Request was aborted.
@@ -182,6 +189,12 @@ class JourneyLogger {
   // reason.
   void SetNotShown(NotShownReason reason);
 
+  // Records the transcation amount separated by currency and completion status
+  // (complete vs triggered).
+  void RecordTransactionAmount(std::string currency,
+                               const std::string& value,
+                               bool completed);
+
  private:
   static const int NUMBER_OF_SECTIONS = 3;
 
@@ -225,8 +238,14 @@ class JourneyLogger {
   // Payment Request.
   void RecordEventsMetric(CompletionStatus completion_status);
 
+  // Validates the recorded event sequence during the Payment Request.
+  void ValidateEventBits() const;
+
   // Returns whether this Payment Request was triggered (shown or skipped show).
   bool WasPaymentRequestTriggered();
+
+  // Sets needs completion bit in events_ bit field for the given section.
+  void SetSectionNeedsCompletion(Section section);
 
   SectionStats sections_[NUMBER_OF_SECTIONS];
   bool has_recorded_ = false;
@@ -234,6 +253,10 @@ class JourneyLogger {
 
   // Accumulates the many events that have happened during the Payment Request.
   int events_;
+
+  // Keeps track of whether transaction amounts are recorded or not to catch
+  // multiple recording. Triggered is the first index and Completed the second.
+  bool has_recorded_transaction_amount_[2] = {false};
 
   ukm::SourceId source_id_;
 

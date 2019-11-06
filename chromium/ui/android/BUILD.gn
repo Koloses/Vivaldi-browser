@@ -111,11 +111,11 @@ generate_jni("ui_android_jni_headers") {
     "java/src/org/chromium/ui/resources/ResourceFactory.java",
     "java/src/org/chromium/ui/resources/ResourceManager.java",
   ]
-  jni_package = "ui_android"
 }
 
 java_cpp_enum("java_enums_srcjar") {
   sources = [
+    "../base/ime/text_input_action.h",
     "../base/ime/text_input_type.h",
     "../base/page_transition_types.h",
     "../base/pointer/pointer_device.h",
@@ -237,6 +237,7 @@ android_library("ui_full_java") {
     "java/src/org/chromium/ui/DropdownPopupWindowInterface.java",
     "java/src/org/chromium/ui/HorizontalListDividerDrawable.java",
     "java/src/org/chromium/ui/OverscrollRefreshHandler.java",
+    "java/src/org/chromium/ui/UiSwitches.java",
     "java/src/org/chromium/ui/ViewProvider.java",
     "java/src/org/chromium/ui/VSyncMonitor.java",
     "java/src/org/chromium/ui/base/ActivityAndroidPermissionDelegate.java",
@@ -273,6 +274,7 @@ android_library("ui_full_java") {
     "java/src/org/chromium/ui/interpolators/BakedBezierInterpolator.java",
     "java/src/org/chromium/ui/modaldialog/DialogDismissalCause.java",
     "java/src/org/chromium/ui/modaldialog/ModalDialogManager.java",
+    "java/src/org/chromium/ui/modaldialog/ModalDialogManagerHolder.java",
     "java/src/org/chromium/ui/modaldialog/ModalDialogProperties.java",
     "java/src/org/chromium/ui/modelutil/ForwardingListObservable.java",
     "java/src/org/chromium/ui/modelutil/LazyConstructionPropertyMcp.java",
@@ -310,6 +312,8 @@ android_library("ui_full_java") {
     "java/src/org/chromium/ui/resources/system/SystemResourceLoader.java",
     "java/src/org/chromium/ui/text/NoUnderlineClickableSpan.java",
     "java/src/org/chromium/ui/text/SpanApplier.java",
+    "java/src/org/chromium/ui/touchless/CursorObserver.java",
+    "java/src/org/chromium/ui/touchless/TouchlessEventHandler.java",
     "java/src/org/chromium/ui/widget/AnchoredPopupWindow.java",
     "java/src/org/chromium/ui/widget/ButtonCompat.java",
     "java/src/org/chromium/ui/widget/CheckableImageView.java",
@@ -331,13 +335,13 @@ android_library("ui_full_java") {
     ":ui_java_resources",
     ":ui_utils_java",
     "//base:base_java",
-    "//third_party/android_deps:android_support_annotations_java",
     "//third_party/android_deps:android_support_v7_appcompat_java",
-    "//third_party/android_deps:android_support_v7_recyclerview_java",
+    "//third_party/android_deps:com_android_support_recyclerview_v7_java",
+    "//third_party/android_deps:com_android_support_support_annotations_java",
   ]
   srcjar_deps = [
     ":java_enums_srcjar",
-    "//third_party/blink/public:blink_cursor_type_java_enums_srcjar",
+    "//ui/base:ui_base_cursor_type_java_enums_srcjar",
   ]
 }
 
@@ -374,13 +378,18 @@ junit_binary("ui_junit_tests") {
     "junit/src/org/chromium/ui/drawable/StateListDrawableBuilderTest.java",
     "junit/src/org/chromium/ui/modaldialog/ModalDialogManagerTest.java",
     "junit/src/org/chromium/ui/modelutil/LazyConstructionPropertyMcpTest.java",
+    "junit/src/org/chromium/ui/modelutil/ListModelBaseTest.java",
+    "junit/src/org/chromium/ui/modelutil/ModelListAdapterTest.java",
+    "junit/src/org/chromium/ui/modelutil/PropertyListModelTest.java",
     "junit/src/org/chromium/ui/modelutil/PropertyModelTest.java",
     "junit/src/org/chromium/ui/modelutil/SimpleListObservableTest.java",
-    "junit/src/org/chromium/ui/text/SpanApplierTest.java",
+    "junit/src/org/chromium/ui/resources/dynamics/BitmapDynamicResourceTest.java",
+    "junit/src/org/chromium/ui/resources/dynamics/ViewResourceAdapterTest.java",
     "junit/src/org/chromium/ui/shadows/ShadowAsyncLayoutInflater.java",
     "junit/src/org/chromium/ui/shadows/ShadowAppCompatResources.java",
     "junit/src/org/chromium/ui/shadows/ShadowAppCompatResourcesTest.java",
     "junit/src/org/chromium/ui/shadows/ShadowAnimatedStateListDrawable.java",
+    "junit/src/org/chromium/ui/text/SpanApplierTest.java",
     "junit/src/org/chromium/ui/widget/AnchoredPopupWindowTest.java",
   ]
   deps = [
@@ -390,12 +399,12 @@ junit_binary("ui_junit_tests") {
     "//base:base_java",
     "//base:base_java_test_support",
     "//base:base_junit_test_support",
+    "//base/test:test_support_java",
   ]
 }
 
 test("ui_android_unittests") {
   sources = [
-    "delegated_frame_host_android_unittest.cc",
     "overscroll_refresh_unittest.cc",
     "resources/resource_manager_impl_unittest.cc",
     "run_all_unittests.cc",

@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/vr/test/mock_xr_device_hook_base.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "device/vr/public/mojom/isolated_xr_service.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 
@@ -39,10 +39,10 @@ device_test::mojom::ControllerFrameDataPtr DeviceToMojoControllerFrameData(
   ret->is_valid = data.is_valid;
   ret->pose_data = device_test::mojom::PoseFrameData::New();
   ret->pose_data->device_to_origin = gfx::Transform();
-  for (int row = 0; row < 4; ++row) {
-    for (int col = 0; col < 4; ++col) {
+  for (int col = 0; col < 4; ++col) {
+    for (int row = 0; row < 4; ++row) {
       ret->pose_data->device_to_origin->matrix().set(
-          row, col, data.pose_data.device_to_origin[row * 4 + col]);
+          row, col, data.pose_data.device_to_origin[row + col * 4]);
     }
   }
   return ret;
@@ -52,11 +52,9 @@ MockXRDeviceHookBase::MockXRDeviceHookBase()
     : tracked_classes_{device_test::mojom::TrackedDeviceClass::
                            kTrackedDeviceInvalid},
       binding_(this) {
-  content::ServiceManagerConnection* connection =
-      content::ServiceManagerConnection::GetForProcess();
-  connection->GetConnector()->BindInterface(
+  content::GetSystemConnector()->BindInterface(
       device::mojom::kVrIsolatedServiceName,
-      mojo::MakeRequest(&test_hook_registration_));
+      mojo::MakeRequest(&service_test_hook_));
 
   device_test::mojom::XRTestHookPtr client;
   binding_.Bind(mojo::MakeRequest(&client));
@@ -65,7 +63,7 @@ MockXRDeviceHookBase::MockXRDeviceHookBase()
   // For now, always have the HMD connected.
   tracked_classes_[0] =
       device_test::mojom::TrackedDeviceClass::kTrackedDeviceHmd;
-  test_hook_registration_->SetTestHook(std::move(client));
+  service_test_hook_->SetTestHook(std::move(client));
 }
 
 MockXRDeviceHookBase::~MockXRDeviceHookBase() {
@@ -73,11 +71,11 @@ MockXRDeviceHookBase::~MockXRDeviceHookBase() {
 }
 
 void MockXRDeviceHookBase::StopHooking() {
-  // We don't call test_hook_registration_->SetTestHook(nullptr), since that
+  // We don't call service_test_hook_->SetTestHook(nullptr), since that
   // will potentially deadlock with reentrant or crossing synchronous mojo
   // calls.
   binding_.Close();
-  test_hook_registration_ = nullptr;
+  service_test_hook_ = nullptr;
 }
 
 void MockXRDeviceHookBase::OnFrameSubmitted(
@@ -164,6 +162,11 @@ unsigned int MockXRDeviceHookBase::ConnectController(
   // NOTREACHED should make it unnecessary to return here (as it does elsewhere
   // in the code), but compilation fails if this is not present.
   return device::kMaxTrackedDevices;
+}
+
+void MockXRDeviceHookBase::TerminateDeviceServiceProcessForTesting() {
+  mojo::ScopedAllowSyncCallForTesting scoped_allow_sync;
+  service_test_hook_->TerminateDeviceServiceProcessForTesting();
 }
 
 void MockXRDeviceHookBase::UpdateController(

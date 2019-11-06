@@ -111,8 +111,7 @@ class ReceivedCallback {
 
 class HandledEventCallbackTracker {
  public:
-  HandledEventCallbackTracker()
-      : handling_event_(false), weak_ptr_factory_(this) {
+  HandledEventCallbackTracker() : handling_event_(false) {
     weak_this_ = weak_ptr_factory_.GetWeakPtr();
   }
 
@@ -144,7 +143,7 @@ class HandledEventCallbackTracker {
  private:
   std::vector<ReceivedCallback> callbacks_received_;
   base::WeakPtr<HandledEventCallbackTracker> weak_this_;
-  base::WeakPtrFactory<HandledEventCallbackTracker> weak_ptr_factory_;
+  base::WeakPtrFactory<HandledEventCallbackTracker> weak_ptr_factory_{this};
 };
 
 class MainThreadEventQueueTest : public testing::Test,
@@ -335,7 +334,7 @@ TEST_F(MainThreadEventQueueTest, NonBlockingWheel) {
 
   {
     WebMouseWheelEvent coalesced_event = kEvents[0];
-    std::vector<const WebInputEvent*> coalesced_events =
+    blink::WebVector<const WebInputEvent*> coalesced_events =
         handled_tasks_[0]->taskAsEvent()->GetCoalescedEventsPointers();
     const WebMouseWheelEvent* coalesced_wheel_event0 =
         static_cast<const WebMouseWheelEvent*>(coalesced_events[0]);
@@ -364,7 +363,7 @@ TEST_F(MainThreadEventQueueTest, NonBlockingWheel) {
 
   {
     WebMouseWheelEvent coalesced_event = kEvents[2];
-    std::vector<const WebInputEvent*> coalesced_events =
+    blink::WebVector<const WebInputEvent*> coalesced_events =
         handled_tasks_[1]->taskAsEvent()->GetCoalescedEventsPointers();
     const WebMouseWheelEvent* coalesced_wheel_event0 =
         static_cast<const WebMouseWheelEvent*>(coalesced_events[0]);
@@ -460,7 +459,7 @@ TEST_F(MainThreadEventQueueTest, NonBlockingTouch) {
   {
     EXPECT_EQ(2u, handled_tasks_[2]->taskAsEvent()->CoalescedEventSize());
     WebTouchEvent coalesced_event = kEvents[2];
-    std::vector<const WebInputEvent*> coalesced_events =
+    blink::WebVector<const WebInputEvent*> coalesced_events =
         handled_tasks_[2]->taskAsEvent()->GetCoalescedEventsPointers();
     const WebTouchEvent* coalesced_touch_event0 =
         static_cast<const WebTouchEvent*>(coalesced_events[0]);
@@ -1357,7 +1356,7 @@ TEST_F(MainThreadEventQueueTest, UnbufferedDispatchTouchEvent) {
 }
 
 TEST_F(MainThreadEventQueueTest, PointerEventsCoalescing) {
-  queue_->HasPointerRawMoveEventHandlers(true);
+  queue_->HasPointerRawUpdateEventHandlers(true);
   WebMouseEvent mouse_move = SyntheticWebMouseEventBuilder::Build(
       WebInputEvent::kMouseMove, 10, 10, 0);
   SyntheticWebTouchEvent touch_move;
@@ -1385,7 +1384,7 @@ TEST_F(MainThreadEventQueueTest, PointerEventsCoalescing) {
   EXPECT_FALSE(needs_main_frame_);
 }
 
-TEST_F(MainThreadEventQueueTest, PointerRawMoveEvents) {
+TEST_F(MainThreadEventQueueTest, PointerRawUpdateEvents) {
   WebMouseEvent mouse_move = SyntheticWebMouseEventBuilder::Build(
       WebInputEvent::kMouseMove, 10, 10, 0);
 
@@ -1402,14 +1401,14 @@ TEST_F(MainThreadEventQueueTest, PointerRawMoveEvents) {
   EXPECT_EQ(0u, event_queue().size());
   EXPECT_FALSE(needs_main_frame_);
 
-  queue_->HasPointerRawMoveEventHandlers(true);
+  queue_->HasPointerRawUpdateEventHandlers(true);
   HandleEvent(mouse_move, INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING);
   EXPECT_EQ(2u, event_queue().size());
   RunPendingTasksWithSimulatedRaf();
   EXPECT_EQ(0u, event_queue().size());
   EXPECT_FALSE(needs_main_frame_);
 
-  queue_->HasPointerRawMoveEventHandlers(false);
+  queue_->HasPointerRawUpdateEventHandlers(false);
   SyntheticWebTouchEvent touch_move;
   touch_move.PressPoint(10, 10);
   touch_move.MovePoint(0, 50, 50);
@@ -1419,7 +1418,7 @@ TEST_F(MainThreadEventQueueTest, PointerRawMoveEvents) {
   EXPECT_EQ(0u, event_queue().size());
   EXPECT_FALSE(needs_main_frame_);
 
-  queue_->HasPointerRawMoveEventHandlers(true);
+  queue_->HasPointerRawUpdateEventHandlers(true);
   HandleEvent(touch_move, INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING);
   EXPECT_EQ(2u, event_queue().size());
   RunPendingTasksWithSimulatedRaf();

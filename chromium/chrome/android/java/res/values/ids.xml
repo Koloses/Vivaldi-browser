@@ -67,6 +67,8 @@
     <item type="id" name="payments_add_option_button" />
     <item type="id" name="payments_edit_cancel_button" />
     <item type="id" name="payments_edit_checkbox" />
+    <item type="id" name="payments_description_label" />
+    <item type="id" name="payments_warning_label" />
 
     <!-- Password update prompt -->
     <item type="id" name="password_infobar_accounts_spinner" />
@@ -113,18 +115,6 @@
     <item type="id" name="menu_item_original_background" />
     <item type="id" name="menu_item_background_drawable_position" />
 
-    <!-- Menu item IDs for Browser Action menu -->
-    <item type="id" name="browser_actions_open_in_background" />
-    <item type="id" name="browser_actions_open_in_incognito_tab" />
-    <item type="id" name="browser_actions_save_link_as" />
-    <item type="id" name="browser_actions_copy_address" />
-    <item type="id" name="browser_actions_share" />
-    <item type="id" name="browser_actions_custom_item_one" />
-    <item type="id" name="browser_actions_custom_item_two" />
-    <item type="id" name="browser_actions_custom_item_three" />
-    <item type="id" name="browser_actions_custom_item_four" />
-    <item type="id" name="browser_actions_custom_item_five" />
-
     <!-- VR constants -->
     <item type="id" name="vr_overlay_view" />
 
@@ -132,4 +122,5 @@
     <item type="id" name="highlight_state" />
     <item type="id" name="item_animator" />
     <item type="id" name="highlight_color" />
+    <item type="id" name="context_menu_delegate" />
 </resources>

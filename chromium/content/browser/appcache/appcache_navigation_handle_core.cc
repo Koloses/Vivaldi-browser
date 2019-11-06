@@ -14,8 +14,10 @@
 #include "content/browser/appcache/appcache_navigation_handle.h"
 #include "content/browser/appcache/appcache_service_impl.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
+#include "content/browser/loader/navigation_url_loader_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/child_process_host.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/appcache/appcache.mojom.h"
 #include "third_party/blink/public/mojom/appcache/appcache_info.mojom.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
@@ -25,7 +27,7 @@ namespace {
 // Map of AppCache host id to the AppCacheNavigationHandleCore instance.
 // Accessed on the IO thread only.
 using AppCacheHandleMap =
-    std::map <int, content::AppCacheNavigationHandleCore*>;
+    std::map<base::UnguessableToken, content::AppCacheNavigationHandleCore*>;
 base::LazyInstance<AppCacheHandleMap>::DestructorAtExit g_appcache_handle_map =
     LAZY_INSTANCE_INITIALIZER;
 
@@ -35,7 +37,7 @@ namespace content {
 
 AppCacheNavigationHandleCore::AppCacheNavigationHandleCore(
     ChromeAppCacheService* appcache_service,
-    int appcache_host_id,
+    const base::UnguessableToken& appcache_host_id,
     int process_id)
     : appcache_service_(appcache_service),
       appcache_host_id_(appcache_host_id),
@@ -43,19 +45,22 @@ AppCacheNavigationHandleCore::AppCacheNavigationHandleCore(
   // The AppCacheNavigationHandleCore is created on the UI thread but
   // should only be accessed from the IO thread afterwards.
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(!appcache_host_id_.is_empty());
 }
 
 AppCacheNavigationHandleCore::~AppCacheNavigationHandleCore() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(
+      NavigationURLLoaderImpl::GetLoaderRequestControllerThreadID());
   precreated_host_.reset(nullptr);
   g_appcache_handle_map.Get().erase(appcache_host_id_);
 }
 
 void AppCacheNavigationHandleCore::Initialize() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(
+      NavigationURLLoaderImpl::GetLoaderRequestControllerThreadID());
   DCHECK(precreated_host_.get() == nullptr);
   precreated_host_ = std::make_unique<AppCacheHost>(
-      appcache_host_id_, process_id_, MSG_ROUTING_NONE, nullptr,
+      appcache_host_id_, process_id_, MSG_ROUTING_NONE, mojo::NullRemote(),
       GetAppCacheService());
 
   DCHECK(g_appcache_handle_map.Get().find(appcache_host_id_) ==
@@ -65,8 +70,9 @@ void AppCacheNavigationHandleCore::Initialize() {
 
 // static
 std::unique_ptr<AppCacheHost> AppCacheNavigationHandleCore::GetPrecreatedHost(
-    int host_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+    const base::UnguessableToken& host_id) {
+  DCHECK_CURRENTLY_ON(
+      NavigationURLLoaderImpl::GetLoaderRequestControllerThreadID());
   auto index = g_appcache_handle_map.Get().find(host_id);
   if (index != g_appcache_handle_map.Get().end()) {
     AppCacheNavigationHandleCore* instance = index->second;

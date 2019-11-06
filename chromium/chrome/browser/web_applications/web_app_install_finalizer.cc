@@ -53,6 +53,7 @@ WebAppInstallFinalizer::~WebAppInstallFinalizer() = default;
 
 void WebAppInstallFinalizer::FinalizeInstall(
     const WebApplicationInfo& web_app_info,
+    const FinalizeOptions& options,
     InstallFinalizedCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -80,6 +81,12 @@ void WebAppInstallFinalizer::FinalizeInstall(
                      std::move(web_app)));
 }
 
+void WebAppInstallFinalizer::UninstallExternalWebApp(
+    const GURL& app_url,
+    UninstallExternalWebAppCallback callback) {
+  NOTIMPLEMENTED();
+}
+
 void WebAppInstallFinalizer::OnDataWritten(InstallFinalizedCallback callback,
                                            std::unique_ptr<WebApp> web_app,
                                            bool success) {
@@ -104,6 +111,7 @@ bool WebAppInstallFinalizer::CanCreateOsShortcuts() const {
 
 void WebAppInstallFinalizer::CreateOsShortcuts(
     const AppId& app_id,
+    bool add_to_desktop,
     CreateOsShortcutsCallback callback) {
   // TODO(loyso): Implement it.
   NOTIMPLEMENTED();
@@ -145,6 +153,13 @@ bool WebAppInstallFinalizer::CanRevealAppShim() const {
 void WebAppInstallFinalizer::RevealAppShim(const AppId& app_id) {
   // TODO(loyso): Implement it.
   NOTIMPLEMENTED();
+}
+
+bool WebAppInstallFinalizer::CanSkipAppUpdateForSync(
+    const AppId& app_id,
+    const WebApplicationInfo& web_app_info) const {
+  NOTIMPLEMENTED();
+  return true;
 }
 
 }  // namespace web_app

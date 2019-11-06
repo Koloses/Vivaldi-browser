@@ -6,6 +6,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/optional.h"
+#include "build/build_config.h"
 #include "content/browser/frame_host/navigation_request.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/ssl_status.h"
@@ -77,11 +78,9 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     RenderViewHostImplTestHarness::TearDown();
   }
 
-  void Resume() { test_handle()->throttle_runner_.CallResumeForTesting(); }
-
   void CancelDeferredNavigation(
       NavigationThrottle::ThrottleCheckResult result) {
-    test_handle()->CancelDeferredNavigationInternal(result);
+    request_->CancelDeferredNavigationInternal(result);
   }
 
   // Helper function to call WillStartRequest on |handle|. If this function
@@ -93,7 +92,7 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
 
     // It's safe to use base::Unretained since the NavigationHandle is owned by
     // the NavigationHandleImplTest.
-    test_handle()->WillStartRequest(
+    request_->WillStartRequest(
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
   }
@@ -109,7 +108,7 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
 
     // It's safe to use base::Unretained since the NavigationHandle is owned by
     // the NavigationHandleImplTest.
-    test_handle()->WillRedirectRequest(
+    request_->WillRedirectRequest(
         GURL(), nullptr,
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
@@ -123,11 +122,11 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
       const base::Optional<net::SSLInfo> ssl_info = base::nullopt) {
     was_callback_called_ = false;
     callback_result_ = NavigationThrottle::DEFER;
-    test_handle()->set_net_error_code(net_error_code);
+    request_->set_net_error(net_error_code);
 
     // It's safe to use base::Unretained since the NavigationHandle is owned by
     // the NavigationHandleImplTest.
-    test_handle()->WillFailRequest(
+    request_->WillFailRequest(
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
   }
@@ -145,7 +144,7 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     // by the NavigationHandleImplTest. The ConnectionInfo is different from
     // that sent to WillRedirectRequest to verify that it's correctly plumbed
     // in both cases.
-    test_handle()->WillProcessResponse(
+    request_->WillProcessResponse(
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
   }
@@ -163,14 +162,16 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     return callback_result_;
   }
 
-  NavigationHandleImpl::State state() { return test_handle()->state(); }
+  NavigationRequest::NavigationHandleState state() {
+    return test_handle()->state();
+  }
 
   bool is_deferring() {
     switch (state()) {
-      case NavigationHandleImpl::PROCESSING_WILL_START_REQUEST:
-      case NavigationHandleImpl::PROCESSING_WILL_REDIRECT_REQUEST:
-      case NavigationHandleImpl::PROCESSING_WILL_FAIL_REQUEST:
-      case NavigationHandleImpl::PROCESSING_WILL_PROCESS_RESPONSE:
+      case NavigationRequest::PROCESSING_WILL_START_REQUEST:
+      case NavigationRequest::PROCESSING_WILL_REDIRECT_REQUEST:
+      case NavigationRequest::PROCESSING_WILL_FAIL_REQUEST:
+      case NavigationRequest::PROCESSING_WILL_PROCESS_RESPONSE:
         return true;
       default:
         return false;
@@ -218,10 +219,15 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     return test_throttle;
   }
 
+  // TODO(zetamoo): Use NavigationSimulator instead of creating
+  // NavigationRequest and NavigationHandleImpl.
   void CreateNavigationHandle() {
-    scoped_refptr<FrameNavigationEntry> frame_entry(new FrameNavigationEntry());
+    auto frame_entry = base::MakeRefCounted<FrameNavigationEntry>();
+    CommonNavigationParams common_params;
+    common_params.initiator_origin =
+        url::Origin::Create(GURL("https://initiator.example.com"));
     request_ = NavigationRequest::CreateBrowserInitiated(
-        main_test_rfh()->frame_tree_node(), CommonNavigationParams(),
+        main_test_rfh()->frame_tree_node(), common_params,
         CommitNavigationParams(), false /* browser-initiated */, std::string(),
         *frame_entry, nullptr, nullptr, nullptr);
     request_->CreateNavigationHandle(true);
@@ -304,58 +310,79 @@ TEST_F(NavigationHandleImplTest, SimpleDataChecksFailure) {
             navigation->GetNavigationHandle()->GetNetErrorCode());
 }
 
+// Flaky on Android. https://crbug.com/970815
+#if defined(OS_ANDROID)
+#define MAYBE_CancelDeferredWillStart DISABLED_CancelDeferredWillStart
+#else
+#define MAYBE_CancelDeferredWillStart CancelDeferredWillStart
+#endif
+
 // Checks that a navigation deferred during WillStartRequest can be properly
 // cancelled.
-TEST_F(NavigationHandleImplTest, CancelDeferredWillStart) {
+TEST_F(NavigationHandleImplTest, MAYBE_CancelDeferredWillStart) {
   TestNavigationThrottle* test_throttle =
       CreateTestNavigationThrottle(NavigationThrottle::DEFER);
-  EXPECT_EQ(NavigationHandleImpl::INITIAL, state());
+  EXPECT_EQ(NavigationRequest::INITIAL, state());
   EXPECT_TRUE(call_counts_match(test_throttle, 0, 0, 0, 0));
 
   // Simulate WillStartRequest. The request should be deferred. The callback
   // should not have been called.
   SimulateWillStartRequest();
-  EXPECT_EQ(NavigationHandleImpl::PROCESSING_WILL_START_REQUEST, state());
+  EXPECT_EQ(NavigationRequest::PROCESSING_WILL_START_REQUEST, state());
   EXPECT_FALSE(was_callback_called());
   EXPECT_TRUE(call_counts_match(test_throttle, 1, 0, 0, 0));
 
   // Cancel the request. The callback should have been called.
   CancelDeferredNavigation(NavigationThrottle::CANCEL_AND_IGNORE);
-  EXPECT_EQ(NavigationHandleImpl::CANCELING, state());
+  EXPECT_EQ(NavigationRequest::CANCELING, state());
   EXPECT_TRUE(was_callback_called());
   EXPECT_EQ(NavigationThrottle::CANCEL_AND_IGNORE, callback_result());
   EXPECT_TRUE(call_counts_match(test_throttle, 1, 0, 0, 0));
 }
 
+// Flaky on Android. https://crbug.com/970815
+#if defined(OS_ANDROID)
+#define MAYBE_CancelDeferredWillRedirect DISABLED_CancelDeferredWillRedirect
+#else
+#define MAYBE_CancelDeferredWillRedirect CancelDeferredWillRedirect
+#endif
+
 // Checks that a navigation deferred during WillRedirectRequest can be properly
 // cancelled.
-TEST_F(NavigationHandleImplTest, CancelDeferredWillRedirect) {
+TEST_F(NavigationHandleImplTest, MAYBE_CancelDeferredWillRedirect) {
   TestNavigationThrottle* test_throttle =
       CreateTestNavigationThrottle(NavigationThrottle::DEFER);
-  EXPECT_EQ(NavigationHandleImpl::INITIAL, state());
+  EXPECT_EQ(NavigationRequest::INITIAL, state());
   EXPECT_TRUE(call_counts_match(test_throttle, 0, 0, 0, 0));
 
   // Simulate WillRedirectRequest. The request should be deferred. The callback
   // should not have been called.
   SimulateWillRedirectRequest();
-  EXPECT_EQ(NavigationHandleImpl::PROCESSING_WILL_REDIRECT_REQUEST, state());
+  EXPECT_EQ(NavigationRequest::PROCESSING_WILL_REDIRECT_REQUEST, state());
   EXPECT_FALSE(was_callback_called());
   EXPECT_TRUE(call_counts_match(test_throttle, 0, 1, 0, 0));
 
   // Cancel the request. The callback should have been called.
   CancelDeferredNavigation(NavigationThrottle::CANCEL_AND_IGNORE);
-  EXPECT_EQ(NavigationHandleImpl::CANCELING, state());
+  EXPECT_EQ(NavigationRequest::CANCELING, state());
   EXPECT_TRUE(was_callback_called());
   EXPECT_EQ(NavigationThrottle::CANCEL_AND_IGNORE, callback_result());
   EXPECT_TRUE(call_counts_match(test_throttle, 0, 1, 0, 0));
 }
 
+// Flaky on Android. https://crbug.com/970815
+#if defined(OS_ANDROID)
+#define MAYBE_CancelDeferredWillFail DISABLED_CancelDeferredWillFail
+#else
+#define MAYBE_CancelDeferredWillFail CancelDeferredWillFail
+#endif
+
 // Checks that a navigation deferred during WillFailRequest can be properly
 // cancelled.
-TEST_F(NavigationHandleImplTest, CancelDeferredWillFail) {
+TEST_F(NavigationHandleImplTest, MAYBE_CancelDeferredWillFail) {
   TestNavigationThrottle* test_throttle = CreateTestNavigationThrottle(
       TestNavigationThrottle::WILL_FAIL_REQUEST, NavigationThrottle::DEFER);
-  EXPECT_EQ(NavigationHandleImpl::INITIAL, state());
+  EXPECT_EQ(NavigationRequest::INITIAL, state());
   EXPECT_TRUE(call_counts_match(test_throttle, 0, 0, 0, 0));
 
   // Simulate WillStartRequest.
@@ -365,46 +392,63 @@ TEST_F(NavigationHandleImplTest, CancelDeferredWillFail) {
   // Simulate WillFailRequest. The request should be deferred. The callback
   // should not have been called.
   SimulateWillFailRequest(net::ERR_CERT_DATE_INVALID);
-  EXPECT_EQ(NavigationHandleImpl::PROCESSING_WILL_FAIL_REQUEST, state());
+  EXPECT_EQ(NavigationRequest::PROCESSING_WILL_FAIL_REQUEST, state());
   EXPECT_FALSE(was_callback_called());
   EXPECT_TRUE(call_counts_match(test_throttle, 1, 0, 1, 0));
 
   // Cancel the request. The callback should have been called.
   CancelDeferredNavigation(NavigationThrottle::CANCEL_AND_IGNORE);
-  EXPECT_EQ(NavigationHandleImpl::CANCELING, state());
+  EXPECT_EQ(NavigationRequest::CANCELING, state());
   EXPECT_TRUE(was_callback_called());
   EXPECT_EQ(NavigationThrottle::CANCEL_AND_IGNORE, callback_result());
   EXPECT_TRUE(call_counts_match(test_throttle, 1, 0, 1, 0));
 }
 
+// Flaky on Android. https://crbug.com/970815
+#if defined(OS_ANDROID)
+#define MAYBE_CancelDeferredWillRedirectNoIgnore \
+  DISABLED_CancelDeferredWillRedirectNoIgnore
+#else
+#define MAYBE_CancelDeferredWillRedirectNoIgnore \
+  CancelDeferredWillRedirectNoIgnore
+#endif
+
 // Checks that a navigation deferred can be canceled and not ignored.
-TEST_F(NavigationHandleImplTest, CancelDeferredWillRedirectNoIgnore) {
+TEST_F(NavigationHandleImplTest, MAYBE_CancelDeferredWillRedirectNoIgnore) {
   TestNavigationThrottle* test_throttle =
       CreateTestNavigationThrottle(NavigationThrottle::DEFER);
-  EXPECT_EQ(NavigationHandleImpl::INITIAL, state());
+  EXPECT_EQ(NavigationRequest::INITIAL, state());
   EXPECT_TRUE(call_counts_match(test_throttle, 0, 0, 0, 0));
 
   // Simulate WillStartRequest. The request should be deferred. The callback
   // should not have been called.
   SimulateWillStartRequest();
-  EXPECT_EQ(NavigationHandleImpl::PROCESSING_WILL_START_REQUEST, state());
+  EXPECT_EQ(NavigationRequest::PROCESSING_WILL_START_REQUEST, state());
   EXPECT_TRUE(call_counts_match(test_throttle, 1, 0, 0, 0));
 
   // Cancel the request. The callback should have been called with CANCEL, and
   // not CANCEL_AND_IGNORE.
   CancelDeferredNavigation(NavigationThrottle::CANCEL);
-  EXPECT_EQ(NavigationHandleImpl::CANCELING, state());
+  EXPECT_EQ(NavigationRequest::CANCELING, state());
   EXPECT_TRUE(was_callback_called());
   EXPECT_EQ(NavigationThrottle::CANCEL, callback_result());
   EXPECT_TRUE(call_counts_match(test_throttle, 1, 0, 0, 0));
 }
 
+// Flaky on Android. https://crbug.com/970815
+#if defined(OS_ANDROID)
+#define MAYBE_CancelDeferredWillFailNoIgnore \
+  DISABLED_CancelDeferredWillFailNoIgnore
+#else
+#define MAYBE_CancelDeferredWillFailNoIgnore CancelDeferredWillFailNoIgnore
+#endif
+
 // Checks that a navigation deferred by WillFailRequest can be canceled and not
 // ignored.
-TEST_F(NavigationHandleImplTest, CancelDeferredWillFailNoIgnore) {
+TEST_F(NavigationHandleImplTest, MAYBE_CancelDeferredWillFailNoIgnore) {
   TestNavigationThrottle* test_throttle = CreateTestNavigationThrottle(
       TestNavigationThrottle::WILL_FAIL_REQUEST, NavigationThrottle::DEFER);
-  EXPECT_EQ(NavigationHandleImpl::INITIAL, state());
+  EXPECT_EQ(NavigationRequest::INITIAL, state());
   EXPECT_TRUE(call_counts_match(test_throttle, 0, 0, 0, 0));
 
   // Simulate WillStartRequest.
@@ -414,14 +458,14 @@ TEST_F(NavigationHandleImplTest, CancelDeferredWillFailNoIgnore) {
   // Simulate WillFailRequest. The request should be deferred. The callback
   // should not have been called.
   SimulateWillFailRequest(net::ERR_CERT_DATE_INVALID);
-  EXPECT_EQ(NavigationHandleImpl::PROCESSING_WILL_FAIL_REQUEST, state());
+  EXPECT_EQ(NavigationRequest::PROCESSING_WILL_FAIL_REQUEST, state());
   EXPECT_FALSE(was_callback_called());
   EXPECT_TRUE(call_counts_match(test_throttle, 1, 0, 1, 0));
 
   // Cancel the request. The callback should have been called with CANCEL, and
   // not CANCEL_AND_IGNORE.
   CancelDeferredNavigation(NavigationThrottle::CANCEL);
-  EXPECT_EQ(NavigationHandleImpl::CANCELING, state());
+  EXPECT_EQ(NavigationRequest::CANCELING, state());
   EXPECT_TRUE(was_callback_called());
   EXPECT_EQ(NavigationThrottle::CANCEL, callback_result());
   EXPECT_TRUE(call_counts_match(test_throttle, 1, 0, 1, 0));
@@ -442,7 +486,7 @@ TEST_F(NavigationHandleImplTest, WillFailRequestSetsSSLInfo) {
   const GURL kUrl = GURL("https://chromium.org");
   auto navigation =
       NavigationSimulatorImpl::CreateRendererInitiated(kUrl, main_rfh());
-  navigation->set_ssl_info(ssl_info);
+  navigation->SetSSLInfo(ssl_info);
   navigation->Fail(net::ERR_CERT_DATE_INVALID);
 
   EXPECT_EQ(net::CERT_STATUS_AUTHORITY_INVALID,
@@ -488,11 +532,21 @@ class ThrottleTestContentBrowserClient : public ContentBrowserClient {
 
 }  // namespace
 
+// Flaky on Android. https://crbug.com/970815
+#if defined(OS_ANDROID)
+#define MAYBE_WillFailRequestCanAccessRenderFrameHost \
+  DISABLED_WillFailRequestCanAccessRenderFrameHost
+#else
+#define MAYBE_WillFailRequestCanAccessRenderFrameHost \
+  WillFailRequestCanAccessRenderFrameHost
+#endif
+
 // Verify that the NavigationHandle::GetRenderFrameHost() can be retrieved by a
 // throttle in WillFailRequest(), as well as after deferring the failure.  This
 // is allowed, since at that point the final RenderFrameHost will have already
 // been chosen. See https://crbug.com/817881.
-TEST_F(NavigationHandleImplTest, WillFailRequestCanAccessRenderFrameHost) {
+TEST_F(NavigationHandleImplTest,
+       MAYBE_WillFailRequestCanAccessRenderFrameHost) {
   std::unique_ptr<ContentBrowserClient> client(
       new ThrottleTestContentBrowserClient);
   ContentBrowserClient* old_browser_client =
@@ -504,7 +558,7 @@ TEST_F(NavigationHandleImplTest, WillFailRequestCanAccessRenderFrameHost) {
   navigation->SetAutoAdvance(false);
   navigation->Start();
   navigation->Fail(net::ERR_CERT_DATE_INVALID);
-  EXPECT_EQ(NavigationHandleImpl::PROCESSING_WILL_FAIL_REQUEST,
+  EXPECT_EQ(NavigationRequest::PROCESSING_WILL_FAIL_REQUEST,
             navigation->GetNavigationHandle()->state_for_testing());
   EXPECT_TRUE(navigation->GetNavigationHandle()->GetRenderFrameHost());
   navigation->GetNavigationHandle()->CallResumeForTesting();

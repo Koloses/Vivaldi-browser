@@ -261,6 +261,11 @@ void FakeDownloadItem::ShowDownloadInShell() {
   NOTREACHED();
 }
 
+void FakeDownloadItem::Rename(const base::FilePath& name,
+                              RenameDownloadCallback callback) {
+  NOTREACHED();
+}
+
 bool FakeDownloadItem::IsPaused() const {
   return false;
 }
@@ -308,6 +313,12 @@ const GURL& FakeDownloadItem::GetTabUrl() const {
 const GURL& FakeDownloadItem::GetTabReferrerUrl() const {
   NOTREACHED();
   return dummy_url;
+}
+
+const base::Optional<url::Origin>& FakeDownloadItem::GetRequestInitiator()
+    const {
+  NOTREACHED();
+  return dummy_origin;
 }
 
 std::string FakeDownloadItem::GetSuggestedFilename() const {

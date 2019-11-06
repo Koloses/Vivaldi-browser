@@ -24,15 +24,14 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_switches.h"
+#include "content/public/common/content_features.h"
 #include "content/public/test/browser_test_utils.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 
 class ReferrerPolicyTest : public InProcessBrowserTest {
  public:
   ReferrerPolicyTest() : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {
-    https_server_.AddDefaultHandlers(
-        base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+    https_server_.AddDefaultHandlers(GetChromeTestDataDir());
     EXPECT_TRUE(embedded_test_server()->Start());
     EXPECT_TRUE(https_server_.Start());
   }
@@ -179,8 +178,7 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
                                   : embedded_test_server();
     const GURL start_url = start_test_server->GetURL(relative_url);
 
-    ui_test_utils::WindowedTabAddedNotificationObserver tab_added_observer(
-        content::NotificationService::AllSources());
+    ui_test_utils::AllBrowserTabAddedWaiter add_tab;
 
     base::string16 expected_title =
         GetExpectedTitle(start_url, expected_referrer);
@@ -208,8 +206,7 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
     if (disposition == WindowOpenDisposition::CURRENT_TAB) {
       EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
     } else {
-      tab_added_observer.Wait();
-      tab = tab_added_observer.GetTab();
+      tab = add_tab.Wait();
       EXPECT_TRUE(tab);
       content::TitleWatcher title_watcher2(tab, expected_title);
 
@@ -244,9 +241,13 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
 class ReferrerPolicyWithReduceReferrerGranularityFlagTest
     : public ReferrerPolicyTest {
  public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kReducedReferrerGranularity);
+  ReferrerPolicyWithReduceReferrerGranularityFlagTest() {
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kReducedReferrerGranularity);
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // The basic behavior of referrer policies is covered by layout tests in

@@ -16,6 +16,7 @@
 #include "chrome/browser/media/router/test/mock_media_router.h"
 #include "chrome/common/media_router/media_route.h"
 #include "chrome/common/media_router/media_source.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "media/mojo/interfaces/mirror_service_remoting.mojom.h"
@@ -62,7 +63,7 @@ RemotingSinkMetadataPtr GetDefaultSinkMetadata() {
 // if any methods were called that should not have been called.
 class FakeMediaRouter : public media_router::MockMediaRouter {
  public:
-  FakeMediaRouter() : weak_factory_(this) {}
+  FakeMediaRouter() {}
   ~FakeMediaRouter() final {}
 
   void RegisterRemotingSource(SessionID tab_id,
@@ -97,7 +98,7 @@ class FakeMediaRouter : public media_router::MockMediaRouter {
   SessionID tab_id_ = SessionID::InvalidValue();
   CastRemotingConnector* connector_ = nullptr;
 
-  base::WeakPtrFactory<FakeMediaRouter> weak_factory_;
+  base::WeakPtrFactory<FakeMediaRouter> weak_factory_{this};
 };
 
 class MockRemotingSource : public media::mojom::RemotingSource {
@@ -257,7 +258,7 @@ class CastRemotingConnectorTest : public ::testing::Test {
   void CreateConnector(bool remoting_allowed) {
     connector_.reset();  // Call dtor first if there is one created.
     connector_.reset(new CastRemotingConnector(
-        &media_router_, kRemotingTabId,
+        &media_router_, &pref_service_, kRemotingTabId,
         base::BindRepeating(
             [](bool remoting_allowed,
                CastRemotingConnector::PermissionResultCallback
@@ -278,6 +279,7 @@ class CastRemotingConnectorTest : public ::testing::Test {
  private:
   content::TestBrowserThreadBundle browser_thread_bundle_;
   FakeMediaRouter media_router_;
+  sync_preferences::TestingPrefServiceSyncable pref_service_;
   std::unique_ptr<CastRemotingConnector> connector_;
 };
 

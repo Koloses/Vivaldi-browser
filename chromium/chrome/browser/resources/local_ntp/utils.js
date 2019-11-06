@@ -13,23 +13,20 @@ const CLASSES = {
   MOUSE_NAVIGATION: 'mouse-navigation',  // Removes blue focus ring.
 };
 
-
 /**
  * Alias for document.getElementById.
  * @param {string} id The ID of the element to find.
- * @return {HTMLElement} The found element or null if not found.
+ * @return {Element} The found element or null if not found.
  */
 function $(id) {
   // eslint-disable-next-line no-restricted-properties
   return document.getElementById(id);
 }
 
-
 /**
  * Contains common functions used in the main NTP page and its iframes.
  */
-let utils = {};
-
+const utils = {};
 
 /**
  * Disables the focus outline for |element| on mousedown.
@@ -44,7 +41,6 @@ utils.disableOutlineOnMouseClick = function(element) {
   });
 };
 
-
 /**
  * Returns whether the given URL has a known, safe scheme.
  * @param {string} url URL to check.
@@ -53,7 +49,6 @@ utils.isSchemeAllowed = function(url) {
   return url.startsWith('http://') || url.startsWith('https://') ||
       url.startsWith('ftp://') || url.startsWith('chrome-extension://');
 };
-
 
 /**
  * Sets CSS class for |element| corresponding to the current platform.

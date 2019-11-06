@@ -62,13 +62,11 @@ class CC_EXPORT LayerTreeSettings {
   SkColor solid_color_scrollbar_color = SK_ColorWHITE;
   base::TimeDelta scroll_animation_duration_for_testing;
   bool timeout_and_draw_when_animation_checkerboards = true;
-  bool layer_transforms_should_scale_layer_contents = false;
   bool layers_always_allowed_lcd_text = false;
   float minimum_contents_scale = 0.0625f;
   float low_res_contents_scale_factor = 0.25f;
   float top_controls_show_threshold = 0.5f;
   float top_controls_hide_threshold = 0.5f;
-  double background_animation_rate = 1.0;
   gfx::Size default_tile_size;
   gfx::Size max_untiled_layer_size;
   // If set, indicates the largest tile size we will use for GPU Raster. If not
@@ -96,8 +94,6 @@ class CC_EXPORT LayerTreeSettings {
   int max_preraster_distance_in_screen_pixels = 1000;
   bool use_rgba_4444 = false;
   bool unpremultiply_and_dither_low_bit_depth_tiles = false;
-
-  bool enable_mask_tiling = true;
 
   // If set to true, the compositor may selectively defer image decodes to the
   // Image Decode Service and raster tiles without images until the decode is
@@ -131,6 +127,10 @@ class CC_EXPORT LayerTreeSettings {
   // completed the current BeginFrame before triggering their own BeginFrame
   // deadlines.
   bool wait_for_all_pipeline_stages_before_draw = false;
+
+  // Determines whether mouse interactions on composited scrollbars are handled
+  // on the compositor thread.
+  bool compositor_threaded_scrollbar_scrolling = false;
 
   // Whether layer tree commits should be made directly to the active
   // tree on the impl thread. If |false| LayerTreeHostImpl creates a
@@ -168,11 +168,6 @@ class CC_EXPORT LayerTreeSettings {
   // go away and CC should send Blink fractional values:
   // https://crbug.com/414283.
   bool commit_fractional_scroll_deltas = false;
-
-  // If true, LayerTreeHostImpl automatically allocates LocalSurfaceIds as
-  // necessary. If false, it is clients generate LocalSurfaceIds as necessary.
-  // TODO(sky): remove this once https://crbug.com/921129 is fixed.
-  bool automatically_allocate_surface_ids = true;
 };
 
 }  // namespace cc

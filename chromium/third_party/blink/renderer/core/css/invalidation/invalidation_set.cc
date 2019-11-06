@@ -37,7 +37,6 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
-#include "third_party/blink/renderer/platform/wtf/compiler.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -367,11 +366,11 @@ void InvalidationSet::ToTracedValue(TracedValue* value) const {
 
 #ifndef NDEBUG
 void InvalidationSet::Show() const {
-  std::unique_ptr<TracedValue> value = TracedValue::Create();
+  auto value = std::make_unique<TracedValue>();
   value->BeginArray("InvalidationSet");
   ToTracedValue(value.get());
   value->EndArray();
-  fprintf(stderr, "%s\n", value->ToString().Ascii().data());
+  fprintf(stderr, "%s\n", value->ToString().Ascii().c_str());
 }
 #endif  // NDEBUG
 

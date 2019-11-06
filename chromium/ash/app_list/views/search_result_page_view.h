@@ -10,12 +10,18 @@
 #include "ash/app_list/app_list_export.h"
 #include "ash/app_list/model/app_list_model.h"
 #include "ash/app_list/views/app_list_page.h"
+#include "ash/app_list/views/result_selection_controller.h"
 #include "ash/app_list/views/search_result_container_view.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 
+namespace ash {
+class ViewShadow;
+}
+
 namespace app_list {
 
+class AppListViewDelegate;
 class SearchResultBaseView;
 
 // The search results page for the app list.
@@ -23,7 +29,7 @@ class APP_LIST_EXPORT SearchResultPageView
     : public AppListPage,
       public SearchResultContainerView::Delegate {
  public:
-  SearchResultPageView();
+  explicit SearchResultPageView(AppListViewDelegate* view_delegate);
   ~SearchResultPageView() override;
 
   void AddSearchResultContainerView(
@@ -55,17 +61,19 @@ class APP_LIST_EXPORT SearchResultPageView
   views::View* GetLastFocusableView() override;
 
   // Overridden from SearchResultContainerView::Delegate :
+  void OnSearchResultContainerResultsChanging() override;
   void OnSearchResultContainerResultsChanged() override;
   void OnSearchResultContainerResultFocused(
       SearchResultBaseView* focused_result_view) override;
 
+  void OnAssistantPrivacyInfoViewCloseButtonPressed();
+
   views::View* contents_view() { return contents_view_; }
 
   SearchResultBaseView* first_result_view() const { return first_result_view_; }
-
-  // Offset/add the size of the shadow border to the bounds
-  // for proper sizing/placement with shadow included.
-  gfx::Rect AddShadowBorderToBounds(const gfx::Rect& bounds) const;
+  ResultSelectionController* result_selection_controller() {
+    return result_selection_controller_.get();
+  }
 
  private:
   // Separator between SearchResultContainerView.
@@ -74,9 +82,15 @@ class APP_LIST_EXPORT SearchResultPageView
   // Sort the result container views.
   void ReorderSearchResultContainers();
 
+  AppListViewDelegate* view_delegate_;
+
   // The SearchResultContainerViews that compose the search page. All owned by
   // the views hierarchy.
   std::vector<SearchResultContainerView*> result_container_views_;
+
+  // |ResultSelectionController| handles selection within the
+  // |result_container_views_|
+  std::unique_ptr<ResultSelectionController> result_selection_controller_;
 
   std::vector<HorizontalSeparator*> separators_;
 
@@ -85,6 +99,10 @@ class APP_LIST_EXPORT SearchResultPageView
 
   // The first search result's view or nullptr if there's no search result.
   SearchResultBaseView* first_result_view_ = nullptr;
+
+  views::View* assistant_privacy_info_view_ = nullptr;
+
+  std::unique_ptr<ash::ViewShadow> view_shadow_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchResultPageView);
 };

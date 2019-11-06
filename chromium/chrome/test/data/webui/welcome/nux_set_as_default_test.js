@@ -7,7 +7,7 @@ cr.define('onboarding_set_as_default_test', function() {
     /** @type {NuxSetAsDefaultElement} */
     let testElement;
 
-    /** @type {nux.NuxSetAsDefaultProxy} */
+    /** @type {welcome.NuxSetAsDefaultProxy} */
     let testSetAsDefaultProxy;
 
     /** @type {!Promise} */
@@ -15,7 +15,7 @@ cr.define('onboarding_set_as_default_test', function() {
 
     setup(function() {
       testSetAsDefaultProxy = new TestNuxSetAsDefaultProxy();
-      nux.NuxSetAsDefaultProxyImpl.instance_ = testSetAsDefaultProxy;
+      welcome.NuxSetAsDefaultProxyImpl.instance_ = testSetAsDefaultProxy;
 
       navigatedPromise = new Promise(resolve => {
         // Spy on navigational function to make sure it's called.
@@ -46,10 +46,14 @@ cr.define('onboarding_set_as_default_test', function() {
             testSetAsDefaultProxy.whenCalled('setAsDefault'),
           ]);
 
+          const notifyPromise =
+              test_util.eventToPromise('default-browser-change', testElement);
+
           cr.webUIListenerCallback(
               'browser-default-state-changed', {isDefault: true});
 
           return Promise.all([
+            notifyPromise,
             testSetAsDefaultProxy.whenCalled('recordSuccessfullySetDefault'),
             navigatedPromise
           ]);

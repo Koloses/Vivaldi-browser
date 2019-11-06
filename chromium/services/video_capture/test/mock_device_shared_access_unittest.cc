@@ -47,9 +47,14 @@ class MockDeviceSharedAccessTest : public ::testing::Test {
 
     auto video_capture_system = std::make_unique<media::VideoCaptureSystemImpl>(
         std::move(mock_device_factory));
+#if defined(OS_CHROMEOS)
     service_device_factory_ = std::make_unique<DeviceFactoryMediaToMojoAdapter>(
         std::move(video_capture_system), base::DoNothing(),
         base::ThreadTaskRunnerHandle::Get());
+#else
+    service_device_factory_ = std::make_unique<DeviceFactoryMediaToMojoAdapter>(
+        std::move(video_capture_system));
+#endif  // defined(OS_CHROMEOS)
     service_device_factory_->SetServiceRef(service_keepalive_.CreateRef());
     source_provider_ = std::make_unique<VideoSourceProviderImpl>(
         service_device_factory_.get(), base::DoNothing());
@@ -378,6 +383,11 @@ TEST_F(MockVideoCaptureDeviceSharedAccessTest,
       .WillOnce(InvokeWithoutArgs([&wait_loop]() { wait_loop.Quit(); }));
   subscription_2_.reset();
   wait_loop.Run();
+
+  // DeviceMediaToMojoAdapter::Stop() issues a DeleteSoon for its |receiver_|
+  // on the current sequence. Wait for this before exiting the test in order to
+  // avoid leaked object failing ASAN tests. See also  https://crbug.com/961066.
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(MockVideoCaptureDeviceSharedAccessTest,
@@ -391,6 +401,11 @@ TEST_F(MockVideoCaptureDeviceSharedAccessTest,
       .WillOnce(InvokeWithoutArgs([&wait_loop]() { wait_loop.Quit(); }));
   source_.reset();
   wait_loop.Run();
+
+  // DeviceMediaToMojoAdapter::Stop() issues a DeleteSoon for its |receiver_|
+  // on the current sequence. Wait for this before exiting the test in order to
+  // avoid leaked object failing ASAN tests. See also  https://crbug.com/961066.
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(MockVideoCaptureDeviceSharedAccessTest,

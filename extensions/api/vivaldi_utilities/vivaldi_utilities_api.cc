@@ -14,7 +14,6 @@
 #include "app/vivaldi_constants.h"
 #include "app/vivaldi_version_info.h"
 #include "base/command_line.h"
-#include "base/guid.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
@@ -83,8 +82,6 @@ bool IsValidUserId(const std::string& user_id) {
 
 namespace extensions {
 
-const char kBaseFileMappingUrl[] = "chrome://vivaldi-data/local-image/";
-
 namespace {
 
 ContentSetting vivContentSettingFromString(const std::string& name) {
@@ -115,10 +112,8 @@ VivaldiUtilitiesAPI::VivaldiUtilitiesAPI(content::BrowserContext* context)
   event_router->RegisterObserver(
       this, vivaldi::utilities::OnDownloadManagerReady::kEventName);
 
-  base::PowerMonitor* power_monitor = base::PowerMonitor::Get();
-  if (power_monitor) {
-    power_monitor->AddObserver(this);
-  }
+  base::PowerMonitor::AddObserver(this);
+
   Profile* profile = Profile::FromBrowserContext(browser_context_);
   content::DownloadManager* manager =
       content::BrowserContext::GetDownloadManager(
@@ -144,10 +139,9 @@ void VivaldiUtilitiesAPI::Shutdown() {
     // Get rid of the allocated items
     delete it.second;
   }
-  base::PowerMonitor* power_monitor = base::PowerMonitor::Get();
-  if (power_monitor) {
-    power_monitor->RemoveObserver(this);
-  }
+
+  base::PowerMonitor::RemoveObserver(this);
+
   if (razer_chroma_handler_ && razer_chroma_handler_->IsAvailable()) {
     razer_chroma_handler_->Shutdown();
   }
@@ -244,10 +238,13 @@ gfx::Rect VivaldiUtilitiesAPI::GetDialogPosition(int window_id,
   return gfx::Rect();
 }
 
-void VivaldiUtilitiesAPI::CloseAllThumbnailWindows() {
+// static
+void VivaldiUtilitiesAPI::CloseAllThumbnailWindows(
+    content::BrowserContext* browser_context) {
+
   // This will close all app windows currently generating thumbnails.
   AppWindowRegistry::AppWindowList windows =
-      AppWindowRegistry::Get(browser_context_)
+      AppWindowRegistry::Get(browser_context)
           ->GetAppWindowsForApp(::vivaldi::kVivaldiAppId);
 
   for (auto* window : windows) {
@@ -257,13 +254,23 @@ void VivaldiUtilitiesAPI::CloseAllThumbnailWindows() {
   }
 }
 
-bool VivaldiUtilitiesAPI::AuthenticateUser(gfx::NativeWindow window) {
-  native_window_ = window;
+// static
+bool VivaldiUtilitiesAPI::AuthenticateUser(
+    content::BrowserContext* browser_context,
+    content::WebContents* web_contents) {
+  VivaldiUtilitiesAPI* api = GetFactoryInstance()->Get(browser_context);
+  DCHECK(api);
+  if (!api)
+    return false;
 
-  bool success = password_access_authenticator_.EnsureUserIsAuthenticated(
+  api->native_window_ =
+      web_contents ? platform_util::GetTopLevel(web_contents->GetNativeView())
+                   : nullptr;
+
+  bool success = api->password_access_authenticator_.EnsureUserIsAuthenticated(
     password_manager::ReauthPurpose::VIEW_PASSWORD);
 
-  native_window_ = nullptr;
+  api->native_window_ = nullptr;
 
   return success;
 }
@@ -352,15 +359,16 @@ ExtensionFunction::ResponseAction UtilitiesPrintFunction::Run() {
   std::unique_ptr<Params> params = Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  int tab_id = params->tab_id;
-
+  std::string error;
   content::WebContents* tabstrip_contents =
-    ::vivaldi::ui_tools::GetWebContentsFromTabStrip(tab_id, browser_context());
-  if (tabstrip_contents) {
-    Browser* browser = chrome::FindBrowserWithWebContents(tabstrip_contents);
-    if (browser) {
-      chrome::Print(browser);
-    }
+      ::vivaldi::ui_tools::GetWebContentsFromTabStrip(
+          params->tab_id, browser_context(), &error);
+  if (!tabstrip_contents)
+    return RespondNow(Error(error));
+
+  Browser* browser = chrome::FindBrowserWithWebContents(tabstrip_contents);
+  if (browser) {
+    chrome::Print(browser);
   }
   return RespondNow(NoArguments());
 }
@@ -448,23 +456,19 @@ ExtensionFunction::ResponseAction UtilitiesIsTabInLastSessionFunction::Run() {
   std::unique_ptr<Params> params = Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  int tabId;
-  if (!base::StringToInt(params->tab_id, &tabId)) {
-    return RespondNow(Error("TabId is not an int - "+params->tab_id));
-  }
+  std::string error;
+  content::WebContents* web_contents =
+      ::vivaldi::ui_tools::GetWebContentsFromTabStrip(
+          params->tab_id, browser_context(), &error);
+  if (!web_contents)
+    return RespondNow(Error(error));
 
-  bool is_in_session = false;
-  content::WebContents* contents;
-
-  if (!ExtensionTabUtil::GetTabById(tabId, browser_context(), true, nullptr,
-                                    nullptr, &contents, nullptr)) {
-    return RespondNow(Error("TabId is found - "+params->tab_id));
-  }
   // Both the profile and navigation entries are marked if they are
   // loaded from a session, so check both.
+  bool is_in_session = false;
   if (Profile::FromBrowserContext(browser_context())->restored_last_session()) {
     content::NavigationEntry* entry =
-        contents->GetController().GetVisibleEntry();
+        web_contents->GetController().GetVisibleEntry();
     is_in_session = entry && entry->IsRestored();
   }
   return RespondNow(ArgumentList(Results::Create(is_in_session)));
@@ -482,12 +486,16 @@ void UtilitiesIsUrlValidFunction::OnDefaultProtocolClientWorkerFinished(
 
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  // If we get here, either we are not the default or we cannot work out
+  // If we get here, either Vivaldi is not the default or we cannot work out
   // what the default is, so we proceed.
   if (prompt_user_ && state == shell_integration::NOT_DEFAULT) {
     // Ask the user if they want to allow the protocol, but only
-    // if the url is a valid formatted url.
-    result_.external_handler = result_.url_valid;
+    // if the url is a valid formatted url with a registered
+    // program to handle it.
+    base::string16 application_name =
+      shell_integration::GetApplicationNameForProtocol(url_);
+
+    result_.external_handler = result_.url_valid && !application_name.empty();
   }
   Respond(ArgumentList(Results::Create(result_)));
 }
@@ -502,13 +510,15 @@ ExtensionFunction::ResponseAction UtilitiesIsUrlValidFunction::Run() {
   GURL url(params->url);
 
   result_.url_valid = !params->url.empty() && url.is_valid();
+  // GURL::spec() can only be called when url is valid.
+  std::string spec = url.is_valid() ? url.spec() : base::EmptyString();
   result_.scheme_valid =
       URLPattern::IsValidSchemeForExtensions(url.scheme()) ||
       url.SchemeIs(url::kJavaScriptScheme) || url.SchemeIs(url::kDataScheme) ||
-      url.SchemeIs(url::kMailToScheme) || url.spec() == url::kAboutBlankURL ||
+      url.SchemeIs(url::kMailToScheme) || spec == url::kAboutBlankURL ||
       url.SchemeIs(content::kViewSourceScheme);
   result_.scheme_parsed = url.scheme();
-  result_.normalized_url = url.is_valid() ? url.spec() : "";
+  result_.normalized_url = spec;
   result_.external_handler = false;
 
   if (result_.url_valid && result_.scheme_valid) {
@@ -522,6 +532,7 @@ ExtensionFunction::ResponseAction UtilitiesIsUrlValidFunction::Run() {
       ExternalProtocolHandler::GetBlockState(
           url.scheme(), Profile::FromBrowserContext(browser_context()));
   prompt_user_ = block_state == ExternalProtocolHandler::UNKNOWN;
+  url_ = url;
 
   auto default_protocol_worker = base::MakeRefCounted<
       shell_integration::DefaultProtocolClientWorker>(
@@ -543,75 +554,106 @@ ExtensionFunction::ResponseAction UtilitiesGetSelectedTextFunction::Run() {
   std::unique_ptr<Params> params = Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  int tabId;
-  if (!base::StringToInt(params->tab_id, &tabId))
-    return RespondNow(Error("TabId is not a string - "+params->tab_id));
+  std::string error;
+  content::WebContents* web_contents =
+      ::vivaldi::ui_tools::GetWebContentsFromTabStrip(
+          params->tab_id, browser_context(), &error);
+  if (!web_contents)
+    return RespondNow(Error(error));
 
   std::string text;
-  content::WebContents* web_contents =
-      ::vivaldi::ui_tools::GetWebContentsFromTabStrip(tabId, browser_context());
-  if (web_contents) {
-    content::RenderWidgetHostView* rwhv =
-        web_contents->GetRenderWidgetHostView();
-    if (rwhv) {
-      text = base::UTF16ToUTF8(rwhv->GetSelectedText());
-    }
+  content::RenderWidgetHostView* rwhv =
+      web_contents->GetRenderWidgetHostView();
+  if (rwhv) {
+    text = base::UTF16ToUTF8(rwhv->GetSelectedText());
   }
 
   return RespondNow(ArgumentList(Results::Create(text)));
 }
 
-ExtensionFunction::ResponseAction UtilitiesCreateUrlMappingFunction::Run() {
-  using vivaldi::utilities::CreateUrlMapping::Params;
-  namespace Results = vivaldi::utilities::CreateUrlMapping::Results;
-
-  std::unique_ptr<Params> params = Params::Create(*args_);
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-
-  VivaldiDataSourcesAPI* api =
-      VivaldiDataSourcesAPI::GetFactoryInstance()->Get(browser_context());
-
-  // PathExists() triggers IO restriction.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-  std::string file = params->local_path;
-  std::string guid = base::GenerateGUID();
-  base::FilePath path = base::FilePath::FromUTF8Unsafe(file);
-  if (!base::PathExists(path)) {
-    return RespondNow(Error("File does not exists: " + file));
-  }
-  if (!api->AddMapping(guid, path)) {
-    return RespondNow(Error("Mapping for file failed: " + file));
-  }
-  std::string retval = kBaseFileMappingUrl + guid;
-  return RespondNow(ArgumentList(Results::Create(retval)));
-}
-
-ExtensionFunction::ResponseAction UtilitiesRemoveUrlMappingFunction::Run() {
-  using vivaldi::utilities::RemoveUrlMapping::Params;
-  namespace Results = vivaldi::utilities::RemoveUrlMapping::Results;
-
-  std::unique_ptr<Params> params = Params::Create(*args_);
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-
-  VivaldiDataSourcesAPI* api =
-    VivaldiDataSourcesAPI::GetFactoryInstance()->Get(browser_context());
-
-  // Extract the ID from the given url first.
-  GURL url(params->url);
-  std::string id = url.ExtractFileName();
-
-  bool success = api->RemoveMapping(id);
-
-  return RespondNow(ArgumentList(Results::Create(success)));
-}
-
 namespace {
-// Converts file extensions to a ui::SelectFileDialog::FileTypeInfo.
-ui::SelectFileDialog::FileTypeInfo ConvertExtensionsToFileTypeInfo(
-    const std::vector<vivaldi::utilities::FileExtension>&
-        extensions) {
-  ui::SelectFileDialog::FileTypeInfo file_type_info;
 
+// Helpers to simply the usage of ui::SelectFileDialog when implementing
+// extension functions.
+
+struct FileSelectionOptions {
+  void SetTitle(base::StringPiece str);
+
+  base::string16 title;
+  ui::SelectFileDialog::Type type = ui::SelectFileDialog::SELECT_OPEN_FILE;
+  ui::SelectFileDialog::FileTypeInfo file_type_info;
+};
+
+class FileSelectionRunner : private ui::SelectFileDialog::Listener {
+ public:
+  using ResultCallback = base::OnceCallback<void(base::FilePath file_path)>;
+
+  static void Start(content::WebContents* web_contents,
+                    const FileSelectionOptions& options,
+                    ResultCallback callback);
+ private:
+  FileSelectionRunner(ResultCallback callback);
+  ~FileSelectionRunner() override;
+
+  // ui::SelectFileDialog::Listener:
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override;
+  void FileSelectionCanceled(void* params) override;
+
+  ResultCallback callback_;
+  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
+
+  DISALLOW_COPY_AND_ASSIGN(FileSelectionRunner);
+};
+
+void FileSelectionOptions::SetTitle(base::StringPiece str) {
+  title = base::UTF8ToUTF16(str);
+}
+
+FileSelectionRunner::FileSelectionRunner(ResultCallback callback)
+    : callback_(std::move(callback)),
+      select_file_dialog_(ui::SelectFileDialog::Create(this, nullptr)) {}
+
+FileSelectionRunner::~FileSelectionRunner() {
+  select_file_dialog_->ListenerDestroyed();
+}
+
+// static
+void FileSelectionRunner::Start(content::WebContents* web_contents,
+                                const FileSelectionOptions& options,
+                                ResultCallback callback) {
+  gfx::NativeWindow window =
+      web_contents ? platform_util::GetTopLevel(web_contents->GetNativeView())
+                   : nullptr;
+
+  FileSelectionRunner* runner = new FileSelectionRunner(std::move(callback));
+  runner->select_file_dialog_->SelectFile(
+      options.type, options.title, base::FilePath(), &options.file_type_info, 0,
+      base::FilePath::StringType(), window, nullptr);
+}
+
+void FileSelectionRunner::FileSelected(const base::FilePath& path,
+                                       int index,
+                                       void* params) {
+  DCHECK(!params);
+  ResultCallback callback = std::move(callback_);
+  base::FilePath path_copy = path;
+  delete this;
+  std::move(callback).Run(std::move(path_copy));
+}
+
+void FileSelectionRunner::FileSelectionCanceled(void* params) {
+  DCHECK(!params);
+  ResultCallback callback = std::move(callback_);
+  delete this;
+  std::move(callback).Run(base::FilePath());
+}
+
+// Converts file extensions to a ui::SelectFileDialog::FileTypeInfo.
+void ConvertExtensionsToFileTypeInfo(
+    const std::vector<vivaldi::utilities::FileExtension>&
+        extensions, ui::SelectFileDialog::FileTypeInfo* file_type_info) {
   for (const auto& item : extensions) {
     base::FilePath::StringType allowed_extension =
       base::FilePath::FromUTF8Unsafe(item.ext).value();
@@ -620,19 +662,11 @@ ui::SelectFileDialog::FileTypeInfo ConvertExtensionsToFileTypeInfo(
     // group equivalent extensions, but we don't use this feature here.
     std::vector<base::FilePath::StringType> inner_vector;
     inner_vector.push_back(allowed_extension);
-    file_type_info.extensions.push_back(inner_vector);
+    file_type_info->extensions.push_back(std::move(inner_vector));
   }
-  return file_type_info;
 }
+
 }  // namespace
-
-UtilitiesSelectFileFunction::UtilitiesSelectFileFunction() {}
-
-UtilitiesSelectFileFunction::~UtilitiesSelectFileFunction() {
-  if (select_file_dialog_) {
-    select_file_dialog_->ListenerDestroyed();
-  }
-}
 
 ExtensionFunction::ResponseAction UtilitiesSelectFileFunction::Run() {
   using vivaldi::utilities::SelectFile::Params;
@@ -640,48 +674,80 @@ ExtensionFunction::ResponseAction UtilitiesSelectFileFunction::Run() {
   std::unique_ptr<Params> params = Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  base::string16 title;
-
-  if (params->title.get()) {
-    title = base::UTF8ToUTF16(*params->title.get());
+  FileSelectionOptions options;
+  if (params->title) {
+    options.SetTitle(*params->title);
   }
+  options.type =
+      params->type == vivaldi::utilities::SELECT_FILE_DIALOG_TYPE_FOLDER
+          ? ui::SelectFileDialog::SELECT_EXISTING_FOLDER
+          : ui::SelectFileDialog::SELECT_OPEN_FILE;
 
-  ui::SelectFileDialog::FileTypeInfo file_type_info;
-
-  if (params->accepts.get()) {
-    file_type_info = ConvertExtensionsToFileTypeInfo(*params->accepts.get());
+  if (params->accepts) {
+    ConvertExtensionsToFileTypeInfo(*params->accepts, &options.file_type_info);
   }
-  file_type_info.include_all_files = true;
-
-  AddRef();
-
-  select_file_dialog_ = ui::SelectFileDialog::Create(this, nullptr);
+  options.file_type_info.include_all_files = true;
 
   content::WebContents* web_contents = dispatcher()->GetAssociatedWebContents();
-  gfx::NativeWindow window =
-      web_contents ? platform_util::GetTopLevel(web_contents->GetNativeView())
-                   : nullptr;
-
-  select_file_dialog_->SelectFile(
-      ui::SelectFileDialog::SELECT_OPEN_FILE, title,
-      base::FilePath(), &file_type_info, 0, base::FilePath::StringType(),
-      window, nullptr);
+  FileSelectionRunner::Start(
+      web_contents, options,
+      base::BindOnce(&UtilitiesSelectFileFunction::OnFileSelected, this));
 
   return RespondLater();
 }
 
-void UtilitiesSelectFileFunction::FileSelected(const base::FilePath& path,
-                                               int index,
-                                               void* params) {
+void UtilitiesSelectFileFunction::OnFileSelected(base::FilePath path) {
   namespace Results = vivaldi::utilities::SelectFile::Results;
 
-  Respond(ArgumentList(Results::Create(path.AsUTF8Unsafe())));
-  Release();
+  if (path.empty()) {
+    Respond(Error("File selection aborted."));
+  } else {
+    Respond(ArgumentList(Results::Create(path.AsUTF8Unsafe())));
+  }
 }
 
-void UtilitiesSelectFileFunction::FileSelectionCanceled(void* params) {
-  Respond(Error("File selection aborted."));
-  Release();
+ExtensionFunction::ResponseAction UtilitiesSelectLocalImageFunction::Run() {
+  using vivaldi::utilities::SelectLocalImage::Params;
+
+  std::unique_ptr<Params> params = Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  FileSelectionOptions options;
+  options.SetTitle(params->params.title);
+  options.type = ui::SelectFileDialog::SELECT_OPEN_FILE;
+  options.file_type_info.include_all_files = true;
+
+  content::WebContents* web_contents = dispatcher()->GetAssociatedWebContents();
+  FileSelectionRunner::Start(
+      web_contents, options,
+      base::BindOnce(&UtilitiesSelectLocalImageFunction::OnFileSelected, this));
+
+  return RespondLater();
+}
+
+void UtilitiesSelectLocalImageFunction::OnFileSelected(
+    base::FilePath path) {
+  namespace Results = vivaldi::utilities::SelectLocalImage::Results;
+
+  std::string result;
+  if (path.empty()) {
+    Respond(ArgumentList(Results::Create(std::string())));
+    return;
+  }
+
+  VivaldiDataSourcesAPI::AddMapping(
+      browser_context(), std::move(path),
+      base::BindOnce(&UtilitiesSelectLocalImageFunction::OnAddMappingFinished,
+                     this));
+}
+
+void UtilitiesSelectLocalImageFunction::OnAddMappingFinished(
+    Profile* profile,
+    bool success,
+    std::string data_mapping_url) {
+  namespace Results = vivaldi::utilities::SelectLocalImage::Results;
+
+  Respond(ArgumentList(Results::Create(data_mapping_url)));
 }
 
 ExtensionFunction::ResponseAction UtilitiesGetVersionFunction::Run() {
@@ -863,7 +929,8 @@ ExtensionFunction::ResponseAction
 UtilitiesLaunchNetworkSettingsFunction::Run() {
   namespace Results = vivaldi::utilities::LaunchNetworkSettings::Results;
 
-  settings_utils::ShowNetworkProxySettings(NULL);
+  settings_utils::ShowNetworkProxySettings(
+      dispatcher()->GetAssociatedWebContents());
   return RespondNow(ArgumentList(Results::Create("")));
 }
 

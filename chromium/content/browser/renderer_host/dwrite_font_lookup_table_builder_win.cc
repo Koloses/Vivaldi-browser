@@ -6,14 +6,19 @@
 
 #include <dwrite.h>
 #include <dwrite_2.h>
-#include <algorithm>
 #include <set>
 #include <utility>
 
+#include "base/file_version_info.h"
+#include "base/files/file.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
+#include "base/hash/hash.h"
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
+#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
@@ -22,9 +27,14 @@
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
+#include "base/win/registry.h"
 #include "content/browser/renderer_host/dwrite_font_file_util_win.h"
+#include "content/browser/renderer_host/dwrite_font_proxy_impl_win.h"
 #include "content/browser/renderer_host/dwrite_font_uma_logging_win.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_features.h"
+#include "third_party/blink/public/common/font_unique_name_lookup/font_table_matcher.h"
+#include "third_party/blink/public/common/font_unique_name_lookup/font_table_persistence.h"
 #include "third_party/blink/public/common/font_unique_name_lookup/icu_fold_case_util.h"
 #include "ui/gfx/win/direct_write.h"
 
@@ -34,19 +44,21 @@ using namespace dwrite_font_file_util;
 using namespace dwrite_font_uma_logging;
 
 namespace {
-// The unresponsive renderer timeout is 30 seconds (kDefaultCommitTimeout). As a
-// starting point, let's set the max time for indexing fonts to half of that 15
-// seconds. We're starting the font lookup table construction earlier at startup
-// before a renderer requests this.  Once we have more UMA data, we can look
-// into performance details and reducing this timeout. This timeout is meant to
-// cover pathological cases of font indexing where a Windows installation has an
-// unusually large collection of fonts. In practice, building the unique font
-// name table should not take longer than tens of milliseconds (~26 ms on a
-// developer machine, Windows 10, default fonts).
-const base::TimeDelta kFontIndexingTimeout = base::TimeDelta::FromSeconds(15);
 
-const base::TimeDelta kIndexingSlowDownForTesting =
-    base::TimeDelta::FromMilliseconds(1200);
+const base::FilePath::CharType kProtobufFilename[] =
+    FILE_PATH_LITERAL("font_unique_name_table.pb");
+
+// Timeout after which font scanning and metadata extraction is stopped and the
+// local lookup table is cleared. Font scanning and lookup table construction is
+// only needed pre Windows 10. If the timeout is hit, no local font matching
+// will be performed on this particular pre Win 10 system.
+constexpr base::TimeDelta kFontIndexingTimeoutDefault =
+    base::TimeDelta::FromMinutes(5);
+
+// In timeout test case, slow down indexing of one font file to this percentage
+// of the timeout value. Assuming that at least two fonts are indexed, the
+// timeout should be usually hit during indexing the second font.
+constexpr float kIndexingSlowDownForTestingPercentage = 0.75;
 
 bool ExtractCaseFoldedLocalizedStrings(
     IDWriteLocalizedStrings* dwrite_localized_strings,
@@ -79,20 +91,14 @@ bool ExtractCaseFoldedLocalizedStrings(
   return true;
 }
 
-// Used in the BuildFontUniqueNameTable() method to ensure that
-// |font_table_built_| is signaled whenever the function exits due to an error
-// or otherwise.
-class ScopedAutoSignal {
- public:
-  ScopedAutoSignal(base::WaitableEvent* waitable_event)
-      : waitable_event_(waitable_event) {}
-  ~ScopedAutoSignal() { waitable_event_->Signal(); }
-
- private:
-  base::WaitableEvent* const waitable_event_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedAutoSignal);
-};
+bool EnsureCacheDirectory(base::FilePath cache_directory) {
+  // If the directory does not exist already, ensure that the parent directory
+  // exists, which is usually the User Data directory. If it exists, we can try
+  // creating the cache directory.
+  return base::DirectoryExists(cache_directory) ||
+         (base::DirectoryExists(cache_directory.DirName()) &&
+          CreateDirectory(cache_directory));
+}
 
 }  // namespace
 
@@ -107,13 +113,25 @@ DWriteFontLookupTableBuilder::FontFileWithUniqueNames::
 DWriteFontLookupTableBuilder::FontFileWithUniqueNames::FontFileWithUniqueNames(
     DWriteFontLookupTableBuilder::FontFileWithUniqueNames&& other) = default;
 
-DWriteFontLookupTableBuilder::DWriteFontLookupTableBuilder() = default;
+DWriteFontLookupTableBuilder::DWriteFontLookupTableBuilder()
+    : font_indexing_timeout_(kFontIndexingTimeoutDefault) {
+  // In FontUniqueNameBrowserTest the DWriteFontLookupTableBuilder is
+  // instantiated to configure the cache directory for testing explicitly before
+  // GetContentClient() is available. Catch this case here. It is safe to not
+  // set the cache directory here, as an invalid cache directory would be
+  // detected by TableCacheFilePath and the LoadFromFile and PersistToFile
+  // methods.
+  cache_directory_ =
+      GetContentClient()
+          ? GetContentClient()->browser()->GetFontLookupTableCacheDir()
+          : base::FilePath();
+}
 
 DWriteFontLookupTableBuilder::~DWriteFontLookupTableBuilder() = default;
 
 base::ReadOnlySharedMemoryRegion
 DWriteFontLookupTableBuilder::DuplicateMemoryRegion() {
-  DCHECK(EnsureFontUniqueNameTable());
+  DCHECK(FontUniqueNameTableReady());
   return font_table_memory_.region.Duplicate();
 }
 
@@ -138,6 +156,11 @@ void DWriteFontLookupTableBuilder::InitializeDirectWrite() {
   // running an older version of DirectWrite (earlier than Win8.1).
   factory.As<IDWriteFactory2>(&factory2_);
 
+  // QueryInterface for IDwriteFactory3, needed for MatchUniqueFont on Windows
+  // 10. May fail on older versions, in which case, unique font matching must be
+  // done through indexing system fonts using DWriteFontLookupTableBuilder.
+  factory.As<IDWriteFactory3>(&factory3_);
+
   HRESULT hr = factory->GetSystemFontCollection(&collection_);
   DCHECK(SUCCEEDED(hr));
 
@@ -149,37 +172,142 @@ void DWriteFontLookupTableBuilder::InitializeDirectWrite() {
   }
 }
 
-bool DWriteFontLookupTableBuilder::EnsureFontUniqueNameTable() {
-  TRACE_EVENT0("dwrite,fonts",
-               "DWriteFontLookupTableBuilder::EnsureFontUniqueNameTable");
-  DCHECK(base::FeatureList::IsEnabled(features::kFontSrcLocalMatching));
-  base::ScopedAllowBaseSyncPrimitives allow_base_sync_primitives;
-  font_table_built_.Wait();
-  return IsFontUniqueNameTableValid();
+std::string DWriteFontLookupTableBuilder::ComputePersistenceHash() {
+  // Build a hash from DWrite product version, browser major version and font
+  // names and file paths as stored in the registry. The browser major version
+  // is included to ensure that the cache is rebuild at least once for every
+  // Chrome milestone release. DWrite DLL version is included to ensure that any
+  // change in DWrite behavior after an update does not interfere with the
+  // information we have in the cache. The font registry keys and values are
+  // used to detect changes in installed fonts.
+
+  std::unique_ptr<FileVersionInfo> dwrite_version_info =
+      FileVersionInfo::CreateFileVersionInfo(
+          base::FilePath(FILE_PATH_LITERAL("DWrite.dll")));
+
+  DCHECK(dwrite_version_info);
+
+  std::string dwrite_version =
+      base::WideToUTF8(dwrite_version_info->product_version());
+
+  std::string to_hash = dwrite_version;
+
+  const wchar_t kFonts[] =
+      L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
+  base::win::RegistryValueIterator it(HKEY_LOCAL_MACHINE, kFonts);
+  DCHECK(it.ValueCount());
+  for (; it.Valid(); ++it) {
+    to_hash.append(base::WideToUTF8(it.Name()));
+    to_hash.append(base::WideToUTF8(it.Value()));
+  }
+
+  DCHECK(GetContentClient());
+  to_hash.append(
+      GetContentClient()->browser()->GetUserAgentMetadata().major_version);
+
+  uint32_t fonts_changed_hash = base::PersistentHash(to_hash);
+  return std::to_string(fonts_changed_hash);
 }
 
-void DWriteFontLookupTableBuilder::ScheduleBuildFontUniqueNameTable() {
-  DCHECK(base::FeatureList::IsEnabled(features::kFontSrcLocalMatching));
-
-  // TODO(https://crbug.com/931366): Downgrade the priority of this startup task
-  // once the UpdatePriority() API for sequenced task runners is in place. Then
-  // bump the priority when the renderer needs the table to be ready.
-  scoped_refptr<base::SequencedTaskRunner> results_collection_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
-           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
-
-  results_collection_task_runner->PostTask(
-      FROM_HERE,
-      base::BindOnce(&DWriteFontLookupTableBuilder::BuildFontUniqueNameTable,
-                     base::Unretained(this)));
+void DWriteFontLookupTableBuilder::SetCacheDirectoryForTesting(
+    base::FilePath cache_directory) {
+  cache_directory_ = cache_directory;
 }
 
-void DWriteFontLookupTableBuilder::BuildFontUniqueNameTable() {
+void DWriteFontLookupTableBuilder::SetCachingEnabledForTesting(
+    bool caching_enabled) {
+  caching_enabled_ = caching_enabled;
+}
+
+bool DWriteFontLookupTableBuilder::HasDWriteUniqueFontLookups() {
+  InitializeDirectWrite();
+  return factory3_;
+}
+
+void DWriteFontLookupTableBuilder::OverrideDWriteVersionChecksForTesting() {
+  InitializeDirectWrite();
+  factory3_.Reset();
+}
+
+base::TimeDelta DWriteFontLookupTableBuilder::IndexingTimeout() {
+  return font_indexing_timeout_;
+}
+
+void DWriteFontLookupTableBuilder::PostCallbacks() {
+  for (auto& pending_callback : pending_callbacks_) {
+    pending_callback.task_runner->PostTask(
+        FROM_HERE, base::BindOnce(std::move(pending_callback.mojo_callback),
+                                  DuplicateMemoryRegion()));
+  }
+  pending_callbacks_.clear();
+}
+
+base::FilePath DWriteFontLookupTableBuilder::TableCacheFilePath() {
+  if (!EnsureCacheDirectory(cache_directory_))
+    return base::FilePath();
+  return cache_directory_.Append(kProtobufFilename);
+}
+
+bool DWriteFontLookupTableBuilder::PersistToFile() {
+  DCHECK(caching_enabled_);
+
+  if (!IsFontUniqueNameTableValid())
+    return false;
+
+  return blink::font_table_persistence::PersistToFile(font_table_memory_,
+                                                      TableCacheFilePath());
+}
+
+bool DWriteFontLookupTableBuilder::LoadFromFile() {
+  DCHECK(caching_enabled_);
+  DCHECK(!IsFontUniqueNameTableValid());
+
+  return blink::font_table_persistence::LoadFromFile(TableCacheFilePath(),
+                                                     &font_table_memory_);
+}
+
+DWriteFontLookupTableBuilder::CallbackOnTaskRunner::CallbackOnTaskRunner(
+    scoped_refptr<base::SequencedTaskRunner> runner,
+    blink::mojom::DWriteFontProxy::GetUniqueNameLookupTableCallback callback)
+    : task_runner(std::move(runner)), mojo_callback(std::move(callback)) {}
+
+DWriteFontLookupTableBuilder::CallbackOnTaskRunner::CallbackOnTaskRunner(
+    CallbackOnTaskRunner&& other) {
+  task_runner = std::move(other.task_runner);
+  mojo_callback = std::move(other.mojo_callback);
+  other.task_runner = nullptr;
+  other.mojo_callback =
+      blink::mojom::DWriteFontProxy::GetUniqueNameLookupTableCallback();
+}
+
+DWriteFontLookupTableBuilder::CallbackOnTaskRunner::~CallbackOnTaskRunner() =
+    default;
+
+void DWriteFontLookupTableBuilder::QueueShareMemoryRegionWhenReady(
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
+    blink::mojom::DWriteFontProxy::GetUniqueNameLookupTableCallback callback) {
   TRACE_EVENT0("dwrite,fonts",
-               "DWriteFontLookupTableBuilder::BuildFontUniqueNameTable");
-  // The table must only be built once.
-  DCHECK(!font_table_built_.IsSignaled());
+               "DWriteFontLookupTableBuilder::QueueShareMemoryRegionWhenReady");
+  DCHECK(!HasDWriteUniqueFontLookups());
+  pending_callbacks_.emplace_back(std::move(task_runner), std::move(callback));
+  // Cover for the condition in which the font table becomes ready briefly after
+  // a renderer asking for GetUniqueNameLookupTableIfAvailable(), receiving the
+  // information that it wasn't ready.
+  if (font_table_built_.IsSignaled())
+    PostCallbacks();
+}
+
+bool DWriteFontLookupTableBuilder::FontUniqueNameTableReady() {
+  TRACE_EVENT0("dwrite,fonts",
+               "DWriteFontLookupTableBuilder::FontUniqueNameTableReady");
+  DCHECK(base::FeatureList::IsEnabled(features::kFontSrcLocalMatching));
+  DCHECK(!HasDWriteUniqueFontLookups());
+  return font_table_built_.IsSignaled() && IsFontUniqueNameTableValid();
+}
+
+void DWriteFontLookupTableBuilder::
+    SchedulePrepareFontUniqueNameTableIfNeeded() {
+  DCHECK(base::FeatureList::IsEnabled(features::kFontSrcLocalMatching));
 
   {
     base::ScopedBlockingCall scoped_blocking_call(
@@ -187,14 +315,60 @@ void DWriteFontLookupTableBuilder::BuildFontUniqueNameTable() {
     InitializeDirectWrite();
   }
 
-  start_time_ = base::TimeTicks::Now();
+  // Nothing to do if we have API to directly lookup local fonts by unique name.
+  if (HasDWriteUniqueFontLookups())
+    return;
+
+  start_time_table_ready_ = base::TimeTicks::Now();
+
+  scoped_refptr<base::SequencedTaskRunner> results_collection_task_runner =
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
+
+  results_collection_task_runner->PostTask(
+      FROM_HERE,
+      base::BindOnce(&DWriteFontLookupTableBuilder::PrepareFontUniqueNameTable,
+                     base::Unretained(this)));
+}
+
+void DWriteFontLookupTableBuilder::PrepareFontUniqueNameTable() {
+  TRACE_EVENT0("dwrite,fonts",
+               "DWriteFontLookupTableBuilder::PrepareFontUniqueNameTable");
+  DCHECK(!HasDWriteUniqueFontLookups());
+  // The table must only be built once.
+  DCHECK(!font_table_built_.IsSignaled());
+
+  if (caching_enabled_ && LoadFromFile()) {
+    blink::FontUniqueNameTable font_table;
+    const bool update_needed =
+        !IsFontUniqueNameTableValid() ||
+        !font_table.ParseFromArray(font_table_memory_.mapping.memory(),
+                                   font_table_memory_.mapping.size()) ||
+        font_table.stored_for_platform_version_identifier() !=
+            ComputePersistenceHash();
+
+    UMA_HISTOGRAM_BOOLEAN("DirectWrite.Fonts.Proxy.LookupTableDiskCacheHit",
+                          !update_needed);
+    if (!update_needed) {
+      base::TimeDelta duration =
+          base::TimeTicks::Now() - start_time_table_ready_;
+      UMA_HISTOGRAM_MEDIUM_TIMES("DirectWrite.Fonts.Proxy.LookupTableReadyTime",
+                                 duration);
+      font_table_built_.Signal();
+      PostCallbacks();
+      return;
+    }
+  }
+
+  start_time_table_build_ = base::TimeTicks::Now();
   font_unique_name_table_ = std::make_unique<blink::FontUniqueNameTable>();
 
   // The |stored_for_platform_version_identifier| proto field is used for
   // persisting the table to disk and identifying whether an update to the
-  // table is needed when loading it back. This functionality is not used on
-  // Windows, hence setting it to the empty string is sufficient.
-  font_unique_name_table_->set_stored_for_platform_version_identifier("");
+  // table is needed when loading it back.
+  font_unique_name_table_->set_stored_for_platform_version_identifier(
+      ComputePersistenceHash());
 
   {
     base::ScopedBlockingCall scoped_blocking_call(
@@ -204,24 +378,29 @@ void DWriteFontLookupTableBuilder::BuildFontUniqueNameTable() {
   }
   for (UINT32 family_index = 0; family_index < outstanding_family_results_;
        ++family_index) {
+    // Specify base::ThreadPolicy::MUST_USE_FOREGROUND because in
+    // https://crbug.com/960263 we observed a priority inversion when running
+    // DWrite worker tasks in the background.
     base::PostTaskWithTraitsAndReplyWithResult(
         FROM_HERE,
-        {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+        {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+         base::ThreadPolicy::MUST_USE_FOREGROUND,
+         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
         base::BindOnce(
             &DWriteFontLookupTableBuilder::ExtractPathAndNamesFromFamily,
-            collection_, family_index, start_time_, slow_down_mode_for_testing_,
-            OptionalOrNullptr(hang_event_for_testing_)),
+            collection_, family_index, start_time_table_build_,
+            slow_down_mode_for_testing_,
+            OptionalOrNullptr(hang_event_for_testing_), IndexingTimeout()),
         base::BindOnce(&DWriteFontLookupTableBuilder::
                            AppendFamilyResultAndFinalizeIfNeeded,
                        base::Unretained(this)));
   }
   // Post a task to catch timeouts should one of the
   // tasks will eventually not reply.
+  timeout_callback_.Reset(base::BindOnce(
+      &DWriteFontLookupTableBuilder::OnTimeout, base::Unretained(this)));
   base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE,
-      base::BindOnce(&DWriteFontLookupTableBuilder::OnTimeout,
-                     base::Unretained(this)),
-      kFontIndexingTimeout);
+      FROM_HERE, timeout_callback_.callback(), IndexingTimeout());
 }
 
 // static
@@ -231,7 +410,8 @@ DWriteFontLookupTableBuilder::ExtractPathAndNamesFromFamily(
     uint32_t family_index,
     base::TimeTicks start_time,
     SlowDownMode slow_down_mode_for_testing,
-    base::WaitableEvent* hang_event_for_testing) {
+    base::WaitableEvent* hang_event_for_testing,
+    base::TimeDelta indexing_timeout) {
   TRACE_EVENT0("dwrite,fonts",
                "DWriteFontLookupTableBuilder::ExtractPathAndNamesFromFamily");
 
@@ -240,8 +420,9 @@ DWriteFontLookupTableBuilder::ExtractPathAndNamesFromFamily(
 
   DWriteFontLookupTableBuilder::FamilyResult family_result;
 
-  if (base::TimeTicks::Now() - start_time > kFontIndexingTimeout)
+  if (base::TimeTicks::Now() - start_time > indexing_timeout) {
     return family_result;
+  }
 
   Microsoft::WRL::ComPtr<IDWriteFontFamily> family;
   HRESULT hr = collection->GetFontFamily(family_index, &family);
@@ -251,6 +432,10 @@ DWriteFontLookupTableBuilder::ExtractPathAndNamesFromFamily(
   UINT32 font_count = family->GetFontCount();
 
   for (UINT32 font_index = 0; font_index < font_count; ++font_index) {
+    if (base::TimeTicks::Now() - start_time > indexing_timeout) {
+      return DWriteFontLookupTableBuilder::FamilyResult();
+    }
+
     Microsoft::WRL::ComPtr<IDWriteFont> font;
     {
       base::ScopedBlockingCall scoped_blocking_call(
@@ -303,7 +488,7 @@ DWriteFontLookupTableBuilder::ExtractPathAndNamesFromFamily(
         [&extracted_names, &hr,
          &font](DWRITE_INFORMATIONAL_STRING_ID font_info_string_id) {
           // Now get names, and make them point to the added font.
-          IDWriteLocalizedStrings* font_id_keyed_names;
+          Microsoft::WRL::ComPtr<IDWriteLocalizedStrings> font_id_keyed_names;
           BOOL has_id_keyed_names;
           {
             base::ScopedBlockingCall scoped_blocking_call(
@@ -314,18 +499,19 @@ DWriteFontLookupTableBuilder::ExtractPathAndNamesFromFamily(
               return;
           }
 
-          ExtractCaseFoldedLocalizedStrings(font_id_keyed_names,
+          ExtractCaseFoldedLocalizedStrings(font_id_keyed_names.Get(),
                                             &extracted_names);
         };
 
     extract_names(DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME);
     extract_names(DWRITE_INFORMATIONAL_STRING_FULL_NAME);
 
-    if (UNLIKELY(slow_down_mode_for_testing == SlowDownMode::kDelayEachTask))
-      base::PlatformThread::Sleep(kIndexingSlowDownForTesting);
-    else if (UNLIKELY(slow_down_mode_for_testing ==
-                      SlowDownMode::kHangOneTask) &&
-             family_index == 0) {
+    if (UNLIKELY(slow_down_mode_for_testing == SlowDownMode::kDelayEachTask)) {
+      base::PlatformThread::Sleep(indexing_timeout *
+                                  kIndexingSlowDownForTestingPercentage);
+    } else if (UNLIKELY(slow_down_mode_for_testing ==
+                        SlowDownMode::kHangOneTask) &&
+               family_index == 0) {
       base::ScopedAllowBaseSyncPrimitivesForTesting scoped_allow_sync_;
       DCHECK(hang_event_for_testing);
       hang_event_for_testing->Wait();
@@ -381,46 +567,58 @@ void DWriteFontLookupTableBuilder::FinalizeFontTable() {
   TRACE_EVENT0("dwrite,fonts",
                "DWriteFontLookupTableBuilder::FinalizeFontTable");
   DCHECK(!font_table_built_.IsSignaled());
-  ScopedAutoSignal auto_signal(&font_table_built_);
 
-  if (base::TimeTicks::Now() - start_time_ > kFontIndexingTimeout) {
-    LOG(ERROR) << "Creating unique font lookup table timed out, emptying "
-                  "partial table.";
-    font_unique_name_table_->clear_fonts();
-    font_unique_name_table_->clear_name_map();
-  }
+  timeout_callback_.Cancel();
 
   // Make sure that whatever happens in the remainder of this function the
   // FontUniqueNameTable object gets released by moving it to a local variable.
   std::unique_ptr<blink::FontUniqueNameTable> font_unique_name_table(
       std::move(font_unique_name_table_));
 
+  bool timed_out = false;
+  if (base::TimeTicks::Now() - start_time_table_build_ > IndexingTimeout()) {
+    font_unique_name_table->clear_fonts();
+    font_unique_name_table->clear_name_map();
+    timed_out = true;
+  }
+  UMA_HISTOGRAM_BOOLEAN("DirectWrite.Fonts.Proxy.TableBuildTimedOut",
+                        timed_out);
+
   unsigned num_font_files = font_unique_name_table->fonts_size();
 
-  // Sort names for using binary search on this proto in FontTableMatcher.
-  std::sort(font_unique_name_table->mutable_name_map()->begin(),
-            font_unique_name_table->mutable_name_map()->end(),
-            [](const blink::FontUniqueNameTable_UniqueNameToFontMapping& a,
-               const blink::FontUniqueNameTable_UniqueNameToFontMapping& b) {
-              return a.font_name() < b.font_name();
-            });
+  blink::FontTableMatcher::SortUniqueNameTableForSearch(
+      font_unique_name_table.get());
 
   font_table_memory_ = base::ReadOnlySharedMemoryRegion::Create(
       font_unique_name_table->ByteSizeLong());
-  if (!IsFontUniqueNameTableValid()) {
-    return;
-  }
 
-  if (!font_unique_name_table->SerializeToArray(
+  if (!IsFontUniqueNameTableValid() ||
+      !font_unique_name_table->SerializeToArray(
           font_table_memory_.mapping.memory(),
           font_table_memory_.mapping.size())) {
     font_table_memory_ = base::MappedReadOnlyRegion();
-    return;
   }
 
-  base::TimeDelta duration = base::TimeTicks::Now() - start_time_;
+  if (caching_enabled_) {
+    bool persist_succeeded = PersistToFile();
+    UMA_HISTOGRAM_BOOLEAN("DirectWrite.Fonts.Proxy.LookupTablePersistSuccess",
+                          persist_succeeded);
+  }
+
+  font_table_built_.Signal();
+  PostCallbacks();
+
+  if (!IsFontUniqueNameTableValid())
+    return;
+
+  base::TimeDelta duration = base::TimeTicks::Now() - start_time_table_build_;
   UMA_HISTOGRAM_MEDIUM_TIMES("DirectWrite.Fonts.Proxy.LookupTableBuildTime",
                              duration);
+
+  duration = base::TimeTicks::Now() - start_time_table_ready_;
+  UMA_HISTOGRAM_MEDIUM_TIMES("DirectWrite.Fonts.Proxy.LookupTableReadyTime",
+                             duration);
+
   // The size is usually tens of kilobytes, ~50kb on a standard Windows 10
   // installation, 1MB should be a more than high enough upper limit.
   UMA_HISTOGRAM_CUSTOM_COUNTS("DirectWrite.Fonts.Proxy.LookupTableSize",
@@ -436,20 +634,24 @@ void DWriteFontLookupTableBuilder::FinalizeFontTable() {
 }
 
 void DWriteFontLookupTableBuilder::OnTimeout() {
-  if (!font_table_built_.IsSignaled())
-    FinalizeFontTable();
+  DCHECK(!font_table_built_.IsSignaled());
+  FinalizeFontTable();
 }
 
-void DWriteFontLookupTableBuilder::SetSlowDownIndexingForTesting(
-    SlowDownMode slow_down_mode) {
+void DWriteFontLookupTableBuilder::SetSlowDownIndexingForTestingWithTimeout(
+    SlowDownMode slow_down_mode,
+    base::TimeDelta new_timeout) {
   slow_down_mode_for_testing_ = slow_down_mode;
+  font_indexing_timeout_ = new_timeout;
   if (slow_down_mode == SlowDownMode::kHangOneTask)
     hang_event_for_testing_.emplace();
 }
 
 void DWriteFontLookupTableBuilder::ResetLookupTableForTesting() {
   slow_down_mode_for_testing_ = SlowDownMode::kNoSlowdown;
+  font_indexing_timeout_ = kFontIndexingTimeoutDefault;
   font_table_memory_ = base::MappedReadOnlyRegion();
+  caching_enabled_ = true;
   font_table_built_.Reset();
 }
 

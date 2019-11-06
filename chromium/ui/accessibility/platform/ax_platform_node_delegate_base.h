@@ -7,7 +7,13 @@
 
 #include "ui/accessibility/platform/ax_platform_node_delegate.h"
 
+#include <stdint.h>
+
 #include <set>
+#include <string>
+#include <vector>
+
+#include "base/optional.h"
 
 namespace ui {
 
@@ -29,6 +35,9 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
   // Get the accessibility tree data for this node.
   const AXTreeData& GetTreeData() const override;
 
+  // Get the unignored selection from the tree
+  const AXTree::Selection GetUnignoredSelection() const override;
+
   // Creates a text position rooted at this object.
   AXNodePosition::AXPositionInstance CreateTextPositionAt(
       int offset,
@@ -43,7 +52,7 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
   gfx::NativeViewAccessible GetParent() override;
 
   // Get the index in parent. Typically this is the AXNode's index_in_parent_.
-  int GetIndexInParent() const override;
+  int GetIndexInParent() override;
 
   // Get the number of children of this node.
   int GetChildCount() override;
@@ -51,13 +60,63 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
   // Get the child of a node given a 0-based index.
   gfx::NativeViewAccessible ChildAtIndex(int index) override;
 
-  // Get the bounds of this node in screen coordinates, applying clipping
-  // to all bounding boxes so that the resulting rect is within the window.
-  gfx::Rect GetClippedScreenBoundsRect() const override;
+  gfx::NativeViewAccessible GetFirstChild() override;
+  gfx::NativeViewAccessible GetLastChild() override;
+  gfx::NativeViewAccessible GetNextSibling() override;
+  gfx::NativeViewAccessible GetPreviousSibling() override;
 
-  // Get the bounds of this node in screen coordinates without applying
-  // any clipping; it may be outside of the window or offscreen.
-  gfx::Rect GetUnclippedScreenBoundsRect() const override;
+  class ChildIteratorBase : public ChildIterator {
+   public:
+    ChildIteratorBase(AXPlatformNodeDelegateBase* parent, int index);
+    ChildIteratorBase(const ChildIteratorBase& it);
+    ~ChildIteratorBase() override {}
+    bool operator==(const ChildIterator& rhs) const override;
+    bool operator!=(const ChildIterator& rhs) const override;
+    void operator++() override;
+    void operator++(int) override;
+    void operator--() override;
+    void operator--(int) override;
+    gfx::NativeViewAccessible GetNativeViewAccessible() const override;
+
+   protected:
+    int GetIndexInParent() const override;
+
+   private:
+    int index_;
+    AXPlatformNodeDelegateBase* parent_;
+  };
+  std::unique_ptr<AXPlatformNodeDelegate::ChildIterator> ChildrenBegin()
+      override;
+  std::unique_ptr<AXPlatformNodeDelegate::ChildIterator> ChildrenEnd() override;
+
+  base::string16 GetHypertext() const override;
+  bool SetHypertextSelection(int start_offset, int end_offset) override;
+
+  base::string16 GetInnerText() const override;
+
+  gfx::Rect GetBoundsRect(const AXCoordinateSystem coordinate_system,
+                          const AXClippingBehavior clipping_behavior,
+                          AXOffscreenResult* offscreen_result) const override;
+
+  gfx::Rect GetHypertextRangeBoundsRect(
+      const int start_offset,
+      const int end_offset,
+      const AXCoordinateSystem coordinate_system,
+      const AXClippingBehavior clipping_behavior,
+      AXOffscreenResult* offscreen_result) const override;
+
+  gfx::Rect GetInnerTextRangeBoundsRect(
+      const int start_offset,
+      const int end_offset,
+      const AXCoordinateSystem coordinate_system,
+      const AXClippingBehavior clipping_behavior,
+      AXOffscreenResult* offscreen_result) const override;
+
+  // Derivative utils for AXPlatformNodeDelegate::GetBoundsRect
+  gfx::Rect GetClippedScreenBoundsRect(
+      AXOffscreenResult* offscreen_result = nullptr) const;
+  gfx::Rect GetUnclippedScreenBoundsRect(
+      AXOffscreenResult* offscreen_result = nullptr) const;
 
   // Do a *synchronous* hit test of the given location in global screen
   // coordinates, and the node within this node's subtree (inclusive) that's
@@ -78,6 +137,9 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
 
   // Get whether this node is offscreen.
   bool IsOffscreen() const override;
+
+  // Get whether this node is a minimized window.
+  bool IsMinimized() const override;
 
   // Get whether this node is in web content.
   bool IsWebContent() const override;
@@ -108,52 +170,62 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
   std::set<AXPlatformNode*> GetReverseRelations(
       ax::mojom::IntListAttribute attr) override;
 
+  base::string16 GetAuthorUniqueId() const override;
+
   const AXUniqueId& GetUniqueId() const override;
 
-  AXPlatformNodeDelegate::EnclosingBoundaryOffsets FindTextBoundariesAtOffset(
-      TextBoundaryType boundary_type,
+  base::Optional<int> FindTextBoundary(
+      AXTextBoundary boundary,
       int offset,
+      TextBoundaryDirection direction,
       ax::mojom::TextAffinity affinity) const override;
+
+  const std::vector<gfx::NativeViewAccessible> GetDescendants() const override;
+
+  std::string GetLanguage() const override;
 
   //
   // Tables. All of these should be called on a node that's a table-like
-  // role.
+  // role, otherwise they return nullopt.
   //
   bool IsTable() const override;
-  int32_t GetTableColCount() const override;
-  int32_t GetTableRowCount() const override;
-  base::Optional<int32_t> GetTableAriaColCount() const override;
-  base::Optional<int32_t> GetTableAriaRowCount() const override;
-  int32_t GetTableCellCount() const override;
-  const std::vector<int32_t> GetColHeaderNodeIds() const override;
-  const std::vector<int32_t> GetColHeaderNodeIds(
-      int32_t col_index) const override;
-  const std::vector<int32_t> GetRowHeaderNodeIds() const override;
-  const std::vector<int32_t> GetRowHeaderNodeIds(
-      int32_t row_index) const override;
-  AXPlatformNode* GetTableCaption() override;
+  base::Optional<int> GetTableColCount() const override;
+  base::Optional<int> GetTableRowCount() const override;
+  base::Optional<int> GetTableAriaColCount() const override;
+  base::Optional<int> GetTableAriaRowCount() const override;
+  base::Optional<int> GetTableCellCount() const override;
+  std::vector<int32_t> GetColHeaderNodeIds() const override;
+  std::vector<int32_t> GetColHeaderNodeIds(int col_index) const override;
+  std::vector<int32_t> GetRowHeaderNodeIds() const override;
+  std::vector<int32_t> GetRowHeaderNodeIds(int row_index) const override;
+  AXPlatformNode* GetTableCaption() const override;
 
   // Table row-like nodes.
   bool IsTableRow() const override;
-  int32_t GetTableRowRowIndex() const override;
+  base::Optional<int> GetTableRowRowIndex() const override;
 
   // Table cell-like nodes.
   bool IsTableCellOrHeader() const override;
-  int32_t GetTableCellIndex() const override;
-  int32_t GetTableCellColIndex() const override;
-  int32_t GetTableCellRowIndex() const override;
-  int32_t GetTableCellColSpan() const override;
-  int32_t GetTableCellRowSpan() const override;
-  int32_t GetTableCellAriaColIndex() const override;
-  int32_t GetTableCellAriaRowIndex() const override;
-  int32_t GetCellId(int32_t row_index, int32_t col_index) const override;
-  int32_t CellIndexToId(int32_t cell_index) const override;
+  base::Optional<int> GetTableCellIndex() const override;
+  base::Optional<int> GetTableCellColIndex() const override;
+  base::Optional<int> GetTableCellRowIndex() const override;
+  base::Optional<int> GetTableCellColSpan() const override;
+  base::Optional<int> GetTableCellRowSpan() const override;
+  base::Optional<int> GetTableCellAriaColIndex() const override;
+  base::Optional<int> GetTableCellAriaRowIndex() const override;
+  base::Optional<int32_t> GetCellId(int row_index,
+                                    int col_index) const override;
+  base::Optional<int32_t> CellIndexToId(int cell_index) const override;
+
+  // Helper methods to check if a cell is an ARIA-1.1+ 'cell' or 'gridcell'
+  bool IsCellOrHeaderOfARIATable() const override;
+  bool IsCellOrHeaderOfARIAGrid() const override;
 
   // Ordered-set-like and item-like nodes.
   bool IsOrderedSetItem() const override;
   bool IsOrderedSet() const override;
-  int32_t GetPosInSet() const override;
-  int32_t GetSetSize() const override;
+  base::Optional<int> GetPosInSet() const override;
+  base::Optional<int> GetSetSize() const override;
 
   //
   // Events.
@@ -178,6 +250,8 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
   base::string16 GetLocalizedStringForImageAnnotationStatus(
       ax::mojom::ImageAnnotationStatus status) const override;
   base::string16 GetLocalizedRoleDescriptionForUnlabeledImage() const override;
+  base::string16 GetLocalizedStringForLandmarkType() const override;
+  base::string16 GetStyleNameAttributeAsLocalizedString() const override;
 
   //
   // Testing.
@@ -194,6 +268,8 @@ class AX_EXPORT AXPlatformNodeDelegateBase : public AXPlatformNodeDelegate {
   // which they correspond.
   std::set<ui::AXPlatformNode*> GetNodesForNodeIds(
       const std::set<int32_t>& ids);
+
+  AXPlatformNodeDelegate* GetParentDelegate();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AXPlatformNodeDelegateBase);

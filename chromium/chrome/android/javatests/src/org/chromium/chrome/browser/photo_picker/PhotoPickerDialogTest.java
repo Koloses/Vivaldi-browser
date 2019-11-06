@@ -19,7 +19,6 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisableIf;
@@ -31,6 +30,7 @@ import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionO
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.browser.RecyclerViewTestUtils;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.browser.test.util.TouchCommon;
 import org.chromium.ui.PhotoPickerListener;
 
@@ -130,7 +130,7 @@ public class PhotoPickerDialogTest implements PhotoPickerListener, SelectionObse
     private PhotoPickerDialog createDialog(final boolean multiselect, final List<String> mimeTypes)
             throws Exception {
         final PhotoPickerDialog dialog =
-                ThreadUtils.runOnUiThreadBlocking(new Callable<PhotoPickerDialog>() {
+                TestThreadUtils.runOnUiThreadBlocking(new Callable<PhotoPickerDialog>() {
                     @Override
                     public PhotoPickerDialog call() {
                         final PhotoPickerDialog dialog =
@@ -150,7 +150,7 @@ public class PhotoPickerDialogTest implements PhotoPickerListener, SelectionObse
     }
 
     private void waitForDecoder() throws Exception {
-        int callCount = onSelectionCallback.getCallCount();
+        int callCount = onDecoderReadyCallback.getCallCount();
         onDecoderReadyCallback.waitForCallback(
                 callCount, 1, WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
@@ -192,16 +192,11 @@ public class PhotoPickerDialogTest implements PhotoPickerListener, SelectionObse
     }
 
     private void dismissDialog() {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mDialog.dismiss();
-            }
-        });
+        TestThreadUtils.runOnUiThreadBlocking(() -> mDialog.dismiss());
     }
 
     @Test
-    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/761060")
+    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/888931")
     @LargeTest
     public void testNoSelection() throws Throwable {
         createDialog(false, Arrays.asList("image/*")); // Multi-select = false.
@@ -219,7 +214,7 @@ public class PhotoPickerDialogTest implements PhotoPickerListener, SelectionObse
     }
 
     @Test
-    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/761060")
+    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/888931")
     @LargeTest
     public void testSingleSelectionPhoto() throws Throwable {
         createDialog(false, Arrays.asList("image/*")); // Multi-select = false.
@@ -240,7 +235,7 @@ public class PhotoPickerDialogTest implements PhotoPickerListener, SelectionObse
     }
 
     @Test
-    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/761060")
+    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/888931")
     @LargeTest
     public void testMultiSelectionPhoto() throws Throwable {
         createDialog(true, Arrays.asList("image/*")); // Multi-select = true.

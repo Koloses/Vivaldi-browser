@@ -9,13 +9,16 @@
 
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
+#include "components/chromeos_camera/common/mjpeg_decode_accelerator.mojom.h"
 #include "media/capture/video/chromeos/camera_hal_delegate.h"
 #include "media/capture/video/chromeos/mojo/cros_image_capture.mojom.h"
 #include "media/capture/video/video_capture_device_factory.h"
 
 namespace media {
 
-class CrosImageCaptureImpl;
+using MojoMjpegDecodeAcceleratorFactoryCB = base::RepeatingCallback<void(
+    chromeos_camera::mojom::MjpegDecodeAcceleratorRequest)>;
+
 class ReprocessManager;
 
 class CAPTURE_EXPORT VideoCaptureDeviceFactoryChromeOS final
@@ -47,6 +50,10 @@ class CAPTURE_EXPORT VideoCaptureDeviceFactoryChromeOS final
   // succeeds.
   bool Init();
 
+  // Gets camera info for the given |device_id|. Returns null CameraInfoPtr on
+  // error.
+  cros::mojom::CameraInfoPtr GetCameraInfo(const std::string& device_id);
+
   const scoped_refptr<base::SingleThreadTaskRunner>
       task_runner_for_screen_observer_;
 
@@ -62,9 +69,9 @@ class CAPTURE_EXPORT VideoCaptureDeviceFactoryChromeOS final
 
   std::unique_ptr<ReprocessManager> reprocess_manager_;
 
-  std::unique_ptr<CrosImageCaptureImpl> cros_image_capture_;
-
   bool initialized_;
+
+  base::WeakPtrFactory<VideoCaptureDeviceFactoryChromeOS> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceFactoryChromeOS);
 };

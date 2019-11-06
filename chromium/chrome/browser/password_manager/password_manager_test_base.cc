@@ -19,7 +19,6 @@
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
@@ -61,26 +60,6 @@ class PasswordStoreResultsObserver
   base::RunLoop run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreResultsObserver);
-};
-
-// Custom class is required to enable password generation.
-class CustomPasswordManagerClient : public ChromePasswordManagerClient {
- public:
-  using ChromePasswordManagerClient::ChromePasswordManagerClient;
-
-  static void CreateForWebContentsWithAutofillClient(
-      content::WebContents* contents,
-      autofill::AutofillClient* autofill_client) {
-    ASSERT_FALSE(FromWebContents(contents));
-    contents->SetUserData(UserDataKey(),
-                          base::WrapUnique(new CustomPasswordManagerClient(
-                              contents, autofill_client)));
-  }
-
-  // PasswordManagerClient:
-  password_manager::SyncState GetPasswordSyncState() const override {
-    return password_manager::SYNCING_NORMAL_ENCRYPTION;
-  }
 };
 
 // ManagePasswordsUIController subclass to capture the UI events.
@@ -304,6 +283,25 @@ enum ReturnCodes {  // Possible results of the JavaScript code.
 };
 
 }  // namespace
+void CustomPasswordManagerClient::CreateForWebContentsWithAutofillClient(
+    content::WebContents* contents,
+    autofill::AutofillClient* autofill_client) {
+  ASSERT_FALSE(FromWebContents(contents));
+  contents->SetUserData(UserDataKey(),
+                        base::WrapUnique(new CustomPasswordManagerClient(
+                            contents, autofill_client)));
+}
+
+// PasswordManagerClient:
+password_manager::SyncState CustomPasswordManagerClient::GetPasswordSyncState()
+    const {
+  return password_manager::SYNCING_NORMAL_ENCRYPTION;
+}
+
+void CustomPasswordManagerClient::OnPaste() {
+  pasted_value_ = ChromePasswordManagerClient::GetTextFromClipboard();
+  ChromePasswordManagerClient::OnPaste();
+}
 
 NavigationObserver::NavigationObserver(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
@@ -411,6 +409,12 @@ void BubbleObserver::WaitForAutomaticSavePrompt() const {
   controller->WaitForState(password_manager::ui::PENDING_PASSWORD_STATE);
 }
 
+void BubbleObserver::WaitForAutomaticUpdatePrompt() const {
+  CustomManagePasswordsUIController* controller =
+      static_cast<CustomManagePasswordsUIController*>(passwords_ui_controller_);
+  controller->WaitForState(password_manager::ui::PENDING_PASSWORD_UPDATE_STATE);
+}
+
 bool BubbleObserver::WaitForFallbackForSaving(
     const base::TimeDelta timeout) const {
   CustomManagePasswordsUIController* controller =
@@ -449,10 +453,6 @@ void PasswordManagerBrowserTestBase::SetUpOnMainThread() {
 
 void PasswordManagerBrowserTestBase::TearDownOnMainThread() {
   ASSERT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
-}
-
-void PasswordManagerBrowserTestBase::TearDownInProcessBrowserTestFixture() {
-  ProfileIOData::SetCertVerifierForTesting(nullptr);
 }
 
 void PasswordManagerBrowserTestBase::SetUpOnMainThreadAndGetNewTab(
@@ -501,8 +501,7 @@ void PasswordManagerBrowserTestBase::WaitForPasswordStore(Browser* browser) {
       PasswordStoreFactory::GetForProfile(browser->profile(),
                                           ServiceAccessType::IMPLICIT_ACCESS);
   PasswordStoreResultsObserver syncer;
-  password_store->GetAutofillableLoginsWithAffiliationAndBrandingInformation(
-      &syncer);
+  password_store->GetAllLoginsWithAffiliationAndBrandingInformation(&syncer);
   syncer.Wait();
 }
 
@@ -684,6 +683,7 @@ void PasswordManagerBrowserTestBase::AddHSTSHost(const std::string& host) {
 void PasswordManagerBrowserTestBase::CheckThatCredentialsStored(
     const std::string& username,
     const std::string& password) {
+  SCOPED_TRACE(::testing::Message() << username << ", " << password);
   scoped_refptr<password_manager::TestPasswordStore> password_store =
       static_cast<password_manager::TestPasswordStore*>(
           PasswordStoreFactory::GetForProfile(

@@ -19,6 +19,9 @@ enum ChromeInsetsMetric {
   INSETS_BOOKMARKS_BAR_BUTTON = views::VIEWS_INSETS_END,
   // Margins used by toasts.
   INSETS_TOAST,
+  // Margins around the title of a tab group header, that form the bounds of the
+  // title chip.
+  INSETS_TAB_GROUP_TITLE_CHIP,
 };
 
 enum ChromeDistanceMetric {
@@ -66,6 +69,8 @@ enum ChromeDistanceMetric {
   // Width of a bubble unless the content is too wide to make that
   // feasible.
   DISTANCE_BUBBLE_PREFERRED_WIDTH,
+  // Horizontal spacing between value and description in the row.
+  DISTANCE_BETWEEN_PRIMARY_AND_SECONDARY_LABELS_HORIZONTAL
 };
 
 class ChromeLayoutProvider : public views::LayoutProvider {

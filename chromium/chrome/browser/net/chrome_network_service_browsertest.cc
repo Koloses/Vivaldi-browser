@@ -44,22 +44,22 @@ void SetCookie(const network::mojom::CookieManagerPtr& cookie_manager) {
   base::Time t = base::Time::Now();
   net::CanonicalCookie cookie(kCookieName, kCookieValue, "www.test.com", "/", t,
                               t + base::TimeDelta::FromDays(1), base::Time(),
-                              false, false, net::CookieSameSite::DEFAULT_MODE,
+                              false, false, net::CookieSameSite::NO_RESTRICTION,
                               net::COOKIE_PRIORITY_DEFAULT);
   base::RunLoop run_loop;
   cookie_manager->SetCanonicalCookie(
-      cookie, "http", false,
-      base::BindLambdaForTesting([&](bool success) { run_loop.Quit(); }));
+      cookie, "http", net::CookieOptions(),
+      base::BindLambdaForTesting(
+          [&](net::CanonicalCookie::CookieInclusionStatus status) {
+            run_loop.Quit();
+          }));
   run_loop.Run();
 }
 
 // See |NetworkServiceBrowserTest| for content's version of tests.
 class ChromeNetworkServiceBrowserTest : public InProcessBrowserTest {
  public:
-  ChromeNetworkServiceBrowserTest() {
-    scoped_feature_list_.InitAndEnableFeature(
-        network::features::kNetworkService);
-  }
+  ChromeNetworkServiceBrowserTest() {}
 
  protected:
   network::mojom::NetworkContextPtr CreateNetworkContext(
@@ -76,8 +76,6 @@ class ChromeNetworkServiceBrowserTest : public InProcessBrowserTest {
   }
 
  private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-
   DISALLOW_COPY_AND_ASSIGN(ChromeNetworkServiceBrowserTest);
 };
 

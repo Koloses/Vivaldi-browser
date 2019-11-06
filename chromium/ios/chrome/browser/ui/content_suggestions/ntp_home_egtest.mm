@@ -31,22 +31,18 @@
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_provider_test_singleton.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_test_utils.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_coordinator.h"
-#import "ios/chrome/browser/ui/ntp/new_tab_page_controller.h"
 #import "ios/chrome/browser/ui/settings/settings_table_view_controller.h"
-#import "ios/chrome/browser/ui/tab_grid/tab_grid_egtest_util.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_constants.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
-#import "ios/chrome/test/app/history_test_util.h"
-#import "ios/chrome/test/app/tab_test_util.h"
 #include "ios/chrome/test/base/scoped_block_swizzler.h"
-#include "ios/chrome/test/earl_grey/accessibility_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/chrome/test/scoped_eg_synchronization_disabler.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -195,7 +191,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
 // Tests that all items are accessible on the home page.
 - (void)testAccessibility {
-  chrome_test_util::VerifyAccessibilityForCurrentScreen();
+  [ChromeEarlGrey verifyAccessibilityForCurrentScreen];
 }
 
 // Tests that the collections shortcut are displayed and working.
@@ -257,7 +253,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 - (void)testOmniboxWidthRotation {
   // TODO(crbug.com/652465): Enable the test for iPad when rotation bug is
   // fixed.
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     EARL_GREY_TEST_DISABLED(@"Disabled for iPad due to device rotation bug.");
   }
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
@@ -267,8 +263,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
   GREYAssertTrue(collectionWidth > 0, @"The collection width is nil.");
   CGFloat fakeOmniboxWidth = searchFieldWidth(collectionWidth);
 
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:OmniboxWidth(fakeOmniboxWidth)];
 
   [EarlGrey rotateDeviceToOrientation:UIDeviceOrientationLandscapeLeft
@@ -282,8 +277,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
                      @"The collection width has not changed.");
   fakeOmniboxWidth = searchFieldWidth(collectionWidthAfterRotation);
 
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:OmniboxWidth(fakeOmniboxWidth)];
 }
 
@@ -302,8 +296,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
   GREYAssertTrue(collectionWidth > 0, @"The collection width is nil.");
   CGFloat fakeOmniboxWidth = searchFieldWidth(collectionWidth);
 
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:OmniboxWidth(fakeOmniboxWidth)];
 
   [ChromeEarlGreyUI openSettingsMenu];
@@ -322,8 +315,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
                      @"The collection width has not changed.");
   fakeOmniboxWidth = searchFieldWidth(collectionWidthAfterRotation);
 
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:OmniboxWidth(fakeOmniboxWidth)];
 }
 
@@ -346,8 +338,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
   // The fake omnibox might be slightly bigger than the screen in order to cover
   // it for all screen scale.
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:OmniboxWidthBetween(collectionWidth + 1, 2)];
 
   [EarlGrey rotateDeviceToOrientation:UIDeviceOrientationLandscapeLeft
@@ -358,8 +349,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
   GREYAssertNotEqual(collectionWidth, collectionWidthAfterRotation,
                      @"The collection width has not changed.");
 
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:grey_not(grey_sufficientlyVisible())];
 }
 
@@ -370,7 +360,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
     [ChromeEarlGreyUI openNewTab];
   }
   id<GREYMatcher> matcher;
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     matcher = grey_accessibilityID(@"Enter Tab Switcher");
   } else {
     matcher = grey_allOf(grey_accessibilityID(kToolbarStackButtonIdentifier),
@@ -436,7 +426,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
                  chrome_test_util::StaticTextWithAccessibilityLabel(
                      base::SysUTF8ToNSString(kPageTitle))]
       performAction:grey_tap()];
-  [ChromeEarlGrey waitForWebViewContainingText:kPageLoadedString];
+  [ChromeEarlGrey waitForWebStateContainingText:kPageLoadedString];
   [ChromeEarlGrey goBack];
 
   // Check that the new position is the same.
@@ -474,7 +464,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
                  chrome_test_util::StaticTextWithAccessibilityLabel(
                      base::SysUTF8ToNSString(kPageTitle))]
       performAction:grey_tap()];
-  [ChromeEarlGrey waitForWebViewContainingText:kPageLoadedString];
+  [ChromeEarlGrey waitForWebStateContainingText:kPageLoadedString];
   [ChromeEarlGrey goBack];
 
   // Check that the new position is the same.
@@ -504,7 +494,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
       performAction:grey_typeText([URL stringByAppendingString:@"\n"])];
 
   // Check that the page is loaded.
-  [ChromeEarlGrey waitForWebViewContainingText:kPageLoadedString];
+  [ChromeEarlGrey waitForWebStateContainingText:kPageLoadedString];
 }
 
 // Tests that tapping the omnibox search button logs correctly.
@@ -526,7 +516,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
   // Tap the search button.
   [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          kToolbarOmniboxButtonIdentifier)]
+                                          kToolbarSearchButtonIdentifier)]
       performAction:grey_tap()];
 
   // Check that the page is loaded.
@@ -563,8 +553,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
   CGPoint offsetAfterTap = collectionView.contentOffset;
 
   // Make sure the fake omnibox has been hidden and the collection has moved.
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:grey_not(grey_sufficientlyVisible())];
 
   CGFloat top = ntp_home::CollectionView().safeAreaInsets.top;
@@ -577,8 +566,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
       performAction:grey_tapAtPoint(CGPointMake(0, offsetAfterTap.y + 100))];
 
   // Check the fake omnibox is displayed again at the same position.
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:grey_sufficientlyVisible()];
 
   GREYAssertEqual(
@@ -613,8 +601,7 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
                         CGPointMake(0, collectionView.contentOffset.y + 100))];
 
   // Check the fake omnibox is displayed again at the same position.
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:grey_sufficientlyVisible()];
 
   // The collection might be slightly moved on iPhone.
@@ -636,24 +623,20 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
       performAction:grey_swipeFastInDirection(kGREYDirectionUp)];
   // Tap the search button.
   [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          kToolbarOmniboxButtonIdentifier)]
+                                          kToolbarSearchButtonIdentifier)]
       performAction:grey_tap()];
   [ChromeEarlGrey
-      waitForElementWithMatcherSufficientlyVisible:chrome_test_util::Omnibox()];
+      waitForSufficientlyVisibleElementWithMatcher:chrome_test_util::Omnibox()];
 }
 
 - (void)testOpeningNewTab {
-  // TODO(crbug.com/933953): Re-enable this test when grey_tap() issue is fixed.
-  EARL_GREY_TEST_DISABLED(@"Disabled due to full-configs and slimnav failures");
-
   [ChromeEarlGreyUI openNewTab];
 
   // Check that the fake omnibox is here.
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:grey_sufficientlyVisible()];
   id<GREYMatcher> tabGridMatcher = nil;
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     tabGridMatcher = grey_accessibilityID(@"Enter Tab Switcher");
   } else {
     tabGridMatcher =
@@ -665,11 +648,17 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
                             [NSString stringWithFormat:@"%i", 2])];
 
   // Test the same thing after opening a tab from the tab grid.
-  [[EarlGrey selectElementWithMatcher:tabGridMatcher] performAction:grey_tap()];
+  // TODO(crbug.com/933953) For an unknown reason synchronization doesn't work
+  // well with tapping on the tabgrid button, and instead triggers the long
+  // press gesture recognizer.  Disable this here so the test can be re-enabled.
+  {
+    ScopedSynchronizationDisabler disabler;
+    [[EarlGrey selectElementWithMatcher:tabGridMatcher]
+        performAction:[GREYActions actionForLongPressWithDuration:0.05]];
+  }
   [[EarlGrey selectElementWithMatcher:chrome_test_util::TabGridNewTabButton()]
       performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       assertWithMatcher:grey_sufficientlyVisible()];
   [[EarlGrey selectElementWithMatcher:tabGridMatcher]
       assertWithMatcher:grey_accessibilityValue(
@@ -725,11 +714,9 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
   const GURL pageURL = self.testServer->GetURL(kPageURL);
 
   // Clear history to ensure the tile will be shown.
-  GREYAssertTrue(chrome_test_util::ClearBrowsingHistory(),
-                 @"Clearing Browsing History timed out");
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  [ChromeEarlGrey clearBrowsingHistory];
   [ChromeEarlGrey loadURL:pageURL];
-  [ChromeEarlGrey waitForWebViewContainingText:kPageLoadedString];
+  [ChromeEarlGrey waitForWebStateContainingText:kPageLoadedString];
 
   // After loading URL, need to do another action before opening a new tab
   // with the icon present.
@@ -740,11 +727,10 @@ std::unique_ptr<net::test_server::HttpResponse> StandardResponse(
 
 // Taps the fake omnibox and waits for the real omnibox to be visible.
 - (void)focusFakebox {
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
-                                          FakeOmniboxAccessibilityID())]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::FakeOmnibox()]
       performAction:grey_tap()];
   [ChromeEarlGrey
-      waitForElementWithMatcherSufficientlyVisible:chrome_test_util::Omnibox()];
+      waitForSufficientlyVisibleElementWithMatcher:chrome_test_util::Omnibox()];
 }
 
 @end

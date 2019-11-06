@@ -289,12 +289,12 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
       gfx::HasExtension(extensions, "GL_ANGLE_instanced_arrays");
   ext.b_GL_ANGLE_multi_draw =
       gfx::HasExtension(extensions, "GL_ANGLE_multi_draw");
-  ext.b_GL_ANGLE_multiview =
-      gfx::HasExtension(extensions, "GL_ANGLE_multiview");
   ext.b_GL_ANGLE_request_extension =
       gfx::HasExtension(extensions, "GL_ANGLE_request_extension");
   ext.b_GL_ANGLE_robust_client_memory =
       gfx::HasExtension(extensions, "GL_ANGLE_robust_client_memory");
+  ext.b_GL_ANGLE_texture_external_update =
+      gfx::HasExtension(extensions, "GL_ANGLE_texture_external_update");
   ext.b_GL_ANGLE_translated_shader_source =
       gfx::HasExtension(extensions, "GL_ANGLE_translated_shader_source");
   ext.b_GL_APPLE_fence = gfx::HasExtension(extensions, "GL_APPLE_fence");
@@ -304,6 +304,8 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
       gfx::HasExtension(extensions, "GL_ARB_ES2_compatibility");
   ext.b_GL_ARB_blend_func_extended =
       gfx::HasExtension(extensions, "GL_ARB_blend_func_extended");
+  ext.b_GL_ARB_clear_texture =
+      gfx::HasExtension(extensions, "GL_ARB_clear_texture");
   ext.b_GL_ARB_draw_buffers =
       gfx::HasExtension(extensions, "GL_ARB_draw_buffers");
   ext.b_GL_ARB_draw_instanced =
@@ -352,6 +354,8 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
       gfx::HasExtension(extensions, "GL_CHROMIUM_path_rendering");
   ext.b_GL_EXT_blend_func_extended =
       gfx::HasExtension(extensions, "GL_EXT_blend_func_extended");
+  ext.b_GL_EXT_clear_texture =
+      gfx::HasExtension(extensions, "GL_EXT_clear_texture");
   ext.b_GL_EXT_debug_marker =
       gfx::HasExtension(extensions, "GL_EXT_debug_marker");
   ext.b_GL_EXT_direct_state_access =
@@ -429,6 +433,8 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
       gfx::HasExtension(extensions, "GL_OES_texture_buffer");
   ext.b_GL_OES_vertex_array_object =
       gfx::HasExtension(extensions, "GL_OES_vertex_array_object");
+  ext.b_GL_OVR_multiview = gfx::HasExtension(extensions, "GL_OVR_multiview");
+  ext.b_GL_OVR_multiview2 = gfx::HasExtension(extensions, "GL_OVR_multiview2");
 
   if (ver->IsAtLeastGL(4u, 1u) || ver->IsAtLeastGLES(3u, 1u)) {
     fn.glActiveShaderProgramFn = reinterpret_cast<glActiveShaderProgramProc>(
@@ -622,6 +628,22 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
   if (ver->IsAtLeastGL(4u, 1u) || ver->is_es) {
     fn.glClearDepthfFn =
         reinterpret_cast<glClearDepthfProc>(GetGLProcAddress("glClearDepthf"));
+  }
+
+  if (ver->IsAtLeastGL(4u, 4u) || ext.b_GL_ARB_clear_texture) {
+    fn.glClearTexImageFn = reinterpret_cast<glClearTexImageProc>(
+        GetGLProcAddress("glClearTexImage"));
+  } else if (ext.b_GL_EXT_clear_texture) {
+    fn.glClearTexImageFn = reinterpret_cast<glClearTexImageProc>(
+        GetGLProcAddress("glClearTexImageEXT"));
+  }
+
+  if (ver->IsAtLeastGL(4u, 4u) || ext.b_GL_EXT_clear_texture) {
+    fn.glClearTexSubImageFn = reinterpret_cast<glClearTexSubImageProc>(
+        GetGLProcAddress("glClearTexSubImage"));
+  } else if (ext.b_GL_EXT_clear_texture) {
+    fn.glClearTexSubImageFn = reinterpret_cast<glClearTexSubImageProc>(
+        GetGLProcAddress("glClearTexSubImageEXT"));
   }
 
   if (ver->IsAtLeastGL(3u, 2u) || ver->IsAtLeastGLES(3u, 0u) ||
@@ -1042,10 +1064,10 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
             GetGLProcAddress("glFramebufferTextureLayer"));
   }
 
-  if (ext.b_GL_ANGLE_multiview) {
-    fn.glFramebufferTextureMultiviewLayeredANGLEFn =
-        reinterpret_cast<glFramebufferTextureMultiviewLayeredANGLEProc>(
-            GetGLProcAddress("glFramebufferTextureMultiviewLayeredANGLE"));
+  if (ext.b_GL_OVR_multiview2 || ext.b_GL_OVR_multiview) {
+    fn.glFramebufferTextureMultiviewOVRFn =
+        reinterpret_cast<glFramebufferTextureMultiviewOVRProc>(
+            GetGLProcAddress("glFramebufferTextureMultiviewOVR"));
   }
 
   if (ver->IsAtLeastGL(3u, 0u) || ver->is_es) {
@@ -1429,7 +1451,8 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
         GetGLProcAddress("glGetProgramPipelineiv"));
   }
 
-  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 1u)) {
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 1u) ||
+      ext.b_GL_ARB_program_interface_query) {
     fn.glGetProgramResourceIndexFn =
         reinterpret_cast<glGetProgramResourceIndexProc>(
             GetGLProcAddress("glGetProgramResourceIndex"));
@@ -1761,6 +1784,12 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
     fn.glInvalidateSubFramebufferFn =
         reinterpret_cast<glInvalidateSubFramebufferProc>(
             GetGLProcAddress("glInvalidateSubFramebuffer"));
+  }
+
+  if (ext.b_GL_ANGLE_texture_external_update) {
+    fn.glInvalidateTextureANGLEFn =
+        reinterpret_cast<glInvalidateTextureANGLEProc>(
+            GetGLProcAddress("glInvalidateTextureANGLE"));
   }
 
   if (ext.b_GL_APPLE_fence) {
@@ -2491,6 +2520,12 @@ void DriverGL::InitializeDynamicBindings(const GLVersionInfo* ver,
         GetGLProcAddress("glTexBufferRangeEXT"));
   }
 
+  if (ext.b_GL_ANGLE_texture_external_update) {
+    fn.glTexImage2DExternalANGLEFn =
+        reinterpret_cast<glTexImage2DExternalANGLEProc>(
+            GetGLProcAddress("glTexImage2DExternalANGLE"));
+  }
+
   if (ext.b_GL_ANGLE_robust_client_memory) {
     fn.glTexImage2DRobustANGLEFn =
         reinterpret_cast<glTexImage2DRobustANGLEProc>(
@@ -2989,6 +3024,29 @@ void GLApiBase::glClearDepthfFn(GLclampf depth) {
 
 void GLApiBase::glClearStencilFn(GLint s) {
   driver_->fn.glClearStencilFn(s);
+}
+
+void GLApiBase::glClearTexImageFn(GLuint texture,
+                                  GLint level,
+                                  GLenum format,
+                                  GLenum type,
+                                  const GLvoid* data) {
+  driver_->fn.glClearTexImageFn(texture, level, format, type, data);
+}
+
+void GLApiBase::glClearTexSubImageFn(GLuint texture,
+                                     GLint level,
+                                     GLint xoffset,
+                                     GLint yoffset,
+                                     GLint zoffset,
+                                     GLint width,
+                                     GLint height,
+                                     GLint depth,
+                                     GLenum format,
+                                     GLenum type,
+                                     const GLvoid* data) {
+  driver_->fn.glClearTexSubImageFn(texture, level, xoffset, yoffset, zoffset,
+                                   width, height, depth, format, type, data);
 }
 
 GLenum GLApiBase::glClientWaitSyncFn(GLsync sync,
@@ -3544,13 +3602,13 @@ void GLApiBase::glFramebufferTextureLayerFn(GLenum target,
                                           layer);
 }
 
-void GLApiBase::glFramebufferTextureMultiviewLayeredANGLEFn(GLenum target,
-                                                            GLenum attachment,
-                                                            GLuint texture,
-                                                            GLint level,
-                                                            GLint baseViewIndex,
-                                                            GLsizei numViews) {
-  driver_->fn.glFramebufferTextureMultiviewLayeredANGLEFn(
+void GLApiBase::glFramebufferTextureMultiviewOVRFn(GLenum target,
+                                                   GLenum attachment,
+                                                   GLuint texture,
+                                                   GLint level,
+                                                   GLint baseViewIndex,
+                                                   GLsizei numViews) {
+  driver_->fn.glFramebufferTextureMultiviewOVRFn(
       target, attachment, texture, level, baseViewIndex, numViews);
 }
 
@@ -4508,6 +4566,10 @@ void GLApiBase::glInvalidateSubFramebufferFn(GLenum target,
                                            x, y, width, height);
 }
 
+void GLApiBase::glInvalidateTextureANGLEFn(GLenum target) {
+  driver_->fn.glInvalidateTextureANGLEFn(target);
+}
+
 GLboolean GLApiBase::glIsBufferFn(GLuint buffer) {
   return driver_->fn.glIsBufferFn(buffer);
 }
@@ -5348,6 +5410,18 @@ void GLApiBase::glTexImage2DFn(GLenum target,
                              border, format, type, pixels);
 }
 
+void GLApiBase::glTexImage2DExternalANGLEFn(GLenum target,
+                                            GLint level,
+                                            GLint internalformat,
+                                            GLsizei width,
+                                            GLsizei height,
+                                            GLint border,
+                                            GLenum format,
+                                            GLenum type) {
+  driver_->fn.glTexImage2DExternalANGLEFn(target, level, internalformat, width,
+                                          height, border, format, type);
+}
+
 void GLApiBase::glTexImage2DRobustANGLEFn(GLenum target,
                                           GLint level,
                                           GLint internalformat,
@@ -6178,6 +6252,31 @@ void TraceGLApi::glClearStencilFn(GLint s) {
   gl_api_->glClearStencilFn(s);
 }
 
+void TraceGLApi::glClearTexImageFn(GLuint texture,
+                                   GLint level,
+                                   GLenum format,
+                                   GLenum type,
+                                   const GLvoid* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glClearTexImage")
+  gl_api_->glClearTexImageFn(texture, level, format, type, data);
+}
+
+void TraceGLApi::glClearTexSubImageFn(GLuint texture,
+                                      GLint level,
+                                      GLint xoffset,
+                                      GLint yoffset,
+                                      GLint zoffset,
+                                      GLint width,
+                                      GLint height,
+                                      GLint depth,
+                                      GLenum format,
+                                      GLenum type,
+                                      const GLvoid* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glClearTexSubImage")
+  gl_api_->glClearTexSubImageFn(texture, level, xoffset, yoffset, zoffset,
+                                width, height, depth, format, type, data);
+}
+
 GLenum TraceGLApi::glClientWaitSyncFn(GLsync sync,
                                       GLbitfield flags,
                                       GLuint64 timeout) {
@@ -6824,17 +6923,16 @@ void TraceGLApi::glFramebufferTextureLayerFn(GLenum target,
                                        layer);
 }
 
-void TraceGLApi::glFramebufferTextureMultiviewLayeredANGLEFn(
-    GLenum target,
-    GLenum attachment,
-    GLuint texture,
-    GLint level,
-    GLint baseViewIndex,
-    GLsizei numViews) {
-  TRACE_EVENT_BINARY_EFFICIENT0(
-      "gpu", "TraceGLAPI::glFramebufferTextureMultiviewLayeredANGLE")
-  gl_api_->glFramebufferTextureMultiviewLayeredANGLEFn(
-      target, attachment, texture, level, baseViewIndex, numViews);
+void TraceGLApi::glFramebufferTextureMultiviewOVRFn(GLenum target,
+                                                    GLenum attachment,
+                                                    GLuint texture,
+                                                    GLint level,
+                                                    GLint baseViewIndex,
+                                                    GLsizei numViews) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glFramebufferTextureMultiviewOVR")
+  gl_api_->glFramebufferTextureMultiviewOVRFn(target, attachment, texture,
+                                              level, baseViewIndex, numViews);
 }
 
 void TraceGLApi::glFrontFaceFn(GLenum mode) {
@@ -7961,6 +8059,11 @@ void TraceGLApi::glInvalidateSubFramebufferFn(GLenum target,
                                         y, width, height);
 }
 
+void TraceGLApi::glInvalidateTextureANGLEFn(GLenum target) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glInvalidateTextureANGLE")
+  gl_api_->glInvalidateTextureANGLEFn(target);
+}
+
 GLboolean TraceGLApi::glIsBufferFn(GLuint buffer) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glIsBuffer")
   return gl_api_->glIsBufferFn(buffer);
@@ -8955,6 +9058,19 @@ void TraceGLApi::glTexImage2DFn(GLenum target,
                           format, type, pixels);
 }
 
+void TraceGLApi::glTexImage2DExternalANGLEFn(GLenum target,
+                                             GLint level,
+                                             GLint internalformat,
+                                             GLsizei width,
+                                             GLsizei height,
+                                             GLint border,
+                                             GLenum format,
+                                             GLenum type) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexImage2DExternalANGLE")
+  gl_api_->glTexImage2DExternalANGLEFn(target, level, internalformat, width,
+                                       height, border, format, type);
+}
+
 void TraceGLApi::glTexImage2DRobustANGLEFn(GLenum target,
                                            GLint level,
                                            GLint internalformat,
@@ -9943,6 +10059,41 @@ void DebugGLApi::glClearStencilFn(GLint s) {
   gl_api_->glClearStencilFn(s);
 }
 
+void DebugGLApi::glClearTexImageFn(GLuint texture,
+                                   GLint level,
+                                   GLenum format,
+                                   GLenum type,
+                                   const GLvoid* data) {
+  GL_SERVICE_LOG("glClearTexImage"
+                 << "(" << texture << ", " << level << ", "
+                 << GLEnums::GetStringEnum(format) << ", "
+                 << GLEnums::GetStringEnum(type) << ", "
+                 << static_cast<const void*>(data) << ")");
+  gl_api_->glClearTexImageFn(texture, level, format, type, data);
+}
+
+void DebugGLApi::glClearTexSubImageFn(GLuint texture,
+                                      GLint level,
+                                      GLint xoffset,
+                                      GLint yoffset,
+                                      GLint zoffset,
+                                      GLint width,
+                                      GLint height,
+                                      GLint depth,
+                                      GLenum format,
+                                      GLenum type,
+                                      const GLvoid* data) {
+  GL_SERVICE_LOG("glClearTexSubImage"
+                 << "(" << texture << ", " << level << ", " << xoffset << ", "
+                 << yoffset << ", " << zoffset << ", " << width << ", "
+                 << height << ", " << depth << ", "
+                 << GLEnums::GetStringEnum(format) << ", "
+                 << GLEnums::GetStringEnum(type) << ", "
+                 << static_cast<const void*>(data) << ")");
+  gl_api_->glClearTexSubImageFn(texture, level, xoffset, yoffset, zoffset,
+                                width, height, depth, format, type, data);
+}
+
 GLenum DebugGLApi::glClientWaitSyncFn(GLsync sync,
                                       GLbitfield flags,
                                       GLuint64 timeout) {
@@ -10793,20 +10944,19 @@ void DebugGLApi::glFramebufferTextureLayerFn(GLenum target,
                                        layer);
 }
 
-void DebugGLApi::glFramebufferTextureMultiviewLayeredANGLEFn(
-    GLenum target,
-    GLenum attachment,
-    GLuint texture,
-    GLint level,
-    GLint baseViewIndex,
-    GLsizei numViews) {
-  GL_SERVICE_LOG("glFramebufferTextureMultiviewLayeredANGLE"
+void DebugGLApi::glFramebufferTextureMultiviewOVRFn(GLenum target,
+                                                    GLenum attachment,
+                                                    GLuint texture,
+                                                    GLint level,
+                                                    GLint baseViewIndex,
+                                                    GLsizei numViews) {
+  GL_SERVICE_LOG("glFramebufferTextureMultiviewOVR"
                  << "(" << GLEnums::GetStringEnum(target) << ", "
                  << GLEnums::GetStringEnum(attachment) << ", " << texture
                  << ", " << level << ", " << baseViewIndex << ", " << numViews
                  << ")");
-  gl_api_->glFramebufferTextureMultiviewLayeredANGLEFn(
-      target, attachment, texture, level, baseViewIndex, numViews);
+  gl_api_->glFramebufferTextureMultiviewOVRFn(target, attachment, texture,
+                                              level, baseViewIndex, numViews);
 }
 
 void DebugGLApi::glFrontFaceFn(GLenum mode) {
@@ -12304,6 +12454,12 @@ void DebugGLApi::glInvalidateSubFramebufferFn(GLenum target,
                                         y, width, height);
 }
 
+void DebugGLApi::glInvalidateTextureANGLEFn(GLenum target) {
+  GL_SERVICE_LOG("glInvalidateTextureANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ")");
+  gl_api_->glInvalidateTextureANGLEFn(target);
+}
+
 GLboolean DebugGLApi::glIsBufferFn(GLuint buffer) {
   GL_SERVICE_LOG("glIsBuffer"
                  << "(" << buffer << ")");
@@ -13624,6 +13780,23 @@ void DebugGLApi::glTexImage2DFn(GLenum target,
                           format, type, pixels);
 }
 
+void DebugGLApi::glTexImage2DExternalANGLEFn(GLenum target,
+                                             GLint level,
+                                             GLint internalformat,
+                                             GLsizei width,
+                                             GLsizei height,
+                                             GLint border,
+                                             GLenum format,
+                                             GLenum type) {
+  GL_SERVICE_LOG("glTexImage2DExternalANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << internalformat << ", " << width << ", " << height
+                 << ", " << border << ", " << GLEnums::GetStringEnum(format)
+                 << ", " << GLEnums::GetStringEnum(type) << ")");
+  gl_api_->glTexImage2DExternalANGLEFn(target, level, internalformat, width,
+                                       height, border, format, type);
+}
+
 void DebugGLApi::glTexImage2DRobustANGLEFn(GLenum target,
                                            GLint level,
                                            GLint internalformat,
@@ -14703,6 +14876,28 @@ void NoContextGLApi::glClearStencilFn(GLint s) {
   NoContextHelper("glClearStencil");
 }
 
+void NoContextGLApi::glClearTexImageFn(GLuint texture,
+                                       GLint level,
+                                       GLenum format,
+                                       GLenum type,
+                                       const GLvoid* data) {
+  NoContextHelper("glClearTexImage");
+}
+
+void NoContextGLApi::glClearTexSubImageFn(GLuint texture,
+                                          GLint level,
+                                          GLint xoffset,
+                                          GLint yoffset,
+                                          GLint zoffset,
+                                          GLint width,
+                                          GLint height,
+                                          GLint depth,
+                                          GLenum format,
+                                          GLenum type,
+                                          const GLvoid* data) {
+  NoContextHelper("glClearTexSubImage");
+}
+
 GLenum NoContextGLApi::glClientWaitSyncFn(GLsync sync,
                                           GLbitfield flags,
                                           GLuint64 timeout) {
@@ -15238,14 +15433,13 @@ void NoContextGLApi::glFramebufferTextureLayerFn(GLenum target,
   NoContextHelper("glFramebufferTextureLayer");
 }
 
-void NoContextGLApi::glFramebufferTextureMultiviewLayeredANGLEFn(
-    GLenum target,
-    GLenum attachment,
-    GLuint texture,
-    GLint level,
-    GLint baseViewIndex,
-    GLsizei numViews) {
-  NoContextHelper("glFramebufferTextureMultiviewLayeredANGLE");
+void NoContextGLApi::glFramebufferTextureMultiviewOVRFn(GLenum target,
+                                                        GLenum attachment,
+                                                        GLuint texture,
+                                                        GLint level,
+                                                        GLint baseViewIndex,
+                                                        GLsizei numViews) {
+  NoContextHelper("glFramebufferTextureMultiviewOVR");
 }
 
 void NoContextGLApi::glFrontFaceFn(GLenum mode) {
@@ -16175,6 +16369,10 @@ void NoContextGLApi::glInvalidateSubFramebufferFn(GLenum target,
   NoContextHelper("glInvalidateSubFramebuffer");
 }
 
+void NoContextGLApi::glInvalidateTextureANGLEFn(GLenum target) {
+  NoContextHelper("glInvalidateTextureANGLE");
+}
+
 GLboolean NoContextGLApi::glIsBufferFn(GLuint buffer) {
   NoContextHelper("glIsBuffer");
   return GL_FALSE;
@@ -17016,6 +17214,17 @@ void NoContextGLApi::glTexImage2DFn(GLenum target,
                                     GLenum type,
                                     const void* pixels) {
   NoContextHelper("glTexImage2D");
+}
+
+void NoContextGLApi::glTexImage2DExternalANGLEFn(GLenum target,
+                                                 GLint level,
+                                                 GLint internalformat,
+                                                 GLsizei width,
+                                                 GLsizei height,
+                                                 GLint border,
+                                                 GLenum format,
+                                                 GLenum type) {
+  NoContextHelper("glTexImage2DExternalANGLE");
 }
 
 void NoContextGLApi::glTexImage2DRobustANGLEFn(GLenum target,

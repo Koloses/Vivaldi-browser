@@ -20,6 +20,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "base/version.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
@@ -32,7 +33,6 @@
 #include "chrome/browser/extensions/external_pref_loader.h"
 #include "chrome/browser/extensions/forced_extensions/installation_reporter.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
-#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -302,7 +302,7 @@ void ExternalProviderImpl::RetrieveExtensionsFromPrefs(
         if (supported_locales->GetString(j, &current_locale) &&
             l10n_util::IsValidLocaleSyntax(current_locale)) {
           current_locale = l10n_util::NormalizeLocale(current_locale);
-          if (base::ContainsValue(browser_locales, current_locale)) {
+          if (base::Contains(browser_locales, current_locale)) {
             locale_supported = true;
             break;
           }
@@ -553,7 +553,7 @@ bool ExternalProviderImpl::HandleDoNotInstallForEnterprise(
                             &do_not_install_for_enterprise) &&
       do_not_install_for_enterprise) {
     const policy::ProfilePolicyConnector* const connector =
-        policy::ProfilePolicyConnectorFactory::GetForBrowserContext(profile_);
+        profile_->GetProfilePolicyConnector();
     if (connector->IsManaged()) {
       unsupported_extensions->insert(extension_id);
       InstallationReporter::ReportFailure(
@@ -580,17 +580,20 @@ void ExternalProviderImpl::CreateExternalProviders(
 
 #if defined(OS_CHROMEOS)
   if (chromeos::ProfileHelper::IsSigninProfile(profile)) {
-    // Download apps installed by policy in the login profile. Flags
-    // FROM_WEBSTORE/WAS_INSTALLED_BY_DEFAULT are applied because these apps are
-    // downloaded from the webstore, and we want to treat them as built-in
-    // extensions.
+    // Download extensions/apps installed by policy in the login profile. Flags
+    // FROM_WEBSTORE/WAS_INSTALLED_BY_DEFAULT are applied because these
+    // extension/apps are downloaded from the webstore, and we want to treat
+    // them as built-in extensions. Extensions (not apps) installed through this
+    // path will have type |TYPE_LOGIN_SCREE_EXTENSION| with limited API
+    // capabilities.
     external_loader = new ExternalPolicyLoader(
         ExtensionManagementFactory::GetForBrowserContext(profile),
         ExternalPolicyLoader::FORCED);
     auto signin_profile_provider = std::make_unique<ExternalProviderImpl>(
         service, external_loader, profile, crx_location,
         Manifest::EXTERNAL_POLICY_DOWNLOAD,
-        Extension::FROM_WEBSTORE | Extension::WAS_INSTALLED_BY_DEFAULT);
+        Extension::FROM_WEBSTORE | Extension::WAS_INSTALLED_BY_DEFAULT |
+            Extension::FOR_LOGIN_SCREEN);
     signin_profile_provider->set_allow_updates(true);
     provider_list->push_back(std::move(signin_profile_provider));
     return;
@@ -780,7 +783,7 @@ void ExternalProviderImpl::CreateExternalProviders(
         bundled_extension_creation_flags));
 
     // Define a per-user source of external extensions.
-#if defined(OS_MACOSX) || (defined(OS_LINUX) && defined(CHROMIUM_BUILD))
+#if defined(OS_MACOSX) || (defined(OS_LINUX) && BUILDFLAG(CHROMIUM_BRANDING))
     provider_list->push_back(std::make_unique<ExternalProviderImpl>(
         service,
         new ExternalPrefLoader(chrome::DIR_USER_EXTERNAL_EXTENSIONS,

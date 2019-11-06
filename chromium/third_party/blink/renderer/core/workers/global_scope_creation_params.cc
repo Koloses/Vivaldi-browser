@@ -18,13 +18,13 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
     const String& global_scope_name,
     const String& user_agent,
     scoped_refptr<WebWorkerFetchContext> web_worker_fetch_context,
-    const Vector<CSPHeaderAndType>& content_security_policy_parsed_headers,
+    const Vector<CSPHeaderAndType>& outside_content_security_policy_headers,
     network::mojom::ReferrerPolicy referrer_policy,
     const SecurityOrigin* starter_origin,
     bool starter_secure_context,
     HttpsState starter_https_state,
     WorkerClients* worker_clients,
-    mojom::IPAddressSpace address_space,
+    base::Optional<mojom::IPAddressSpace> response_address_space,
     const Vector<String>* origin_trial_tokens,
     const base::UnguessableToken& parent_devtools_token,
     std::unique_ptr<WorkerSettings> worker_settings,
@@ -46,7 +46,7 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
       starter_secure_context(starter_secure_context),
       starter_https_state(starter_https_state),
       worker_clients(worker_clients),
-      address_space(address_space),
+      response_address_space(response_address_space),
       parent_devtools_token(parent_devtools_token),
       worker_settings(std::move(worker_settings)),
       v8_cache_options(v8_cache_options),
@@ -62,14 +62,6 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
       agent_cluster_id(agent_cluster_id) {
   switch (this->script_type) {
     case mojom::ScriptType::kClassic:
-      if (this->off_main_thread_fetch_option ==
-          OffMainThreadWorkerScriptFetchOption::kEnabled) {
-        DCHECK(base::FeatureList::IsEnabled(
-                   features::kOffMainThreadDedicatedWorkerScriptFetch) ||
-               base::FeatureList::IsEnabled(
-                   features::kOffMainThreadServiceWorkerScriptFetch) ||
-               features::IsOffMainThreadSharedWorkerScriptFetchEnabled());
-      }
       break;
     case mojom::ScriptType::kModule:
       DCHECK_EQ(this->off_main_thread_fetch_option,
@@ -77,10 +69,10 @@ GlobalScopeCreationParams::GlobalScopeCreationParams(
       break;
   }
 
-  this->content_security_policy_parsed_headers.ReserveInitialCapacity(
-      content_security_policy_parsed_headers.size());
-  for (const auto& header : content_security_policy_parsed_headers) {
-    this->content_security_policy_parsed_headers.emplace_back(
+  this->outside_content_security_policy_headers.ReserveInitialCapacity(
+      outside_content_security_policy_headers.size());
+  for (const auto& header : outside_content_security_policy_headers) {
+    this->outside_content_security_policy_headers.emplace_back(
         header.first.IsolatedCopy(), header.second);
   }
 

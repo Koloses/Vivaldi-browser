@@ -11,9 +11,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/arc/icon_decode_request.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
-#include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
+#include "components/arc/session/arc_bridge_service.h"
 #include "third_party/skia/include/core/SkPath.h"
+#include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/canvas_image_source.h"
 #include "ui/gfx/image/image_skia_operations.h"
@@ -51,7 +52,7 @@ bool LaunchIntent(const std::string& intent_uri, int64_t display_id) {
 class AvatarImageSource : public gfx::CanvasImageSource {
  public:
   AvatarImageSource(gfx::ImageSkia avatar, int size)
-      : CanvasImageSource(gfx::Size(size, size), false), radius_(size / 2) {
+      : CanvasImageSource(gfx::Size(size, size)), radius_(size / 2) {
     avatar_ = gfx::ImageSkiaOperations::CreateResizedImage(
         avatar, skia::ImageOperations::RESIZE_BEST, gfx::Size(size, size));
   }

@@ -40,10 +40,10 @@ void PostSignResultToTaskRunner(
 
 void PostIdentitiesToTaskRunner(
     const scoped_refptr<base::TaskRunner>& target_task_runner,
-    const base::Callback<void(net::ClientCertIdentityList)>& callback,
+    base::OnceCallback<void(net::ClientCertIdentityList)> callback,
     net::ClientCertIdentityList certs) {
-  target_task_runner->PostTask(FROM_HERE,
-                               base::BindOnce(callback, std::move(certs)));
+  target_task_runner->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), std::move(certs)));
 }
 
 }  // namespace
@@ -59,15 +59,15 @@ class CertificateProviderService::CertificateProviderImpl
       const base::WeakPtr<CertificateProviderService>& service);
   ~CertificateProviderImpl() override;
 
-  void GetCertificates(const base::Callback<void(net::ClientCertIdentityList)>&
-                           callback) override;
+  void GetCertificates(
+      base::OnceCallback<void(net::ClientCertIdentityList)> callback) override;
 
   std::unique_ptr<CertificateProvider> Copy() override;
 
  private:
   static void GetCertificatesOnServiceThread(
       const base::WeakPtr<CertificateProviderService>& service,
-      const base::Callback<void(net::ClientCertIdentityList)>& callback);
+      base::OnceCallback<void(net::ClientCertIdentityList)> callback);
 
   const scoped_refptr<base::SequencedTaskRunner> service_task_runner_;
   // Must be dereferenced on |service_task_runner_| only.
@@ -134,7 +134,7 @@ class CertificateProviderService::ClientCertIdentity
         service_(service) {}
 
   void AcquirePrivateKey(
-      const base::Callback<void(scoped_refptr<net::SSLPrivateKey>)>&
+      base::OnceCallback<void(scoped_refptr<net::SSLPrivateKey>)>
           private_key_callback) override;
 
  private:
@@ -149,19 +149,15 @@ class CertificateProviderService::ClientCertIdentity
 };
 
 void CertificateProviderService::ClientCertIdentity::AcquirePrivateKey(
-    const base::Callback<void(scoped_refptr<net::SSLPrivateKey>)>&
+    base::OnceCallback<void(scoped_refptr<net::SSLPrivateKey>)>
         private_key_callback) {
   // The caller is responsible for keeping the ClientCertIdentity alive until
   // |private_key_callback| is run, so it's safe to use Unretained here.
-  if (base::PostTaskAndReplyWithResult(
-          service_task_runner_.get(), FROM_HERE,
-          base::Bind(&ClientCertIdentity::AcquirePrivateKeyOnServiceThread,
+  base::PostTaskAndReplyWithResult(
+      service_task_runner_.get(), FROM_HERE,
+      base::BindOnce(&ClientCertIdentity::AcquirePrivateKeyOnServiceThread,
                      base::Unretained(this), base::Unretained(certificate())),
-          private_key_callback)) {
-    return;
-  }
-  // If the task could not be posted, behave as if there was no key.
-  private_key_callback.Run(nullptr);
+      std::move(private_key_callback));
 }
 
 scoped_refptr<net::SSLPrivateKey> CertificateProviderService::
@@ -193,16 +189,16 @@ CertificateProviderService::CertificateProviderImpl::
     ~CertificateProviderImpl() {}
 
 void CertificateProviderService::CertificateProviderImpl::GetCertificates(
-    const base::Callback<void(net::ClientCertIdentityList)>& callback) {
+    base::OnceCallback<void(net::ClientCertIdentityList)> callback) {
   const scoped_refptr<base::TaskRunner> source_task_runner =
       base::ThreadTaskRunnerHandle::Get();
-  const base::Callback<void(net::ClientCertIdentityList)>
-      callback_from_service_thread =
-          base::Bind(&PostIdentitiesToTaskRunner, source_task_runner, callback);
+  base::OnceCallback<void(net::ClientCertIdentityList)>
+      callback_from_service_thread = base::BindOnce(
+          &PostIdentitiesToTaskRunner, source_task_runner, std::move(callback));
 
   service_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&GetCertificatesOnServiceThread, service_,
-                                callback_from_service_thread));
+                                std::move(callback_from_service_thread)));
 }
 
 std::unique_ptr<CertificateProvider>
@@ -215,12 +211,12 @@ CertificateProviderService::CertificateProviderImpl::Copy() {
 void CertificateProviderService::CertificateProviderImpl::
     GetCertificatesOnServiceThread(
         const base::WeakPtr<CertificateProviderService>& service,
-        const base::Callback<void(net::ClientCertIdentityList)>& callback) {
+        base::OnceCallback<void(net::ClientCertIdentityList)> callback) {
   if (!service) {
-    callback.Run(net::ClientCertIdentityList());
+    std::move(callback).Run(net::ClientCertIdentityList());
     return;
   }
-  service->GetCertificatesFromExtensions(callback);
+  service->GetCertificatesFromExtensions(std::move(callback));
 }
 
 CertificateProviderService::SSLPrivateKey::SSLPrivateKey(
@@ -333,6 +329,14 @@ void CertificateProviderService::SetDelegate(
   delegate_ = std::move(delegate);
 }
 
+void CertificateProviderService::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void CertificateProviderService::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
 bool CertificateProviderService::SetCertificatesProvidedByExtension(
     const std::string& extension_id,
     int cert_request_id,
@@ -348,10 +352,10 @@ bool CertificateProviderService::SetCertificatesProvidedByExtension(
   }
   if (completed) {
     std::map<std::string, CertificateInfoList> certificates;
-    base::Callback<void(net::ClientCertIdentityList)> callback;
+    base::OnceCallback<void(net::ClientCertIdentityList)> callback;
     certificate_requests_.RemoveRequest(cert_request_id, &certificates,
                                         &callback);
-    UpdateCertificatesAndRun(certificates, callback);
+    UpdateCertificatesAndRun(certificates, std::move(callback));
   }
   return true;
 }
@@ -362,8 +366,10 @@ void CertificateProviderService::ReplyToSignRequest(
     const std::vector<uint8_t>& signature) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  scoped_refptr<net::X509Certificate> certificate;
   net::SSLPrivateKey::SignCallback callback;
-  if (!sign_requests_.RemoveRequest(extension_id, sign_request_id, &callback)) {
+  if (!sign_requests_.RemoveRequest(extension_id, sign_request_id, &certificate,
+                                    &callback)) {
     LOG(ERROR) << "request id unknown.";
     // Maybe multiple replies to the same request.
     return;
@@ -371,6 +377,11 @@ void CertificateProviderService::ReplyToSignRequest(
 
   const net::Error error_code = signature.empty() ? net::ERR_FAILED : net::OK;
   std::move(callback).Run(error_code, signature);
+
+  if (!signature.empty()) {
+    for (auto& observer : observers_)
+      observer.OnSignCompleted(certificate);
+  }
 }
 
 bool CertificateProviderService::LookUpCertificate(
@@ -399,10 +410,10 @@ void CertificateProviderService::OnExtensionUnloaded(
   for (const int cert_request_id :
        certificate_requests_.DropExtension(extension_id)) {
     std::map<std::string, CertificateInfoList> certificates;
-    base::Callback<void(net::ClientCertIdentityList)> callback;
+    base::OnceCallback<void(net::ClientCertIdentityList)> callback;
     certificate_requests_.RemoveRequest(cert_request_id, &certificates,
                                         &callback);
-    UpdateCertificatesAndRun(certificates, callback);
+    UpdateCertificatesAndRun(certificates, std::move(callback));
   }
 
   certificate_map_.RemoveExtension(extension_id);
@@ -413,8 +424,46 @@ void CertificateProviderService::OnExtensionUnloaded(
   pin_dialog_manager_.ExtensionUnloaded(extension_id);
 }
 
+void CertificateProviderService::RequestSignatureBySpki(
+    const std::string& subject_public_key_info,
+    uint16_t algorithm,
+    base::span<const uint8_t> digest,
+    net::SSLPrivateKey::SignCallback callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  bool is_currently_provided = false;
+  CertificateInfo info;
+  std::string extension_id;
+  certificate_map_.LookUpCertificateBySpki(
+      subject_public_key_info, &is_currently_provided, &info, &extension_id);
+  if (!is_currently_provided) {
+    LOG(ERROR) << "no certificate with the specified spki was found";
+    std::move(callback).Run(net::ERR_FAILED, std::vector<uint8_t>());
+    return;
+  }
+
+  RequestSignatureFromExtension(extension_id, info.certificate, algorithm,
+                                digest, std::move(callback));
+}
+
+bool CertificateProviderService::GetSupportedAlgorithmsBySpki(
+    const std::string& subject_public_key_info,
+    std::vector<uint16_t>* supported_algorithms) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  bool is_currently_provided = false;
+  CertificateInfo info;
+  std::string extension_id;
+  certificate_map_.LookUpCertificateBySpki(
+      subject_public_key_info, &is_currently_provided, &info, &extension_id);
+  if (!is_currently_provided) {
+    LOG(ERROR) << "no certificate with the specified spki was found";
+    return false;
+  }
+  *supported_algorithms = info.supported_algorithms;
+  return true;
+}
+
 void CertificateProviderService::GetCertificatesFromExtensions(
-    const base::Callback<void(net::ClientCertIdentityList)>& callback) {
+    base::OnceCallback<void(net::ClientCertIdentityList)> callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   const std::vector<std::string> provider_extensions(
@@ -423,14 +472,14 @@ void CertificateProviderService::GetCertificatesFromExtensions(
   if (provider_extensions.empty()) {
     DVLOG(2) << "No provider extensions left, clear all certificates.";
     UpdateCertificatesAndRun(std::map<std::string, CertificateInfoList>(),
-                             callback);
+                             std::move(callback));
     return;
   }
 
   const int cert_request_id = certificate_requests_.AddRequest(
-      provider_extensions, callback,
-      base::Bind(&CertificateProviderService::TerminateCertificateRequest,
-                 base::Unretained(this)));
+      provider_extensions, std::move(callback),
+      base::BindOnce(&CertificateProviderService::TerminateCertificateRequest,
+                     base::Unretained(this)));
 
   DVLOG(2) << "Start certificate request " << cert_request_id;
   delegate_->BroadcastCertificateRequest(cert_request_id);
@@ -438,7 +487,7 @@ void CertificateProviderService::GetCertificatesFromExtensions(
 
 void CertificateProviderService::UpdateCertificatesAndRun(
     const std::map<std::string, CertificateInfoList>& extension_to_certificates,
-    const base::Callback<void(net::ClientCertIdentityList)>& callback) {
+    base::OnceCallback<void(net::ClientCertIdentityList)> callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // Extensions are removed from the service's state when they're unloaded.
@@ -453,7 +502,7 @@ void CertificateProviderService::UpdateCertificatesAndRun(
           weak_factory_.GetWeakPtr()));
   }
 
-  callback.Run(std::move(all_certs));
+  std::move(callback).Run(std::move(all_certs));
 }
 
 void CertificateProviderService::TerminateCertificateRequest(
@@ -461,7 +510,7 @@ void CertificateProviderService::TerminateCertificateRequest(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   std::map<std::string, CertificateInfoList> certificates;
-  base::Callback<void(net::ClientCertIdentityList)> callback;
+  base::OnceCallback<void(net::ClientCertIdentityList)> callback;
   if (!certificate_requests_.RemoveRequest(cert_request_id, &certificates,
                                            &callback)) {
     DLOG(WARNING) << "Request id " << cert_request_id << " unknown.";
@@ -469,7 +518,7 @@ void CertificateProviderService::TerminateCertificateRequest(
   }
 
   DVLOG(1) << "Time out certificate request " << cert_request_id;
-  UpdateCertificatesAndRun(certificates, callback);
+  UpdateCertificatesAndRun(certificates, std::move(callback));
 }
 
 void CertificateProviderService::RequestSignatureFromExtension(
@@ -481,10 +530,12 @@ void CertificateProviderService::RequestSignatureFromExtension(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   const int sign_request_id =
-      sign_requests_.AddRequest(extension_id, std::move(callback));
+      sign_requests_.AddRequest(extension_id, certificate, std::move(callback));
   if (!delegate_->DispatchSignRequestToExtension(
           extension_id, sign_request_id, algorithm, certificate, digest)) {
-    sign_requests_.RemoveRequest(extension_id, sign_request_id, &callback);
+    scoped_refptr<net::X509Certificate> local_certificate;
+    sign_requests_.RemoveRequest(extension_id, sign_request_id,
+                                 &local_certificate, &callback);
     std::move(callback).Run(net::ERR_FAILED, std::vector<uint8_t>());
   }
 }

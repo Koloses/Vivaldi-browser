@@ -15,6 +15,7 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -26,23 +27,26 @@
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_core_observer.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
-#include "content/browser/service_worker/service_worker_dispatcher_host.h"
 #include "content/browser/service_worker/service_worker_provider_host.h"
+#include "content/browser/service_worker/service_worker_register_job.h"
 #include "content/browser/service_worker/service_worker_registration_object_host.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/browser/service_worker/test_service_worker_observer.h"
+#include "content/browser/storage_partition_impl.h"
 #include "content/common/service_worker/service_worker_utils.h"
+#include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/test/test_content_browser_client.h"
 #include "mojo/core/embedder/embedder.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_object.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
-namespace service_worker_registration_unittest {
+
+namespace {
 
 // From service_worker_registration.cc.
 constexpr base::TimeDelta kMaxLameDuckTime = base::TimeDelta::FromMinutes(5);
@@ -71,18 +75,21 @@ int CreateInflightRequest(ServiceWorkerVersion* version) {
                                base::DoNothing());
 }
 
-static void SaveStatusCallback(bool* called,
-                               blink::ServiceWorkerStatusCode* out,
-                               blink::ServiceWorkerStatusCode status) {
+void SaveStatusCallback(bool* called,
+                        blink::ServiceWorkerStatusCode* out,
+                        blink::ServiceWorkerStatusCode status) {
   *called = true;
   *out = status;
 }
+
+}  // namespace
 
 class ServiceWorkerTestContentBrowserClient : public TestContentBrowserClient {
  public:
   bool AllowServiceWorker(
       const GURL& scope,
       const GURL& first_party,
+      const GURL& script_url,
       content::ResourceContext* context,
       base::RepeatingCallback<WebContents*()> wc_getter) override {
     return false;
@@ -171,13 +178,17 @@ class ServiceWorkerRegistrationTest : public testing::Test {
   void SetUp() override {
     helper_ = std::make_unique<EmbeddedWorkerTestHelper>(base::FilePath());
 
-    context()->storage()->LazyInitializeForTest(base::DoNothing());
-    base::RunLoop().RunUntilIdle();
-  }
+    // Create a StoragePartition with the testing browser context so that the
+    // ServiceWorkerUpdateChecker can find the BrowserContext through it.
+    storage_partition_impl_ = StoragePartitionImpl::Create(
+        helper_->browser_context(), /* in_memory= */ true, base::FilePath(),
+        /* partition_domain= */ "");
+    helper_->context_wrapper()->set_storage_partition(
+        storage_partition_impl_.get());
 
-  void TearDown() override {
-    helper_.reset();
-    base::RunLoop().RunUntilIdle();
+    base::RunLoop loop;
+    context()->storage()->LazyInitializeForTest(loop.QuitClosure());
+    loop.Run();
   }
 
   ServiceWorkerContextCore* context() { return helper_->context(); }
@@ -223,6 +234,7 @@ class ServiceWorkerRegistrationTest : public testing::Test {
  protected:
   TestBrowserThreadBundle thread_bundle_;
   std::unique_ptr<EmbeddedWorkerTestHelper> helper_;
+  std::unique_ptr<StoragePartitionImpl> storage_partition_impl_;
 };
 
 TEST_F(ServiceWorkerRegistrationTest, SetAndUnsetVersions) {
@@ -375,6 +387,7 @@ class ServiceWorkerActivationTest : public ServiceWorkerRegistrationTest,
   void SetUp() override {
     ServiceWorkerRegistrationTest::SetUp();
 
+    const GURL kUrl("https://www.example.not/");
     const GURL kScope("https://www.example.not/");
     const GURL kScript("https://www.example.not/service_worker.js");
 
@@ -403,10 +416,11 @@ class ServiceWorkerActivationTest : public ServiceWorkerRegistrationTest,
     version_1->SetMainScriptHttpResponseInfo(
         EmbeddedWorkerTestHelper::CreateHttpResponseInfo());
     base::Optional<blink::ServiceWorkerStatusCode> status;
+    base::RunLoop run_loop;
     context()->storage()->StoreRegistration(
         registration_.get(), version_1.get(),
-        CreateReceiverOnCurrentThread(&status));
-    base::RunLoop().RunUntilIdle();
+        ReceiveServiceWorkerStatus(&status, run_loop.QuitClosure()));
+    run_loop.Run();
     ASSERT_EQ(blink::ServiceWorkerStatusCode::kOk, status.value());
 
     // Give the active version a controllee.
@@ -415,7 +429,9 @@ class ServiceWorkerActivationTest : public ServiceWorkerRegistrationTest,
         context()->AsWeakPtr(), &remote_endpoint_);
     DCHECK(remote_endpoint_.client_request()->is_pending());
     DCHECK(remote_endpoint_.host_ptr()->is_bound());
-    version_1->AddControllee(host_.get());
+    host_->UpdateUrls(kUrl, kUrl);
+    host_->SetControllerRegistration(registration_,
+                                     false /* notify_controllerchange */);
 
     // Setup the Mojo implementation fakes for the renderer-side service worker.
     // These will be bound once the service worker starts.
@@ -480,6 +496,16 @@ class ServiceWorkerActivationTest : public ServiceWorkerRegistrationTest,
   ServiceWorkerRegistration* registration() { return registration_.get(); }
   ServiceWorkerProviderHost* controllee() { return host_.get(); }
   int inflight_request_id() const { return inflight_request_id_; }
+
+  void AddControllee() {
+    controllee()->SetControllerRegistration(
+        registration(), false /* notify_controllerchange */);
+  }
+
+  void RemoveControllee() {
+    controllee()->SetControllerRegistration(
+        nullptr, false /* notify_controllerchange */);
+  }
 
   bool IsLameDuckTimerRunning() {
     return registration_->lame_duck_timer_.IsRunning();
@@ -550,44 +576,20 @@ TEST_P(ServiceWorkerActivationTest, NoInflightRequest) {
 
   // Remove the controllee. Since there is an in-flight request,
   // activation should not yet happen.
-  // When S13nServiceWorker is on, the idle timer living in the renderer is
-  // requested to notify the browser the idle state ASAP.
-  version_1->RemoveControllee(controllee()->client_uuid());
+  RemoveControllee();
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(version_1.get(), reg->active_version());
-  if (blink::ServiceWorkerUtils::IsServicificationEnabled())
-    EXPECT_TRUE(version_1_service_worker()->is_zero_idle_timer_delay());
+  // The idle timer living in the renderer is requested to notify the idle state
+  // to the browser ASAP.
+  EXPECT_TRUE(version_1_service_worker()->is_zero_idle_timer_delay());
 
   // Finish the request. Activation should happen.
   version_1->FinishRequest(inflight_request_id(), true /* was_handled */);
-  if (blink::ServiceWorkerUtils::IsServicificationEnabled()) {
-    EXPECT_EQ(version_1.get(), reg->active_version());
-    RequestTermination(&version_1_client()->host());
-  }
+  EXPECT_EQ(version_1.get(), reg->active_version());
+  RequestTermination(&version_1_client()->host());
+
   TestServiceWorkerObserver observer(helper_->context_wrapper());
   observer.RunUntilActivated(version_2.get(), runner);
-  EXPECT_EQ(version_2.get(), reg->active_version());
-}
-
-// Test activation triggered by loss of controllee.
-TEST_P(ServiceWorkerActivationTest, NoControllee) {
-  // S13nServiceWorker: activation only happens when the service worker reports
-  // it's idle, so this test doesn't make sense.
-  if (blink::ServiceWorkerUtils::IsServicificationEnabled())
-    return;
-  scoped_refptr<ServiceWorkerRegistration> reg = registration();
-  scoped_refptr<ServiceWorkerVersion> version_1 = reg->active_version();
-  scoped_refptr<ServiceWorkerVersion> version_2 = reg->waiting_version();
-
-  // Finish the request. Since there is a controllee, activation should not yet
-  // happen.
-  version_1->FinishRequest(inflight_request_id(), true /* was_handled */);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(version_1.get(), reg->active_version());
-
-  // Remove the controllee. Activation should happen.
-  version_1->RemoveControllee(controllee()->client_uuid());
-  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(version_2.get(), reg->active_version());
 }
 
@@ -605,20 +607,15 @@ TEST_P(ServiceWorkerActivationTest, SkipWaitingWithInflightRequest) {
                                   skip_waiting_loop.QuitClosure());
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(version_1.get(), reg->active_version());
-  if (blink::ServiceWorkerUtils::IsServicificationEnabled())
-    EXPECT_TRUE(version_1_service_worker()->is_zero_idle_timer_delay());
+  EXPECT_TRUE(version_1_service_worker()->is_zero_idle_timer_delay());
 
-  // Finish the request.
-  // non-S13nServiceWorker: The service worker becomes idle.
-  // S13nServiceWorker: FinishRequest() doesn't immediately make the worker
-  // "no work" state. It needs to be notfied the idle state by
+  // Finish the request. FinishRequest() doesn't immediately make the worker
+  // reach the "no work" state. It needs to be notfied of the idle state by
   // RequestTermination().
   version_1->FinishRequest(inflight_request_id(), true /* was_handled */);
 
-  if (blink::ServiceWorkerUtils::IsServicificationEnabled()) {
-    EXPECT_EQ(version_1.get(), reg->active_version());
-    RequestTermination(&version_1_client()->host());
-  }
+  EXPECT_EQ(version_1.get(), reg->active_version());
+  RequestTermination(&version_1_client()->host());
 
   // Wait until SkipWaiting resolves.
   skip_waiting_loop.Run();
@@ -640,21 +637,16 @@ TEST_P(ServiceWorkerActivationTest, SkipWaiting) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(version_1.get(), reg->active_version());
 
-  // Call skipWaiting.
-  // non-S13nServiceWorker: Activation should happen.
-  // S13nServiceWorker: Activation should happen after RequestTermination is
-  // triggered.
+  // Call skipWaiting. Activation happens after RequestTermination is triggered.
   base::Optional<bool> result;
   base::RunLoop skip_waiting_loop;
   SimulateSkipWaitingWithCallback(version_2.get(), &result,
                                   skip_waiting_loop.QuitClosure());
 
-  if (blink::ServiceWorkerUtils::IsServicificationEnabled()) {
-    EXPECT_TRUE(version_1_service_worker()->is_zero_idle_timer_delay());
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(version_1.get(), reg->active_version());
-    RequestTermination(&version_1_client()->host());
-  }
+  EXPECT_TRUE(version_1_service_worker()->is_zero_idle_timer_delay());
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(version_1.get(), reg->active_version());
+  RequestTermination(&version_1_client()->host());
 
   // Wait until SkipWaiting resolves.
   skip_waiting_loop.Run();
@@ -729,6 +721,12 @@ TEST_P(ServiceWorkerActivationTest, LameDuckTime_SkipWaiting) {
   EXPECT_TRUE(*result);
   EXPECT_EQ(version_2.get(), reg->active_version());
   EXPECT_FALSE(IsLameDuckTimerRunning());
+
+  // Restore the TickClock to the default. This is required because the dtor
+  // of ServiceWorkerVersions can access the TickClock and it should outlive
+  // ServiceWorkerVersion.
+  version_1->SetTickClockForTesting(base::DefaultTickClock::GetInstance());
+  version_2->SetTickClockForTesting(base::DefaultTickClock::GetInstance());
 }
 
 // Test lame duck timer triggered by loss of controllee.
@@ -746,7 +744,7 @@ TEST_P(ServiceWorkerActivationTest, LameDuckTime_NoControllee) {
   // Remove the controllee. Since there is still an in-flight request,
   // activation should not happen. But the lame duck timer should start.
   EXPECT_FALSE(IsLameDuckTimerRunning());
-  version_1->RemoveControllee(controllee()->client_uuid());
+  RemoveControllee();
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(version_1.get(), reg->active_version());
   EXPECT_TRUE(IsLameDuckTimerRunning());
@@ -756,12 +754,12 @@ TEST_P(ServiceWorkerActivationTest, LameDuckTime_NoControllee) {
   clock_1.Advance(kLittleBit);
 
   // Add a controllee again to reset the lame duck period.
-  version_1->AddControllee(controllee());
+  AddControllee();
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(IsLameDuckTimerRunning());
 
   // Remove the controllee.
-  version_1->RemoveControllee(controllee()->client_uuid());
+  RemoveControllee();
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(IsLameDuckTimerRunning());
 
@@ -967,6 +965,31 @@ class ServiceWorkerRegistrationObjectHostTest
   std::vector<std::string> bad_messages_;
 };
 
+class ServiceWorkerRegistrationObjectHostUpdateTest
+    : public ServiceWorkerRegistrationObjectHostTest,
+      public testing::WithParamInterface<bool> {
+ protected:
+  void SetUp() override {
+    if (IsImportedScriptUpdateCheckEnabled()) {
+      feature_list_.InitAndEnableFeature(
+          blink::features::kServiceWorkerImportedScriptUpdateCheck);
+    } else {
+      feature_list_.InitAndDisableFeature(
+          blink::features::kServiceWorkerImportedScriptUpdateCheck);
+    }
+    ServiceWorkerRegistrationObjectHostTest::SetUp();
+  }
+
+  static bool IsImportedScriptUpdateCheckEnabled() { return GetParam(); }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+INSTANTIATE_TEST_SUITE_P(ServiceWorkerRegistrationObjectHostUpdateTestP,
+                         ServiceWorkerRegistrationObjectHostUpdateTest,
+                         testing::Bool());
+
 TEST_F(ServiceWorkerRegistrationObjectHostTest, BreakConnection_Destroy) {
   const GURL kScope("https://www.example.com/");
   const GURL kScriptUrl("https://www.example.com/sw.js");
@@ -985,7 +1008,7 @@ TEST_F(ServiceWorkerRegistrationObjectHostTest, BreakConnection_Destroy) {
   EXPECT_EQ(nullptr, context()->GetLiveRegistration(registration_id));
 }
 
-TEST_F(ServiceWorkerRegistrationObjectHostTest, Update_Success) {
+TEST_P(ServiceWorkerRegistrationObjectHostUpdateTest, Update_Success) {
   const GURL kScope("https://www.example.com/");
   const GURL kScriptUrl("https://www.example.com/sw.js");
   SetUpRegistration(kScope, kScriptUrl);
@@ -1006,7 +1029,8 @@ TEST_F(ServiceWorkerRegistrationObjectHostTest, Update_Success) {
             CallUpdate(registration_host_ptr.get()));
 }
 
-TEST_F(ServiceWorkerRegistrationObjectHostTest, Update_CrossOriginShouldFail) {
+TEST_P(ServiceWorkerRegistrationObjectHostUpdateTest,
+       Update_CrossOriginShouldFail) {
   const GURL kScope("https://www.example.com/");
   const GURL kScriptUrl("https://www.example.com/sw.js");
   SetUpRegistration(kScope, kScriptUrl);
@@ -1026,7 +1050,7 @@ TEST_F(ServiceWorkerRegistrationObjectHostTest, Update_CrossOriginShouldFail) {
   EXPECT_EQ(1u, bad_messages_.size());
 }
 
-TEST_F(ServiceWorkerRegistrationObjectHostTest,
+TEST_P(ServiceWorkerRegistrationObjectHostUpdateTest,
        Update_ContentSettingsDisallowsServiceWorker) {
   const GURL kScope("https://www.example.com/");
   const GURL kScriptUrl("https://www.example.com/sw.js");
@@ -1047,7 +1071,8 @@ TEST_F(ServiceWorkerRegistrationObjectHostTest,
   SetBrowserClientForTesting(old_browser_client);
 }
 
-TEST_F(ServiceWorkerRegistrationObjectHostTest, Update_NoDelayFromControllee) {
+TEST_P(ServiceWorkerRegistrationObjectHostUpdateTest,
+       Update_NoDelayFromControllee) {
   const GURL kScope("https://www.example.com/");
   const GURL kScriptUrl("https://www.example.com/sw.js");
   int64_t registration_id = SetUpRegistration(kScope, kScriptUrl);
@@ -1076,7 +1101,7 @@ TEST_F(ServiceWorkerRegistrationObjectHostTest, Update_NoDelayFromControllee) {
   EXPECT_EQ(base::TimeDelta(), registration->self_update_delay());
 }
 
-TEST_F(ServiceWorkerRegistrationObjectHostTest,
+TEST_P(ServiceWorkerRegistrationObjectHostUpdateTest,
        Update_DelayFromWorkerWithoutControllee) {
   const GURL kScope("https://www.example.com/");
   const GURL kScriptUrl("https://www.example.com/sw.js");
@@ -1107,14 +1132,17 @@ TEST_F(ServiceWorkerRegistrationObjectHostTest,
   EXPECT_LE(base::TimeDelta::FromMinutes(5), registration->self_update_delay());
 }
 
-TEST_F(ServiceWorkerRegistrationObjectHostTest,
+TEST_P(ServiceWorkerRegistrationObjectHostUpdateTest,
        Update_NoDelayFromWorkerWithControllee) {
   const GURL kScope("https://www.example.com/");
   const GURL kScriptUrl("https://www.example.com/sw.js");
   scoped_refptr<ServiceWorkerRegistration> registration =
       CreateRegistration(kScope);
+
   scoped_refptr<ServiceWorkerVersion> version =
       CreateVersion(registration.get(), kScriptUrl);
+  version->SetStatus(ServiceWorkerVersion::ACTIVATED);
+
   ServiceWorkerRemoteProviderEndpoint remote_endpoint;
   base::WeakPtr<ServiceWorkerProviderHost> host = CreateProviderHostForWindow(
       helper_->mock_render_process_id(), true /* is_parent_frame_secure */,
@@ -1345,7 +1373,7 @@ TEST_F(ServiceWorkerRegistrationObjectHostTest, SetUpdateViaCache) {
             mock_registration_object->update_via_cache());
 }
 
-TEST_F(ServiceWorkerRegistrationObjectHostTest, UpdateFound) {
+TEST_P(ServiceWorkerRegistrationObjectHostUpdateTest, UpdateFound) {
   const GURL kScope("https://www.example.com/");
   const GURL kScriptUrl("https://www.example.com/sw.js");
   int64_t registration_id = SetUpRegistration(kScope, kScriptUrl);
@@ -1368,5 +1396,4 @@ TEST_F(ServiceWorkerRegistrationObjectHostTest, UpdateFound) {
   EXPECT_EQ(1, mock_registration_object->update_found_called_count());
 }
 
-}  // namespace service_worker_registration_unittest
 }  // namespace content

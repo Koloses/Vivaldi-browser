@@ -23,6 +23,7 @@
 namespace performance_monitor {
 
 class MetricEvaluatorsHelper;
+class SystemMonitorMetricsLogger;
 
 // Monitors various various system metrics such as free memory, disk idle time,
 // etc.
@@ -55,6 +56,11 @@ class SystemMonitor {
   // with Get().
   static std::unique_ptr<SystemMonitor> Create();
 
+  // Test fixture that allows creating a global SystemMonitor instance that uses
+  // a custom metric evaluator helper.
+  static std::unique_ptr<SystemMonitor> CreateForTesting(
+      std::unique_ptr<MetricEvaluatorsHelper> helper);
+
   // Get the application-wide SystemMonitor (if not present, returns
   // nullptr).
   static SystemMonitor* Get();
@@ -75,6 +81,9 @@ class SystemMonitor {
 
       SamplingFrequency system_metrics_sampling_frequency =
           SamplingFrequency::kNoSampling;
+
+      // A builder used to create instances of this object.
+      class Builder;
     };
 
     ~SystemObserver() override;
@@ -108,11 +117,6 @@ class SystemMonitor {
 
   const base::OneShotTimer& refresh_timer_for_testing() {
     return refresh_timer_;
-  }
-
-  void SetMetricEvaluatorsHelperForTesting(
-      std::unique_ptr<MetricEvaluatorsHelper> helper) {
-    metric_evaluators_helper_.reset(helper.release());
   }
 
  protected:
@@ -228,13 +232,6 @@ class SystemMonitor {
     return metrics_refresh_frequencies_;
   }
 
-  MetricMetadata* GetMetricEvaluatorMetadataForTesting(
-      MetricEvaluator::Type type) {
-    DCHECK_LT(static_cast<size_t>(type), metric_evaluators_metadata_.size());
-    return const_cast<MetricMetadata*>(
-        &metric_evaluators_metadata_[static_cast<size_t>(type)]);
-  }
-
  private:
   using MetricMetadataArray =
       const std::array<const MetricMetadata,
@@ -242,6 +239,9 @@ class SystemMonitor {
   // Evaluate the metrics in |metric_vector|.
   static SystemMonitor::MetricVector EvaluateMetrics(
       MetricVector metric_vector);
+
+  // Create a |MetricEvaluatorsHelper| instance for the current platform.
+  static std::unique_ptr<MetricEvaluatorsHelper> CreateMetricEvaluatorsHelper();
 
   // Create the array of MetricMetadata used to initialize
   // |metric_evaluators_metadata_|.
@@ -283,11 +283,33 @@ class SystemMonitor {
   // |MetricEvaluator::Type|.
   MetricMetadataArray metric_evaluators_metadata_;
 
+  // The logger responsible of logging the system metrics.
+  std::unique_ptr<SystemMonitorMetricsLogger> metrics_logger_;
+
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<SystemMonitor> weak_factory_;
+  base::WeakPtrFactory<SystemMonitor> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SystemMonitor);
+};
+
+// A builder class used to easily create a MetricRefreshFrequencies object.
+class SystemMonitor::SystemObserver::MetricRefreshFrequencies::Builder {
+ public:
+  Builder() = default;
+  ~Builder() = default;
+
+  Builder& SetFreePhysMemoryMbFrequency(SamplingFrequency freq);
+  Builder& SetDiskIdleTimePercentFrequency(SamplingFrequency freq);
+  Builder& SetSystemMetricsSamplingFrequency(SamplingFrequency freq);
+
+  // Returns the initialized MetricRefreshFrequencies instance.
+  MetricRefreshFrequencies Build();
+
+ private:
+  MetricRefreshFrequencies metrics_and_frequencies_ = {};
+
+  DISALLOW_COPY_AND_ASSIGN(Builder);
 };
 
 // An helper class used by the MetricEvaluator object to retrieve the info

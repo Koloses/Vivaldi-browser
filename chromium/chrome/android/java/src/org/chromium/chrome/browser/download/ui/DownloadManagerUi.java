@@ -5,10 +5,10 @@
 package org.chromium.chrome.browser.download.ui;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.os.Handler;
-import android.support.graphics.drawable.VectorDrawableCompat;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar.OnMenuItemClickListener;
@@ -19,6 +19,7 @@ import android.view.ViewGroup;
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.DiscardableReferencePool;
 import org.chromium.base.FileUtils;
+import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
@@ -26,8 +27,8 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
-import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.GlobalDiscardableReferencePool;
 import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.download.home.DownloadManagerCoordinator;
@@ -35,6 +36,7 @@ import org.chromium.chrome.browser.download.home.metrics.UmaUtils;
 import org.chromium.chrome.browser.download.home.metrics.UmaUtils.MenuAction;
 import org.chromium.chrome.browser.download.home.toolbar.ToolbarUtils;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
+import org.chromium.chrome.browser.gesturenav.HistoryNavigationDelegate;
 import org.chromium.chrome.browser.native_page.BasicNativePage;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.download.DownloadPreferences;
@@ -82,8 +84,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
 
         @Override
         public OfflineContentProvider getOfflineContentProvider() {
-            return OfflineContentAggregatorFactory.forProfile(
-                    Profile.getLastUsedProfile().getOriginalProfile());
+            return OfflineContentAggregatorFactory.get();
         }
 
         @Override
@@ -150,6 +151,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
         }
     }
 
+    private static final String TAG = "DownloadManagerUi";
     private static final int PREFETCH_BUNDLE_OPEN_DELAY_MS = 500;
 
     private static BackendProvider sProviderForTests;
@@ -188,10 +190,9 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
             SnackbarManager snackbarManager) {
         TraceEvent.startAsync("DownloadManagerUi shown", hashCode());
         mActivity = activity;
-        ChromeApplication application = (ChromeApplication) activity.getApplication();
-        mBackendProvider = sProviderForTests == null
-                ? new DownloadBackendProvider(application.getReferencePool(), this)
-                : sProviderForTests;
+        mBackendProvider = sProviderForTests == null ? new DownloadBackendProvider(
+                                   GlobalDiscardableReferencePool.getReferencePool(), this)
+                                                     : sProviderForTests;
         mSnackbarManager = snackbarManager;
 
         mMainView = (ViewGroup) LayoutInflater.from(activity).inflate(R.layout.download_main, null);
@@ -200,9 +201,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
                 mMainView.findViewById(R.id.selectable_list);
 
         mSelectableListLayout.initializeEmptyView(
-                VectorDrawableCompat.create(
-                        mActivity.getResources(), R.drawable.downloads_big, mActivity.getTheme()),
-                R.string.download_manager_ui_empty, R.string.download_manager_no_results);
+                R.string.download_manager_no_downloads, R.string.download_manager_no_results);
 
         mHistoryAdapter = new DownloadHistoryAdapter(isOffTheRecord, parentComponent);
         mRecyclerView = mSelectableListLayout.initializeRecyclerView(mHistoryAdapter);
@@ -230,7 +229,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
                 isLocationEnabled ? R.id.with_settings_close_menu_id : R.id.close_menu_id;
 
         mToolbar = (DownloadManagerToolbar) mSelectableListLayout.initializeToolbar(
-                R.layout.download_manager_toolbar, mBackendProvider.getSelectionDelegate(), 0, null,
+                R.layout.download_manager_toolbar, mBackendProvider.getSelectionDelegate(), 0,
                 normalGroupId, R.id.selection_mode_menu_group, this, true, isSeparateActivity);
         mToolbar.getMenu().setGroupVisible(normalGroupId, true);
         mToolbar.setManager(this);
@@ -340,6 +339,9 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
     }
 
     @Override
+    public void setHistoryNavigationDelegate(HistoryNavigationDelegate delegate) {}
+
+    @Override
     public boolean onMenuItemClick(MenuItem item) {
         UmaUtils.recordTopMenuAction(item.getItemId());
 
@@ -381,7 +383,7 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
             mToolbar.showSearchView();
             return true;
         } else if (item.getItemId() == R.id.settings_menu_id) {
-            PreferencesLauncher.launchSettingsPage(mActivity, DownloadPreferences.class);
+            PreferencesLauncher.launchSettingsPageCompat(mActivity, DownloadPreferences.class);
             return true;
         }
         return false;
@@ -441,8 +443,14 @@ public class DownloadManagerUi implements OnMenuItemClickListener, SearchDelegat
     }
 
     private void startShareIntent(Intent intent) {
-        mActivity.startActivity(Intent.createChooser(
-                intent, mActivity.getString(R.string.share_link_chooser_title)));
+        try {
+            mActivity.startActivity(Intent.createChooser(
+                    intent, mActivity.getString(R.string.share_link_chooser_title)));
+        } catch (ActivityNotFoundException e) {
+            Log.e(TAG, "Cannot find activity for sharing");
+        } catch (Exception e) {
+            Log.e(TAG, "Cannot start activity for sharing, exception: " + e);
+        }
     }
 
     private void deleteItems(List<DownloadHistoryItemWrapper> items) {

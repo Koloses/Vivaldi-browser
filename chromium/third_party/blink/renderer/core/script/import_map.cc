@@ -26,16 +26,16 @@ namespace {
 void AddIgnoredKeyMessage(ConsoleLogger& logger,
                           const String& key,
                           const String& reason) {
-  logger.AddWarningMessage(
-      ConsoleLogger::Source::kOther,
+  logger.AddConsoleMessage(
+      mojom::ConsoleMessageSource::kOther, mojom::ConsoleMessageLevel::kWarning,
       "Ignored an import map key \"" + key + "\": " + reason);
 }
 
 void AddIgnoredValueMessage(ConsoleLogger& logger,
                             const String& key,
                             const String& reason) {
-  logger.AddWarningMessage(
-      ConsoleLogger::Source::kOther,
+  logger.AddConsoleMessage(
+      mojom::ConsoleMessageSource::kOther, mojom::ConsoleMessageLevel::kWarning,
       "Ignored an import map value of \"" + key + "\": " + reason);
 }
 
@@ -101,24 +101,27 @@ ImportMap* ImportMap::Create(const Modulator& modulator_for_built_in_modules,
 
   std::unique_ptr<JSONValue> root = ParseJSON(text);
   if (!root) {
-    logger.AddErrorMessage(ConsoleLogger::Source::kOther,
-                           "Failed to parse import map: invalid JSON");
+    logger.AddConsoleMessage(mojom::ConsoleMessageSource::kOther,
+                             mojom::ConsoleMessageLevel::kError,
+                             "Failed to parse import map: invalid JSON");
     return MakeGarbageCollected<ImportMap>(modulator_for_built_in_modules,
                                            modules_map);
   }
 
   std::unique_ptr<JSONObject> root_object = JSONObject::From(std::move(root));
   if (!root_object) {
-    logger.AddErrorMessage(ConsoleLogger::Source::kOther,
-                           "Failed to parse import map: not an object");
+    logger.AddConsoleMessage(mojom::ConsoleMessageSource::kOther,
+                             mojom::ConsoleMessageLevel::kError,
+                             "Failed to parse import map: not an object");
     return MakeGarbageCollected<ImportMap>(modulator_for_built_in_modules,
                                            modules_map);
   }
 
   JSONObject* modules = root_object->GetJSONObject("imports");
   if (!modules) {
-    logger.AddErrorMessage(ConsoleLogger::Source::kOther,
-                           "Failed to parse import map: no \"imports\" entry.");
+    logger.AddConsoleMessage(
+        mojom::ConsoleMessageSource::kOther, mojom::ConsoleMessageLevel::kError,
+        "Failed to parse import map: no \"imports\" entry.");
     return MakeGarbageCollected<ImportMap>(modulator_for_built_in_modules,
                                            modules_map);
   }
@@ -184,7 +187,7 @@ ImportMap* ImportMap::Create(const Modulator& modulator_for_built_in_modules,
       values.clear();
     }
     if (values.size() == 2) {
-      if (blink::layered_api::GetBuiltinPath(values[0]).IsNull()) {
+      if (layered_api::GetBuiltinPath(values[0]).IsNull()) {
         AddIgnoredValueMessage(
             logger, entry.first,
             "Fallback from a non-builtin URL is not yet supported.");
@@ -279,8 +282,8 @@ base::Optional<KURL> ImportMap::Resolve(const ParsedSpecifier& parsed_specifier,
 
   for (const KURL& value : matched->value) {
     const KURL complete_url = postfix.IsEmpty() ? value : KURL(value, postfix);
-    if (blink::layered_api::ResolveFetchingURL(*modulator_for_built_in_modules_,
-                                               complete_url)
+    if (layered_api::ResolveFetchingURL(*modulator_for_built_in_modules_,
+                                        complete_url)
             .IsValid()) {
       *debug_message = "Import Map: \"" + key + "\" matches with \"" +
                        matched->key + "\" and is mapped to " +

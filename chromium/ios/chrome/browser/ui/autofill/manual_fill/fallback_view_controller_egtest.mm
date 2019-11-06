@@ -22,7 +22,6 @@
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #include "ios/web/public/test/element_selector.h"
-#import "ios/web/public/test/web_view_interaction_test_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "url/gurl.h"
 
@@ -71,11 +70,6 @@ void AddAutofillProfile(autofill::PersonalDataManager* personalDataManager) {
 
 - (void)setUp {
   [super setUp];
-  GREYAssert(autofill::features::IsAutofillManualFallbackEnabled(),
-             @"Manual Fallback must be enabled for this Test Case");
-  GREYAssert(autofill::features::IsAutofillManualFallbackEnabled(),
-             @"Manual Fallback phase 2 must be enabled for this Test Case");
-
   ios::ChromeBrowserState* browserState =
       chrome_test_util::GetOriginalBrowserState();
   _personalDataManager =
@@ -87,7 +81,7 @@ void AddAutofillProfile(autofill::PersonalDataManager* personalDataManager) {
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
   const GURL URL = self.testServer->GetURL(kFormHTMLFile);
   [ChromeEarlGrey loadURL:URL];
-  [ChromeEarlGrey waitForWebViewContainingText:"Hello"];
+  [ChromeEarlGrey waitForWebStateContainingText:"Hello"];
 }
 
 - (void)tearDown {

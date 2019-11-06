@@ -470,8 +470,10 @@ FileType.getTypeForName = name => {
 
   // subtype is the extension excluding the first dot.
   return {
-    name: 'GENERIC_FILE_TYPE', type: 'UNKNOWN',
-    subtype: extension.substr(1).toUpperCase(), icon: ''
+    name: 'GENERIC_FILE_TYPE',
+    type: 'UNKNOWN',
+    subtype: extension.substr(1).toUpperCase(),
+    icon: ''
   };
 };
 
@@ -511,8 +513,10 @@ FileType.getType = (entry, opt_mimeType) => {
 
   // subtype is the extension excluding the first dot.
   return {
-    name: 'GENERIC_FILE_TYPE', type: 'UNKNOWN',
-    subtype: extension.substr(1).toUpperCase(), icon: ''
+    name: 'GENERIC_FILE_TYPE',
+    type: 'UNKNOWN',
+    subtype: extension.substr(1).toUpperCase(),
+    icon: ''
   };
 };
 
@@ -616,6 +620,7 @@ FileType.getIconOverrides = (entry, opt_rootType) => {
   const overrides = {
     [VolumeManagerCommon.RootType.DOWNLOADS]: {
       '/Downloads': VolumeManagerCommon.VolumeType.DOWNLOADS,
+      '/PvmDefault': 'plugin_vm',
     },
   };
   const root = overrides[opt_rootType];

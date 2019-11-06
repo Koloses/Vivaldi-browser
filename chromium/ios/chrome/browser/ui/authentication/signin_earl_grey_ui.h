@@ -17,6 +17,10 @@
 // Adds the identity (if not already added), and perform a sign-in.
 + (void)signinWithIdentity:(ChromeIdentity*)identity;
 
+// Taps on the settings link in the sign-in view. The sign-in view has to be
+// opened before calling this method.
++ (void)tapSettingsLink;
+
 // Selects an identity when the identity chooser dialog is presented. The dialog
 // is confirmed, but it doesn't validated the user consent page.
 + (void)selectIdentityWithEmail:(NSString*)userEmail;
@@ -24,6 +28,11 @@
 // Confirms the sign in confirmation page, scrolls first to make the OK button
 // visible on short devices (e.g. iPhone 5s).
 + (void)confirmSigninConfirmationDialog;
+
+// Taps on the "ADD ACCOUNT" button in the unified consent, to display the
+// SSO dialog.
+// This method should only be used with UnifiedConsent flag.
++ (void)tapAddAccountButton;
 
 // Checks that the sign-in promo view (with a close button) is visible using the
 // right mode.

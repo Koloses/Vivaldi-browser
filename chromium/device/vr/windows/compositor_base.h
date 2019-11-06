@@ -58,15 +58,24 @@ class XRCompositorCommon : public base::Thread,
                       RequestSessionCallback callback);
   void ExitPresent();
 
-  void GetFrameData(XRFrameDataProvider::GetFrameDataCallback callback) final;
+  void GetFrameData(mojom::XRFrameDataRequestOptionsPtr options,
+                    XRFrameDataProvider::GetFrameDataCallback callback) final;
+  void SetInputSourceButtonListener(
+      mojom::XRInputSourceButtonListenerAssociatedPtrInfo input_listener_info)
+      override;
   void GetControllerDataAndSendFrameData(
       XRFrameDataProvider::GetFrameDataCallback callback,
       mojom::XRFrameDataPtr frame_data);
+
+  void GetEnvironmentIntegrationProvider(
+      device::mojom::XREnvironmentIntegrationProviderAssociatedRequest
+          environment_provider) final;
 
   void RequestGamepadProvider(mojom::IsolatedXRGamepadProviderRequest request);
   void RequestOverlay(mojom::ImmersiveOverlayRequest request);
 
  protected:
+  virtual bool UsesInputEventing();
 #if defined(OS_WIN)
   D3D11TextureHelper texture_helper_;
 #endif
@@ -74,6 +83,7 @@ class XRCompositorCommon : public base::Thread,
 
   // Allow derived classes to call methods on the main thread.
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
+  mojom::XRInputSourceButtonListenerAssociatedPtr input_event_listener_;
 
  private:
   // base::Thread overrides:
@@ -121,6 +131,8 @@ class XRCompositorCommon : public base::Thread,
   void RequestNextOverlayPose(RequestNextOverlayPoseCallback callback) override;
   void SetOverlayAndWebXRVisibility(bool overlay_visible,
                                     bool webxr_visible) override;
+  void RequestNotificationOnWebXrSubmitted(
+      RequestNotificationOnWebXrSubmittedCallback callback) override;
 
   struct OutstandingFrame {
     OutstandingFrame();
@@ -148,7 +160,6 @@ class XRCompositorCommon : public base::Thread,
   bool webxr_visible_ = true;   // The browser may hide a presenting session.
   bool overlay_visible_ = false;
   base::OnceCallback<void()> delayed_get_frame_data_callback_;
-  base::OnceCallback<void()> delayed_overlay_get_frame_data_callback_;
 
   gfx::RectF left_webxr_bounds_;
   gfx::RectF right_webxr_bounds_;
@@ -156,6 +167,8 @@ class XRCompositorCommon : public base::Thread,
 
   mojom::XRPresentationClientPtr submit_client_;
   SubmitOverlayTextureCallback overlay_submit_callback_;
+  RequestNotificationOnWebXrSubmittedCallback on_webxr_submitted_;
+  bool webxr_has_pose_ = false;
   base::OnceCallback<void()> on_presentation_ended_;
   mojom::IsolatedXRGamepadProvider::RequestUpdateCallback gamepad_callback_;
   mojo::Binding<mojom::XRPresentationProvider> presentation_binding_;

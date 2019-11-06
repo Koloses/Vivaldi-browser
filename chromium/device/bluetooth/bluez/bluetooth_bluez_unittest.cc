@@ -11,11 +11,11 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "dbus/object_path.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
@@ -81,10 +81,10 @@ class FakeBluetoothProfileServiceProviderDelegate
       const dbus::ObjectPath&,
       base::ScopedFD,
       const bluez::BluetoothProfileServiceProvider::Delegate::Options&,
-      const ConfirmationCallback&) override {}
+      ConfirmationCallback) override {}
 
   void RequestDisconnection(const dbus::ObjectPath&,
-                            const ConfirmationCallback&) override {}
+                            ConfirmationCallback) override {}
 
   void Cancel() override {}
 };
@@ -274,7 +274,7 @@ class BluetoothBlueZTest : public testing::Test {
   }
 
  protected:
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   bluez::FakeBluetoothAdapterClient* fake_bluetooth_adapter_client_;
   bluez::FakeBluetoothDeviceClient* fake_bluetooth_device_client_;
   scoped_refptr<BluetoothAdapter> adapter_;
@@ -864,7 +864,8 @@ TEST_F(BluetoothBlueZTest, MultipleDiscoverySessions) {
                    base::Unretained(this)),
         GetErrorCallback());
   }
-  // Run only once, as there should have been one D-Bus call.
+
+  // Run the callbacks to set up state for new requests.
   base::RunLoop().Run();
 
   // The observer should have received the discovering changed event exactly
@@ -911,14 +912,14 @@ TEST_F(BluetoothBlueZTest, MultipleDiscoverySessions) {
   EXPECT_EQ(0, error_callback_count_);
   EXPECT_TRUE(observer.last_discovering());
   EXPECT_TRUE(adapter_->IsDiscovering());
-  ASSERT_EQ((size_t)6, discovery_sessions_.size());
+  ASSERT_EQ(6u, discovery_sessions_.size());
 
   // Request to stop discovery 4 times.
   for (int i = 2; i < 6; i++) {
     discovery_sessions_[i]->Stop(GetCallback(), GetErrorCallback());
+    // Run the callbacks to set up state for new requests.
+    base::RunLoop().Run();
   }
-  // Run only once, as there should have been one D-Bus call.
-  base::RunLoop().Run();
 
   // The observer should have received the discovering changed event exactly
   // once, the success callback should have been called 4 times and the adapter
@@ -968,9 +969,9 @@ TEST_F(BluetoothBlueZTest, UnexpectedChangesDuringMultipleDiscoverySessions) {
                    base::Unretained(this)),
         GetErrorCallback());
   }
-  // Run only once, as there should have been one D-Bus call.
-  base::RunLoop().Run();
 
+  // Run the callbacks to set up state for new requests.
+  base::RunLoop().Run();
   // The observer should have received the discovering changed event exactly
   // once, the success callback should have been called 3 times and the adapter
   // should be discovering.
@@ -1023,7 +1024,7 @@ TEST_F(BluetoothBlueZTest, UnexpectedChangesDuringMultipleDiscoverySessions) {
                    base::Unretained(this)),
         GetErrorCallback());
   }
-  // Run only once, as there should have been one D-Bus call.
+
   base::RunLoop().Run();
   EXPECT_EQ(3, observer.discovering_changed_count());
   EXPECT_EQ(6, callback_count_);
@@ -1153,9 +1154,9 @@ TEST_F(BluetoothBlueZTest, InvalidatedDiscoverySessions) {
         base::Bind(&BluetoothBlueZTest::DiscoverySessionCallback,
                    base::Unretained(this)),
         GetErrorCallback());
+    // Run loop every time as we are calling dbus on every session start.
+    base::RunLoop().Run();
   }
-  // Run only once, as there should have been one D-Bus call.
-  base::RunLoop().Run();
 
   // The observer should have received the discovering changed event exactly
   // once, the success callback should have been called 3 times and the adapter
@@ -1440,7 +1441,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterBeforeStartDiscovery) {
   EXPECT_EQ(-60, *filter->rssi);
   EXPECT_EQ(nullptr, filter->pathloss.get());
   std::vector<std::string> uuids = *filter->uuids;
-  EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
+  EXPECT_TRUE(base::Contains(uuids, "1000"));
 
   discovery_sessions_[0]->Stop(
       base::Bind(&BluetoothBlueZTest::Callback, base::Unretained(this)),
@@ -1568,12 +1569,13 @@ TEST_F(BluetoothBlueZTest, QueuedSetDiscoveryFilterBeforeStartDiscovery) {
   EXPECT_EQ(-65, *filter->rssi);
   EXPECT_EQ(nullptr, filter->pathloss.get());
   auto uuids = *filter->uuids;
-  EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
-  EXPECT_TRUE(base::ContainsValue(uuids, "1002"));
+  EXPECT_TRUE(base::Contains(uuids, "1000"));
+  EXPECT_TRUE(base::Contains(uuids, "1002"));
 
   discovery_sessions_[0]->Stop(
       base::Bind(&BluetoothBlueZTest::Callback, base::Unretained(this)),
       base::Bind(&BluetoothBlueZTest::ErrorCallback, base::Unretained(this)));
+  base::RunLoop().Run();
 
   discovery_sessions_[1]->Stop(
       base::Bind(&BluetoothBlueZTest::Callback, base::Unretained(this)),
@@ -1672,7 +1674,7 @@ TEST_F(BluetoothBlueZTest, QueuedSetDiscoveryFilterBeforeStartDiscoveryFail) {
   EXPECT_EQ(-65, *filter->rssi);
   EXPECT_EQ(nullptr, filter->pathloss.get());
   auto uuids = *filter->uuids;
-  EXPECT_TRUE(base::ContainsValue(uuids, "1002"));
+  EXPECT_TRUE(base::Contains(uuids, "1002"));
 
   discovery_sessions_[0]->Stop(
       base::Bind(&BluetoothBlueZTest::Callback, base::Unretained(this)),
@@ -1750,7 +1752,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterAfterStartDiscovery) {
   EXPECT_EQ(-60, *filter->rssi);
   EXPECT_EQ(nullptr, filter->pathloss.get());
   std::vector<std::string> uuids = *filter->uuids;
-  EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
+  EXPECT_TRUE(base::Contains(uuids, "1000"));
 
   discovery_sessions_[0]->Stop(
       base::Bind(&BluetoothBlueZTest::Callback, base::Unretained(this)),
@@ -1828,26 +1830,26 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterBeforeStartDiscoveryMultiple) {
       EXPECT_EQ(-85, *filter->rssi);
       EXPECT_EQ(nullptr, filter->pathloss.get());
       std::vector<std::string> uuids = *filter->uuids;
-      EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
+      EXPECT_TRUE(base::Contains(uuids, "1000"));
     } else if (i == 1) {
       auto* filter = fake_bluetooth_adapter_client_->GetDiscoveryFilter();
       EXPECT_EQ("le", *filter->transport);
       EXPECT_EQ(-85, *filter->rssi);
       EXPECT_EQ(nullptr, filter->pathloss.get());
       std::vector<std::string> uuids = *filter->uuids;
-      EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1001"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1020"));
+      EXPECT_TRUE(base::Contains(uuids, "1000"));
+      EXPECT_TRUE(base::Contains(uuids, "1001"));
+      EXPECT_TRUE(base::Contains(uuids, "1020"));
     } else if (i == 2) {
       auto* filter = fake_bluetooth_adapter_client_->GetDiscoveryFilter();
       EXPECT_EQ("le", *filter->transport);
       EXPECT_EQ(-85, *filter->rssi);
       EXPECT_EQ(nullptr, filter->pathloss.get());
       std::vector<std::string> uuids = *filter->uuids;
-      EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1001"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1003"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1020"));
+      EXPECT_TRUE(base::Contains(uuids, "1000"));
+      EXPECT_TRUE(base::Contains(uuids, "1001"));
+      EXPECT_TRUE(base::Contains(uuids, "1003"));
+      EXPECT_TRUE(base::Contains(uuids, "1020"));
     }
   }
 
@@ -1873,10 +1875,10 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterBeforeStartDiscoveryMultiple) {
       EXPECT_EQ(nullptr, filter->pathloss.get());
       std::vector<std::string> uuids = *filter->uuids;
       EXPECT_EQ(3UL, uuids.size());
-      EXPECT_FALSE(base::ContainsValue(uuids, "1000"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1001"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1003"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1020"));
+      EXPECT_FALSE(base::Contains(uuids, "1000"));
+      EXPECT_TRUE(base::Contains(uuids, "1001"));
+      EXPECT_TRUE(base::Contains(uuids, "1003"));
+      EXPECT_TRUE(base::Contains(uuids, "1020"));
     } else if (i == 1) {
       auto* filter = fake_bluetooth_adapter_client_->GetDiscoveryFilter();
       EXPECT_EQ("le", *filter->transport);
@@ -1884,10 +1886,10 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterBeforeStartDiscoveryMultiple) {
       EXPECT_EQ(nullptr, filter->pathloss.get());
       std::vector<std::string> uuids = *filter->uuids;
       EXPECT_EQ(2UL, uuids.size());
-      EXPECT_FALSE(base::ContainsValue(uuids, "1000"));
-      EXPECT_FALSE(base::ContainsValue(uuids, "1001"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1003"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1020"));
+      EXPECT_FALSE(base::Contains(uuids, "1000"));
+      EXPECT_FALSE(base::Contains(uuids, "1001"));
+      EXPECT_TRUE(base::Contains(uuids, "1003"));
+      EXPECT_TRUE(base::Contains(uuids, "1020"));
     } else if (i == 2) {
       auto* filter = fake_bluetooth_adapter_client_->GetDiscoveryFilter();
       EXPECT_EQ("le", *filter->transport);
@@ -1950,19 +1952,19 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterBeforeStartDiscoveryMultiple) {
       EXPECT_EQ(-85, *filter->rssi);
       EXPECT_EQ(nullptr, filter->pathloss.get());
       std::vector<std::string> uuids = *filter->uuids;
-      EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1003"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1020"));
+      EXPECT_TRUE(base::Contains(uuids, "1000"));
+      EXPECT_TRUE(base::Contains(uuids, "1003"));
+      EXPECT_TRUE(base::Contains(uuids, "1020"));
     } else if (i == 1 || i == 2) {
       auto* filter = fake_bluetooth_adapter_client_->GetDiscoveryFilter();
       EXPECT_EQ("le", *filter->transport);
       EXPECT_EQ(-85, *filter->rssi);
       EXPECT_EQ(nullptr, filter->pathloss.get());
       std::vector<std::string> uuids = *filter->uuids;
-      EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1001"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1003"));
-      EXPECT_TRUE(base::ContainsValue(uuids, "1020"));
+      EXPECT_TRUE(base::Contains(uuids, "1000"));
+      EXPECT_TRUE(base::Contains(uuids, "1001"));
+      EXPECT_TRUE(base::Contains(uuids, "1003"));
+      EXPECT_TRUE(base::Contains(uuids, "1020"));
     }
   }
 
@@ -2030,7 +2032,7 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterMergingTest) {
   EXPECT_EQ(-15, *filter->rssi);
   EXPECT_EQ(nullptr, filter->pathloss.get());
   std::vector<std::string> uuids = *filter->uuids;
-  EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
+  EXPECT_TRUE(base::Contains(uuids, "1000"));
 
   df = new BluetoothDiscoveryFilter(device::BLUETOOTH_TRANSPORT_LE);
   df->SetRSSI(-60);
@@ -2051,9 +2053,9 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterMergingTest) {
   EXPECT_EQ(-60, *filter->rssi);
   EXPECT_EQ(nullptr, filter->pathloss.get());
   uuids = *filter->uuids;
-  EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
-  EXPECT_TRUE(base::ContainsValue(uuids, "1001"));
-  EXPECT_TRUE(base::ContainsValue(uuids, "1020"));
+  EXPECT_TRUE(base::Contains(uuids, "1000"));
+  EXPECT_TRUE(base::Contains(uuids, "1001"));
+  EXPECT_TRUE(base::Contains(uuids, "1020"));
 
   BluetoothDiscoveryFilter* df3 =
       new BluetoothDiscoveryFilter(device::BLUETOOTH_TRANSPORT_CLASSIC);
@@ -2075,10 +2077,10 @@ TEST_F(BluetoothBlueZTest, SetDiscoveryFilterMergingTest) {
   EXPECT_EQ(-65, *filter->rssi);
   EXPECT_EQ(nullptr, filter->pathloss.get());
   uuids = *filter->uuids;
-  EXPECT_TRUE(base::ContainsValue(uuids, "1000"));
-  EXPECT_TRUE(base::ContainsValue(uuids, "1001"));
-  EXPECT_TRUE(base::ContainsValue(uuids, "1003"));
-  EXPECT_TRUE(base::ContainsValue(uuids, "1020"));
+  EXPECT_TRUE(base::Contains(uuids, "1000"));
+  EXPECT_TRUE(base::Contains(uuids, "1001"));
+  EXPECT_TRUE(base::Contains(uuids, "1003"));
+  EXPECT_TRUE(base::Contains(uuids, "1020"));
 
   // start additionally classic scan
   adapter_->StartDiscoverySession(
@@ -2131,8 +2133,8 @@ TEST_F(BluetoothBlueZTest, DeviceProperties) {
 
   BluetoothDevice::UUIDSet uuids = devices[idx]->GetUUIDs();
   EXPECT_EQ(2U, uuids.size());
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1800")));
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1801")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("1800")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("1801")));
 
   EXPECT_EQ(BluetoothDevice::VENDOR_ID_USB, devices[idx]->GetVendorIDSource());
   EXPECT_EQ(0x05ac, devices[idx]->GetVendorID());
@@ -2502,8 +2504,8 @@ TEST_F(BluetoothBlueZTest, DeviceUuidsChanged) {
 
   BluetoothDevice::UUIDSet uuids = devices[idx]->GetUUIDs();
   ASSERT_EQ(2U, uuids.size());
-  ASSERT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1800")));
-  ASSERT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1801")));
+  ASSERT_TRUE(base::Contains(uuids, BluetoothUUID("1800")));
+  ASSERT_TRUE(base::Contains(uuids, BluetoothUUID("1801")));
 
   // Install an observer; expect the DeviceChanged method to be called when
   // we change the class of the device.
@@ -2528,11 +2530,11 @@ TEST_F(BluetoothBlueZTest, DeviceUuidsChanged) {
   // Fetching the value should give the new one.
   uuids = devices[idx]->GetUUIDs();
   EXPECT_EQ(5U, uuids.size());
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1800")));
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1801")));
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("110c")));
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("110e")));
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("110a")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("1800")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("1801")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("110c")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("110e")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("110a")));
 }
 
 TEST_F(BluetoothBlueZTest, DeviceInquiryRSSIInvalidated) {
@@ -2769,7 +2771,7 @@ TEST_F(BluetoothBlueZTest, ConnectUnpairableDevice) {
   // Verify is a HID device and is not connectable.
   BluetoothDevice::UUIDSet uuids = device->GetUUIDs();
   EXPECT_EQ(1U, uuids.size());
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1124")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("1124")));
   EXPECT_FALSE(device->IsConnectable());
 }
 
@@ -3072,7 +3074,7 @@ TEST_F(BluetoothBlueZTest, PairLegacyAutopair) {
   // Verify is a HID device and is connectable.
   BluetoothDevice::UUIDSet uuids = device->GetUUIDs();
   EXPECT_EQ(1U, uuids.size());
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1124")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("1124")));
   EXPECT_TRUE(device->IsConnectable());
 
   // Make sure the trusted property has been set to true.
@@ -3129,7 +3131,7 @@ TEST_F(BluetoothBlueZTest, PairDisplayPinCode) {
   // Verify is a HID device and is connectable.
   BluetoothDevice::UUIDSet uuids = device->GetUUIDs();
   EXPECT_EQ(1U, uuids.size());
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1124")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("1124")));
   EXPECT_TRUE(device->IsConnectable());
 
   // Make sure the trusted property has been set to true.
@@ -3206,7 +3208,7 @@ TEST_F(BluetoothBlueZTest, PairDisplayPasskey) {
   // Verify is a HID device.
   BluetoothDevice::UUIDSet uuids = device->GetUUIDs();
   EXPECT_EQ(1U, uuids.size());
-  EXPECT_TRUE(base::ContainsKey(uuids, BluetoothUUID("1124")));
+  EXPECT_TRUE(base::Contains(uuids, BluetoothUUID("1124")));
 
   // And usually not connectable.
   EXPECT_FALSE(device->IsConnectable());
@@ -3220,7 +3222,6 @@ TEST_F(BluetoothBlueZTest, PairDisplayPasskey) {
 
 TEST_F(BluetoothBlueZTest, PairRequestPinCode) {
   fake_bluetooth_device_client_->SetSimulationIntervalMs(10);
-
   GetAdapter();
   DiscoverDevices();
 
@@ -4532,8 +4533,10 @@ TEST_F(BluetoothBlueZTest, Shutdown) {
   EXPECT_EQ(0, callback_count_) << "OnPropertyChangeCompleted error";
   EXPECT_EQ(1, error_callback_count_--) << "OnPropertyChangeCompleted error";
 
-  adapter_bluez->AddDiscoverySession(nullptr, GetCallback(),
-                                     GetDiscoveryErrorCallback());
+  adapter_bluez->StartDiscoverySession(
+      base::BindRepeating(&BluetoothBlueZTest::DiscoverySessionCallback,
+                          base::Unretained(this)),
+      GetErrorCallback());
   EXPECT_EQ(0, callback_count_) << "AddDiscoverySession error";
   EXPECT_EQ(1, error_callback_count_--) << "AddDiscoverySession error";
 
@@ -4605,8 +4608,10 @@ TEST_F(BluetoothBlueZTest, Shutdown_OnStartDiscovery) {
       static_cast<BluetoothAdapterBlueZ*>(adapter_.get());
 
   for (int i = 0; i < kNumberOfDiscoverySessions; i++) {
-    adapter_bluez->AddDiscoverySession(nullptr, GetCallback(),
-                                       GetDiscoveryErrorCallback());
+    adapter_bluez->StartDiscoverySession(
+        base::BindRepeating(&BluetoothBlueZTest::DiscoverySessionCallback,
+                            base::Unretained(this)),
+        GetErrorCallback());
   }
   adapter_->Shutdown();
   adapter_bluez->OnStartDiscovery(GetCallback(), GetDiscoveryErrorCallback());
@@ -4623,8 +4628,10 @@ TEST_F(BluetoothBlueZTest, Shutdown_OnStartDiscoveryError) {
       static_cast<BluetoothAdapterBlueZ*>(adapter_.get());
 
   for (int i = 0; i < kNumberOfDiscoverySessions; i++) {
-    adapter_bluez->AddDiscoverySession(nullptr, GetCallback(),
-                                       GetDiscoveryErrorCallback());
+    adapter_bluez->StartDiscoverySession(
+        base::BindRepeating(&BluetoothBlueZTest::DiscoverySessionCallback,
+                            base::Unretained(this)),
+        GetErrorCallback());
   }
   adapter_->Shutdown();
   adapter_bluez->OnStartDiscoveryError(GetCallback(),
@@ -4643,8 +4650,10 @@ TEST_F(BluetoothBlueZTest, Shutdown_OnStopDiscovery) {
 
   // In order to queue up discovery sessions before an OnStopDiscovery call
   // RemoveDiscoverySession must be called, so Add, Start, and Remove:
-  adapter_bluez->AddDiscoverySession(nullptr, GetCallback(),
-                                     GetDiscoveryErrorCallback());
+  adapter_bluez->StartDiscoverySession(
+      base::BindRepeating(&BluetoothBlueZTest::DiscoverySessionCallback,
+                          base::Unretained(this)),
+      GetErrorCallback());
   adapter_bluez->OnStartDiscovery(GetCallback(), GetDiscoveryErrorCallback());
   adapter_bluez->RemoveDiscoverySession(nullptr, GetCallback(),
                                         GetDiscoveryErrorCallback());
@@ -4652,8 +4661,10 @@ TEST_F(BluetoothBlueZTest, Shutdown_OnStopDiscovery) {
   error_callback_count_ = 0;
   // Can now queue discovery sessions while waiting for OnStopDiscovery.
   for (int i = 0; i < kNumberOfDiscoverySessions; i++) {
-    adapter_bluez->AddDiscoverySession(nullptr, GetCallback(),
-                                       GetDiscoveryErrorCallback());
+    adapter_bluez->StartDiscoverySession(
+        base::BindRepeating(&BluetoothBlueZTest::DiscoverySessionCallback,
+                            base::Unretained(this)),
+        GetErrorCallback());
   }
   adapter_->Shutdown();
   adapter_bluez->OnStopDiscovery(GetCallback());
@@ -4673,8 +4684,10 @@ TEST_F(BluetoothBlueZTest, Shutdown_OnStopDiscoveryError) {
 
   // In order to queue up discovery sessions before an OnStopDiscoveryError call
   // RemoveDiscoverySession must be called, so Add, Start, and Remove:
-  adapter_bluez->AddDiscoverySession(nullptr, GetCallback(),
-                                     GetDiscoveryErrorCallback());
+  adapter_bluez->StartDiscoverySession(
+      base::BindRepeating(&BluetoothBlueZTest::DiscoverySessionCallback,
+                          base::Unretained(this)),
+      GetErrorCallback());
   adapter_bluez->OnStartDiscovery(GetCallback(), GetDiscoveryErrorCallback());
   adapter_bluez->RemoveDiscoverySession(nullptr, GetCallback(),
                                         GetDiscoveryErrorCallback());
@@ -4682,8 +4695,10 @@ TEST_F(BluetoothBlueZTest, Shutdown_OnStopDiscoveryError) {
   error_callback_count_ = 0;
   // Can now queue discovery sessions while waiting for OnStopDiscoveryError.
   for (int i = 0; i < kNumberOfDiscoverySessions; i++) {
-    adapter_bluez->AddDiscoverySession(nullptr, GetCallback(),
-                                       GetDiscoveryErrorCallback());
+    adapter_bluez->StartDiscoverySession(
+        base::BindRepeating(&BluetoothBlueZTest::DiscoverySessionCallback,
+                            base::Unretained(this)),
+        GetErrorCallback());
   }
   adapter_->Shutdown();
   adapter_bluez->OnStopDiscoveryError(GetDiscoveryErrorCallback(), "", "");

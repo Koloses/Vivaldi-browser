@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "chromecast/media/base/aligned_buffer.h"
 #include "chromecast/media/cma/backend/post_processing_pipeline.h"
 #include "chromecast/media/cma/backend/post_processor_factory.h"
 #include "chromecast/public/volume_control.h"
@@ -32,15 +33,16 @@ class PostProcessingPipelineImpl : public PostProcessingPipeline {
                              int channels);
   ~PostProcessingPipelineImpl() override;
 
-  int ProcessFrames(float* data,
-                    int num_frames,
-                    float current_volume,
-                    bool is_silence) override;
+  double ProcessFrames(float* data,
+                       int num_frames,
+                       float current_volume,
+                       bool is_silence) override;
 
   float* GetOutputBuffer() override;
-  int NumOutputChannels() override;
+  int NumOutputChannels() const override;
 
-  bool SetSampleRate(int sample_rate) override;
+  bool SetOutputConfig(const AudioPostProcessor2::Config& config) override;
+  int GetInputSampleRate() const override;
   bool IsRinging() override;
 
   // Send string |config| to post processor |name|.
@@ -54,6 +56,7 @@ class PostProcessingPipelineImpl : public PostProcessingPipeline {
   // structs.
   typedef struct {
     std::unique_ptr<AudioPostProcessor2> ptr;
+    int input_frames_per_write;
     std::string name;
   } PostProcessorInfo;
 
@@ -61,15 +64,17 @@ class PostProcessingPipelineImpl : public PostProcessingPipeline {
   void UpdateCastVolume(float multiplier);
 
   std::string name_;
-  int sample_rate_ = 0;
+  int input_sample_rate_ = 0;
+  int output_sample_rate_ = 0;
   int ringing_time_in_frames_ = 0;
   int silence_frames_processed_ = 0;
-  int total_delay_frames_ = 0;
+  double delay_s_ = 0;
   float current_multiplier_ = 0.0;
   float cast_volume_ = 0.0;
   float current_dbfs_ = 0.0;
   int num_output_channels_ = 0;
   float* output_buffer_ = nullptr;
+  AlignedBuffer<float> silence_buffer_;
 
   // factory_ keeps shared libraries open, so it must outlive processors_.
   PostProcessorFactory factory_;

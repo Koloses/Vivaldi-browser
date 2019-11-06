@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/hash.h"
+#include "base/hash/hash.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,6 +19,7 @@
 #include "media/base/video_util.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImage.h"
+#include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image.h"
 
 using content::BrowserThread;
@@ -28,8 +29,8 @@ namespace {
 
 gfx::ImageSkia CreateEnclosedFaviconImage(gfx::Size size,
                                           const gfx::ImageSkia& favicon) {
-  DCHECK_GE(size.width(), 20);
-  DCHECK_GE(size.height(), 20);
+  DCHECK_GE(size.width(), gfx::kFaviconSize);
+  DCHECK_GE(size.height(), gfx::kFaviconSize);
 
   // Create a bitmap.
   SkBitmap result;
@@ -60,8 +61,7 @@ const int kDefaultTabDesktopMediaListUpdatePeriod = 1000;
 
 TabDesktopMediaList::TabDesktopMediaList()
     : DesktopMediaListBase(base::TimeDelta::FromMilliseconds(
-          kDefaultTabDesktopMediaListUpdatePeriod)),
-      weak_factory_(this) {
+          kDefaultTabDesktopMediaListUpdatePeriod)) {
   type_ = DesktopMediaID::TYPE_WEB_CONTENTS;
   thumbnail_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
       {base::MayBlock(), base::TaskPriority::USER_VISIBLE});

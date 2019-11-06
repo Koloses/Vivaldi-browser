@@ -32,6 +32,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/buildflags/buildflags.h"
+#include "net/base/network_isolation_key.h"
 #include "ppapi/buildflags/buildflags.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -81,6 +82,8 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RequestFileSystemAccessAsync,
                         OnRequestFileSystemAccessAsync)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowIndexedDB, OnAllowIndexedDB)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowCacheStorage,
+                        OnAllowCacheStorage)
 #if BUILDFLAG(ENABLE_PLUGINS)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_IsCrashReportingEnabled,
                         OnIsCrashReportingEnabled)
@@ -128,12 +131,17 @@ void ChromeRenderMessageFilter::OnPreconnect(const GURL& url,
     return;
   }
 
-  if (preconnect_manager_initialized_) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
-        base::BindOnce(&predictors::PreconnectManager::StartPreconnectUrl,
-                       preconnect_manager_, url, allow_credentials));
-  }
+  if (!preconnect_manager_initialized_)
+    return;
+
+  // TODO(mmenke):  Use process and frame ids to populate NetworkIsolationKey.
+  // May also need to think about enabling cross-site preconnects, though that
+  // will result in at least some cross-site information leakage.
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
+      base::BindOnce(&predictors::PreconnectManager::StartPreconnectUrl,
+                     preconnect_manager_, url, allow_credentials,
+                     net::NetworkIsolationKey()));
 }
 
 void ChromeRenderMessageFilter::OnAllowDatabase(
@@ -289,6 +297,19 @@ void ChromeRenderMessageFilter::OnAllowIndexedDB(int render_frame_id,
   base::PostTaskWithTraits(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&TabSpecificContentSettings::IndexedDBAccessed,
+                     render_process_id_, render_frame_id, origin_url,
+                     !*allowed));
+}
+
+void ChromeRenderMessageFilter::OnAllowCacheStorage(int render_frame_id,
+                                                    const GURL& origin_url,
+                                                    const GURL& top_origin_url,
+                                                    bool* allowed) {
+  *allowed =
+      cookie_settings_->IsCookieAccessAllowed(origin_url, top_origin_url);
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
+      base::BindOnce(&TabSpecificContentSettings::CacheStorageAccessed,
                      render_process_id_, render_frame_id, origin_url,
                      !*allowed));
 }

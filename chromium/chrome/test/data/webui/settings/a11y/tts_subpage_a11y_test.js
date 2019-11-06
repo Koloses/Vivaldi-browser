@@ -4,17 +4,16 @@
 
 /**
  * @fileoverview Define accessibility tests for the MANAGE_TTS_SETTINGS route.
+ * Chrome OS only.
  */
-
-// This is only for Chrome OS.
-GEN('#if defined(OS_CHROMEOS)');
 
 // SettingsAccessibilityTest fixture.
 GEN_INCLUDE([
   'settings_accessibility_test.js',
 ]);
 
-TtsAccessibilityTest = class extends SettingsAccessibilityTest {
+// eslint-disable-next-line no-var
+var TtsAccessibilityTest = class extends SettingsAccessibilityTest {
   /** @override */
   get commandLineSwitches() {
     return ['enable-experimental-a11y-features'];
@@ -36,5 +35,3 @@ AccessibilityTest.define('TtsAccessibilityTest', {
   /** @override */
   violationFilter: SettingsAccessibilityTest.violationFilter,
 });
-
-GEN('#endif  // defined(OS_CHROMEOS)');

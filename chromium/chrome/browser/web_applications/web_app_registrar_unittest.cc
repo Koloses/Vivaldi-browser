@@ -49,7 +49,7 @@ std::set<AppId> RegisterAppsForTesting(WebAppRegistrar* registrar,
 
 TEST(WebAppRegistrar, CreateRegisterUnregister) {
   auto database = std::make_unique<TestWebAppDatabase>();
-  auto registrar = std::make_unique<WebAppRegistrar>(database.get());
+  auto registrar = std::make_unique<WebAppRegistrar>(nullptr, database.get());
 
   EXPECT_EQ(nullptr, registrar->GetAppById(AppId()));
   EXPECT_FALSE(registrar->GetAppById(AppId()));
@@ -115,7 +115,7 @@ TEST(WebAppRegistrar, CreateRegisterUnregister) {
 
 TEST(WebAppRegistrar, DestroyRegistrarOwningRegisteredApps) {
   auto database = std::make_unique<TestWebAppDatabase>();
-  auto registrar = std::make_unique<WebAppRegistrar>(database.get());
+  auto registrar = std::make_unique<WebAppRegistrar>(nullptr, database.get());
 
   const AppId app_id = GenerateAppIdFromURL(GURL("https://example.com/path"));
   const AppId app_id2 = GenerateAppIdFromURL(GURL("https://example.com/path2"));
@@ -131,7 +131,7 @@ TEST(WebAppRegistrar, DestroyRegistrarOwningRegisteredApps) {
 
 TEST(WebAppRegistrar, ForEachAndUnregisterAll) {
   auto database = std::make_unique<TestWebAppDatabase>();
-  auto registrar = std::make_unique<WebAppRegistrar>(database.get());
+  auto registrar = std::make_unique<WebAppRegistrar>(nullptr, database.get());
 
   Registry registry = CreateRegistryForTesting("https://example.com/path", 100);
   auto ids = RegisterAppsForTesting(registrar.get(), std::move(registry));
@@ -151,7 +151,7 @@ TEST(WebAppRegistrar, ForEachAndUnregisterAll) {
 
 TEST(WebAppRegistrar, AbstractWebAppDatabase) {
   auto database = std::make_unique<TestWebAppDatabase>();
-  auto registrar = std::make_unique<WebAppRegistrar>(database.get());
+  auto registrar = std::make_unique<WebAppRegistrar>(nullptr, database.get());
 
   registrar->Init(base::DoNothing());
   EXPECT_TRUE(registrar->is_empty());
@@ -186,6 +186,32 @@ TEST(WebAppRegistrar, AbstractWebAppDatabase) {
 
   EXPECT_TRUE(ids.empty());
   EXPECT_TRUE(registrar->is_empty());
+}
+
+TEST(WebAppRegistrar, GetAppDetails) {
+  auto database = std::make_unique<TestWebAppDatabase>();
+  auto registrar = std::make_unique<WebAppRegistrar>(nullptr, database.get());
+
+  const GURL launch_url = GURL("https://example.com/path");
+  const AppId app_id = GenerateAppIdFromURL(launch_url);
+  const std::string name = "Name";
+  const std::string description = "Description";
+  const base::Optional<SkColor> theme_color = 0xAABBCCDD;
+
+  EXPECT_EQ(std::string(), registrar->GetAppShortName(app_id));
+  EXPECT_EQ(GURL(), registrar->GetAppLaunchURL(app_id));
+
+  auto web_app = std::make_unique<WebApp>(app_id);
+  web_app->SetName(name);
+  web_app->SetDescription(description);
+  web_app->SetThemeColor(theme_color);
+  web_app->SetLaunchUrl(launch_url);
+  registrar->RegisterApp(std::move(web_app));
+
+  EXPECT_EQ(name, registrar->GetAppShortName(app_id));
+  EXPECT_EQ(description, registrar->GetAppDescription(app_id));
+  EXPECT_EQ(theme_color, registrar->GetAppThemeColor(app_id));
+  EXPECT_EQ(launch_url, registrar->GetAppLaunchURL(app_id));
 }
 
 }  // namespace web_app

@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_PREVIEWS_PREVIEWS_LITE_PAGE_URL_LOADER_INTERCEPTOR_H_
 #define CHROME_BROWSER_PREVIEWS_PREVIEWS_LITE_PAGE_URL_LOADER_INTERCEPTOR_H_
 
+#include <stdint.h>
 #include <memory>
 #include <set>
 
@@ -28,12 +29,14 @@ class PreviewsLitePageURLLoaderInterceptor
   PreviewsLitePageURLLoaderInterceptor(
       const scoped_refptr<network::SharedURLLoaderFactory>&
           network_loader_factory,
+      uint64_t page_id,
       int frame_tree_node_id);
   ~PreviewsLitePageURLLoaderInterceptor() override;
 
   // content::URLLaoderRequestInterceptor:
   void MaybeCreateLoader(
       const network::ResourceRequest& tentative_resource_request,
+      content::BrowserContext* browser_context,
       content::ResourceContext* resource_context,
       content::URLLoaderRequestInterceptor::LoaderCallback callback) override;
 
@@ -41,6 +44,7 @@ class PreviewsLitePageURLLoaderInterceptor
   // Begins an attempt at fetching the lite page version of the URL.
   void CreateRedirectLoader(
       const network::ResourceRequest& tentative_resource_request,
+      content::BrowserContext* browser_context,
       content::ResourceContext* resource_context,
       content::URLLoaderRequestInterceptor::LoaderCallback callback);
 
@@ -74,6 +78,9 @@ class PreviewsLitePageURLLoaderInterceptor
 
   // Factory to create a network service URLLoader.
   scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory_;
+
+  // Used in the chrome-proxy header if a preview is attempted.
+  uint64_t page_id_;
 
   // Used to create the network service URLLoader.
   int frame_tree_node_id_;

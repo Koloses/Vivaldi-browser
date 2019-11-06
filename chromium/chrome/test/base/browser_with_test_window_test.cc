@@ -33,13 +33,9 @@
 #include "components/constrained_window/constrained_window_views.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/public/cpp/mus_property_mirror_ash.h"
 #include "ash/test/ash_test_views_delegate.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "content/public/browser/context_factory.h"
-#include "ui/aura/mus/window_tree_client.h"
-#include "ui/aura/test/env_test_helper.h"
-#include "ui/views/mus/mus_client.h"
 #else
 #include "ui/views/test/test_views_delegate.h"
 #endif
@@ -55,16 +51,14 @@ BrowserWithTestWindowTest::~BrowserWithTestWindowTest() {}
 void BrowserWithTestWindowTest::SetUp() {
   testing::Test::SetUp();
 #if defined(OS_CHROMEOS)
-  ash_test_helper_.SetUp(true);
-  ash_test_helper_.SetRunningOutsideAsh();
-  if (aura::Env::GetInstance()->mode() == aura::Env::Mode::MUS)
-    ash_test_helper_.CreateMusClient();
+  ash::AshTestHelper::InitParams init_params;
+  ash_test_helper_.SetUp(init_params);
 #elif defined(TOOLKIT_VIEWS)
   views_test_helper_.reset(new views::ScopedViewsTestHelper());
 #endif
 
   // This must be created after ash_test_helper_ is set up so that it doesn't
-  // create an InputDeviceManager.
+  // create an DeviceDataManager.
   rvh_test_enabler_ = std::make_unique<content::RenderViewHostTestEnabler>();
 
 #if defined(TOOLKIT_VIEWS)
@@ -83,12 +77,12 @@ void BrowserWithTestWindowTest::SetUp() {
   // Subclasses can provide their own Profile.
   profile_ = CreateProfile();
   // Subclasses can provide their own test BrowserWindow. If they return NULL
-  // then Browser will create the a production BrowserWindow and the subclass
-  // is responsible for cleaning it up (usually by NativeWidget destruction).
-  window_.reset(CreateBrowserWindow());
+  // then Browser will create a production BrowserWindow and the subclass is
+  // responsible for cleaning it up (usually by NativeWidget destruction).
+  window_ = CreateBrowserWindow();
 
-  browser_.reset(
-      CreateBrowser(profile(), browser_type_, hosted_app_, window_.get()));
+  browser_ =
+      CreateBrowser(profile(), browser_type_, hosted_app_, window_.get());
 }
 
 void BrowserWithTestWindowTest::TearDown() {
@@ -126,10 +120,7 @@ void BrowserWithTestWindowTest::TearDown() {
   testing::Test::TearDown();
 
   // A Task is leaked if we don't destroy everything, then run the message loop.
-  base::RunLoop loop;
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                loop.QuitWhenIdleClosure());
-  loop.Run();
+  base::RunLoop().RunUntilIdle();
 }
 
 gfx::NativeWindow BrowserWithTestWindowTest::GetContext() {
@@ -193,11 +184,12 @@ BrowserWithTestWindowTest::GetTestingFactories() {
   return {};
 }
 
-BrowserWindow* BrowserWithTestWindowTest::CreateBrowserWindow() {
-  return new TestBrowserWindow();
+std::unique_ptr<BrowserWindow>
+BrowserWithTestWindowTest::CreateBrowserWindow() {
+  return std::make_unique<TestBrowserWindow>();
 }
 
-Browser* BrowserWithTestWindowTest::CreateBrowser(
+std::unique_ptr<Browser> BrowserWithTestWindowTest::CreateBrowser(
     Profile* profile,
     Browser::Type browser_type,
     bool hosted_app,
@@ -210,7 +202,7 @@ Browser* BrowserWithTestWindowTest::CreateBrowser(
     params.type = browser_type;
   }
   params.window = browser_window;
-  return new Browser(params);
+  return std::make_unique<Browser>(params);
 }
 
 BrowserWithTestWindowTest::BrowserWithTestWindowTest(

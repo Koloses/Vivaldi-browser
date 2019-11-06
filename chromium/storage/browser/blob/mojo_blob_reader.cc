@@ -239,7 +239,7 @@ void MojoBlobReader::DidRead(bool completed_synchronously, int num_bytes) {
   response_body_stream_ = pending_write_->Complete(num_bytes);
   total_written_bytes_ += num_bytes;
   pending_write_ = nullptr;
-  if (num_bytes == 0) {
+  if (num_bytes == 0 || blob_reader_->remaining_bytes() == 0) {
     response_body_stream_.reset();  // This closes the data pipe.
     NotifyCompletedAndDeleteIfNeeded(net::OK);
     return;

@@ -11,7 +11,7 @@
 #include <map>
 #include <string>
 #include <vector>
-#include "base/time/time.h"
+
 #include "chrome/browser/ui/input_method/input_method_engine_base.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -133,9 +133,16 @@ class InputMethodEngine : public ::input_method::InputMethodEngineBase {
   void UpdateComposition(const ui::CompositionText& composition_text,
                          uint32_t cursor_pos,
                          bool is_visible) override;
+  bool SetCompositionRange(
+      uint32_t before,
+      uint32_t after,
+      const std::vector<ui::ImeTextSpan>& text_spans) override;
   void CommitTextToInputContext(int context_id,
                                 const std::string& text) override;
+  void DeleteSurroundingTextToInputContext(int offset,
+                                           size_t number_of_chars) override;
   bool SendKeyEvent(ui::KeyEvent* event, const std::string& code) override;
+  void ConfirmCompositionText() override;
 
   // Enables overriding input view page to Virtual Keyboard window.
   void EnableInputView();
@@ -165,6 +172,8 @@ class InputMethodEngine : public ::input_method::InputMethodEngineBase {
 
   // Whether the desktop is being casted.
   bool is_casting_;
+
+  DISALLOW_COPY_AND_ASSIGN(InputMethodEngine);
 };
 
 }  // namespace chromeos

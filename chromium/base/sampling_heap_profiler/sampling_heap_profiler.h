@@ -5,6 +5,7 @@
 #ifndef BASE_SAMPLING_HEAP_PROFILER_SAMPLING_HEAP_PROFILER_H_
 #define BASE_SAMPLING_HEAP_PROFILER_SAMPLING_HEAP_PROFILER_H_
 
+#include <atomic>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "base/macros.h"
 #include "base/sampling_heap_profiler/poisson_allocation_sampler.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/thread_id_name_manager.h"
 
 namespace base {
 
@@ -24,7 +26,8 @@ class NoDestructor;
 // record samples.
 // The recorded samples can then be retrieved using GetSamples method.
 class BASE_EXPORT SamplingHeapProfiler
-    : private PoissonAllocationSampler::SamplesObserver {
+    : private PoissonAllocationSampler::SamplesObserver,
+      public base::ThreadIdNameManager::Observer {
  public:
   class BASE_EXPORT Sample {
    public:
@@ -94,6 +97,9 @@ class BASE_EXPORT SamplingHeapProfiler
   static void Init();
   static SamplingHeapProfiler* Get();
 
+  // ThreadIdNameManager::Observer implementation:
+  void OnThreadNameChanged(const char* name) override;
+
  private:
   SamplingHeapProfiler();
   ~SamplingHeapProfiler() override;
@@ -124,13 +130,21 @@ class BASE_EXPORT SamplingHeapProfiler
   // deleted.
   std::unordered_set<const char*> strings_;
 
+  // Mutex to make |running_sessions_| and Add/Remove samples observer access
+  // atomic.
+  Lock start_stop_mutex_;
+
+  // Number of the running sessions.
+  int running_sessions_ = 0;
+
   // Last sample ordinal used to mark samples recorded during single session.
-  uint32_t last_sample_ordinal_ = 1;
+  std::atomic<uint32_t> last_sample_ordinal_{1};
 
   // Whether it should record thread names.
-  bool record_thread_names_ = false;
+  std::atomic<bool> record_thread_names_{false};
 
   friend class NoDestructor<SamplingHeapProfiler>;
+  friend class SamplingHeapProfilerTest;
 
   DISALLOW_COPY_AND_ASSIGN(SamplingHeapProfiler);
 };

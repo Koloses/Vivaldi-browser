@@ -29,16 +29,22 @@ import org.chromium.chrome.browser.vr.util.VrTestRuleUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
 import org.chromium.components.module_installer.ModuleInstaller;
+import org.chromium.components.module_installer.ModuleInstallerRule;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Callable;
 
 /**
  * End-to-end tests for installing the VR DFM on Daydream-ready phones on startup.
+ *
+ * TODO(agrieve): This test may be better as a robolectric test.
  */
 @RunWith(ParameterizedRunner.class)
 @UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@CommandLineFlags.
+Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE, "enable-features=LogJsConsoleMessages"})
 @MinAndroidSdkLevel(Build.VERSION_CODES.N) // Daydream is only supported on N+.
 public class VrDaydreamReadyModuleInstallTest {
     @ClassParameter
@@ -47,12 +53,24 @@ public class VrDaydreamReadyModuleInstallTest {
     @Rule
     public RuleChain mRuleChain;
 
+    private ModuleInstallerRule mModuleInstallerRule;
+
     private ChromeActivityTestRule mVrTestRule;
+
+    private final Set<String> mModulesRequestedDeferred = new HashSet<>();
 
     public VrDaydreamReadyModuleInstallTest(Callable<ChromeActivityTestRule> callable)
             throws Exception {
         mVrTestRule = callable.call();
-        mRuleChain = VrTestRuleUtils.wrapRuleInActivityRestrictionRule(mVrTestRule);
+        mModuleInstallerRule = new ModuleInstallerRule(new ModuleInstaller() {
+            @Override
+            public void installDeferred(String moduleName) {
+                mModulesRequestedDeferred.add(moduleName);
+            }
+        });
+        mRuleChain =
+                RuleChain.outerRule(mModuleInstallerRule)
+                        .around(VrTestRuleUtils.wrapRuleInActivityRestrictionRule(mVrTestRule));
     }
 
     /** Tests that the install is requested deferred. */
@@ -61,8 +79,8 @@ public class VrDaydreamReadyModuleInstallTest {
     @XrActivityRestriction({XrActivityRestriction.SupportedActivity.ALL})
     @Restriction({RESTRICTION_TYPE_DEVICE_DAYDREAM})
     @VrModuleNotInstalled
-    public void testDeferredRequestOnStartup() throws InterruptedException {
+    public void testDeferredRequestOnStartup() {
         Assert.assertTrue("VR module should have been deferred installed at startup",
-                ModuleInstaller.didRequestDeferred("vr"));
+                mModulesRequestedDeferred.contains("vr"));
     }
 }

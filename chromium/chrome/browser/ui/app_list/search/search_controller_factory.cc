@@ -21,12 +21,11 @@
 #include "chrome/browser/ui/app_list/search/arc/arc_app_reinstall_search_provider.h"
 #include "chrome/browser/ui/app_list/search/arc/arc_app_shortcuts_search_provider.h"
 #include "chrome/browser/ui/app_list/search/arc/arc_playstore_search_provider.h"
-#include "chrome/browser/ui/app_list/search/crostini/crostini_repository_search_provider.h"
 #include "chrome/browser/ui/app_list/search/launcher_search/launcher_search_provider.h"
 #include "chrome/browser/ui/app_list/search/mixer.h"
 #include "chrome/browser/ui/app_list/search/omnibox_provider.h"
 #include "chrome/browser/ui/app_list/search/search_controller.h"
-#include "chrome/browser/ui/app_list/search/search_result_ranker/recurrence_ranker.h"
+#include "chrome/browser/ui/app_list/search/search_result_ranker/search_result_ranker.h"
 #include "chrome/browser/ui/app_list/search/settings_shortcut/settings_shortcut_provider.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
@@ -63,9 +62,6 @@ constexpr size_t kMaxSettingsShortcutResults = 6;
 constexpr float kBoostOfSettingsShortcut = 10.0f;
 constexpr float kBoostOfApps = 8.0f;
 
-// TODO(danielng): Need UX spec.
-constexpr size_t kMaxCrostiniRepositoryResults = 2;
-
 }  // namespace
 
 std::unique_ptr<SearchController> CreateSearchController(
@@ -75,7 +71,8 @@ std::unique_ptr<SearchController> CreateSearchController(
   std::unique_ptr<SearchController> controller =
       std::make_unique<SearchController>(model_updater, list_controller,
                                          profile);
-  AppSearchResultRanker* ranker = controller->GetSearchResultRanker();
+
+  AppSearchResultRanker* app_ranker = controller->GetAppSearchResultRanker();
 
   // Add mixer groups. There are four main groups: answer card, apps
   // and omnibox. Each group has a "soft" maximum number of results. However, if
@@ -94,7 +91,7 @@ std::unique_ptr<SearchController> CreateSearchController(
   controller->AddProvider(apps_group_id, std::make_unique<AppSearchProvider>(
                                              profile, list_controller,
                                              base::DefaultClock::GetInstance(),
-                                             model_updater, ranker));
+                                             model_updater, app_ranker));
   controller->AddProvider(omnibox_group_id, std::make_unique<OmniboxProvider>(
                                                 profile, list_controller));
   if (app_list_features::IsAnswerCardEnabled()) {
@@ -149,47 +146,13 @@ std::unique_ptr<SearchController> CreateSearchController(
         std::make_unique<SettingsShortcutProvider>(profile));
   }
 
-  if (app_list_features::IsAppShortcutSearchEnabled() &&
-      arc::IsArcAllowedForProfile(profile)) {
+  if (arc::IsArcAllowedForProfile(profile)) {
     size_t app_shortcut_group_id =
         controller->AddGroup(kMaxAppShortcutResults, 1.0, kBoostOfApps);
     controller->AddProvider(
         app_shortcut_group_id,
         std::make_unique<ArcAppShortcutsSearchProvider>(
-            kMaxAppShortcutResults, profile, list_controller, ranker));
-  }
-
-  // TODO(https://crbug.com/921429): Put feature switch in ash/public/app_list/
-  // like the other search providers.
-  if (base::FeatureList::IsEnabled(features::kCrostiniAppSearch)) {
-    size_t crostini_repository_group_id =
-        controller->AddGroup(kMaxCrostiniRepositoryResults, 1.0, 0.0);
-    controller->AddProvider(
-        crostini_repository_group_id,
-        std::make_unique<CrostiniRepositorySearchProvider>(profile));
-  }
-
-  if (app_list_features::IsAdaptiveResultRankerEnabled()) {
-    RecurrenceRankerConfigProto group_ranker_config;
-    group_ranker_config.set_min_seconds_between_saves(240u);
-    auto* predictor =
-        group_ranker_config.mutable_zero_state_frecency_predictor();
-    predictor->set_target_limit(base::GetFieldTrialParamByFeatureAsInt(
-        app_list_features::kEnableAdaptiveResultRanker, "target_limit", 200));
-    predictor->set_decay_coeff(base::GetFieldTrialParamByFeatureAsDouble(
-        app_list_features::kEnableAdaptiveResultRanker, "decay_coeff", 0.8f));
-    auto* fallback = group_ranker_config.mutable_fallback_predictor();
-    fallback->set_target_limit(base::GetFieldTrialParamByFeatureAsInt(
-        app_list_features::kEnableAdaptiveResultRanker, "fallback_target_limit",
-        200));
-    fallback->set_decay_coeff(base::GetFieldTrialParamByFeatureAsDouble(
-        app_list_features::kEnableAdaptiveResultRanker, "fallback_decay_coeff",
-        0.8f));
-
-    controller->SetRecurrenceRanker(std::make_unique<RecurrenceRanker>(
-        profile->GetPath().AppendASCII("adaptive_result_ranker.proto"),
-        group_ranker_config,
-        chromeos::ProfileHelper::IsEphemeralUserProfile(profile)));
+            kMaxAppShortcutResults, profile, list_controller, app_ranker));
   }
 
   return controller;

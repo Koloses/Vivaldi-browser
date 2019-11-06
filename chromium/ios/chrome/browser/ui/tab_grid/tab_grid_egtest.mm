@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import <EarlGrey/EarlGrey.h>
+
 #include "base/strings/stringprintf.h"
 #import "ios/chrome/browser/ui/tab_grid/tab_grid_constants.h"
-#import "ios/chrome/browser/ui/tab_grid/tab_grid_egtest_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
@@ -141,13 +142,13 @@ char kResponse3[] = "Test Page 3 content";
 
 - (void)loadTestURLs {
   [ChromeEarlGrey loadURL:_URL1];
-  [ChromeEarlGrey waitForWebViewContainingText:kResponse1];
+  [ChromeEarlGrey waitForWebStateContainingText:kResponse1];
 
   [ChromeEarlGrey loadURL:_URL2];
-  [ChromeEarlGrey waitForWebViewContainingText:kResponse2];
+  [ChromeEarlGrey waitForWebStateContainingText:kResponse2];
 
   [ChromeEarlGrey loadURL:_URL3];
-  [ChromeEarlGrey waitForWebViewContainingText:kResponse3];
+  [ChromeEarlGrey waitForWebStateContainingText:kResponse3];
 }
 
 // Test that Clear Browsing Data can be successfully done from tab grid.

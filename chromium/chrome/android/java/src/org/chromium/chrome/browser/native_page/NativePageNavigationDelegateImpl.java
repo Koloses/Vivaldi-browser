@@ -12,11 +12,14 @@ import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.offlinepages.DownloadUiActionFlags;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.offlinepages.RequestCoordinatorBridge;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.tab.InterceptNavigationDelegateImpl;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.SheetState;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.mojom.WindowOpenDisposition;
@@ -53,6 +56,16 @@ public class NativePageNavigationDelegateImpl implements NativePageNavigationDel
 
         switch (windowOpenDisposition) {
             case WindowOpenDisposition.CURRENT_TAB:
+                if (FeatureUtilities.isNoTouchModeEnabled()) {
+                    // Allow PWAs to handle navigation.
+                    InterceptNavigationDelegateImpl delegate =
+                            InterceptNavigationDelegateImpl.get(mHost.getActiveTab());
+                    if (delegate != null
+                            && delegate.shouldIgnoreNewTab(loadUrlParams.getUrl(),
+                                    mTabModelSelector.isIncognitoSelected())) {
+                        break;
+                    }
+                }
                 mHost.loadUrl(loadUrlParams, mTabModelSelector.isIncognitoSelected());
                 loadingTab = mHost.getActiveTab();
                 break;
@@ -98,12 +111,12 @@ public class NativePageNavigationDelegateImpl implements NativePageNavigationDel
     }
 
     private void saveUrlForOffline(String url) {
-        OfflinePageBridge offlinePageBridge = OfflinePageBridge.getForProfile(mProfile);
         if (mHost.getActiveTab() != null) {
-            offlinePageBridge.scheduleDownload(mHost.getActiveTab().getWebContents(),
+            OfflinePageBridge.getForProfile(mProfile).scheduleDownload(
+                    mHost.getActiveTab().getWebContents(),
                     OfflinePageBridge.NTP_SUGGESTIONS_NAMESPACE, url, DownloadUiActionFlags.ALL);
         } else {
-            offlinePageBridge.savePageLater(
+            RequestCoordinatorBridge.getForProfile(mProfile).savePageLater(
                     url, OfflinePageBridge.NTP_SUGGESTIONS_NAMESPACE, true /* userRequested */);
         }
     }

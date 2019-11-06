@@ -11,10 +11,12 @@
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/google/core/common/google_util.h"
 #include "components/prefs/pref_service.h"
+#import "components/signin/public/identity_manager/objc/identity_manager_observer_bridge.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_user_settings.h"
+#include "components/unified_consent/feature.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
@@ -32,7 +34,6 @@
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/ui/commands/show_signin_command.h"
-#import "ios/chrome/browser/ui/settings/cells/settings_detail_item.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_cell.h"
 #import "ios/chrome/browser/ui/settings/cells/sync_switch_item.h"
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
@@ -50,7 +51,6 @@
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity_service.h"
-#import "services/identity/public/objc/identity_manager_observer_bridge.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "url/gurl.h"
 
@@ -101,7 +101,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ios::ChromeBrowserState* _browserState;  // Weak.
   SyncSetupService* _syncSetupService;     // Weak.
   std::unique_ptr<SyncObserverBridge> _syncObserver;
-  std::unique_ptr<identity::IdentityManagerObserverBridge>
+  std::unique_ptr<signin::IdentityManagerObserverBridge>
       _identityManagerObserver;
   AuthenticationFlow* _authenticationFlow;
   // Whether switching sync account is allowed on the screen.
@@ -212,6 +212,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
               allowSwitchSyncAccount:(BOOL)allowSwitchSyncAccount {
+  DCHECK(!unified_consent::IsUnifiedConsentFeatureEnabled());
   DCHECK(browserState);
   UITableViewStyle style = base::FeatureList::IsEnabled(kSettingsRefresh)
                                ? UITableViewStylePlain
@@ -227,7 +228,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
     syncer::SyncService* syncService =
         ProfileSyncServiceFactory::GetForBrowserState(_browserState);
     _syncObserver.reset(new SyncObserverBridge(self, syncService));
-    _identityManagerObserver.reset(new identity::IdentityManagerObserverBridge(
+    _identityManagerObserver.reset(new signin::IdentityManagerObserverBridge(
         IdentityManagerFactory::GetForBrowserState(_browserState), self));
     _avatarCache = [[ResizedAvatarCache alloc] init];
     _identityServiceObserver.reset(
@@ -304,7 +305,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
     auto* identity_manager =
         IdentityManagerFactory::GetForBrowserState(_browserState);
 
-    for (const AccountInfo& account :
+    for (const CoreAccountInfo& account :
          identity_manager->GetAccountsWithRefreshTokens()) {
       ChromeIdentity* identity = ios::GetChromeBrowserProvider()
                                      ->GetChromeIdentityService()
@@ -374,7 +375,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
       [[TableViewAccountItem alloc] initWithType:ItemTypeAccount];
   [self updateAccountItem:identityAccountItem withIdentity:identity];
 
-  identityAccountItem.enabled = _syncSetupService->IsSyncEnabled();
+  identityAccountItem.mode = _syncSetupService->IsSyncEnabled()
+                                 ? TableViewAccountModeEnabled
+                                 : TableViewAccountModeDisabled;
   ChromeIdentity* authenticatedIdentity =
       AuthenticationServiceFactory::GetForBrowserState(_browserState)
           ->GetAuthenticatedIdentity();
@@ -616,7 +619,11 @@ typedef NS_ENUM(NSInteger, ItemType) {
                                                      ACCESS_POINT_UNKNOWN]
         baseViewController:self];
   } else if (ShouldShowSyncSettings(syncState)) {
-    [self.dispatcher showSyncSettingsFromViewController:self];
+    if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
+      [self.dispatcher showGoogleServicesSettingsFromViewController:self];
+    } else {
+      [self.dispatcher showSyncSettingsFromViewController:self];
+    }
   } else if (ShouldShowSyncPassphraseSettings(syncState)) {
     [self.dispatcher showSyncPassphraseSettingsFromViewController:self];
   }
@@ -778,7 +785,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
       TableViewAccountItem* accountItem =
           base::mac::ObjCCastStrict<TableViewAccountItem>(
               [self.tableViewModel itemAtIndexPath:indexPath]);
-      accountItem.enabled = _syncSetupService->IsSyncEnabled();
+      accountItem.mode = _syncSetupService->IsSyncEnabled()
+                             ? TableViewAccountModeEnabled
+                             : TableViewAccountModeDisabled;
       [accountsToReconfigure addObject:accountItem];
     }
     [self reconfigureCellsForItems:accountsToReconfigure];
@@ -904,7 +913,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (BOOL)shouldDisplaySyncError {
   SyncSetupService::SyncServiceState state =
       _syncSetupService->GetSyncServiceState();
-  return state != SyncSetupService::kNoSyncServiceError;
+  // Without unity, kSyncSettingsNotConfirmed should not be shown.
+  return state != SyncSetupService::kNoSyncServiceError &&
+         state != SyncSetupService::kSyncSettingsNotConfirmed;
 }
 
 - (BOOL)shouldDisableSettingsOnSyncError {
@@ -1008,7 +1019,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   [self updateTableView];
 }
 
-#pragma mark identity::IdentityManagerObserverBridgeDelegate
+#pragma mark signin::IdentityManagerObserverBridgeDelegate
 
 - (void)onEndBatchOfRefreshTokenStateChanges {
   if (_authenticationOperationInProgress) {

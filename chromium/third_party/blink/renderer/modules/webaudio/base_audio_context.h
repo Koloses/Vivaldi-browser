@@ -43,6 +43,7 @@
 #include "third_party/blink/renderer/modules/webaudio/deferred_task_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/iir_filter_node.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
+#include "third_party/blink/renderer/platform/audio/audio_callback_metric_reporter.h"
 #include "third_party/blink/renderer/platform/audio/audio_io_callback.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
@@ -59,6 +60,7 @@ class AnalyserNode;
 class AudioBuffer;
 class AudioBufferSourceNode;
 class AudioContextOptions;
+class AudioGraphTracer;
 class AudioListener;
 class AudioWorklet;
 class BiquadFilterNode;
@@ -168,11 +170,10 @@ class MODULES_EXPORT BaseAudioContext
 
   // Handles the promise and callbacks when |decodeAudioData| is finished
   // decoding.
-  void HandleDecodeAudioData(
-      AudioBuffer*,
-      ScriptPromiseResolver*,
-      V8PersistentCallbackFunction<V8DecodeSuccessCallback>*,
-      V8PersistentCallbackFunction<V8DecodeErrorCallback>*);
+  void HandleDecodeAudioData(AudioBuffer*,
+                             ScriptPromiseResolver*,
+                             V8DecodeSuccessCallback*,
+                             V8DecodeErrorCallback*);
 
   AudioListener* listener() { return listener_; }
 
@@ -248,7 +249,7 @@ class MODULES_EXPORT BaseAudioContext
   //   - The return value indicates whether the context needs to be suspended or
   //   not after rendering.
   virtual bool HandlePreRenderTasks(const AudioIOPosition* output_position,
-                                    const AudioIOCallbackMetric* metric) = 0;
+                                    const AudioCallbackMetric* metric) = 0;
 
   // Called at the end of each render quantum.
   virtual void HandlePostRenderTasks() = 0;
@@ -315,6 +316,18 @@ class MODULES_EXPORT BaseAudioContext
   // Does nothing when the worklet global scope does not exist.
   void UpdateWorkletGlobalScopeOnRenderingThread();
 
+  // Returns a unique ID for the instance for Devtools.
+  const String& Uuid() const { return uuid_; }
+
+  // Returns -1 if the destination node is unavailable or any other condition
+  // occurs preventing us from determining the count.
+  int32_t MaxChannelCount();
+
+  // Returns the platform-specific callback buffer size for Devtools.
+  // Returns -1 if the destination node is unavailable or any other condition
+  // occurs preventing us from determining the count.
+  int32_t CallbackBufferSize();
+
  protected:
   enum ContextType { kRealtimeContext, kOfflineContext };
 
@@ -341,10 +354,11 @@ class MODULES_EXPORT BaseAudioContext
 
   void RejectPendingDecodeAudioDataResolvers();
 
+  // When the context goes away, reject any pending script promise resolvers.
+  virtual void RejectPendingResolvers();
+
   // Returns the Document wich wich the instance is associated.
   Document* GetDocument() const;
-
-  const String& Uuid() const { return uuid_; }
 
   // The audio thread relies on the main thread to perform some operations
   // over the objects that it owns and controls; |ScheduleMainThreadCleanup()|
@@ -363,9 +377,9 @@ class MODULES_EXPORT BaseAudioContext
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
- private:
-  friend class AudioContextAutoplayTest;
+  AudioGraphTracer* GraphTracer();
 
+ private:
   // Unique ID for each context.
   const String uuid_;
 
@@ -378,10 +392,6 @@ class MODULES_EXPORT BaseAudioContext
 
   // Listener for the PannerNodes
   Member<AudioListener> listener_;
-
-  // When the context is going away, reject any pending script promise
-  // resolvers.
-  virtual void RejectPendingResolvers();
 
   // Set to |true| by the audio thread when it posts a main-thread task to
   // perform delayed state sync'ing updates that needs to be done on the main

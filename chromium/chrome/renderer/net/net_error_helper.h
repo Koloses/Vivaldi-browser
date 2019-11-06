@@ -21,6 +21,7 @@
 #include "chrome/renderer/security_interstitials/security_interstitial_page_controller.h"
 #include "chrome/renderer/supervised_user/supervised_user_error_page_controller.h"
 #include "chrome/renderer/supervised_user/supervised_user_error_page_controller_delegate.h"
+#include "components/error_page/common/localized_error.h"
 #include "components/error_page/common/net_error_info.h"
 #include "components/security_interstitials/core/controller_client.h"
 #include "content/public/renderer/render_frame_observer.h"
@@ -31,17 +32,13 @@
 
 class GURL;
 
-namespace blink {
-class WebURLResponse;
-}
-
-namespace content {
-class ResourceFetcher;
-}
-
 namespace error_page {
 class Error;
 struct ErrorPageParams;
+}
+
+namespace network {
+class SimpleURLLoader;
 }
 
 // Listens for NetErrorInfo messages from the NetErrorTabHelper on the
@@ -113,27 +110,27 @@ class NetErrorHelper
   bool ShouldSuppressErrorPage(const GURL& url);
 
  private:
+  // Returns ResourceRequest filled with |url|. It has request_initiator from
+  // the frame origin and origin header with "null" for a unique origin.
+  std::unique_ptr<network::ResourceRequest> CreatePostRequest(
+      const GURL& url) const;
   chrome::mojom::NetworkDiagnostics* GetRemoteNetworkDiagnostics();
   chrome::mojom::NetworkEasterEgg* GetRemoteNetworkEasterEgg();
 
   // NetErrorHelperCore::Delegate implementation:
-  void GenerateLocalizedErrorPage(
+  error_page::LocalizedError::PageState GenerateLocalizedErrorPage(
       const error_page::Error& error,
       bool is_failed_post,
       bool can_use_local_diagnostics_service,
       std::unique_ptr<error_page::ErrorPageParams> params,
-      bool* reload_button_shown,
-      bool* show_cached_copy_button_shown,
-      bool* download_button_shown,
-      error_page::LocalizedError::OfflineContentOnNetErrorFeatureState*
-          offline_content_feature_state,
-      bool* auto_fetch_allowed,
       std::string* html) const override;
   void LoadErrorPage(const std::string& html, const GURL& failed_url) override;
+
   void EnablePageHelperFunctions() override;
-  void UpdateErrorPage(const error_page::Error& error,
-                       bool is_failed_post,
-                       bool can_use_local_diagnostics_service) override;
+  error_page::LocalizedError::PageState UpdateErrorPage(
+      const error_page::Error& error,
+      bool is_failed_post,
+      bool can_use_local_diagnostics_service) override;
   void InitializeErrorPageEasterEggHighScore(int high_score) override;
   void RequestEasterEggHighScore() override;
   void FetchNavigationCorrections(
@@ -149,8 +146,6 @@ class NetErrorHelper
   void OfflineContentAvailable(
       bool list_visible_by_prefs,
       const std::string& offline_content_json) override;
-  void OfflineContentSummaryAvailable(
-      const std::string& offline_content_summary_json) override;
   content::RenderFrame* GetRenderFrame() override;
 
 #if defined(OS_ANDROID)
@@ -164,11 +159,10 @@ class NetErrorHelper
                                      const std::string& api_key,
                                      const GURL& search_url);
 
-  void OnNavigationCorrectionsFetched(const blink::WebURLResponse& response,
-                                      const std::string& data);
+  void OnNavigationCorrectionsFetched(
+      std::unique_ptr<std::string> response_body);
 
-  void OnTrackingRequestComplete(const blink::WebURLResponse& response,
-                                 const std::string& data);
+  void OnTrackingRequestComplete(std::unique_ptr<std::string> response_body);
 
   void OnNetworkDiagnosticsClientRequest(
       chrome::mojom::NetworkDiagnosticsClientAssociatedRequest request);
@@ -186,8 +180,8 @@ class NetErrorHelper
                                    const std::string& api_key,
                                    const GURL& search_url) override;
 
-  std::unique_ptr<content::ResourceFetcher> correction_fetcher_;
-  std::unique_ptr<content::ResourceFetcher> tracking_fetcher_;
+  std::unique_ptr<network::SimpleURLLoader> correction_loader_;
+  std::unique_ptr<network::SimpleURLLoader> tracking_loader_;
 
   std::unique_ptr<NetErrorHelperCore> core_;
 
@@ -205,13 +199,13 @@ class NetErrorHelper
   // pointers are invalidated on each commit, to prevent getting messages from
   // Controllers used for the previous commit that haven't yet been cleaned up.
   base::WeakPtrFactory<NetErrorPageController::Delegate>
-      weak_controller_delegate_factory_;
+      weak_controller_delegate_factory_{this};
 
   base::WeakPtrFactory<SecurityInterstitialPageController::Delegate>
-      weak_security_interstitial_controller_delegate_factory_;
+      weak_security_interstitial_controller_delegate_factory_{this};
 
   base::WeakPtrFactory<SupervisedUserErrorPageControllerDelegate>
-      weak_supervised_user_error_controller_delegate_factory_;
+      weak_supervised_user_error_controller_delegate_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(NetErrorHelper);
 };

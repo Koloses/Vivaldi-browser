@@ -4,28 +4,35 @@
 
 #include "content/browser/devtools/devtools_session.h"
 
+#include <vector>
+
 #include "base/bind.h"
-#include "base/json/json_reader.h"
-#include "base/strings/stringprintf.h"
 #include "content/browser/devtools/devtools_manager.h"
+#include "content/browser/devtools/devtools_protocol_encoding.h"
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/protocol.h"
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/public/browser/devtools_external_agent_proxy_delegate.h"
 #include "content/public/browser/devtools_manager_delegate.h"
+#include "third_party/inspector_protocol/encoding/encoding.h"
 
 namespace content {
-
 namespace {
+using ::inspector_protocol_encoding::span;
+using ::inspector_protocol_encoding::SpanFrom;
+using ::inspector_protocol_encoding::cbor::AppendString8EntryToCBORMap;
+using ::inspector_protocol_encoding::cbor::IsCBORMessage;
+using IPEStatus = ::inspector_protocol_encoding::Status;
 
 bool ShouldSendOnIO(const std::string& method) {
   // Keep in sync with WebDevToolsAgent::ShouldInterruptForMethod.
-  // TODO(dgozman): find a way to share this.
+  // TODO(einbinder): find a way to share this.
   return method == "Debugger.pause" || method == "Debugger.setBreakpoint" ||
          method == "Debugger.setBreakpointByUrl" ||
          method == "Debugger.removeBreakpoint" ||
          method == "Debugger.setBreakpointsActive" ||
+         method == "Debugger.getStackTrace" ||
          method == "Performance.getMetrics" || method == "Page.crash" ||
          method == "Runtime.terminateExecution" ||
          method == "Emulation.setScriptExecutionDisabled";
@@ -34,14 +41,12 @@ bool ShouldSendOnIO(const std::string& method) {
 static const char kMethod[] = "method";
 static const char kResumeMethod[] = "Runtime.runIfWaitingForDebugger";
 static const char kSessionId[] = "sessionId";
-
 }  // namespace
 
 DevToolsSession::DevToolsSession(DevToolsAgentHostClient* client)
     : binding_(this),
       client_(client),
-      dispatcher_(new protocol::UberDispatcher(this)),
-      weak_factory_(this) {}
+      dispatcher_(new protocol::UberDispatcher(this)) {}
 
 DevToolsSession::~DevToolsSession() {
   if (proxy_delegate_)
@@ -103,7 +108,8 @@ void DevToolsSession::AttachToAgent(blink::mojom::DevToolsAgent* agent) {
   binding_.Bind(mojo::MakeRequest(&host_ptr_info));
   agent->AttachDevToolsSession(
       std::move(host_ptr_info), mojo::MakeRequest(&session_ptr_),
-      mojo::MakeRequest(&io_session_ptr_), session_state_cookie_.Clone());
+      mojo::MakeRequest(&io_session_ptr_), session_state_cookie_.Clone(),
+      client_->UsesBinaryProtocol());
   session_ptr_.set_connection_error_handler(base::BindOnce(
       &DevToolsSession::MojoConnectionDestroyed, base::Unretained(this)));
 
@@ -133,27 +139,51 @@ void DevToolsSession::MojoConnectionDestroyed() {
   io_session_ptr_.reset();
 }
 
+// The client of the devtools session will call this method to send a message
+// to handlers / agents that the session is connected with.
 bool DevToolsSession::DispatchProtocolMessage(const std::string& message) {
+  // If the session is in proxy mode, then |message| will be sent to
+  // an external session, so it needs to be sent as JSON.
+  // TODO(dgozman): revisit the proxy delegate.
   if (proxy_delegate_) {
-    // Note: we assume that child sessions are not forwarding.
+    if (client_->UsesBinaryProtocol()) {
+      DCHECK(IsCBORMessage(SpanFrom(message)));
+      std::string json;
+      IPEStatus status = ConvertCBORToJSON(SpanFrom(message), &json);
+      LOG_IF(ERROR, !status.ok()) << status.ToASCIIString();
+      proxy_delegate_->SendMessageToBackend(this, json);
+      return true;
+    }
     proxy_delegate_->SendMessageToBackend(this, message);
     return true;
   }
-
+  std::string converted_cbor_message;
+  const std::string* message_to_send = &message;
+  if (client_->UsesBinaryProtocol()) {
+    // If the client uses the binary protocol, then |message| is already
+    // CBOR (it comes from the client).
+    DCHECK(IsCBORMessage(SpanFrom(message)));
+  } else {
+    IPEStatus status =
+        ConvertJSONToCBOR(SpanFrom(message), &converted_cbor_message);
+    LOG_IF(ERROR, !status.ok()) << status.ToASCIIString();
+    message_to_send = &converted_cbor_message;
+  }
   std::unique_ptr<protocol::DictionaryValue> value =
-      protocol::DictionaryValue::cast(protocol::StringUtil::parseMessage(
-          message, client_->UsesBinaryProtocol()));
+      protocol::DictionaryValue::cast(
+          protocol::StringUtil::parseMessage(*message_to_send, true));
 
   std::string session_id;
   if (!value || !value->getString(kSessionId, &session_id))
-    return DispatchProtocolMessageInternal(message, std::move(value));
+    return DispatchProtocolMessageInternal(*message_to_send, std::move(value));
 
   auto it = child_sessions_.find(session_id);
   if (it == child_sessions_.end())
     return false;
   DevToolsSession* session = it->second;
   DCHECK(!session->proxy_delegate_);
-  return session->DispatchProtocolMessageInternal(message, std::move(value));
+  return session->DispatchProtocolMessageInternal(*message_to_send,
+                                                  std::move(value));
 }
 
 bool DevToolsSession::DispatchProtocolMessageInternal(
@@ -242,22 +272,50 @@ void DevToolsSession::ResumeSendingMessagesToAgent() {
   suspended_messages_.clear();
 }
 
+// The following methods handle responses or notifications coming from
+// the browser to the client.
+static void SendProtocolResponseOrNotification(
+    DevToolsAgentHostClient* client,
+    DevToolsAgentHostImpl* agent_host,
+    std::unique_ptr<protocol::Serializable> message) {
+  std::string cbor = message->serialize(/*binary=*/true);
+  DCHECK(IsCBORMessage(SpanFrom(cbor)));
+  if (client->UsesBinaryProtocol()) {
+    client->DispatchProtocolMessage(agent_host, cbor);
+    return;
+  }
+  std::string json;
+  IPEStatus status = ConvertCBORToJSON(SpanFrom(cbor), &json);
+  LOG_IF(ERROR, !status.ok()) << status.ToASCIIString();
+  client->DispatchProtocolMessage(agent_host, json);
+}
+
 void DevToolsSession::sendProtocolResponse(
     int call_id,
     std::unique_ptr<protocol::Serializable> message) {
-  bool binary = client_->UsesBinaryProtocol();
-  client_->DispatchProtocolMessage(agent_host_, message->serialize(binary));
+  SendProtocolResponseOrNotification(client_, agent_host_, std::move(message));
   // |this| may be deleted at this point.
 }
 
 void DevToolsSession::sendProtocolNotification(
     std::unique_ptr<protocol::Serializable> message) {
-  bool binary = client_->UsesBinaryProtocol();
-  client_->DispatchProtocolMessage(agent_host_, message->serialize(binary));
+  SendProtocolResponseOrNotification(client_, agent_host_, std::move(message));
   // |this| may be deleted at this point.
 }
 
 void DevToolsSession::flushProtocolNotifications() {
+}
+
+// The following methods handle responses or notifications coming from
+// the renderer (blink) to the client.
+static void DispatchProtocolResponseOrNotification(
+    DevToolsAgentHostClient* client,
+    DevToolsAgentHostImpl* agent_host,
+    blink::mojom::DevToolsMessagePtr message) {
+  client->DispatchProtocolMessage(
+      agent_host,
+      std::string(reinterpret_cast<const char*>(message->data.data()),
+                  message->data.size()));
 }
 
 void DevToolsSession::DispatchProtocolResponse(
@@ -266,10 +324,8 @@ void DevToolsSession::DispatchProtocolResponse(
     blink::mojom::DevToolsSessionStatePtr updates) {
   ApplySessionStateUpdates(std::move(updates));
   waiting_for_response_messages_.erase(call_id);
-  client_->DispatchProtocolMessage(
-      agent_host_,
-      std::string(reinterpret_cast<const char*>(message->data.data()),
-                  message->data.size()));
+  DispatchProtocolResponseOrNotification(client_, agent_host_,
+                                         std::move(message));
   // |this| may be deleted at this point.
 }
 
@@ -277,15 +333,27 @@ void DevToolsSession::DispatchProtocolNotification(
     blink::mojom::DevToolsMessagePtr message,
     blink::mojom::DevToolsSessionStatePtr updates) {
   ApplySessionStateUpdates(std::move(updates));
-  client_->DispatchProtocolMessage(
-      agent_host_,
-      std::string(reinterpret_cast<const char*>(message->data.data()),
-                  message->data.size()));
+  DispatchProtocolResponseOrNotification(client_, agent_host_,
+                                         std::move(message));
   // |this| may be deleted at this point.
 }
 
 void DevToolsSession::DispatchOnClientHost(const std::string& message) {
-  client_->DispatchProtocolMessage(agent_host_, message);
+  // |message| either comes from a web socket, in which case it's JSON.
+  // Or it comes from another devtools_session, in which case it may be CBOR
+  // already. We auto-detect and convert to what the client wants as needed.
+  inspector_protocol_encoding::span<uint8_t> bytes = SpanFrom(message);
+  bool is_cbor_message = IsCBORMessage(bytes);
+  if (client_->UsesBinaryProtocol() == is_cbor_message) {
+    client_->DispatchProtocolMessage(agent_host_, message);
+    return;
+  }
+  std::string converted;
+  IPEStatus status = client_->UsesBinaryProtocol()
+                         ? ConvertJSONToCBOR(bytes, &converted)
+                         : ConvertCBORToJSON(bytes, &converted);
+  LOG_IF(ERROR, !status.ok()) << status.ToASCIIString();
+  client_->DispatchProtocolMessage(agent_host_, converted);
   // |this| may be deleted at this point.
 }
 
@@ -305,7 +373,7 @@ void DevToolsSession::ApplySessionStateUpdates(
     session_state_cookie_ = blink::mojom::DevToolsSessionState::New();
   for (auto& entry : updates->entries) {
     if (entry.second.has_value())
-      session_state_cookie_->entries[entry.first] = std::move(entry.second);
+      session_state_cookie_->entries[entry.first] = std::move(*entry.second);
     else
       session_state_cookie_->entries.erase(entry.first);
   }
@@ -335,18 +403,21 @@ void DevToolsSession::SendMessageFromChildSession(const std::string& session_id,
                                                   const std::string& message) {
   if (child_sessions_.find(session_id) == child_sessions_.end())
     return;
-  std::string patched;
-  bool patched_ok;
-  if (client_->UsesBinaryProtocol()) {
-    patched_ok = protocol::AppendStringValueToMapBinary(message, kSessionId,
-                                                        session_id, &patched);
-  } else {
-    patched_ok = protocol::AppendStringValueToMapJSON(message, kSessionId,
-                                                      session_id, &patched);
-  }
-  if (!patched_ok)
+  DCHECK(IsCBORMessage(SpanFrom(message)));
+  std::string patched(message);
+  IPEStatus status = AppendString8EntryToCBORMap(
+      SpanFrom(kSessionId), SpanFrom(session_id), &patched);
+  LOG_IF(ERROR, !status.ok()) << status.ToASCIIString();
+  if (!status.ok())
     return;
-  client_->DispatchProtocolMessage(agent_host_, patched);
+  if (client_->UsesBinaryProtocol()) {
+    client_->DispatchProtocolMessage(agent_host_, patched);
+    return;
+  }
+  std::string json;
+  status = ConvertCBORToJSON(SpanFrom(patched), &json);
+  LOG_IF(ERROR, !status.ok()) << status.ToASCIIString();
+  client_->DispatchProtocolMessage(agent_host_, json);
   // |this| may be deleted at this point.
 }
 

@@ -25,10 +25,10 @@
 #import "ios/chrome/browser/ui/ntp_tile_views/ntp_tile_layout_util.h"
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_controller.h"
 #import "ios/chrome/browser/ui/toolbar/public/toolbar_utils.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
+#import "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
 #import "ios/chrome/common/ui_util/constraints_ui_util.h"
-#include "ios/web/public/features.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -267,20 +267,11 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
   [super viewDidAppear:animated];
   // Resize the collection as it might have been rotated while not being
   // presented (e.g. rotation on stack view).
-  [self correctMissingSafeArea];
   [self updateConstraints];
 }
 
 - (void)viewDidLayoutSubviews {
   [super viewDidLayoutSubviews];
-  if (!base::FeatureList::IsEnabled(kBrowserContainerContainsNTP) &&
-      CGSizeEqualToSize(self.collectionView.bounds.size, CGSizeZero) &&
-      !CGSizeEqualToSize(self.view.bounds.size, CGSizeZero)) {
-    // When started after a cold start, the frame of the collection view isn't
-    // set to the bounds of the view. In that case, the constraints for the
-    // cells are broken.
-    self.collectionView.frame = self.view.bounds;
-  }
   [self applyContentOffset];
 }
 
@@ -319,15 +310,13 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
       self.traitCollection.preferredContentSizeCategory) {
     [self.collectionViewLayout invalidateLayout];
     [self.headerSynchronizer updateFakeOmniboxOnCollectionScroll];
-    [self.headerSynchronizer updateConstraints];
   }
-  [self correctMissingSafeArea];
+  [self.headerSynchronizer updateConstraints];
   [self updateOverscrollActionsState];
 }
 
 - (void)viewSafeAreaInsetsDidChange {
   [super viewSafeAreaInsetsDidChange];
-  [self correctMissingSafeArea];
   [self.headerSynchronizer
       updateFakeOmniboxOnNewWidth:self.collectionView.bounds.size.width];
   [self.headerSynchronizer updateConstraints];
@@ -411,12 +400,19 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
   CGSize size = [super collectionView:collectionView
                                layout:collectionViewLayout
                sizeForItemAtIndexPath:indexPath];
+
+  // No need to add extra spacing if kOptionalArticleThumbnail is enabled,
+  // because each cell already has spacing at top and bottom for separators.
+  if (base::FeatureList::IsEnabled(kOptionalArticleThumbnail)) {
+    return size;
+  }
+
   // Special case for last item to add extra spacing before the footer.
   if ([self.collectionUpdater isContentSuggestionsSection:indexPath.section] &&
       indexPath.row ==
-          [self.collectionView numberOfItemsInSection:indexPath.section] - 1)
+          [self.collectionView numberOfItemsInSection:indexPath.section] - 1) {
     size.height += [ContentSuggestionsCell standardSpacing];
-
+  }
   return size;
 }
 
@@ -474,8 +470,17 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
     cellBackgroundColorAtIndexPath:(nonnull NSIndexPath*)indexPath {
   if ([self.collectionUpdater
           shouldUseCustomStyleForSection:indexPath.section]) {
-    return [UIColor clearColor];
+    return UIColor.clearColor;
   }
+  // MDCCollectionView doesn't support dynamic colors, so they have to be
+  // resolved now.
+  // TODO(crbug.com/984928): Clean up once dynamic color support is added.
+#if defined(__IPHONE_13_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0)
+  if (@available(iOS 13, *)) {
+    return [ntp_home::kNTPBackgroundColor()
+        resolvedColorWithTraitCollection:self.traitCollection];
+  }
+#endif
   return ntp_home::kNTPBackgroundColor();
 }
 
@@ -524,6 +529,12 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
 
 - (BOOL)collectionView:(UICollectionView*)collectionView
     shouldHideItemSeparatorAtIndexPath:(NSIndexPath*)indexPath {
+  // If kOptionalArticleThumbnail is enabled, show separators for all cells in
+  // content suggestion sections.
+  if (base::FeatureList::IsEnabled(kOptionalArticleThumbnail)) {
+    return !
+        [self.collectionUpdater isContentSuggestionsSection:indexPath.section];
+  }
   // Special case, show a seperator between the last regular item and the
   // footer.
   if (![self.collectionUpdater
@@ -639,24 +650,6 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
 }
 
 #pragma mark - Private
-
-// TODO(crbug.com/826369) Remove this when the NTP is conatined by the BVC
-// and removed from native content.  As a part of native content, the NTP is
-// contained by a view controller that is inset from safeArea.top.  Even
-// though content suggestions appear under the top safe area, they are blocked
-// by the browser container view controller.
-- (void)correctMissingSafeArea {
-  if (base::FeatureList::IsEnabled(web::features::kBrowserContainerFullscreen))
-    return;
-
-  UIEdgeInsets missingTop = UIEdgeInsetsZero;
-  // During the new tab animation the browser container view controller
-  // actually matches the browser view controller frame, so safe area does
-  // work, so be sure to check the parent view controller offset.
-  if (self.parentViewController.view.frame.origin.y == StatusBarHeight())
-    missingTop = UIEdgeInsetsMake(StatusBarHeight(), 0, 0, 0);
-  self.additionalSafeAreaInsets = missingTop;
-}
 
 - (void)handleLongPress:(UILongPressGestureRecognizer*)gestureRecognizer {
   if (self.editor.editing ||

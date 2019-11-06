@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_or_imported_document.h"
+#include "third_party/blink/renderer/core/loader/prefetched_signed_exchange_manager.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
@@ -21,10 +22,16 @@ namespace blink {
 
 LoaderFactoryForFrame::LoaderFactoryForFrame(
     const FrameOrImportedDocument& frame_or_imported_document)
-    : frame_or_imported_document_(frame_or_imported_document) {}
+    : frame_or_imported_document_(frame_or_imported_document),
+      prefetched_signed_exchange_manager_(
+          frame_or_imported_document_->GetDocumentLoader()
+              ? frame_or_imported_document_->GetDocumentLoader()
+                    ->GetPrefetchedSignedExchangeManager()
+              : nullptr) {}
 
 void LoaderFactoryForFrame::Trace(Visitor* visitor) {
   visitor->Trace(frame_or_imported_document_);
+  visitor->Trace(prefetched_signed_exchange_manager_);
   LoaderFactory::Trace(visitor);
 }
 
@@ -55,12 +62,11 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForFrame::CreateURLLoader(
   // disabled).
   // TODO(mek): Move the RequestContext check to the worker side's relevant
   // callsite when we make Shared Worker loading off-main-thread.
-  Document* document = frame_or_imported_document_->GetDocument();
-  if (document && request.Url().ProtocolIs("blob") &&
-      BlobUtils::MojoBlobURLsEnabled() && !url_loader_factory &&
+  if (request.Url().ProtocolIs("blob") && BlobUtils::MojoBlobURLsEnabled() &&
+      !url_loader_factory &&
       request.GetRequestContext() != mojom::RequestContextType::SHARED_WORKER) {
-    document->GetPublicURLManager().Resolve(request.Url(),
-                                            MakeRequest(&url_loader_factory));
+    frame_or_imported_document_->GetDocument().GetPublicURLManager().Resolve(
+        request.Url(), MakeRequest(&url_loader_factory));
   }
   LocalFrame& frame = frame_or_imported_document_->GetFrame();
   FrameScheduler* frame_scheduler = frame.GetFrameScheduler();
@@ -84,6 +90,13 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForFrame::CreateURLLoader(
     auto loader =
         document_loader.GetServiceWorkerNetworkProvider()->CreateURLLoader(
             webreq, frame_scheduler->CreateResourceLoadingTaskRunnerHandle());
+    if (loader)
+      return loader;
+  }
+
+  if (prefetched_signed_exchange_manager_) {
+    auto loader =
+        prefetched_signed_exchange_manager_->MaybeCreateURLLoader(webreq);
     if (loader)
       return loader;
   }

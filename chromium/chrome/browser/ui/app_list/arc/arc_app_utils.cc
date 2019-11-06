@@ -30,12 +30,12 @@
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/shelf_spinner_controller.h"
 #include "chrome/common/pref_names.h"
-#include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_prefs.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/arc_util.h"
 #include "components/arc/common/intent_helper.mojom.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
+#include "components/arc/session/arc_bridge_service.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "ui/aura/window.h"
@@ -616,6 +616,45 @@ void GetLocaleAndPreferredLanguages(const Profile* profile,
       profile->GetPrefs()->GetString(::language::prefs::kPreferredLanguages);
 }
 
+void GetAndroidId(
+    base::OnceCallback<void(bool ok, int64_t android_id)> callback) {
+  auto* app_instance = GET_APP_INSTANCE(GetAndroidId);
+  if (!app_instance) {
+    std::move(callback).Run(false, 0);
+    return;
+  }
+
+  app_instance->GetAndroidId(base::BindOnce(std::move(callback), true));
+}
+
+std::string AppIdToArcPackageName(const std::string& app_id, Profile* profile) {
+  ArcAppListPrefs* arc_prefs = ArcAppListPrefs::Get(profile);
+  std::unique_ptr<ArcAppListPrefs::AppInfo> app_info =
+      arc_prefs->GetApp(app_id);
+
+  if (!app_info) {
+    DLOG(ERROR) << "Couldn't retrieve ARC package name for AppID: " << app_id;
+    return std::string();
+  }
+  return app_info->package_name;
+}
+
+std::string ArcPackageNameToAppId(const std::string& package_name,
+                                  Profile* profile) {
+  ArcAppListPrefs* arc_prefs = ArcAppListPrefs::Get(profile);
+  return arc_prefs->GetAppIdByPackageName(package_name);
+}
+
+bool IsArcAppSticky(const std::string& app_id, Profile* profile) {
+  ArcAppListPrefs* arc_prefs = ArcAppListPrefs::Get(profile);
+  std::unique_ptr<ArcAppListPrefs::AppInfo> app_info =
+      arc_prefs->GetApp(app_id);
+
+  DCHECK(app_info) << "Couldn't retrieve ARC package name for AppID: "
+                   << app_id;
+  return app_info->sticky;
+}
+
 Intent::Intent() = default;
 
 Intent::~Intent() = default;
@@ -625,7 +664,7 @@ void Intent::AddExtraParam(const std::string& extra_param) {
 }
 
 bool Intent::HasExtraParam(const std::string& extra_param) const {
-  return base::ContainsValue(extra_params_, extra_param);
+  return base::Contains(extra_params_, extra_param);
 }
 
 }  // namespace arc

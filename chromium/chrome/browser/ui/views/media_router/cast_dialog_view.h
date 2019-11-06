@@ -20,6 +20,7 @@
 #include "ui/views/controls/menu/menu_runner.h"
 
 class Browser;
+class Profile;
 
 namespace gfx {
 class Canvas;
@@ -54,9 +55,17 @@ class CastDialogView : public views::BubbleDialogDelegateView,
 
   // Shows the singleton dialog anchored to the top-center of the browser
   // window.
-  static void ShowDialogTopCentered(CastDialogController* controller,
-                                    Browser* browser,
-                                    const base::Time& start_time);
+  static void ShowDialogCenteredForBrowserWindow(
+      CastDialogController* controller,
+      Browser* browser,
+      const base::Time& start_time);
+
+  // Shows the singleton dialog anchored to the bottom of |bounds|, horizontally
+  // centered.
+  static void ShowDialogCentered(const gfx::Rect& bounds,
+                                 CastDialogController* controller,
+                                 Profile* profile,
+                                 const base::Time& start_time);
 
   // No-op if the dialog is currently not shown.
   static void HideDialog();
@@ -76,7 +85,7 @@ class CastDialogView : public views::BubbleDialogDelegateView,
 
   // views::DialogDelegate:
   int GetDialogButtons() const override;
-  views::View* CreateExtraView() override;
+  std::unique_ptr<views::View> CreateExtraView() override;
   bool Close() override;
 
   // CastDialogController::Observer:
@@ -131,13 +140,13 @@ class CastDialogView : public views::BubbleDialogDelegateView,
   static void ShowDialog(views::View* anchor_view,
                          views::BubbleBorder::Arrow anchor_position,
                          CastDialogController* controller,
-                         Browser* browser,
+                         Profile* profile,
                          const base::Time& start_time);
 
   CastDialogView(views::View* anchor_view,
                  views::BubbleBorder::Arrow anchor_position,
                  CastDialogController* controller,
-                 Browser* browser,
+                 Profile* profile,
                  const base::Time& start_time);
   ~CastDialogView() override;
 
@@ -206,7 +215,7 @@ class CastDialogView : public views::BubbleDialogDelegateView,
   // View shown while there are no sinks.
   views::View* no_sinks_view_ = nullptr;
 
-  Browser* const browser_;
+  Profile* const profile_;
 
   // How much |scroll_view_| is scrolled downwards in pixels. Whenever the sink
   // list is updated the scroll position gets reset, so we must manually restore
@@ -233,7 +242,7 @@ class CastDialogView : public views::BubbleDialogDelegateView,
   // When this is set to true, the dialog does not close on blur.
   bool keep_shown_for_testing_ = false;
 
-  base::WeakPtrFactory<CastDialogView> weak_factory_;
+  base::WeakPtrFactory<CastDialogView> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(CastDialogView);
 };

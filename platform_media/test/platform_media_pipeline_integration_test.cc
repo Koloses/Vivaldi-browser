@@ -69,7 +69,7 @@ class PlatformMediaMockMediaSource : public TestMediaSource {
                         mimetype,
                         initial_append_size,
                         initial_sequence_mode,
-                        GetVivaldiTestDataFilePath(filename)){};
+                        GetVivaldiTestDataFilePath(filename)){}
 };
 
 class PlatformMediaPipelineIntegrationTest
@@ -83,7 +83,7 @@ class PlatformMediaPipelineIntegrationTest
 #if defined(OS_MACOSX)
     return true;
 #elif defined(OS_WIN)
-    if (base::win::GetVersion() >= base::win::VERSION_WIN7)
+    if (base::win::GetVersion() >= base::win::Version::WIN7)
       return true;
 #endif
     LOG(WARNING) << " PROPMEDIA(GPU) : " << __FUNCTION__
@@ -140,14 +140,8 @@ TEST_F(PlatformMediaPipelineIntegrationTest, BasicPlayback) {
   ASSERT_TRUE(WaitUntilOnEnded());
 
 #if defined(OS_MACOSX)
-  if (base::mac::IsAtLeastOS10_10()) {
-    EXPECT_EQ("bd1d880e4934bf76c0bb34450cd0f173", GetVideoHash());
-    EXPECT_EQ("-0.51,0.54,1.03,0.85,-0.08,-0.22,", GetAudioHash());
-  } else {
-    // On OS X 10.9, the expected hashes can be different, because our solution
-    // doesn't necessarily process frames one by one, see AVFMediaDecoder.
-    EXPECT_EQ("-1.38,-0.99,0.56,1.71,1.48,0.23,", GetAudioHash());
-  }
+  EXPECT_EQ("bd1d880e4934bf76c0bb34450cd0f173", GetVideoHash());
+  EXPECT_EQ("-0.51,0.54,1.03,0.85,-0.08,-0.22,", GetAudioHash());
 #elif defined(OS_WIN)
   EXPECT_EQ("eb228dfe6882747111161156164dcab0", GetVideoHash());
   EXPECT_EQ("-0.52,0.26,0.16,0.24,-0.00,0.26,", GetAudioHash());
@@ -166,14 +160,8 @@ TEST_F(PlatformMediaPipelineIntegrationTest, BasicPlayback_16x9_Aspect) {
   ASSERT_TRUE(WaitUntilOnEnded());
 
 #if defined(OS_MACOSX)
-  if (base::mac::IsAtLeastOS10_10()) {
-    EXPECT_EQ("e9a2e53ef2c16757962cc58d37de69e7", GetVideoHash());
-    EXPECT_EQ("-3.66,-2.08,0.22,2.09,0.64,-0.90,", GetAudioHash());
-  } else {
-    // On OS X, the expected hashes can be different, because our solution
-    // doesn't necessarily process frames one by one, see AVFMediaDecoder.
-    EXPECT_EQ("-1.81,-0.36,-0.20,0.84,-0.52,-1.11,", GetAudioHash());
-  }
+  EXPECT_EQ("e9a2e53ef2c16757962cc58d37de69e7", GetVideoHash());
+  EXPECT_EQ("-3.66,-2.08,0.22,2.09,0.64,-0.90,", GetAudioHash());
 #elif defined(OS_WIN)
   EXPECT_EQ("e9a2e53ef2c16757962cc58d37de69e7", GetVideoHash());
   EXPECT_EQ("-3.60,-1.82,0.28,1.90,0.34,-1.09,", GetAudioHash());
@@ -191,11 +179,9 @@ TEST_F(PlatformMediaPipelineIntegrationTest, BasicPlayback_VideoOnly) {
   ASSERT_TRUE(WaitUntilOnEnded());
 
 #if defined(OS_MACOSX)
-  if (base::mac::IsAtLeastOS10_10()) {
-    EXPECT_EQ("e7832270a91e8de7945b5724eec2cbcb", GetVideoHash());
-  }
   // On OS X, the expected hashes can be different, because our solution
   // doesn't necessarily process frames one by one, see AVFMediaDecoder.
+  EXPECT_EQ("e7832270a91e8de7945b5724eec2cbcb", GetVideoHash());
 #elif defined(OS_WIN)
   EXPECT_EQ("eb228dfe6882747111161156164dcab0", GetVideoHash());
 #endif
@@ -212,13 +198,7 @@ TEST_F(PlatformMediaPipelineIntegrationTest, BasicPlayback_M4A) {
   ASSERT_TRUE(WaitUntilOnEnded());
 
 #if defined(OS_MACOSX)
-  if (base::mac::IsAtLeastOS10_10()) {
     EXPECT_EQ("-5.29,-5.47,-5.05,-4.33,-2.99,-3.79,", GetAudioHash());
-  } else {
-    // On OS X, the expected hashes can be different, because our solution
-    // doesn't necessarily process frames one by one, see AVFMediaDecoder.
-    EXPECT_EQ("-4.97,-3.80,-3.26,-3.75,-4.90,-5.83,", GetAudioHash());
-  }
 #elif defined(OS_WIN)
   EXPECT_EQ("0.46,1.72,4.26,4.57,3.39,1.54,", GetAudioHash());
 #endif
@@ -318,12 +298,6 @@ TEST_F(PlatformMediaPipelineIntegrationTest, DecodingError) {
   if (!IsEnabled())
     return;
 
-#if defined(OS_MACOSX)
-  // AVPlayer hides the error.
-  if (base::mac::IsOS10_9())
-    return;
-#endif
-
   // TODO(wdzierzanowski): WMFMediaPipeline (Windows) doesn't detect the error?
   // (DNA-30324).
 #if !defined(OS_WIN)
@@ -339,12 +313,12 @@ TEST_F(PlatformMediaPipelineIntegrationTest, Rotated_Metadata_0) {
 
   // This is known not to work on Windows systems older than 8.
 #if defined(OS_WIN)
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+  if (base::win::GetVersion() < base::win::Version::WIN8)
     return;
 #endif
 
   ASSERT_EQ(PipelineStatus::PIPELINE_OK, Start("bear_rotate_0.mp4"));
-  ASSERT_EQ(VideoRotation::VIDEO_ROTATION_0, metadata_.video_decoder_config.video_rotation());
+  ASSERT_EQ(VideoRotation::VIDEO_ROTATION_0, metadata_.video_decoder_config.video_transformation());
 }
 
 TEST_F(PlatformMediaPipelineIntegrationTest, Rotated_Metadata_90) {
@@ -353,12 +327,12 @@ TEST_F(PlatformMediaPipelineIntegrationTest, Rotated_Metadata_90) {
 
   // This is known not to work on Windows systems older than 8.
 #if defined(OS_WIN)
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+  if (base::win::GetVersion() < base::win::Version::WIN8)
     return;
 #endif
 
   ASSERT_EQ(PipelineStatus::PIPELINE_OK, Start("bear_rotate_90.mp4"));
-  ASSERT_EQ(VideoRotation::VIDEO_ROTATION_90, metadata_.video_decoder_config.video_rotation());
+  ASSERT_EQ(VideoRotation::VIDEO_ROTATION_90, metadata_.video_decoder_config.video_transformation());
 }
 
 TEST_F(PlatformMediaPipelineIntegrationTest, Rotated_Metadata_180) {
@@ -367,12 +341,12 @@ TEST_F(PlatformMediaPipelineIntegrationTest, Rotated_Metadata_180) {
 
   // This is known not to work on Windows systems older than 8.
 #if defined(OS_WIN)
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+  if (base::win::GetVersion() < base::win::Version::WIN8)
     return;
 #endif
 
   ASSERT_EQ(PipelineStatus::PIPELINE_OK, Start("bear_rotate_180.mp4"));
-  ASSERT_EQ(VideoRotation::VIDEO_ROTATION_180, metadata_.video_decoder_config.video_rotation());
+  ASSERT_EQ(VideoRotation::VIDEO_ROTATION_180, metadata_.video_decoder_config.video_transformation());
 }
 
 TEST_F(PlatformMediaPipelineIntegrationTest, Rotated_Metadata_270) {
@@ -381,12 +355,12 @@ TEST_F(PlatformMediaPipelineIntegrationTest, Rotated_Metadata_270) {
 
   // This is known not to work on Windows systems older than 8.
 #if defined(OS_WIN)
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+  if (base::win::GetVersion() < base::win::Version::WIN8)
     return;
 #endif
 
   ASSERT_EQ(PipelineStatus::PIPELINE_OK, Start("bear_rotate_270.mp4"));
-  ASSERT_EQ(VideoRotation::VIDEO_ROTATION_270, metadata_.video_decoder_config.video_rotation());
+  ASSERT_EQ(VideoRotation::VIDEO_ROTATION_270, metadata_.video_decoder_config.video_transformation());
 }
 
 // Configuration change happens only on Windows.

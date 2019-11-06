@@ -12,6 +12,7 @@
 #include "chromecast/common/mojom/media_caps.mojom.h"
 #include "chromecast/common/mojom/media_playback_options.mojom.h"
 #include "chromecast/common/mojom/memory_pressure.mojom.h"
+#include "chromecast/common/mojom/queryable_data_store.mojom.h"
 #include "media/mojo/services/media_manifest.h"
 #include "services/service_manager/public/cpp/manifest_builder.h"
 
@@ -25,12 +26,20 @@
 #include "chromecast/internal/shell/browser/cast_content_renderer_internal_manifest_overlay.h"
 #endif
 
+#if !defined(OS_FUCHSIA)
+#include "components/services/heap_profiling/public/mojom/heap_profiling_client.mojom.h"  // nogncheck
+#endif  // !defined(OS_FUCHSIA)
+
 namespace chromecast {
 namespace shell {
 
 const service_manager::Manifest& GetCastContentBrowserOverlayManifest() {
   static base::NoDestructor<service_manager::Manifest> manifest {
     service_manager::ManifestBuilder()
+#if !defined(OS_FUCHSIA)
+        .RequireCapability("heap_profiling", "heap_profiler")
+        .RequireCapability("heap_profiling", "profiling")
+#endif  // !defined(OS_FUCHSIA)
         .ExposeCapability("renderer",
                           service_manager::Manifest::InterfaceList<
                               chromecast::media::mojom::MediaCaps,
@@ -50,10 +59,16 @@ const service_manager::Manifest& GetCastContentBrowserOverlayManifest() {
 const service_manager::Manifest& GetCastContentRendererOverlayManifest() {
   static base::NoDestructor<service_manager::Manifest> manifest {
     service_manager::ManifestBuilder()
+#if !defined(OS_FUCHSIA)
+        .ExposeCapability("browser",
+                          service_manager::Manifest::InterfaceList<
+                              heap_profiling::mojom::ProfilingClient>())
+#endif  // !defined(OS_FUCHSIA)
         .ExposeInterfaceFilterCapability_Deprecated(
             "navigation:frame", "browser",
             service_manager::Manifest::InterfaceList<
-                mojom::FeatureManager, mojom::MediaPlaybackOptions>())
+                mojom::FeatureManager, mojom::MediaPlaybackOptions,
+                mojom::QueryableDataStore>())
         .Build()
 #if defined(USE_INTERNAL_OVERLAY_MANIFESTS)
         .Amend(cast_content_renderer_internal_manifest_overlay::GetManifest())

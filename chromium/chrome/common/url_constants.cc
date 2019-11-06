@@ -6,8 +6,14 @@
 
 namespace chrome {
 
+const char kAccessibilityLabelsLearnMoreURL[] =
+    "https://support.google.com/chrome/?p=image_descriptions";
+
 const char kAutomaticSettingsResetLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ui_automatic_settings_reset";
+
+const char kAdvancedProtectionDownloadLearnMoreURL[] =
+    "https://support.google.com/accounts/?p=ap_faq";
 
 const char kBluetoothAdapterOffHelpURL[] =
 #if defined(OS_CHROMEOS)
@@ -30,6 +36,10 @@ const char kChooserUsbOverviewURL[] =
 
 const char kChromeBetaForumURL[] =
     "https://support.google.com/chrome/?p=beta_forum";
+
+// TODO: replace w/link after marketing provides it.
+const char kChromeReleaseNotesURL[] =
+    "https://www.google.com/chromebook/whatsnew/embedded/";
 
 const char kChromeHelpViaKeyboardURL[] =
 #if defined(OS_CHROMEOS)
@@ -54,14 +64,14 @@ const char kChromeHelpViaMenuURL[] =
 #endif  // defined(OS_CHROMEOS)
 
 const char kChromeHelpViaWebUIURL[] =
+    "https://support.google.com/chrome/?p=help&ctx=settings";
 #if defined(OS_CHROMEOS)
+const char kChromeOsHelpViaWebUIURL[] =
 #if defined(GOOGLE_CHROME_BUILD)
     "chrome-extension://honijodknafkokifofgiaalefdiedpko/main.html";
 #else
     "https://support.google.com/chromebook/?p=help&ctx=settings";
 #endif  // defined(GOOGLE_CHROME_BUILD)
-#else
-    "https://support.google.com/chrome/?p=help&ctx=settings";
 #endif  // defined(OS_CHROMEOS)
 
 const char kChromeNativeScheme[] = "chrome-native";
@@ -142,6 +152,9 @@ const char kGoogleAccountActivityControlsURL[] =
     "https://myaccount.google.com/activitycontrols/search";
 
 const char kGoogleAccountURL[] = "https://myaccount.google.com";
+
+const char kGoogleAccountChooserURL[] =
+    "https://accounts.google.com/AccountChooser";
 
 const char kGooglePasswordManagerURL[] = "https://passwords.google.com";
 
@@ -256,6 +269,9 @@ const char kEnhancedPlaybackNotificationLearnMoreURL[] =
 #endif
 
 #if defined(OS_CHROMEOS)
+const char kAccountManagerLearnMoreURL[] =
+    "https://support.google.com/chromebook/?p=google_accounts";
+
 const char kAndroidAppsLearnMoreURL[] =
     "https://support.google.com/chromebook/?p=playapps";
 
@@ -276,6 +292,9 @@ const char kCrosScheme[] = "cros";
 const char kCupsPrintLearnMoreURL[] =
     "https://support.google.com/chromebook?p=chromebook_printing";
 
+const char kCupsPrintPPDLearnMoreURL[] =
+    "https://support.google.com/chromebook/?p=printing_advancedconfigurations";
+
 const char kEasyUnlockLearnMoreUrl[] =
     "https://support.google.com/chromebook/?p=smart_lock";
 
@@ -292,6 +311,9 @@ const char kGoogleNameserversLearnMoreURL[] =
 
 const char kInstantTetheringLearnMoreURL[] =
     "https://support.google.com/chromebook?p=instant_tethering";
+
+const char kKerberosAccountsLearnMoreURL[] =
+    "https://support.google.com/chromebook/?p=kerberos_accounts";
 
 const char kMultiDeviceLearnMoreURL[] =
     "https://support.google.com/chromebook/?p=multi_device";

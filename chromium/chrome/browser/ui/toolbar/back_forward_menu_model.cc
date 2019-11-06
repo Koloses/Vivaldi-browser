@@ -42,7 +42,7 @@ using content::WebContents;
 
 const int BackForwardMenuModel::kMaxHistoryItems = 12;
 const int BackForwardMenuModel::kMaxChapterStops = 5;
-static const int kMaxWidth = 700;
+static const int kMaxBackForwardMenuWidth = 700;
 
 BackForwardMenuModel::BackForwardMenuModel(Browser* browser,
                                            ModelType model_type)
@@ -101,8 +101,9 @@ base::string16 BackForwardMenuModel::GetLabelAt(int index) const {
   NavigationEntry* entry = GetNavigationEntry(index);
   base::string16 menu_text(entry->GetTitleForDisplay());
   menu_text = ui::EscapeMenuLabelAmpersands(menu_text);
-  menu_text = gfx::ElideText(menu_text, gfx::FontList(), kMaxWidth,
-                             gfx::ELIDE_TAIL, gfx::Typesetter::NATIVE);
+  menu_text =
+      gfx::ElideText(menu_text, gfx::FontList(), kMaxBackForwardMenuWidth,
+                     gfx::ELIDE_TAIL, gfx::Typesetter::NATIVE);
 
   return menu_text;
 }
@@ -191,11 +192,8 @@ void BackForwardMenuModel::ActivatedAt(int index, int event_flags) {
 
   WindowOpenDisposition disposition =
       ui::DispositionFromEventFlags(event_flags);
-  if (!chrome::NavigateToIndexWithDisposition(browser_,
-                                              controller_index,
-                                              disposition)) {
-    NOTREACHED();
-  }
+  chrome::NavigateToIndexWithDisposition(browser_, controller_index,
+                                         disposition);
 }
 
 void BackForwardMenuModel::MenuWillShow() {
@@ -226,7 +224,7 @@ bool BackForwardMenuModel::IsSeparator(int index) const {
 void BackForwardMenuModel::FetchFavicon(NavigationEntry* entry) {
   // If the favicon has already been requested for this menu, don't do
   // anything.
-  if (base::ContainsKey(requested_favicons_, entry->GetUniqueID()))
+  if (base::Contains(requested_favicons_, entry->GetUniqueID()))
     return;
 
   requested_favicons_.insert(entry->GetUniqueID());
@@ -428,11 +426,11 @@ int BackForwardMenuModel::MenuIndexToNavEntryIndex(int index) const {
 NavigationEntry* BackForwardMenuModel::GetNavigationEntry(int index) const {
   int controller_index = MenuIndexToNavEntryIndex(index);
   NavigationController& controller = GetWebContents()->GetController();
-  if (controller_index >= 0 && controller_index < controller.GetEntryCount())
-    return controller.GetEntryAtIndex(controller_index);
 
-  NOTREACHED();
-  return nullptr;
+  DCHECK_GE(controller_index, 0);
+  DCHECK_LT(controller_index, controller.GetEntryCount());
+
+  return controller.GetEntryAtIndex(controller_index);
 }
 
 std::string BackForwardMenuModel::BuildActionName(

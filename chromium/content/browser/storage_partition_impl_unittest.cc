@@ -31,7 +31,6 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/fake_leveldb_database.h"
-#include "net/base/features.h"
 #include "net/base/test_completion_callback.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_store.h"
@@ -68,7 +67,7 @@ const char kCacheValue[] = "cached value";
 const char kTestOrigin1[] = "http://host1:1/";
 const char kTestOrigin2[] = "http://host2:1/";
 const char kTestOrigin3[] = "http://host3:1/";
-const char kTestOriginDevTools[] = "chrome-devtools://abcdefghijklmnopqrstuvw/";
+const char kTestOriginDevTools[] = "devtools://abcdefghijklmnopqrstuvw/";
 const char kTestURL[] = "http://host4/script.js";
 const char kFilterURLForCodeCache[] = "http://host5/script.js";
 
@@ -137,16 +136,13 @@ class AwaitCompletionHelper {
 
 class RemoveCookieTester {
  public:
-  explicit RemoveCookieTester(TestBrowserContext* context)
-      : get_cookie_success_(false),
-        cookie_store_(context->GetRequestContext()
-                          ->GetURLRequestContext()
-                          ->cookie_store()) {}
+  explicit RemoveCookieTester(StoragePartition* storage_partition)
+      : get_cookie_success_(false), storage_partition_(storage_partition) {}
 
   // Returns true, if the given cookie exists in the cookie store.
   bool ContainsCookie() {
     get_cookie_success_ = false;
-    cookie_store_->GetCookieListWithOptionsAsync(
+    storage_partition_->GetCookieManagerForBrowserProcess()->GetCookieList(
         kOrigin1.GetURL(), net::CookieOptions(),
         base::BindOnce(&RemoveCookieTester::GetCookieListCallback,
                        base::Unretained(this)));
@@ -155,8 +151,12 @@ class RemoveCookieTester {
   }
 
   void AddCookie() {
-    cookie_store_->SetCookieWithOptionsAsync(
-        kOrigin1.GetURL(), "A=1", net::CookieOptions(),
+    CanonicalCookie::CookieInclusionStatus status;
+    std::unique_ptr<net::CanonicalCookie> cc(net::CanonicalCookie::Create(
+        kOrigin1.GetURL(), "A=1", base::Time::Now(), net::CookieOptions(),
+        &status));
+    storage_partition_->GetCookieManagerForBrowserProcess()->SetCanonicalCookie(
+        *cc, kOrigin1.scheme(), net::CookieOptions(),
         base::BindOnce(&RemoveCookieTester::SetCookieCallback,
                        base::Unretained(this)));
     await_completion_.BlockUntilNotified();
@@ -183,7 +183,7 @@ class RemoveCookieTester {
 
   bool get_cookie_success_;
   AwaitCompletionHelper await_completion_;
-  net::CookieStore* cookie_store_;
+  StoragePartition* storage_partition_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveCookieTester);
 };
@@ -576,28 +576,28 @@ class RemovePluginPrivateDataTester {
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 
 bool IsWebSafeSchemeForTest(const std::string& scheme) {
-  return scheme == "http";
+  return scheme == url::kHttpScheme;
 }
 
 bool DoesOriginMatchForUnprotectedWeb(
-    const GURL& origin,
+    const url::Origin& origin,
     storage::SpecialStoragePolicy* special_storage_policy) {
   if (IsWebSafeSchemeForTest(origin.scheme()))
-    return !special_storage_policy->IsStorageProtected(origin.GetOrigin());
+    return !special_storage_policy->IsStorageProtected(origin.GetURL());
 
   return false;
 }
 
 bool DoesOriginMatchForBothProtectedAndUnprotectedWeb(
-    const GURL& origin,
+    const url::Origin& origin,
     storage::SpecialStoragePolicy* special_storage_policy) {
   return true;
 }
 
 bool DoesOriginMatchUnprotected(
-    const GURL& origin,
+    const url::Origin& origin,
     storage::SpecialStoragePolicy* special_storage_policy) {
-  return origin.GetOrigin().scheme() != kOriginDevTools.scheme();
+  return origin.scheme() != kOriginDevTools.scheme();
 }
 
 void ClearQuotaData(content::StoragePartition* partition,
@@ -1152,14 +1152,12 @@ TEST_F(StoragePartitionImplTest, RemoveQuotaManagedIgnoreDevTools) {
 }
 
 TEST_F(StoragePartitionImplTest, RemoveCookieForever) {
-  RemoveCookieTester tester(browser_context());
+  StoragePartition* partition =
+      BrowserContext::GetDefaultStoragePartition(browser_context());
 
+  RemoveCookieTester tester(partition);
   tester.AddCookie();
   ASSERT_TRUE(tester.ContainsCookie());
-
-  StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
-      BrowserContext::GetDefaultStoragePartition(browser_context()));
-  partition->SetURLRequestContext(browser_context()->GetRequestContext());
 
   base::RunLoop run_loop;
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -1171,15 +1169,14 @@ TEST_F(StoragePartitionImplTest, RemoveCookieForever) {
 }
 
 TEST_F(StoragePartitionImplTest, RemoveCookieLastHour) {
-  RemoveCookieTester tester(browser_context());
+  StoragePartition* partition =
+      BrowserContext::GetDefaultStoragePartition(browser_context());
 
+  RemoveCookieTester tester(partition);
   tester.AddCookie();
   ASSERT_TRUE(tester.ContainsCookie());
 
-  StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
-      BrowserContext::GetDefaultStoragePartition(browser_context()));
   base::Time an_hour_ago = base::Time::Now() - base::TimeDelta::FromHours(1);
-  partition->SetURLRequestContext(browser_context()->GetRequestContext());
 
   base::RunLoop run_loop;
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -1191,14 +1188,12 @@ TEST_F(StoragePartitionImplTest, RemoveCookieLastHour) {
 }
 
 TEST_F(StoragePartitionImplTest, RemoveCookieWithDeleteInfo) {
-  RemoveCookieTester tester(browser_context());
+  StoragePartition* partition =
+      BrowserContext::GetDefaultStoragePartition(browser_context());
 
+  RemoveCookieTester tester(partition);
   tester.AddCookie();
   ASSERT_TRUE(tester.ContainsCookie());
-
-  StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
-      BrowserContext::GetDefaultStoragePartition(browser_context()));
-  partition->SetURLRequestContext(browser_context()->GetRequestContext());
 
   base::RunLoop run_loop2;
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -1316,10 +1311,6 @@ TEST_F(StoragePartitionImplTest, RemoveLocalStorageForLastWeek) {
 }
 
 TEST_F(StoragePartitionImplTest, ClearCodeCache) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(net::features::kIsolatedCodeCache);
-  ASSERT_TRUE(base::FeatureList::IsEnabled(net::features::kIsolatedCodeCache));
-
   StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
       BrowserContext::GetDefaultStoragePartition(browser_context()));
   // Ensure code cache is initialized.
@@ -1351,10 +1342,6 @@ TEST_F(StoragePartitionImplTest, ClearCodeCache) {
 }
 
 TEST_F(StoragePartitionImplTest, ClearCodeCacheSpecificURL) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(net::features::kIsolatedCodeCache);
-  ASSERT_TRUE(base::FeatureList::IsEnabled(net::features::kIsolatedCodeCache));
-
   StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
       BrowserContext::GetDefaultStoragePartition(browser_context()));
   // Ensure code cache is initialized.
@@ -1391,12 +1378,7 @@ TEST_F(StoragePartitionImplTest, ClearCodeCacheSpecificURL) {
   base::RunLoop().RunUntilIdle();
 }
 
-// TODO(https://crbug.com/925957): Flakes, especially under Fuchsia.
-TEST_F(StoragePartitionImplTest, DISABLED_ClearCodeCacheDateRange) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(net::features::kIsolatedCodeCache);
-  ASSERT_TRUE(base::FeatureList::IsEnabled(net::features::kIsolatedCodeCache));
-
+TEST_F(StoragePartitionImplTest, ClearCodeCacheDateRange) {
   StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
       BrowserContext::GetDefaultStoragePartition(browser_context()));
   // Ensure code cache is initialized.
@@ -1424,8 +1406,8 @@ TEST_F(StoragePartitionImplTest, DISABLED_ClearCodeCacheDateRange) {
                   origin, data);
   EXPECT_TRUE(tester.ContainsEntry(RemoveCodeCacheTester::kJs,
                                    kFilterResourceURLForCodeCache, origin));
-  tester.SetLastUseTime(RemoveCodeCacheTester::kJs, kResourceURL, origin,
-                        in_range_time);
+  tester.SetLastUseTime(RemoveCodeCacheTester::kJs,
+                        kFilterResourceURLForCodeCache, origin, in_range_time);
 
   base::RunLoop run_loop;
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -1446,11 +1428,7 @@ TEST_F(StoragePartitionImplTest, DISABLED_ClearCodeCacheDateRange) {
 
 TEST_F(StoragePartitionImplTest, ClearWasmCodeCache) {
   base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatures(
-      std::vector<base::Feature>(
-          {net::features::kIsolatedCodeCache, blink::features::kWasmCodeCache}),
-      std::vector<base::Feature>());
-  ASSERT_TRUE(base::FeatureList::IsEnabled(net::features::kIsolatedCodeCache));
+  feature_list.InitAndEnableFeature(blink::features::kWasmCodeCache);
   ASSERT_TRUE(base::FeatureList::IsEnabled(blink::features::kWasmCodeCache));
 
   StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
@@ -1484,32 +1462,7 @@ TEST_F(StoragePartitionImplTest, ClearWasmCodeCache) {
   base::RunLoop().RunUntilIdle();
 }
 
-TEST_F(StoragePartitionImplTest, ClearCodeCacheNoIsolatedCodeCache) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(net::features::kIsolatedCodeCache);
-  ASSERT_FALSE(base::FeatureList::IsEnabled(net::features::kIsolatedCodeCache));
-
-  StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
-      BrowserContext::GetDefaultStoragePartition(browser_context()));
-  base::RunLoop().RunUntilIdle();
-  // We should not create GeneratedCodeCacheContext when IsolatedCodeCache
-  // is disabled.
-  EXPECT_EQ(nullptr, partition->GetGeneratedCodeCacheContext());
-
-  base::RunLoop run_loop;
-  // This shouldn't crash.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&ClearCodeCache, partition, base::Time(), base::Time(),
-                     base::RepeatingCallback<bool(const GURL&)>(), &run_loop));
-  run_loop.Run();
-}
-
 TEST_F(StoragePartitionImplTest, ClearCodeCacheIncognito) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(net::features::kIsolatedCodeCache);
-  ASSERT_TRUE(base::FeatureList::IsEnabled(net::features::kIsolatedCodeCache));
-
   browser_context()->set_is_off_the_record(true);
 
   StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(

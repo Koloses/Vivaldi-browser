@@ -193,7 +193,8 @@ SandboxFileSystemBackendDelegate::SandboxFileSystemBackendDelegate(
                                  GetKnownTypeStrings(),
                                  this,
                                  file_system_options.is_incognito()))),
-      file_system_usage_cache_(std::make_unique<FileSystemUsageCache>()),
+      file_system_usage_cache_(std::make_unique<FileSystemUsageCache>(
+          file_system_options.is_incognito())),
       quota_observer_(new SandboxQuotaObserver(quota_manager_proxy,
                                                file_task_runner,
                                                obfuscated_file_util(),
@@ -314,17 +315,16 @@ SandboxFileSystemBackendDelegate::CreateFileSystemOperationContext(
   return operation_context;
 }
 
-std::unique_ptr<storage::FileStreamReader>
+std::unique_ptr<FileStreamReader>
 SandboxFileSystemBackendDelegate::CreateFileStreamReader(
     const FileSystemURL& url,
     int64_t offset,
     const base::Time& expected_modification_time,
     FileSystemContext* context) const {
   if (!IsAccessValid(url))
-    return std::unique_ptr<storage::FileStreamReader>();
-  return std::unique_ptr<storage::FileStreamReader>(
-      storage::FileStreamReader::CreateForFileSystemFile(
-          context, url, offset, expected_modification_time));
+    return nullptr;
+  return FileStreamReader::CreateForFileSystemFile(context, url, offset,
+                                                   expected_modification_time);
 }
 
 std::unique_ptr<FileStreamWriter>
@@ -416,14 +416,15 @@ int64_t SandboxFileSystemBackendDelegate::GetOriginUsageOnFileTaskRunner(
 
   // Don't use usage cache and return recalculated usage for sticky invalidated
   // origins.
-  if (base::ContainsKey(sticky_dirty_origins_,
-                        std::make_pair(origin_url, type)))
+  if (base::Contains(sticky_dirty_origins_, std::make_pair(origin_url, type)))
     return RecalculateUsage(file_system_context, origin_url, type);
 
   base::FilePath base_path =
       GetBaseDirectoryForOriginAndType(origin_url, type, false);
-  if (base_path.empty() || !base::DirectoryExists(base_path))
+  if (base_path.empty() ||
+      !obfuscated_file_util()->delegate()->DirectoryExists(base_path)) {
     return 0;
+  }
   base::FilePath usage_file_path =
       base_path.Append(FileSystemUsageCache::kUsageFileName);
 

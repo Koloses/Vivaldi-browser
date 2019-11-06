@@ -30,7 +30,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_client.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 class BytesConsumer;
@@ -121,7 +121,9 @@ class PLATFORM_EXPORT RawResource final : public Resource {
   }
   void WillNotFollowRedirect() override;
   void ResponseReceived(const ResourceResponse&) override;
-  void ResponseBodyReceived(ResponseBodyLoaderDrainableInterface&) override;
+  void ResponseBodyReceived(
+      ResponseBodyLoaderDrainableInterface&,
+      scoped_refptr<base::SingleThreadTaskRunner> loader_task_runner) override;
   void DidSendData(uint64_t bytes_sent,
                    uint64_t total_bytes_to_be_sent) override;
   void DidDownloadData(uint64_t) override;

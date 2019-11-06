@@ -4,6 +4,7 @@
 
 #include "chromecast/media/cma/backend/post_processing_pipeline_impl.h"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -20,8 +21,6 @@ namespace chromecast {
 namespace media {
 
 namespace {
-
-const int kNoSampleRate = -1;
 
 // Used for AudioPostProcessor(1)
 const char kJsonKeyProcessor[] = "processor";
@@ -52,7 +51,7 @@ PostProcessingPipelineImpl::PostProcessingPipelineImpl(
     const std::string& name,
     const base::Value* filter_description_list,
     int channels)
-    : name_(name), sample_rate_(kNoSampleRate), num_output_channels_(channels) {
+    : name_(name), num_output_channels_(channels) {
   if (!filter_description_list) {
     return;  // Warning logged.
   }
@@ -106,47 +105,63 @@ PostProcessingPipelineImpl::PostProcessingPipelineImpl(
     LOG(INFO) << "Creating an instance of " << library_path << "("
               << processor_config_string << ")";
 
-    processors_.emplace_back(
-        PostProcessorInfo{factory_.CreatePostProcessor(
-                              library_path, processor_config_string, channels),
-                          processor_name});
-    channels = processors_.back().ptr->NumOutputChannels();
+    processors_.emplace_back(PostProcessorInfo{
+        factory_.CreatePostProcessor(library_path, processor_config_string,
+                                     channels),
+        1.0 /* output_frames_per_input_frame */, processor_name});
+    channels = processors_.back().ptr->GetStatus().output_channels;
   }
   num_output_channels_ = channels;
 }
 
 PostProcessingPipelineImpl::~PostProcessingPipelineImpl() = default;
 
-int PostProcessingPipelineImpl::ProcessFrames(float* data,
-                                              int num_frames,
-                                              float current_multiplier,
-                                              bool is_silence) {
-  DCHECK_NE(sample_rate_, kNoSampleRate);
+double PostProcessingPipelineImpl::ProcessFrames(float* data,
+                                                 int num_input_frames,
+                                                 float current_multiplier,
+                                                 bool is_silence) {
+  DCHECK_GT(input_sample_rate_, 0);
   DCHECK(data);
+  if (processors_.size() > 0) {
+    DCHECK_EQ(processors_[0].input_frames_per_write, num_input_frames);
+  }
 
   output_buffer_ = data;
 
   if (is_silence) {
     if (!IsRinging()) {
-      return total_delay_frames_;  // Output will be silence.
+      // If the input sample rate differs from the output sample rate, then the
+      // input data will be the incorrect size without any resampling. Output a
+      // zeroed buffer of correct size.
+      if (input_sample_rate_ != output_sample_rate_) {
+        // We cannot guarantee that the consumer of the output buffer will not
+        // mutate it, so set it back to zero.
+        std::fill_n(silence_buffer_.data(), silence_buffer_.size(), 0.0);
+        output_buffer_ = silence_buffer_.data();
+      }
+      return delay_s_;
     }
-    silence_frames_processed_ += num_frames;
+    silence_frames_processed_ += num_input_frames;
   } else {
     silence_frames_processed_ = 0;
   }
 
   UpdateCastVolume(current_multiplier);
 
-  total_delay_frames_ = 0;
+  delay_s_ = 0;
   for (auto& processor : processors_) {
-    total_delay_frames_ += processor.ptr->ProcessFrames(
-        output_buffer_, num_frames, cast_volume_, current_dbfs_);
-    output_buffer_ = processor.ptr->GetOutputBuffer();
+    processor.ptr->ProcessFrames(output_buffer_,
+                                 processor.input_frames_per_write, cast_volume_,
+                                 current_dbfs_);
+    const auto& status = processor.ptr->GetStatus();
+    delay_s_ += static_cast<double>(status.rendering_delay_frames) /
+                status.input_sample_rate;
+    output_buffer_ = status.output_buffer;
   }
-  return total_delay_frames_;
+  return delay_s_;
 }
 
-int PostProcessingPipelineImpl::NumOutputChannels() {
+int PostProcessingPipelineImpl::NumOutputChannels() const {
   return num_output_channels_;
 }
 
@@ -156,15 +171,43 @@ float* PostProcessingPipelineImpl::GetOutputBuffer() {
   return output_buffer_;
 }
 
-bool PostProcessingPipelineImpl::SetSampleRate(int sample_rate) {
-  sample_rate_ = sample_rate;
-  bool result = true;
-  for (auto& processor : processors_) {
-    result &= processor.ptr->SetSampleRate(sample_rate_);
+bool PostProcessingPipelineImpl::SetOutputConfig(
+    const AudioPostProcessor2::Config& output_config) {
+  output_sample_rate_ = output_config.output_sample_rate;
+  AudioPostProcessor2::Config processor_config = output_config;
+
+  // Each Processor's output rate must be the following processor's input rate.
+  for (int i = static_cast<int>(processors_.size()) - 1; i >= 0; --i) {
+    if (!processors_[i].ptr->SetConfig(processor_config)) {
+      return false;
+    }
+    int input_sample_rate = processors_[i].ptr->GetStatus().input_sample_rate;
+    DCHECK_GT(input_sample_rate, 0)
+        << processors_[i].name << " did not set its sample rate";
+    processors_[i].input_frames_per_write =
+        processor_config.output_frames_per_write * input_sample_rate /
+        processor_config.output_sample_rate;
+    processor_config.output_sample_rate = input_sample_rate;
+    processor_config.output_frames_per_write =
+        processors_[i].input_frames_per_write;
   }
+
+  input_sample_rate_ = processor_config.output_sample_rate;
   ringing_time_in_frames_ = GetRingingTimeInFrames();
   silence_frames_processed_ = 0;
-  return result;
+
+  if (input_sample_rate_ != output_sample_rate_) {
+    size_t silence_size = num_output_channels_ *
+                          processors_[0].input_frames_per_write *
+                          output_sample_rate_ / input_sample_rate_;
+    silence_buffer_.resize(silence_size);
+  }
+
+  return true;
+}
+
+int PostProcessingPipelineImpl::GetInputSampleRate() const {
+  return input_sample_rate_;
 }
 
 bool PostProcessingPipelineImpl::IsRinging() {
@@ -175,7 +218,7 @@ bool PostProcessingPipelineImpl::IsRinging() {
 int PostProcessingPipelineImpl::GetRingingTimeInFrames() {
   int memory_frames = 0;
   for (auto& processor : processors_) {
-    int ringing_time = processor.ptr->GetRingingTimeInFrames();
+    int ringing_time = processor.ptr->GetStatus().ringing_time_frames;
     if (ringing_time < 0) {
       return -1;
     }
@@ -206,8 +249,8 @@ void PostProcessingPipelineImpl::SetPostProcessorConfig(
               [&name](PostProcessorInfo& p) { return p.name == name; });
   if (it != processors_.end()) {
     it->ptr->UpdateParameters(config);
-    LOG(INFO) << "Config string: " << config
-              << " was delivered to postprocessor " << name;
+    DVLOG(2) << "Config string: " << config
+             << " was delivered to postprocessor " << name;
   }
 }
 

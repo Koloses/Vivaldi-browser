@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/metrics/histogram_functions.h"
 #include "components/download/public/common/download_stats.h"
 #include "components/download/public/common/download_url_parameters.h"
 #include "components/download/public/common/download_utils.h"
@@ -57,7 +58,9 @@ DownloadResponseHandler::DownloadResponseHandler(
     const DownloadUrlParameters::RequestHeadersType& request_headers,
     const std::string& request_origin,
     DownloadSource download_source,
-    std::vector<GURL> url_chain)
+    bool ignore_content_length_mismatch,
+    std::vector<GURL> url_chain,
+    bool is_background_mode)
     : delegate_(delegate),
       started_(false),
       save_info_(std::move(save_info)),
@@ -72,15 +75,16 @@ DownloadResponseHandler::DownloadResponseHandler(
       request_headers_(request_headers),
       request_origin_(request_origin),
       download_source_(download_source),
-      has_strong_validators_(false),
+      ignore_content_length_mismatch_(ignore_content_length_mismatch),
       is_partial_request_(save_info_->offset > 0),
       completed_(false),
-      abort_reason_(DOWNLOAD_INTERRUPT_REASON_NONE) {
+      abort_reason_(DOWNLOAD_INTERRUPT_REASON_NONE),
+      is_background_mode_(is_background_mode) {
   if (!is_parallel_request) {
     RecordDownloadCountWithSource(UNTHROTTLED_COUNT, download_source);
   }
   if (resource_request->request_initiator.has_value())
-    origin_ = resource_request->request_initiator.value().GetURL();
+    request_initiator_ = resource_request->request_initiator;
 }
 
 DownloadResponseHandler::~DownloadResponseHandler() = default;
@@ -94,8 +98,17 @@ void DownloadResponseHandler::OnReceiveResponse(
   // Sets page transition type correctly and call
   // |RecordDownloadSourcePageTransitionType| here.
   if (head.headers) {
-    has_strong_validators_ = head.headers->HasStrongValidators();
-    RecordDownloadHttpResponseCode(head.headers->response_code());
+    // ERR_CONTENT_LENGTH_MISMATCH can be caused by 1 of the following reasons:
+    // 1. Server or proxy closes the connection too early.
+    // 2. The content-length header is wrong.
+    // If the download has strong validators, we can interrupt the download
+    // and let it resume automatically. Otherwise, resuming the download will
+    // cause it to restart and the download may never complete if the error was
+    // caused by reason 2. As a result, downloads without strong validators are
+    // treated as completed here.
+    ignore_content_length_mismatch_ |= !head.headers->HasStrongValidators();
+    RecordDownloadHttpResponseCode(head.headers->response_code(),
+                                   is_background_mode_);
     RecordDownloadContentDisposition(create_info_->content_disposition);
   }
 
@@ -103,10 +116,12 @@ void DownloadResponseHandler::OnReceiveResponse(
   // suggested name for the security origin of the downlaod URL. However, this
   // assumption doesn't hold if there were cross origin redirects. Therefore,
   // clear the suggested_name for such requests.
-  if (origin_.is_valid() && !create_info_->url_chain.back().SchemeIsBlob() &&
+  if (request_initiator_.has_value() &&
+      !create_info_->url_chain.back().SchemeIsBlob() &&
       !create_info_->url_chain.back().SchemeIs(url::kAboutScheme) &&
       !create_info_->url_chain.back().SchemeIs(url::kDataScheme) &&
-      origin_ != create_info_->url_chain.back().GetOrigin()) {
+      request_initiator_.value() !=
+          url::Origin::Create(create_info_->url_chain.back())) {
     create_info_->save_info->suggested_name.clear();
   }
 
@@ -143,6 +158,7 @@ DownloadResponseHandler::CreateDownloadCreateInfo(
   create_info->request_headers = request_headers_;
   create_info->request_origin = request_origin_;
   create_info->download_source = download_source_;
+  create_info->request_initiator = request_initiator_;
 
   HandleResponseHeaders(head.headers.get(), create_info.get());
   return create_info;
@@ -194,7 +210,7 @@ void DownloadResponseHandler::OnUploadProgress(
 }
 
 void DownloadResponseHandler::OnReceiveCachedMetadata(
-    const std::vector<uint8_t>& data) {}
+    mojo_base::BigBuffer data) {}
 
 void DownloadResponseHandler::OnTransferSizeUpdated(
     int32_t transfer_size_diff) {}
@@ -218,12 +234,23 @@ void DownloadResponseHandler::OnComplete(
 
   completed_ = true;
   DownloadInterruptReason reason = HandleRequestCompletionStatus(
-      static_cast<net::Error>(status.error_code), has_strong_validators_,
-      cert_status_, abort_reason_);
+      static_cast<net::Error>(status.error_code),
+      ignore_content_length_mismatch_, cert_status_, is_partial_request_,
+      abort_reason_);
 
   if (client_ptr_) {
     client_ptr_->OnStreamCompleted(
         ConvertInterruptReasonToMojoNetworkRequestStatus(reason));
+  }
+
+  if (reason == DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED) {
+    base::UmaHistogramSparse("Download.MapErrorNetworkFailed.NetworkService",
+                             std::abs(status.error_code));
+    if (is_background_mode_) {
+      base::UmaHistogramSparse(
+          "Download.MapErrorNetworkFailed.NetworkService.BackgroundDownload",
+          std::abs(status.error_code));
+    }
   }
 
   if (started_) {

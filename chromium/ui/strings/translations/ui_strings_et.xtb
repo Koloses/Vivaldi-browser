@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="et">
+<translation id="1028699632127661925">Saatmine seadmesse <ph name="DEVICE_NAME" /> …</translation>
 <translation id="111910763555783249">Märguandeseaded</translation>
 <translation id="1127811143501539442">{DAYS,plural, =1{1 päev tagasi}other{# päeva tagasi}}</translation>
 <translation id="1156623771253174079">{SECONDS,plural, =1{1 minut tagasi}other{# minutit tagasi}}</translation>
@@ -15,7 +16,7 @@
 <translation id="1383876407941801731">Otsi</translation>
 <translation id="1398853756734560583">Maksimeeri</translation>
 <translation id="1409544243779336081">Rakenduse soovitus</translation>
-<translation id="1413622004203049571">Keela märguanded: <ph name="NOTIFIER_NAME" /></translation>
+<translation id="1498028757988366001">Olete seda varem otsinud. Päringu „<ph name="QUERY" />” kustutamisel ajaloost eemaldatakse see teie kontolt jäädavalt kõigis teie seadmetes.</translation>
 <translation id="1591184457164800433">{MINUTES,plural, =1{1 minut ja }other{# minutit ja }}</translation>
 <translation id="1643823602425662293">Märguanne</translation>
 <translation id="169515659049020177">Tõstuklahv</translation>
@@ -34,6 +35,7 @@
 <translation id="1884435127456172652"><ph name="NUMBER" />%</translation>
 <translation id="1901303067676059328">Vali &amp;kõik</translation>
 <translation id="1938451708255335766">Aknakuva tiheduse kohandamiseks taaskäivitage rakendus.</translation>
+<translation id="208586643495776849">Proovige uuesti</translation>
 <translation id="2141853158323869627">{DAYS,plural, =1{1p}other{#p}}</translation>
 <translation id="2148716181193084225">Täna</translation>
 <translation id="2168039046890040389">Lehekülje üles</translation>
@@ -44,18 +46,24 @@
 <translation id="2289052229480071835">Puudutage ekraanil puutesihtmärke.</translation>
 <translation id="2295140143284145483">Küsitlus</translation>
 <translation id="2297836609126180313"><ph name="QUANTITY" /> TB/s</translation>
+<translation id="2388990488038464401">Kas soovite telefonist sellele numbrile helistada?</translation>
 <translation id="24452542372838207">Laienda märguannet</translation>
 <translation id="2445449901874883781">Kasuta kõrget tihedust</translation>
+<translation id="2451871130406122810">Saadeti seadmesse</translation>
 <translation id="2482878487686419369">Märguanded</translation>
 <translation id="2497284189126895209">Kõik failid</translation>
 <translation id="2515586267016047495">Alt</translation>
 <translation id="2522350507219695259">Kalibreerimine on lõpetatud</translation>
 <translation id="252373100621549798">Tundmatu ekraan</translation>
+<translation id="2545651323591713692">Edasilükkamine</translation>
+<translation id="2573731672208488250">{HOURS,plural, =1{1 h pärast}other{# h pärast}}</translation>
 <translation id="2583543531130364912">Kalibreerige puuteekraan</translation>
 <translation id="2666092431469916601">Üles</translation>
+<translation id="2701330563083355633">Jagas <ph name="DEVICE_NAME" /></translation>
 <translation id="2743387203779672305">Kopeeri lõikelauale</translation>
 <translation id="2803313416453193357">Kausta avamine</translation>
 <translation id="2824719307700604149">{YEARS,plural, =1{1 aasta tagasi}other{# aastat tagasi}}</translation>
+<translation id="2907671656515444832">{DAYS,plural, =1{1 p pärast}other{# p pärast}}</translation>
 <translation id="2931838996092594335">klõpsake</translation>
 <translation id="3036649622769666520">Failide avamine</translation>
 <translation id="3049748772180311791"><ph name="QUANTITY" /> MB</translation>
@@ -66,7 +74,9 @@
 <translation id="3183922693828471536">Keri siia</translation>
 <translation id="3234408098842461169">Allanool</translation>
 <translation id="3291688615589870984">{DAYS,plural, =1{1 päev}other{# päeva}}</translation>
+<translation id="3295886253693811851">Helistage rakenduses</translation>
 <translation id="335581015389089642">Kõne</translation>
+<translation id="3443810440409579745">Vaheleht võeti vastu.</translation>
 <translation id="3479552764303398839">Mitte praegu</translation>
 <translation id="348799646910989694">Riiul on automaatselt peidetud</translation>
 <translation id="3600566671520689681">{DAYS,plural, =1{1 päev on jäänud}other{# päeva on jäänud}}</translation>
@@ -90,12 +100,14 @@
 <translation id="4266252015790371705">{MONTHS,plural, =1{1 kuu tagasi}other{# kuud tagasi}}</translation>
 <translation id="4289300219472526559">Alusta rääkimist</translation>
 <translation id="4316910396681052118">KÕIK RAKENDUSED</translation>
+<translation id="4467014365953759647">Ei saa numbrit saata</translation>
 <translation id="4588090240171750605">Keri paremale</translation>
 <translation id="4690510401873698237">Riiul asub allpool</translation>
 <translation id="4724120544754982507">Märguandekeskus, <ph name="UNREAD_NOTIFICATION_COUNT" /> lugemata märguannet</translation>
 <translation id="4730374152663651037">SAGELI KASUTATUD</translation>
 <translation id="4788285488841504513">{MONTHS,plural, =1{1 kuu jäänud}other{# kuud jäänud}}</translation>
 <translation id="4841881773802181781">Lisamine</translation>
+<translation id="4881695831933465202">Ava</translation>
 <translation id="4968171027979920686">{SECONDS,plural, =1{1 sekund}other{# sekundit}}</translation>
 <translation id="4971687151119236543">Meediumi eelmine lugu</translation>
 <translation id="5046499563572181734">Puudutage siin</translation>
@@ -103,7 +115,9 @@
 <translation id="5137751499640340777">Google'i assistendi käivitamine</translation>
 <translation id="520299402983819650"><ph name="QUANTITY" /> PB</translation>
 <translation id="5266161281976477809">Avalikustamise kolmnurk</translation>
+<translation id="5278860589123563674">Saatmine ebaõnnestus</translation>
 <translation id="528468243742722775">Lõpeta</translation>
+<translation id="5327567770033251652">lülita sünkroonimine sisse</translation>
 <translation id="5329858601952122676">&amp;Kustuta</translation>
 <translation id="5395308026110844773">Rakendus <ph name="DRAGGED_APP_NAME" /> rakenduse <ph name="IN_PLACE_APP" /> kohal, kausta loomiseks vabastage.</translation>
 <translation id="5463830097259460683">Emotikonid ja sümbolid</translation>
@@ -114,6 +128,7 @@
 <translation id="5613020302032141669">Vasaknool</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 min}other{# min}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 päev ja }other{# päeva ja }}</translation>
+<translation id="5866104238061687188">{YEARS,plural, =1{1 a pärast}other{# a pärast}}</translation>
 <translation id="5895138241574237353">Taaskäivitamine</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{1 sekund on jäänud}other{# sekundit on jäänud}}</translation>
 <translation id="5941711191222866238">Minimeeri</translation>
@@ -126,6 +141,7 @@
 <translation id="6135826906199951471">Del</translation>
 <translation id="6142413573757616983"><ph name="QUANTITY" /> B/s</translation>
 <translation id="6156262341071374681">Laiendage kõikide rakenduste kuvamiseks</translation>
+<translation id="6165508094623778733">Lisateave</translation>
 <translation id="6264365405983206840">Vali &amp;kõik</translation>
 <translation id="6351032674660237738">RAKENDUSTE SOOVITUSED</translation>
 <translation id="6364916375976753737">Keri vasakule</translation>
@@ -141,11 +157,11 @@
 <translation id="6620110761915583480">Faili salvestamine</translation>
 <translation id="6699343763173986273">Meediumi järgmine lugu</translation>
 <translation id="673773751041746814">Kustutamine</translation>
+<translation id="6779314412797872738">Selleks et number siit teie Android-telefoni saata, tehke mõlema seadme puhul seadetes järgmist: <ph name="TROUBLESHOOT_LINK" />.</translation>
 <translation id="6786750046913594791">Kausta sulgemine</translation>
 <translation id="6808150112686056157">Meediumi peatamine</translation>
 <translation id="6845383723252244143">Kausta valimine</translation>
 <translation id="6845533974506654842">vajuta</translation>
-<translation id="686304767576508198">Jagab:</translation>
 <translation id="6863590663815976734">{HOURS,plural, =1{1 tund on jäänud}other{# tundi on jäänud}}</translation>
 <translation id="688711909580084195">Nimeta veebileht</translation>
 <translation id="6907759265145635167"><ph name="QUANTITY" /> PB/s</translation>
@@ -160,7 +176,9 @@
 <translation id="7319740667687257810">Käivitusprogramm, osaline vaade</translation>
 <translation id="7365057348334984696">{MINUTES,plural, =1{1 min tagasi}other{# min tagasi}}</translation>
 <translation id="7389409599945284130">- <ph name="MESSAGE" /></translation>
+<translation id="7399254631220132461">Kontrollige oma telefoni ühendust ja proovige uuesti</translation>
 <translation id="7410957453383678442">{MINUTES,plural, =1{1 minut on jäänud}other{# minutit on jäänud}}</translation>
+<translation id="7430878839542012341">Kas kustutada see otsing teie ajaloost?</translation>
 <translation id="7460907917090416791"><ph name="QUANTITY" /> TB</translation>
 <translation id="7507604095951736240">Emotikonid</translation>
 <translation id="7658239707568436148">Tühista</translation>
@@ -170,12 +188,14 @@
 <translation id="7907591526440419938">Faili avamine</translation>
 <translation id="7969046989155602842">Käsuklahv</translation>
 <translation id="8074552109918343525">{MAX_UNREAD_NOTIFICATIONS,plural, =1{Rohkem kui 1 lugemata märguanne}other{Rohkem kui # lugemata märguannet}}</translation>
+<translation id="8086866675552927481">{MINUTES,plural, =1{1 min pärast}other{# min pärast}}</translation>
 <translation id="8087772101393322318"><ph name="KEY_MODIFIER_NAME" /> + <ph name="KEY_COMBO_NAME" /></translation>
+<translation id="8098075892845277643">Käivita Google'i assistendi häälpäring</translation>
 <translation id="8106081041558092062">{HOURS,plural, =1{1 tund tagasi}other{# tundi tagasi}}</translation>
 <translation id="8131263257437993507">{SECONDS,plural, =1{1 s on jäänud}other{# s on jäänud}}</translation>
+<translation id="8144660977431427332">Teie otsingud toimuvad Google'i assistendi toel. <ph name="LEARN_MORE" /></translation>
 <translation id="8152264887680882389"><ph name="TEXT" />, automaatne täitmine</translation>
 <translation id="815598010540052116">Keri alla</translation>
-<translation id="8170087467028567933">Kui selle soovituse eemaldate, peidetakse see teie kontol ja seda ei kuvata üheski seadmes.</translation>
 <translation id="8179976553408161302">Sisestusklahv</translation>
 <translation id="8210608804940886430">Lehekülje lõppu</translation>
 <translation id="8245914219290430011">Tabeldusklahv</translation>
@@ -186,7 +206,6 @@
 <translation id="838869780401515933">mrgista</translation>
 <translation id="8393700583063109961">Saatke sõnum</translation>
 <translation id="8394908167088220973">Meediumi esitamine/peatamine</translation>
-<translation id="8420205633584771378">Kas eemaldada see soovitus?</translation>
 <translation id="8458811141851741261">{YEARS,plural, =1{1a}other{#a}}</translation>
 <translation id="8602707065186045623"><ph name="SAVEAS_EXTENSION_TYPE" /> Fail (.<ph name="SAVEAS_EXTENSION_NAME" />)</translation>
 <translation id="8649597172973390955">Riiul on alati kuvatud</translation>
@@ -198,6 +217,7 @@
 <translation id="8806053966018712535">Kaust <ph name="FOLDER_NAME" /></translation>
 <translation id="883911313571074303">Lisa kujutisele märkused</translation>
 <translation id="8841375032071747811">Nupp Tagasi</translation>
+<translation id="8876215549894133151">Vorming:</translation>
 <translation id="8901569739625249689"><ph name="QUANTITY" /> kB</translation>
 <translation id="8926951137623668982">Riiul on alati peidetud</translation>
 <translation id="9002566407876343676">avage</translation>

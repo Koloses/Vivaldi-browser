@@ -60,6 +60,11 @@ v8::Maybe<void> V8TreatNonObjectAsNullVoidFunction::Invoke(bindings::V8ValueOrSc
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
 
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
+
   v8::Local<v8::Function> function;
   // callback function's invoke:
   // step 4. If ! IsCallable(F) is false:
@@ -113,16 +118,6 @@ void V8TreatNonObjectAsNullVoidFunction::InvokeAndReportException(bindings::V8Va
       Invoke(callback_this_value);
   // An exception if any is killed with the v8::TryCatch above.
   ALLOW_UNUSED_LOCAL(maybe_result);
-}
-
-v8::Maybe<void> V8PersistentCallbackFunction<V8TreatNonObjectAsNullVoidFunction>::Invoke(bindings::V8ValueOrScriptWrappableAdapter callback_this_value) {
-  return Proxy()->Invoke(
-      callback_this_value);
-}
-
-void V8PersistentCallbackFunction<V8TreatNonObjectAsNullVoidFunction>::InvokeAndReportException(bindings::V8ValueOrScriptWrappableAdapter callback_this_value) {
-  Proxy()->InvokeAndReportException(
-      callback_this_value);
 }
 
 }  // namespace blink

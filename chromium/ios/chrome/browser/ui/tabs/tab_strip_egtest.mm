@@ -51,16 +51,16 @@ id<GREYMatcher> TabTitleMatcher(web::WebState* web_state) {
   // Note that the tab ordering wraps.  E.g. if A, B, and C are open,
   // and C is the current tab, the 'next' tab is 'A'.
   for (int i = 0; i < kNumberOfTabs + 1; i++) {
-    GREYAssertTrue(chrome_test_util::GetMainTabCount() > 1,
-                   chrome_test_util::GetMainTabCount() ? @"Only one tab open."
-                                                       : @"No more tabs.");
-    Tab* nextTab = chrome_test_util::GetNextTab();
+    GREYAssertTrue([ChromeEarlGrey mainTabCount] > 1,
+                   [ChromeEarlGrey mainTabCount] ? @"Only one tab open."
+                                                 : @"No more tabs.");
+    web::WebState* nextWebState = chrome_test_util::GetNextWebState();
 
-    [[EarlGrey selectElementWithMatcher:TabTitleMatcher(nextTab.webState)]
+    [[EarlGrey selectElementWithMatcher:TabTitleMatcher(nextWebState)]
         performAction:grey_tap()];
 
-    Tab* newCurrentTab = chrome_test_util::GetCurrentTab();
-    GREYAssertTrue(newCurrentTab == nextTab,
+    web::WebState* newCurrentWebState = chrome_test_util::GetCurrentWebState();
+    GREYAssertTrue(newCurrentWebState == nextWebState,
                    @"The selected tab did not change to the next tab.");
   }
 }

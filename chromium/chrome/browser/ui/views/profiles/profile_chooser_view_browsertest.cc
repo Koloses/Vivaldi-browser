@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
-
 #include <stddef.h>
 
 #include "base/command_line.h"
@@ -14,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/metrics/user_action_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -32,13 +31,16 @@
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
 #include "chrome/browser/ui/views/profiles/user_manager_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/ui_test_utils.h"
+#include "components/autofill/core/common/autofill_payments_features.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/signin_pref_names.h"
+#include "components/signin/public/base/signin_pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -56,12 +58,13 @@ Profile* CreateTestingProfile(const base::FilePath& path) {
   if (!base::PathExists(path) && !base::CreateDirectory(path))
     NOTREACHED() << "Could not create directory at " << path.MaybeAsASCII();
 
-  Profile* profile =
+  std::unique_ptr<Profile> profile =
       Profile::CreateProfile(path, nullptr, Profile::CREATE_MODE_SYNCHRONOUS);
-  profile_manager->RegisterTestingProfile(profile, true, false);
+  Profile* profile_ptr = profile.get();
+  profile_manager->RegisterTestingProfile(std::move(profile), true, false);
   EXPECT_EQ(starting_number_of_profiles + 1,
             profile_manager->GetNumberOfProfiles());
-  return profile;
+  return profile_ptr;
 }
 
 Profile* CreateTestingProfile(const std::string& profile_name) {
@@ -139,11 +142,7 @@ class ProfileChooserViewExtensionsTest
       CreateTestingProfile(profile_manager->GenerateNextProfileDirectoryPath());
     }
     if (name == kGuest || name == kDiceGuest) {
-      content::WindowedNotificationObserver browser_creation_observer(
-          chrome::NOTIFICATION_BROWSER_OPENED,
-          content::NotificationService::AllSources());
       profiles::SwitchToGuestProfile(ProfileManager::CreateCallback());
-      browser_creation_observer.Wait();
 
       Profile* guest = g_browser_process->profile_manager()->GetProfileByPath(
           ProfileManager::GetGuestProfilePath());
@@ -172,16 +171,11 @@ class ProfileChooserViewExtensionsTest
 
     base::RunLoop().RunUntilIdle();
     ASSERT_TRUE(ProfileChooserView::IsShowing());
-
-    // Create this observer before lock is pressed to avoid a race condition.
-    window_close_observer_.reset(new content::WindowedNotificationObserver(
-        chrome::NOTIFICATION_BROWSER_CLOSED,
-        content::Source<Browser>(browser)));
   }
 
   void OpenProfileChooserViews(Browser* browser) {
     BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
-    views::View* button = browser_view->toolbar()->avatar_button();
+    views::View* button = browser_view->toolbar()->GetAvatarToolbarButton();
     DCHECK(button);
 
     ui::MouseEvent e(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
@@ -190,14 +184,14 @@ class ProfileChooserViewExtensionsTest
   }
 
   AvatarMenu* GetProfileChooserViewAvatarMenu() {
-    return ProfileChooserView::profile_bubble_->avatar_menu_.get();
+    return current_profile_bubble()->avatar_menu_.get();
   }
 
   void ClickProfileChooserViewLockButton() {
     ui::MouseEvent e(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
                      ui::EventTimeForNow(), 0, 0);
-    ProfileChooserView::profile_bubble_->ButtonPressed(
-        ProfileChooserView::profile_bubble_->lock_button_, e);
+    current_profile_bubble()->ButtonPressed(
+        current_profile_bubble()->lock_button_, e);
   }
 
   // Access the registry that has been prepared with at least one extension.
@@ -214,16 +208,13 @@ class ProfileChooserViewExtensionsTest
     return registry;
   }
 
-  content::WindowedNotificationObserver* window_close_observer() {
-    return window_close_observer_.get();
-  }
-
   ProfileChooserView* current_profile_bubble() {
-    return ProfileChooserView::profile_bubble_;
+    return static_cast<ProfileChooserView*>(
+        ProfileChooserView::GetBubbleForTesting());
   }
 
-  views::LabelButton* signin_current_profile_button() {
-    return ProfileChooserView::profile_bubble_->signin_current_profile_button_;
+  views::Button* signin_current_profile_button() {
+    return current_profile_bubble()->signin_current_profile_button_;
   }
 
   int GetDiceSigninPromoShowCount() {
@@ -231,9 +222,32 @@ class ProfileChooserViewExtensionsTest
   }
 
  private:
-  std::unique_ptr<content::WindowedNotificationObserver> window_close_observer_;
-
   DISALLOW_COPY_AND_ASSIGN(ProfileChooserViewExtensionsTest);
+};
+
+// TODO(crbug.com/932818): Remove this class after
+// |kAutofillEnableToolbarStatusChip| is cleaned up. Otherwise we need it
+// because the toolbar is init-ed before each test is set up. Thus need to
+// enable the feature in the general browsertest SetUp().
+class ProfileChooserViewExtensionsParamTest
+    : public ProfileChooserViewExtensionsTest,
+      public ::testing::WithParamInterface<bool> {
+ protected:
+  ProfileChooserViewExtensionsParamTest()
+      : ProfileChooserViewExtensionsTest() {}
+  ~ProfileChooserViewExtensionsParamTest() override {}
+
+  void SetUp() override {
+    if (GetParam()) {
+      scoped_feature_list_.InitAndEnableFeature(
+          autofill::features::kAutofillEnableToolbarStatusChip);
+    }
+
+    ProfileChooserViewExtensionsTest::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // TODO(https://crbug.com/855867): This test is flaky on Windows.
@@ -310,7 +324,8 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, LockProfile) {
   ClickProfileChooserViewLockButton();
   EXPECT_TRUE(menu->GetItemAt(menu->GetActiveProfileIndex()).signin_required);
 
-  window_close_observer()->Wait();
+  if (!BrowserList::GetInstance()->empty())
+    ui_test_utils::WaitForBrowserToClose(browser());
   EXPECT_TRUE(BrowserList::GetInstance()->empty());
 
   // Wait until the user manager is shown.
@@ -336,7 +351,10 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
 
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser()));
   ClickProfileChooserViewLockButton();
-  window_close_observer()->Wait();
+
+  if (!BrowserList::GetInstance()->empty())
+    ui_test_utils::WaitForBrowserToClose(browser());
+  EXPECT_TRUE(BrowserList::GetInstance()->empty());
 
   // Wait until the user manager is shown.
   runner->Run();
@@ -371,7 +389,9 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
 
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser_to_lock));
   ClickProfileChooserViewLockButton();
-  window_close_observer()->Wait();
+
+  if (1U != BrowserList::GetInstance()->size())
+    ui_test_utils::WaitForBrowserToClose(browser_to_lock);
   EXPECT_EQ(1U, BrowserList::GetInstance()->size());
 
   // Wait until the user manager is shown.
@@ -448,51 +468,53 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
 }
 
 // Shows a non-signed in profile with no others.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, InvokeUi_default) {
+IN_PROC_BROWSER_TEST_P(ProfileChooserViewExtensionsParamTest,
+                       InvokeUi_default) {
   ShowAndVerifyUi();
 }
 
 // Shows a signed in profile with no others.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, InvokeUi_SignedIn) {
+IN_PROC_BROWSER_TEST_P(ProfileChooserViewExtensionsParamTest,
+                       InvokeUi_SignedIn) {
   ShowAndVerifyUi();
 }
 
 // Shows the |ProfileChooserView| with three different profiles.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
+IN_PROC_BROWSER_TEST_P(ProfileChooserViewExtensionsParamTest,
                        InvokeUi_MultiProfile) {
   ShowAndVerifyUi();
 }
 
 // Shows the |ProfileChooserView| during a Guest browsing session.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, InvokeUi_Guest) {
+IN_PROC_BROWSER_TEST_P(ProfileChooserViewExtensionsParamTest, InvokeUi_Guest) {
   ShowAndVerifyUi();
 }
 
-// TODO: Flaking test crbug.com/802374
 // Shows the |ProfileChooserView| during a Guest browsing session when the DICE
 // flag is enabled.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, InvokeUi_DiceGuest) {
+IN_PROC_BROWSER_TEST_P(ProfileChooserViewExtensionsParamTest,
+                       InvokeUi_DiceGuest) {
   ScopedAccountConsistencyDice scoped_dice;
   ShowAndVerifyUi();
 }
 
 // Shows the manage account link, which appears when account consistency is
 // enabled for signed-in accounts.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
+IN_PROC_BROWSER_TEST_P(ProfileChooserViewExtensionsParamTest,
                        InvokeUi_ManageAccountLink) {
   ShowAndVerifyUi();
 }
 
 // Shows the |ProfileChooserView| from a signed-in account that has a supervised
 // user profile attached.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
+IN_PROC_BROWSER_TEST_P(ProfileChooserViewExtensionsParamTest,
                        InvokeUi_SupervisedOwner) {
   ShowAndVerifyUi();
 }
 
 // Crashes because account consistency changes:  http://crbug.com/820390
 // Shows the |ProfileChooserView| when a supervised user is the active profile.
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
+IN_PROC_BROWSER_TEST_P(ProfileChooserViewExtensionsParamTest,
                        DISABLED_InvokeUi_SupervisedUser) {
   ShowAndVerifyUi();
 }
@@ -543,3 +565,7 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, SignedInNoUsername) {
   AddAccountToProfile(browser()->profile(), "");
   OpenProfileChooserView(browser());
 }
+
+INSTANTIATE_TEST_SUITE_P(,
+                         ProfileChooserViewExtensionsParamTest,
+                         ::testing::Bool());

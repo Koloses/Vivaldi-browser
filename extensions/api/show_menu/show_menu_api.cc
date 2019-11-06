@@ -1,5 +1,9 @@
 //
-// Copyright (c) 2014-2015 Vivaldi Technologies AS. All rights reserved.
+// Copyright (c) 2014-2019 Vivaldi Technologies AS. All rights reserved.
+//
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 //
 
 #include "extensions/api/show_menu/show_menu_api.h"
@@ -18,18 +22,20 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/values.h"
 #include "browser/menus/bookmark_sorter.h"
 #include "browser/menus/bookmark_support.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/platform_apps/app_load_service.h"
+#include "chrome/browser/banners/app_banner_manager.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -40,18 +46,19 @@
 #include "extensions/api/vivaldi_utilities/vivaldi_utilities_api.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/common/manifest_constants.h"
 #include "extensions/schema/show_menu.h"
 #include "extensions/tools/vivaldi_tools.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/devtools/devtools_connector.h"
+#include "ui/gfx/text_elider.h"
 #include "ui/vivaldi_context_menu.h"
-#include "ui/vivaldi_main_menu.h"
 #include "vivaldi/prefs/vivaldi_gen_prefs.h"
 
 #define BOOKMARK_ID_BASE 100000
+
+constexpr size_t kMaxAppNameLength = 30;
 
 namespace gfx {
 class Rect;
@@ -59,23 +66,10 @@ class Rect;
 
 namespace extensions {
 
-// These symbols do not not exist in chrome or the definition differs
-// from vivaldi.
-const char* kVivaldiKeyEsc = "Esc";
-const char* kVivaldiKeyDel = "Del";
-const char* kVivaldiKeyIns = "Ins";
-const char* kVivaldiKeyPgUp = "Pageup";
-const char* kVivaldiKeyPgDn = "Pagedown";
-const char* kVivaldiKeyMultiply = "*";
-const char* kVivaldiKeyDivide = "/";
-const char* kVivaldiKeySubtract = "-";
-const char* kVivaldiKeyPeriod = ".";
-const char* kVivaldiKeyComma = ",";
-
 using content::BrowserContext;
 
 namespace show_menu = vivaldi::show_menu;
-namespace values = manifest_values;
+//namespace values = manifest_values;
 
 namespace {
 int TranslateCommandIdToMenuId(int command_id) {
@@ -101,138 +95,7 @@ const show_menu::MenuItem* GetMenuItemById(
   return nullptr;
 }
 
-ui::KeyboardCode GetFunctionKey(std::string token) {
-  int size = token.size();
-  if (size >= 2 && token[0] == 'F') {
-    if (size == 2 && token[1] >= '1' && token[1] <= '9')
-      return static_cast<ui::KeyboardCode>(ui::VKEY_F1 + (token[1] - '1'));
-    if (size == 3 && token[1] == '1' && token[2] >= '0' && token[2] <= '9')
-      return static_cast<ui::KeyboardCode>(ui::VKEY_F10 + (token[2] - '0'));
-    if (size == 3 && token[1] == '2' && token[2] >= '0' && token[2] <= '4')
-      return static_cast<ui::KeyboardCode>(ui::VKEY_F20 + (token[2] - '0'));
-  }
-  return ui::VKEY_UNKNOWN;
-}
-
-// Based on extensions/command.cc
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-ui::Accelerator ParseShortcut(const std::string& accelerator,
-                              bool should_parse_media_keys) {
-  std::vector<std::string> tokens = base::SplitString(
-      accelerator, "+", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-  if (tokens.size() == 0) {
-    return ui::Accelerator();
-  }
-
-  int modifiers = ui::EF_NONE;
-  ui::KeyboardCode key = ui::VKEY_UNKNOWN;
-  for (size_t i = 0; i < tokens.size(); i++) {
-    if (tokens[i] == values::kKeyCtrl) {
-      modifiers |= ui::EF_CONTROL_DOWN;
-    } else if (tokens[i] == values::kKeyAlt) {
-      modifiers |= ui::EF_ALT_DOWN;
-    } else if (tokens[i] == values::kKeyShift) {
-      modifiers |= ui::EF_SHIFT_DOWN;
-    } else if (tokens[i] == values::kKeyCommand) {
-      modifiers |= ui::EF_COMMAND_DOWN;
-    } else if (key == ui::VKEY_UNKNOWN) {
-      if (tokens[i] == values::kKeyUp) {
-        key = ui::VKEY_UP;
-      } else if (tokens[i] == values::kKeyDown) {
-        key = ui::VKEY_DOWN;
-      } else if (tokens[i] == values::kKeyLeft) {
-        key = ui::VKEY_LEFT;
-      } else if (tokens[i] == values::kKeyRight) {
-        key = ui::VKEY_RIGHT;
-      } else if (tokens[i] == values::kKeyIns) {
-        key = ui::VKEY_INSERT;
-      } else if (tokens[i] == values::kKeyDel) {
-        key = ui::VKEY_DELETE;
-      } else if (tokens[i] == values::kKeyHome) {
-        key = ui::VKEY_HOME;
-      } else if (tokens[i] == values::kKeyEnd) {
-        key = ui::VKEY_END;
-      } else if (tokens[i] == values::kKeyPgUp) {
-        key = ui::VKEY_PRIOR;
-      } else if (tokens[i] == values::kKeyPgDwn) {
-        key = ui::VKEY_NEXT;
-      } else if (tokens[i] == values::kKeySpace) {
-        key = ui::VKEY_SPACE;
-      } else if (tokens[i] == values::kKeyTab) {
-        key = ui::VKEY_TAB;
-      } else if (tokens[i] == kVivaldiKeyPeriod) {
-        key = ui::VKEY_OEM_PERIOD;
-      } else if (tokens[i] == kVivaldiKeyComma) {
-        key = ui::VKEY_OEM_COMMA;
-      } else if (tokens[i] == kVivaldiKeyEsc) {
-        key = ui::VKEY_ESCAPE;
-      } else if (tokens[i] == kVivaldiKeyDel) {
-        key = ui::VKEY_DELETE;
-      } else if (tokens[i] == kVivaldiKeyIns) {
-        key = ui::VKEY_ESCAPE;
-      } else if (tokens[i] == kVivaldiKeyPgUp) {
-        key = ui::VKEY_PRIOR;
-      } else if (tokens[i] == kVivaldiKeyPgDn) {
-        key = ui::VKEY_NEXT;
-      } else if (tokens[i] == kVivaldiKeyMultiply) {
-        key = ui::VKEY_MULTIPLY;
-      } else if (tokens[i] == kVivaldiKeyDivide) {
-        key = ui::VKEY_DIVIDE;
-      } else if (tokens[i] == kVivaldiKeySubtract) {
-        key = ui::VKEY_SUBTRACT;
-      } else if (tokens[i].size() == 0) {
-        // Nasty workaround. The parser does not handle "++"
-        key = ui::VKEY_ADD;
-      } else if (tokens[i] == values::kKeyMediaNextTrack &&
-                 should_parse_media_keys) {
-        key = ui::VKEY_MEDIA_NEXT_TRACK;
-      } else if (tokens[i] == values::kKeyMediaPlayPause &&
-                 should_parse_media_keys) {
-        key = ui::VKEY_MEDIA_PLAY_PAUSE;
-      } else if (tokens[i] == values::kKeyMediaPrevTrack &&
-                 should_parse_media_keys) {
-        key = ui::VKEY_MEDIA_PREV_TRACK;
-      } else if (tokens[i] == values::kKeyMediaStop &&
-                 should_parse_media_keys) {
-        key = ui::VKEY_MEDIA_STOP;
-      } else if (tokens[i].size() == 1 && tokens[i][0] >= 'A' &&
-                 tokens[i][0] <= 'Z') {
-        key = static_cast<ui::KeyboardCode>(ui::VKEY_A + (tokens[i][0] - 'A'));
-      } else if (tokens[i].size() == 1 && tokens[i][0] >= '0' &&
-                 tokens[i][0] <= '9') {
-        key = static_cast<ui::KeyboardCode>(ui::VKEY_0 + (tokens[i][0] - '0'));
-      } else if ((key = GetFunctionKey(tokens[i])) != ui::VKEY_UNKNOWN) {
-      } else {
-        // Keep this for now.
-        // printf("unknown key length=%lu, string=%s\n", tokens[i].size(),
-        // tokens[i].c_str()); for(int j=0; j<(int)tokens[i].size(); j++) {
-        //  printf("%02x ", tokens[i][j]);
-        //}
-        // printf("\n");
-      }
-    }
-  }
-  if (key == ui::VKEY_UNKNOWN) {
-    return ui::Accelerator();
-  } else {
-    return ui::Accelerator(key, modifiers);
-  }
-}
-
 }  // namespace
-
-// static
-void ShowMenuAPI::SendCommandExecuted(Profile* profile,
-                                      int window_id,
-                                      int command_id,
-                                      const std::string& parameter) {
-  ::vivaldi::BroadcastEvent(
-      show_menu::OnMainMenuCommand::kEventName,
-      show_menu::OnMainMenuCommand::Create(window_id, command_id, parameter),
-      profile);
-}
 
 // static
 void ShowMenuAPI::SendOpen(Profile* profile) {
@@ -315,16 +178,16 @@ class VivaldiMenuController : public ui::SimpleMenuModel::Delegate,
                            bool ids_reassigned) override {}
   void BookmarkNodeMoved(bookmarks::BookmarkModel* model,
                                  const bookmarks::BookmarkNode* old_parent,
-                                 int old_index,
+                                 size_t old_index,
                                  const bookmarks::BookmarkNode* new_parent,
-                                 int new_index) override {}
+                                 size_t new_index) override {}
   void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
                                  const bookmarks::BookmarkNode* parent,
-                                 int index) override {}
+                                 size_t index) override {}
   void BookmarkNodeRemoved(
       bookmarks::BookmarkModel* model,
       const bookmarks::BookmarkNode* parent,
-      int old_index,
+      size_t old_index,
       const bookmarks::BookmarkNode* node,
       const std::set<GURL>& no_longer_bookmarked) override {}
   void BookmarkNodeChanged(bookmarks::BookmarkModel* model,
@@ -357,7 +220,9 @@ class VivaldiMenuController : public ui::SimpleMenuModel::Delegate,
   bool IsBookmarkSeparator(const bookmarks::BookmarkNode* node);
   bool HasDeveloperTools();
   bool IsDeveloperTools(int command_id) const;
+  bool IsPWAItem(int command_id) const;
   void HandleDeveloperToolsCommand(int command_id);
+  void HandlePWACommand(int command_id);
   const Extension* GetExtension() const;
   void LoadFavicon(int command_id, const std::string& url);
   void OnFaviconDataAvailable(
@@ -417,6 +282,21 @@ VivaldiMenuController::~VivaldiMenuController() {
   EnableBookmarkObserver(false);
 }
 
+// Returns the appropriate menu label for the IDC_INSTALL_PWA command if
+// available.
+// Copied from app_menu_model.cc.
+base::Optional<base::string16> GetInstallPWAAppMenuItemName(Browser* browser) {
+  WebContents* web_contents =
+    browser->tab_strip_model()->GetActiveWebContents();
+  if (!web_contents)
+    return base::nullopt;
+  base::string16 app_name =
+    banners::AppBannerManager::GetInstallableWebAppName(web_contents);
+  if (app_name.empty())
+    return base::nullopt;
+  return l10n_util::GetStringFUTF16(IDS_INSTALL_TO_OS_LAUNCH_SURFACE, app_name);
+}
+
 void VivaldiMenuController::Show() {
   // Populate menu
   for (std::vector<show_menu::MenuItem>::const_iterator it =
@@ -424,6 +304,32 @@ void VivaldiMenuController::Show() {
        it != params_->items.end(); ++it) {
     const show_menu::MenuItem& menuitem = *it;
     PopulateModel(&menuitem, &menu_model_, -1);
+  }
+  Browser* browser =
+      ::vivaldi::FindBrowserForEmbedderWebContents(web_contents_);
+  if (browser &&
+      VivaldiRuntimeFeatures::IsEnabled(browser->profile(), "install_pwa")) {
+    const extensions::Extension* pwa =
+      extensions::util::GetPwaForSecureActiveTab(browser);
+    if (pwa) {
+      menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+      menu_model_.AddItem(
+          IDC_OPEN_IN_PWA_WINDOW,
+          l10n_util::GetStringFUTF16(
+              IDS_OPEN_IN_APP_WINDOW,
+              gfx::TruncateString(base::UTF8ToUTF16(pwa->name()),
+                                  kMaxAppNameLength, gfx::CHARACTER_BREAK)));
+    } else {
+      base::Optional<base::string16> install_pwa_item_name =
+        GetInstallPWAAppMenuItemName(browser);
+      if (install_pwa_item_name) {
+        menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+        menu_model_.AddItem(IDC_INSTALL_PWA, *install_pwa_item_name);
+
+        menu_model_.AddItemWithStringId(IDC_CREATE_SHORTCUT,
+                                        IDS_ADD_TO_OS_LAUNCH_SURFACE);
+      }
+    }
   }
 
   if (HasDeveloperTools()) {
@@ -505,6 +411,32 @@ bool VivaldiMenuController::IsDeveloperTools(int command_id) const {
          command_id == IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE;
 }
 
+bool VivaldiMenuController::IsPWAItem(int command_id) const {
+  return command_id == IDC_INSTALL_PWA || command_id == IDC_CREATE_SHORTCUT ||
+         command_id == IDC_OPEN_IN_PWA_WINDOW;
+}
+
+void VivaldiMenuController::HandlePWACommand(int command_id) {
+  Browser* browser =
+      ::vivaldi::FindBrowserForEmbedderWebContents(web_contents_);
+
+  switch (command_id) {
+  case IDC_CREATE_SHORTCUT:
+    chrome::CreateBookmarkAppFromCurrentWebContents(browser,
+      true /* force_shortcut_app */);
+    break;
+  case IDC_INSTALL_PWA:
+    chrome::CreateBookmarkAppFromCurrentWebContents(browser,
+      false /* force_shortcut_app */);
+    break;
+  case IDC_OPEN_IN_PWA_WINDOW:
+    ReparentSecureActiveTabIntoPwaWindow(browser);
+    break;
+  default:
+    break;
+  }
+}
+
 void VivaldiMenuController::HandleDeveloperToolsCommand(int command_id) {
   const extensions::Extension* platform_app = GetExtension();
 
@@ -519,17 +451,9 @@ void VivaldiMenuController::HandleDeveloperToolsCommand(int command_id) {
 
     case IDC_CONTENT_CONTEXT_RESTART_PACKAGED_APP:
       if (platform_app && platform_app->is_platform_app()) {
-        extensions::DevtoolsConnectorAPI* api =
-          extensions::DevtoolsConnectorAPI::GetFactoryInstance()->Get(
-            Profile::FromBrowserContext(profile_));
-        DCHECK(api);
-        api->CloseAllDevtools();
+        DevtoolsConnectorAPI::CloseAllDevtools(profile_);
 
-        extensions::VivaldiUtilitiesAPI* utils_api =
-            extensions::VivaldiUtilitiesAPI::GetFactoryInstance()->Get(
-                profile_);
-        DCHECK(utils_api);
-        utils_api->CloseAllThumbnailWindows();
+        VivaldiUtilitiesAPI::CloseAllThumbnailWindows(profile_);
 
         chrome::AttemptRestart();
       }
@@ -624,8 +548,8 @@ void VivaldiMenuController::PopulateModel(const show_menu::MenuItem* item,
       id = *item->container_id;
     } else {
       const bookmarks::BookmarkNode* root = model->root_node();
-      if (root && root->child_count() > 0) {
-        const bookmarks::BookmarkNode* vivaldi_root = root->GetChild(0);
+      if (root && !root->children().empty()) {
+        const bookmarks::BookmarkNode* vivaldi_root = root->children()[0].get();
         id = vivaldi_root->id();
       }
     }
@@ -662,6 +586,9 @@ void VivaldiMenuController::PopulateModel(const show_menu::MenuItem* item,
       } else {
         if (item->type.get() && item->type->compare("checkbox") == 0) {
           menu_model->AddCheckItem(id, label);
+        } else if (item->type.get() &&
+                   item->type->compare("radiobutton") == 0) {
+          menu_model->AddRadioItem(id, label, *item->radiogroup.get());
         } else {
           if (index >= 0 && index <= menu_model->GetItemCount()) {
             menu_model->InsertItemAt(index, id, label);
@@ -764,9 +691,9 @@ void VivaldiMenuController::PopulateBookmarkFolder(
 
     // Call AddAddTabToBookmarksMenuItem() here for in front of bookmarks.
     std::vector<bookmarks::BookmarkNode*> nodes;
-    nodes.reserve(node->child_count());
-    for (int i = 0; i < node->child_count(); ++i) {
-      nodes.push_back(const_cast<bookmarks::BookmarkNode*>(node->GetChild(i)));
+    nodes.reserve(node->children().size());
+    for (auto& it: node->children()) {
+      nodes.push_back(const_cast<bookmarks::BookmarkNode*>(it.get()));
     }
     bookmark_sorter_->sort(nodes);
     bookmark_sorter_->setGroupFolders(true); // Always grouping in sub menus.
@@ -867,7 +794,7 @@ void VivaldiMenuController::LoadFavicon(int command_id,
       base::Bind(&VivaldiMenuController::OnFaviconDataAvailable,
                  base::Unretained(this), command_id);
 
-  favicon_service_->GetFaviconImageForPageURL(GURL(url), callback,
+  favicon_service_->GetFaviconImageForPageURL(GURL(url), std::move(callback),
                                               &cancelable_task_tracker_);
 }
 
@@ -892,17 +819,30 @@ bool VivaldiMenuController::IsCommandIdEnabled(int command_id) const {
     return true;
   }
   const show_menu::MenuItem* item = getItemByCommandId(command_id);
-  return item != nullptr || IsDeveloperTools(command_id);
+  return item != nullptr || IsDeveloperTools(command_id) ||
+         IsPWAItem(command_id);
 }
 
 bool VivaldiMenuController::IsItemForCommandIdDynamic(int command_id) const {
-  return false;
+  return command_id == IDC_INSTALL_PWA;
 }
 
 base::string16 VivaldiMenuController::GetLabelForCommandId(
     int command_id) const {
-  const show_menu::MenuItem* item = getItemByCommandId(command_id);
-  return base::UTF8ToUTF16(item ? item->name : std::string());
+  switch (command_id) {
+    case IDC_INSTALL_PWA: {
+      Browser* browser =
+        ::vivaldi::FindBrowserForEmbedderWebContents(web_contents_);
+      if (browser) {
+        return GetInstallPWAAppMenuItemName(browser).value();
+      }
+      return base::string16();
+    }
+    default: {
+      const show_menu::MenuItem* item = getItemByCommandId(command_id);
+      return base::UTF8ToUTF16(item ? item->name : std::string());
+    }
+  }
 }
 
 bool VivaldiMenuController::GetAcceleratorForCommandId(
@@ -910,8 +850,7 @@ bool VivaldiMenuController::GetAcceleratorForCommandId(
     ui::Accelerator* accelerator) const {
   const show_menu::MenuItem* item = getItemByCommandId(command_id);
   if (item && item->shortcut) {
-    // printf("shortcut: %s\n", item->shortcut->c_str());
-    *accelerator = ParseShortcut(*item->shortcut, true);
+    *accelerator = ::vivaldi::ParseShortcut(*item->shortcut, true);
     return true;
   } else if (IsDeveloperTools(command_id)) {
     switch (command_id) {
@@ -959,7 +898,9 @@ void VivaldiMenuController::VivaldiCommandIdHighlighted(int command_id) {
 }
 
 void VivaldiMenuController::ExecuteCommand(int command_id, int event_flags) {
-  if (IsDeveloperTools(command_id)) {
+  if (IsPWAItem(command_id)) {
+    HandlePWACommand(command_id);
+  } else if (IsDeveloperTools(command_id)) {
     // These are the commands we only get when running with npm.
     // For JS, this menu has been canceled since we handle the actions here.
     HandleDeveloperToolsCommand(command_id);
@@ -1032,24 +973,6 @@ void ShowMenuShowContextMenuFunction::SendResult(int command_id,
   response.right = event_flags & ui::EF_RIGHT_MOUSE_BUTTON ? true : false;
   response.center = event_flags & ui::EF_MIDDLE_MOUSE_BUTTON ? true : false;
   Respond(ArgumentList(vivaldi::show_menu::ShowContextMenu::Results::Create(response)));
-}
-
-ExtensionFunction::ResponseAction ShowMenuSetupMainMenuFunction::Run() {
-  auto params = vivaldi::show_menu::SetupMainMenu::Params::Create(*args_);
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-#if defined(OS_MACOSX)
-  if (params->mode == "menubar" || params->mode == "tabs" ||
-      params->mode == "update" || params->mode == "bookmarks") {
-    // Mac needs to update the menu even with no open windows. So we allow
-    // a nullptr profile when calling the api.
-    Profile* profile = Profile::FromBrowserContext(browser_context());
-    ::vivaldi::CreateVivaldiMainMenu(profile, &params->items, params->mode);
-    return RespondNow(NoArguments());
-  }
-  return RespondNow(Error("Invalid mode - " + params->mode));
-#else
-  return RespondNow(Error("NOT IMPLEMENTED"));
-#endif  // defined(OS_MACOSX)
 }
 
 }  // namespace extensions

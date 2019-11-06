@@ -16,7 +16,7 @@
 #include "base/scoped_observer.h"
 #include "chrome/browser/chromeos/lock_screen_apps/app_manager.h"
 #include "chrome/browser/chromeos/lock_screen_apps/state_observer.h"
-#include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/power/power_manager_client.h"
 #include "components/session_manager/core/session_manager_observer.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/common/api/app_runtime.h"
@@ -54,7 +54,7 @@ class SessionManager;
 }
 
 namespace ui {
-class InputDeviceManager;
+class DeviceDataManager;
 }
 
 namespace lock_screen_apps {
@@ -258,7 +258,7 @@ class StateController : public ash::mojom::TrayActionClient,
   ScopedObserver<session_manager::SessionManager,
                  session_manager::SessionManagerObserver>
       session_observer_;
-  ScopedObserver<ui::InputDeviceManager, ui::InputDeviceEventObserver>
+  ScopedObserver<ui::DeviceDataManager, ui::InputDeviceEventObserver>
       input_devices_observer_;
   ScopedObserver<chromeos::PowerManagerClient,
                  chromeos::PowerManagerClient::Observer>

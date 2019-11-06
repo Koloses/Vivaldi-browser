@@ -4,8 +4,8 @@
 
 package org.chromium.chrome.browser.browserservices;
 
-import static org.chromium.chrome.browser.preferences.ChromePreferenceManager.TWA_DIALOG_NUMBER_OF_DIMSISSALS_ON_CLEAR_DATA;
-import static org.chromium.chrome.browser.preferences.ChromePreferenceManager.TWA_DIALOG_NUMBER_OF_DIMSISSALS_ON_UNINSTALL;
+import static org.chromium.chrome.browser.preferences.ChromePreferenceManager.TWA_DIALOG_NUMBER_OF_DISMISSALS_ON_CLEAR_DATA;
+import static org.chromium.chrome.browser.preferences.ChromePreferenceManager.TWA_DIALOG_NUMBER_OF_DISMISSALS_ON_UNINSTALL;
 
 import org.chromium.base.StrictModeContext;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
@@ -47,10 +47,10 @@ public class ClearDataDialogResultRecorder {
         } else {
             // Avoid loading native just for the sake of recording. Save the info and record
             // on next Chrome launch.
-            String key = triggeredByUninstall ? TWA_DIALOG_NUMBER_OF_DIMSISSALS_ON_UNINSTALL
-                    : TWA_DIALOG_NUMBER_OF_DIMSISSALS_ON_CLEAR_DATA;
+            String key = triggeredByUninstall ? TWA_DIALOG_NUMBER_OF_DISMISSALS_ON_UNINSTALL
+                                              : TWA_DIALOG_NUMBER_OF_DISMISSALS_ON_CLEAR_DATA;
 
-            try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+            try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
                 mPrefsManager.get().writeInt(key, mPrefsManager.get().readInt(key) + 1);
             }
         }
@@ -60,9 +60,9 @@ public class ClearDataDialogResultRecorder {
      * Make recordings that were deferred in order to not load native.
      */
     public void makeDeferredRecordings() {
-        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
-            recordDismissals(TWA_DIALOG_NUMBER_OF_DIMSISSALS_ON_UNINSTALL, true);
-            recordDismissals(TWA_DIALOG_NUMBER_OF_DIMSISSALS_ON_CLEAR_DATA, false);
+        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
+            recordDismissals(TWA_DIALOG_NUMBER_OF_DISMISSALS_ON_UNINSTALL, true);
+            recordDismissals(TWA_DIALOG_NUMBER_OF_DISMISSALS_ON_CLEAR_DATA, false);
         }
     }
 

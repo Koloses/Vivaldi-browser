@@ -83,7 +83,7 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   }
   void* memory(size_t plane) override {
     DCHECK(mapped_);
-    DCHECK_LT(plane, gfx::NumberOfPlanesForBufferFormat(format_));
+    DCHECK_LT(plane, gfx::NumberOfPlanesForLinearBufferFormat(format_));
     return reinterpret_cast<uint8_t*>(&bytes_->data().front()) +
            gfx::BufferOffsetForBufferFormat(size_, format_, plane);
   }
@@ -94,7 +94,7 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   gfx::Size GetSize() const override { return size_; }
   gfx::BufferFormat GetFormat() const override { return format_; }
   int stride(size_t plane) const override {
-    DCHECK_LT(plane, gfx::NumberOfPlanesForBufferFormat(format_));
+    DCHECK_LT(plane, gfx::NumberOfPlanesForLinearBufferFormat(format_));
     return gfx::RowSizeForBufferFormat(size_.width(), format_, plane);
   }
   gfx::GpuMemoryBufferId GetId() const override {
@@ -150,7 +150,7 @@ class IOSurfaceGpuMemoryBuffer : public gfx::GpuMemoryBuffer {
   }
   void* memory(size_t plane) override {
     DCHECK(mapped_);
-    DCHECK_LT(plane, gfx::NumberOfPlanesForBufferFormat(format_));
+    DCHECK_LT(plane, gfx::NumberOfPlanesForLinearBufferFormat(format_));
     return IOSurfaceGetBaseAddressOfPlane(iosurface_, plane);
   }
   void Unmap() override {
@@ -160,7 +160,7 @@ class IOSurfaceGpuMemoryBuffer : public gfx::GpuMemoryBuffer {
   gfx::Size GetSize() const override { return size_; }
   gfx::BufferFormat GetFormat() const override { return format_; }
   int stride(size_t plane) const override {
-    DCHECK_LT(plane, gfx::NumberOfPlanesForBufferFormat(format_));
+    DCHECK_LT(plane, gfx::NumberOfPlanesForLinearBufferFormat(format_));
     return IOSurfaceGetWidthOfPlane(iosurface_, plane);
   }
   gfx::GpuMemoryBufferId GetId() const override {
@@ -226,7 +226,7 @@ GLManager::Options::Options() = default;
 
 GLManager::GLManager()
     : gpu_memory_buffer_factory_(
-          gpu::GpuMemoryBufferFactory::CreateNativeType()) {
+          gpu::GpuMemoryBufferFactory::CreateNativeType(nullptr)) {
   SetupBaseContext();
 }
 
@@ -469,13 +469,13 @@ void GLManager::Destroy() {
   }
   transfer_buffer_.reset();
   gles2_helper_.reset();
-  command_buffer_.reset();
   if (decoder_.get()) {
     bool have_context = decoder_->GetGLContext() &&
                         decoder_->GetGLContext()->MakeCurrent(surface_.get());
     decoder_->Destroy(have_context);
     decoder_.reset();
   }
+  command_buffer_.reset();
   context_ = nullptr;
 }
 
@@ -609,6 +609,10 @@ void GLManager::WaitSyncToken(const gpu::SyncToken& sync_token) {
 bool GLManager::CanWaitUnverifiedSyncToken(const gpu::SyncToken& sync_token) {
   NOTREACHED();
   return false;
+}
+
+void GLManager::SetDisplayTransform(gfx::OverlayTransform transform) {
+  NOTREACHED();
 }
 
 ContextType GLManager::GetContextType() const {

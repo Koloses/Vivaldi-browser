@@ -34,13 +34,11 @@
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/cryptohome/system_salt_getter.h"
 #include "chromeos/dbus/cros_disks_client.h"
+#include "chromeos/dbus/cryptohome/account_identifier_operators.h"
+#include "chromeos/dbus/cryptohome/fake_cryptohome_client.h"
 #include "chromeos/dbus/cryptohome/rpc.pb.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/fake_cryptohome_client.h"
-#include "chromeos/dbus/util/account_identifier_operators.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/mock_auth_status_consumer.h"
-#include "chromeos/login/auth/mock_url_fetchers.h"
 #include "chromeos/login/auth/test_attempt_state.h"
 #include "chromeos/login/auth/user_context.h"
 #include "chromeos/login/login_state/login_state.h"
@@ -51,7 +49,6 @@
 #include "crypto/nss_key_util.h"
 #include "crypto/nss_util_internal.h"
 #include "crypto/scoped_test_nss_chromeos_user.h"
-#include "google_apis/gaia/mock_url_fetcher_factory.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -274,7 +271,9 @@ class CryptohomeAuthenticatorTest : public testing::Test {
     profile_.reset(new TestingProfile);
     OwnerSettingsServiceChromeOSFactory::GetInstance()
         ->SetOwnerKeyUtilForTesting(owner_key_util_);
-    user_context_.SetKey(Key("fakepass"));
+    Key key("fakepass");
+    key.SetLabel(kCryptohomeGAIAKeyLabel);
+    user_context_.SetKey(key);
     user_context_.SetUserIDHash("me_nowhere_com_hash");
     const user_manager::User* user =
         user_manager_->AddUser(user_context_.GetAccountId());
@@ -299,8 +298,6 @@ class CryptohomeAuthenticatorTest : public testing::Test {
     cryptohome::HomedirMethods::Initialize();
 
     fake_cryptohome_client_ = new TestCryptohomeClient;
-    chromeos::DBusThreadManager::GetSetterForTesting()->SetCryptohomeClient(
-        std::unique_ptr<CryptohomeClient>(fake_cryptohome_client_));
 
     SystemSaltGetter::Initialize();
 
@@ -311,7 +308,7 @@ class CryptohomeAuthenticatorTest : public testing::Test {
   // Tears down the test fixture.
   void TearDown() override {
     SystemSaltGetter::Shutdown();
-    DBusThreadManager::Shutdown();
+    CryptohomeClient::Shutdown();
 
     cryptohome::AsyncMethodCaller::Shutdown();
     mock_caller_ = NULL;

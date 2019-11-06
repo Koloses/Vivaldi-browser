@@ -102,8 +102,9 @@ class FakeSyncManager : public SyncManager {
   UserShare* GetUserShare() override;
   ModelTypeConnector* GetModelTypeConnector() override;
   std::unique_ptr<ModelTypeConnector> GetModelTypeConnectorProxy() override;
-  const std::string cache_guid() override;
-  bool ReceivedExperiment(Experiments* experiments) override;
+  std::string cache_guid() override;
+  std::string birthday() override;
+  std::string bag_of_chips() override;
   bool HasUnsyncedItemsForTest() override;
   SyncEncryptionHandler* GetEncryptionHandler() override;
   std::vector<std::unique_ptr<ProtocolEvent>> GetBufferedProtocolEvents()
@@ -146,9 +147,9 @@ class FakeSyncManager : public SyncManager {
   // The most recent configure reason.
   ConfigureReason last_configure_reason_;
 
-  FakeModelTypeConnector fake_model_type_connector_;
-
   FakeSyncEncryptionHandler fake_encryption_handler_;
+
+  FakeModelTypeConnector fake_model_type_connector_;
 
   TestUserShare test_user_share_;
 

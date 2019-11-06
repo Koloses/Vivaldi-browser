@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import <EarlGrey/EarlGrey.h>
+
 #include "base/ios/ios_util.h"
-#include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/payments/core/journey_logger.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/payments/payment_request_egtest_base.h"
@@ -70,7 +72,7 @@ using payments::JourneyLogger;
   [self addCard1];
 
   [self loadTestPage:"payment_request_no_shipping_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
   [self payWithCreditCardUsingCVC:@"123"];
 
   // Make sure the correct events were logged.
@@ -111,6 +113,17 @@ using payments::JourneyLogger;
                  @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
+
+  FailureBlock failureBlock = ^(NSString* error) {
+    GREYFail(error);
+  };
+  // Make sure transaction amount is logged correctly considering the completion
+  // status.
+  histogramTester.ExpectTotalCount("PaymentRequest.TransactionAmount.Triggered",
+                                   1, failureBlock);
+  histogramTester.ExpectTotalCount("PaymentRequest.TransactionAmount.Completed",
+                                   1, failureBlock);
 }
 
 - (void)testOnlyBobpaySupported {
@@ -126,7 +139,7 @@ using payments::JourneyLogger;
   [self addCard1];
 
   [self loadTestPage:"payment_request_bobpay_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
   [self waitForWebViewContainingTexts:{"rejected"}];
 
   FailureBlock failureBlock = ^(NSString* error) {
@@ -136,6 +149,13 @@ using payments::JourneyLogger;
       "PaymentRequest.CheckoutFunnel.NoShow",
       JourneyLogger::NOT_SHOWN_REASON_NO_SUPPORTED_PAYMENT_METHOD, 1,
       failureBlock);
+
+  // Make sure transaction amount metrics are not logged since we could not
+  // trigger the payment sheet.
+  histogramTester.ExpectTotalCount("PaymentRequest.TransactionAmount.Triggered",
+                                   0, failureBlock);
+  histogramTester.ExpectTotalCount("PaymentRequest.TransactionAmount.Completed",
+                                   0, failureBlock);
 
   // Make sure the correct events were logged.
   std::vector<chrome_test_util::Bucket> buckets =
@@ -148,7 +168,7 @@ using payments::JourneyLogger;
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SKIPPED_SHOW, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COMPLETED, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_USER_ABORTED, @"");
-  GREYAssertTrue(buckets[0].min & JourneyLogger::EVENT_OTHER_ABORTED, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_OTHER_ABORTED, @"");
   GREYAssertFalse(
       buckets[0].min & JourneyLogger::EVENT_HAD_INITIAL_FORM_OF_PAYMENT, @"");
   GREYAssertFalse(
@@ -175,6 +195,7 @@ using payments::JourneyLogger;
                   @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertTrue(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 // TODO(crbug.com/795663): Fails on iphone11 devices.
@@ -190,8 +211,8 @@ using payments::JourneyLogger;
   [self addCard1];
 
   [self loadTestPage:"payment_request_multiple_show_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"showAgain"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"showAgain"];
   [self payWithCreditCardUsingCVC:@"123"];
 
   // Trying to show the same request twice is not considered a concurrent
@@ -239,6 +260,7 @@ using payments::JourneyLogger;
                  @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 // TODO(crbug.com/602666): add a test to verify that the correct metrics get
@@ -264,7 +286,7 @@ using payments::JourneyLogger;
 
   [self loadTestPage:
             "payment_request_contact_details_and_free_shipping_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
   [self payWithCreditCardUsingCVC:@"123"];
 
   FailureBlock failureBlock = ^(NSString* error) {
@@ -319,6 +341,7 @@ using payments::JourneyLogger;
                  @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 // Tests that the correct number of suggestions shown for each section is logged
@@ -337,11 +360,11 @@ using payments::JourneyLogger;
 
   [self loadTestPage:
             "payment_request_contact_details_and_free_shipping_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
   [[EarlGrey
       selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabelId(
                                    IDS_CANCEL)] performAction:grey_tap()];
-  [self waitForWebViewContainingTexts:{"Request cancelled"}];
+  [self waitForWebViewContainingTexts:{"User closed the Payment Request UI."}];
 
   FailureBlock failureBlock = ^(NSString* error) {
     GREYFail(error);
@@ -395,6 +418,7 @@ using payments::JourneyLogger;
                   @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 // Tests that the correct number of suggestions shown for each section is logged
@@ -414,7 +438,7 @@ using payments::JourneyLogger;
   [self addCard1];
 
   [self loadTestPage:"payment_request_contact_details_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
   [self payWithCreditCardUsingCVC:@"123"];
 
   FailureBlock failureBlock = ^(NSString* error) {
@@ -471,6 +495,7 @@ using payments::JourneyLogger;
                  @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 // Tests that the correct number of suggestions shown for each section is logged
@@ -488,11 +513,11 @@ using payments::JourneyLogger;
   [self addCard1];
 
   [self loadTestPage:"payment_request_contact_details_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
   [[EarlGrey
       selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabelId(
                                    IDS_CANCEL)] performAction:grey_tap()];
-  [self waitForWebViewContainingTexts:{"Request cancelled"}];
+  [self waitForWebViewContainingTexts:{"User closed the Payment Request UI."}];
 
   FailureBlock failureBlock = ^(NSString* error) {
     GREYFail(error);
@@ -548,6 +573,7 @@ using payments::JourneyLogger;
                   @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 // Tests that the correct number of suggestions shown for each section is logged
@@ -568,7 +594,7 @@ using payments::JourneyLogger;
   [self addCard1];
 
   [self loadTestPage:"payment_request_free_shipping_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
   [self payWithCreditCardUsingCVC:@"123"];
 
   FailureBlock failureBlock = ^(NSString* error) {
@@ -626,6 +652,7 @@ using payments::JourneyLogger;
                  @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 // Tests that the correct number of suggestions shown for each section is logged
@@ -643,11 +670,11 @@ using payments::JourneyLogger;
   [self addCard1];
 
   [self loadTestPage:"payment_request_free_shipping_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
   [[EarlGrey
       selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabelId(
                                    IDS_CANCEL)] performAction:grey_tap()];
-  [self waitForWebViewContainingTexts:{"Request cancelled"}];
+  [self waitForWebViewContainingTexts:{"User closed the Payment Request UI."}];
 
   FailureBlock failureBlock = ^(NSString* error) {
     GREYFail(error);
@@ -665,6 +692,13 @@ using payments::JourneyLogger;
   histogramTester.ExpectTotalCount(
       "PaymentRequest.NumberOfSuggestionsShown.ContactInfo.UserAborted", 0,
       failureBlock);
+
+  // Make sure transaction amount is logged correctly considering the completion
+  // status.
+  histogramTester.ExpectTotalCount("PaymentRequest.TransactionAmount.Triggered",
+                                   1, failureBlock);
+  histogramTester.ExpectTotalCount("PaymentRequest.TransactionAmount.Completed",
+                                   0, failureBlock);
 
   // Make sure the correct events were logged.
   std::vector<chrome_test_util::Bucket> buckets =
@@ -708,6 +742,7 @@ using payments::JourneyLogger;
                   @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 // Tests that the correct number of suggestions shown for each section is logged
@@ -716,7 +751,7 @@ using payments::JourneyLogger;
   chrome_test_util::HistogramTester histogramTester;
 
   [self loadTestPage:"payment_request_can_make_payment_metrics_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"queryNoShow"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"queryNoShow"];
 
   // Navigate away to abort the Payment Request and trigger the logs.
   [self loadTestPage:"payment_request_email_test.html"];
@@ -725,9 +760,10 @@ using payments::JourneyLogger;
     GREYFail(error);
   };
 
-  // Abort should not be logged.
-  histogramTester.ExpectTotalCount("PaymentRequest.CheckoutFunnel.Aborted", 0,
-                                   failureBlock);
+  // Abort should be logged.
+  histogramTester.ExpectBucketCount("PaymentRequest.CheckoutFunnel.Aborted",
+                                    JourneyLogger::ABORT_REASON_USER_NAVIGATION,
+                                    1, failureBlock);
 
   // Some events should be logged.
   std::vector<chrome_test_util::Bucket> buckets =
@@ -738,7 +774,8 @@ using payments::JourneyLogger;
   GREYAssertEqual(JourneyLogger::EVENT_USER_ABORTED |
                       JourneyLogger::EVENT_CAN_MAKE_PAYMENT_FALSE |
                       JourneyLogger::EVENT_REQUEST_METHOD_OTHER |
-                      JourneyLogger::EVENT_REQUEST_METHOD_BASIC_CARD,
+                      JourneyLogger::EVENT_REQUEST_METHOD_BASIC_CARD |
+                      JourneyLogger::EVENT_NEEDS_COMPLETION_PAYMENT,
                   buckets[0].min, @"");
 
   // Make sure that the metrics that required the Payment Request to be shown
@@ -753,6 +790,13 @@ using payments::JourneyLogger;
                                    failureBlock);
   histogramTester.ExpectTotalCount("PaymentRequest.NumberOfSuggestionsShown", 0,
                                    failureBlock);
+
+  // Make sure transaction amount metrics are not logged since the user
+  // navigated away before triggering .show().
+  histogramTester.ExpectTotalCount("PaymentRequest.TransactionAmount.Triggered",
+                                   0, failureBlock);
+  histogramTester.ExpectTotalCount("PaymentRequest.TransactionAmount.Completed",
+                                   0, failureBlock);
 }
 
 - (void)testUserHadCompleteSuggestionsForEverything {
@@ -762,7 +806,7 @@ using payments::JourneyLogger;
   [self addCard1];
 
   [self loadTestPage:"payment_request_email_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
 
   // Navigate away to abort the Payment Request and trigger the logs.
   [self loadTestPage:"payment_request_email_test.html"];
@@ -805,6 +849,7 @@ using payments::JourneyLogger;
                   @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 - (void)testUserHadIncompleteSuggestionsForEverything_NoCard {
@@ -813,7 +858,7 @@ using payments::JourneyLogger;
   [self addProfiles];  // The user has no form of payment on file.
 
   [self loadTestPage:"payment_request_email_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
 
   // Navigate away to abort the Payment Request and trigger the logs.
   [self loadTestPage:"payment_request_email_test.html"];
@@ -856,6 +901,7 @@ using payments::JourneyLogger;
                   @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 - (void)testUserHadIncompleteSuggestionsForEverything_CardNetworkNotSupported {
@@ -865,7 +911,7 @@ using payments::JourneyLogger;
   [self addCard2];  // AMEX is not supported by the merchant.
 
   [self loadTestPage:"payment_request_email_test.html"];
-  [ChromeEarlGrey tapWebViewElementWithID:@"buy"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"buy"];
 
   // Navigate away to abort the Payment Request and trigger the logs.
   [self loadTestPage:"payment_request_email_test.html"];
@@ -908,6 +954,7 @@ using payments::JourneyLogger;
                   @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_GOOGLE, @"");
   GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_SELECTED_OTHER, @"");
+  GREYAssertFalse(buckets[0].min & JourneyLogger::EVENT_COULD_NOT_SHOW, @"");
 }
 
 @end

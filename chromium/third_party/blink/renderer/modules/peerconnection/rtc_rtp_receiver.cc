@@ -7,6 +7,7 @@
 #include "third_party/blink/public/platform/web_media_stream.h"
 #include "third_party/blink/public/platform/web_media_stream_track.h"
 #include "third_party/blink/public/platform/web_rtc_rtp_source.h"
+#include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_dtls_transport.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_rtp_capabilities.h"
@@ -40,24 +41,54 @@ RTCDtlsTransport* RTCRtpReceiver::transport() {
   return transport_;
 }
 
-RTCDtlsTransport* RTCRtpReceiver::rtcp_transport() {
+RTCDtlsTransport* RTCRtpReceiver::rtcpTransport() {
   // Chrome does not support turning off RTCP-mux.
   return nullptr;
+}
+
+double RTCRtpReceiver::jitterBufferDelayHint(bool& is_null, ExceptionState&) {
+  is_null = !jitter_buffer_delay_hint_.has_value();
+  return jitter_buffer_delay_hint_.value_or(0.0);
+}
+
+void RTCRtpReceiver::setJitterBufferDelayHint(double value,
+                                              bool is_null,
+                                              ExceptionState& exception_state) {
+  base::Optional<double> hint =
+      is_null ? base::nullopt : base::Optional<double>(value);
+  if (hint && *hint < 0.0) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidAccessError,
+        "jitterBufferDelayHint can't be negative");
+    return;
+  }
+
+  jitter_buffer_delay_hint_ = hint;
+  receiver_->SetJitterBufferMinimumDelay(jitter_buffer_delay_hint_);
 }
 
 HeapVector<Member<RTCRtpSynchronizationSource>>
 RTCRtpReceiver::getSynchronizationSources() {
   UpdateSourcesIfNeeded();
+
+  Document* document = To<Document>(pc_->GetExecutionContext());
+  DocumentLoadTiming& time_converter = document->Loader()->GetTiming();
+
   HeapVector<Member<RTCRtpSynchronizationSource>> synchronization_sources;
   for (const auto& web_source : web_sources_) {
     if (web_source->SourceType() != WebRTCRtpSource::Type::kSSRC)
       continue;
     RTCRtpSynchronizationSource* synchronization_source =
         MakeGarbageCollected<RTCRtpSynchronizationSource>();
-    synchronization_source->setTimestamp(web_source->TimestampMs());
+    synchronization_source->setTimestamp(
+        time_converter
+            .MonotonicTimeToPseudoWallTime(
+                pc_->WebRtcMsToBlinkTimeTicks(web_source->TimestampMs()))
+            .InMilliseconds());
     synchronization_source->setSource(web_source->Source());
     if (web_source->AudioLevel())
       synchronization_source->setAudioLevel(*web_source->AudioLevel());
+    synchronization_source->setRtpTimestamp(web_source->RtpTimestamp());
     synchronization_sources.push_back(synchronization_source);
   }
   return synchronization_sources;
@@ -66,26 +97,36 @@ RTCRtpReceiver::getSynchronizationSources() {
 HeapVector<Member<RTCRtpContributingSource>>
 RTCRtpReceiver::getContributingSources() {
   UpdateSourcesIfNeeded();
+
+  Document* document = To<Document>(pc_->GetExecutionContext());
+  DocumentLoadTiming& time_converter = document->Loader()->GetTiming();
+
   HeapVector<Member<RTCRtpContributingSource>> contributing_sources;
   for (const auto& web_source : web_sources_) {
     if (web_source->SourceType() != WebRTCRtpSource::Type::kCSRC)
       continue;
     RTCRtpContributingSource* contributing_source =
         MakeGarbageCollected<RTCRtpContributingSource>();
-    contributing_source->setTimestamp(web_source->TimestampMs());
+    contributing_source->setTimestamp(
+        time_converter
+            .MonotonicTimeToPseudoWallTime(
+                pc_->WebRtcMsToBlinkTimeTicks(web_source->TimestampMs()))
+            .InMilliseconds());
     contributing_source->setSource(web_source->Source());
     if (web_source->AudioLevel())
       contributing_source->setAudioLevel(*web_source->AudioLevel());
+    contributing_source->setRtpTimestamp(web_source->RtpTimestamp());
     contributing_sources.push_back(contributing_source);
   }
   return contributing_sources;
 }
 
 ScriptPromise RTCRtpReceiver::getStats(ScriptState* script_state) {
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
-  receiver_->GetStats(WebRTCStatsReportCallbackResolver::Create(resolver),
-                      GetRTCStatsFilter(script_state));
+  receiver_->GetStats(
+      WTF::Bind(WebRTCStatsReportCallbackResolver, WrapPersistent(resolver)),
+      GetExposedGroupIds(script_state));
   return promise;
 }
 

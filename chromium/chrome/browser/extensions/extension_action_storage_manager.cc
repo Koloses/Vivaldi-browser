@@ -198,8 +198,7 @@ ExtensionActionStorageManager::ExtensionActionStorageManager(
     content::BrowserContext* context)
     : browser_context_(context),
       extension_action_observer_(this),
-      extension_registry_observer_(this),
-      weak_factory_(this) {
+      extension_registry_observer_(this) {
   extension_action_observer_.Add(ExtensionActionAPI::Get(browser_context_));
   extension_registry_observer_.Add(ExtensionRegistry::Get(browser_context_));
 
@@ -214,8 +213,9 @@ ExtensionActionStorageManager::~ExtensionActionStorageManager() {
 void ExtensionActionStorageManager::OnExtensionLoaded(
     content::BrowserContext* browser_context,
     const Extension* extension) {
-  if (!ExtensionActionManager::Get(browser_context_)->GetBrowserAction(
-          *extension))
+  ExtensionAction* action = ExtensionActionManager::Get(browser_context_)
+                                ->GetExtensionAction(*extension);
+  if (!action || action->action_type() != ActionInfo::TYPE_BROWSER)
     return;
 
   StateStore* store = GetStateStore();
@@ -237,6 +237,7 @@ void ExtensionActionStorageManager::OnExtensionActionUpdated(
   // is null. We only persist the default settings to disk, since per-tab
   // settings can't be persisted across browser sessions.
   bool for_default_tab = !web_contents;
+  // TODO(devlin): We should probably persist for TYPE_ACTION as well.
   if (browser_context_ == browser_context &&
       extension_action->action_type() == ActionInfo::TYPE_BROWSER &&
       for_default_tab) {
@@ -267,10 +268,9 @@ void ExtensionActionStorageManager::ReadFromStorage(
   if (!extension)
     return;
 
-  ExtensionAction* browser_action =
-      ExtensionActionManager::Get(browser_context_)->GetBrowserAction(
-          *extension);
-  if (!browser_action) {
+  ExtensionAction* action = ExtensionActionManager::Get(browser_context_)
+                                ->GetExtensionAction(*extension);
+  if (!action || action->action_type() != ActionInfo::TYPE_BROWSER) {
     // This can happen if the extension is updated between startup and when the
     // storage read comes back, and the update removes the browser action.
     // http://crbug.com/349371
@@ -281,7 +281,7 @@ void ExtensionActionStorageManager::ReadFromStorage(
   if (!value.get() || !value->GetAsDictionary(&dict))
     return;
 
-  SetDefaultsFromValue(dict, browser_action);
+  SetDefaultsFromValue(dict, action);
 }
 
 StateStore* ExtensionActionStorageManager::GetStateStore() {

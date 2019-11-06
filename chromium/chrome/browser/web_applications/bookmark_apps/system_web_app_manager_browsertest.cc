@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/browsertest_util.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -19,6 +20,7 @@
 #include "chrome/browser/web_applications/test/test_system_web_app_manager.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/manifest_handlers/app_theme_color_info.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chrome_unscaled_resources.h"
 #include "content/public/browser/web_contents.h"
@@ -26,8 +28,9 @@
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/test_extension_registry_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -67,21 +70,24 @@ class TestWebUIController : public content::WebUIController {
     content::WebUIDataSource* data_source =
         content::WebUIDataSource::Create("test-system-app");
     data_source->AddResourcePath("icon-256.png", IDR_PRODUCT_LOGO_256);
-    data_source->SetRequestFilter(base::BindRepeating(
-        [](const std::string& id,
-           const content::WebUIDataSource::GotDataCallback& callback) {
-          scoped_refptr<base::RefCountedString> ref_contents(
-              new base::RefCountedString);
-          if (id == "manifest.json")
-            ref_contents->data() = kSystemAppManifestText;
-          else if (id == "pwa.html")
-            ref_contents->data() = kPwaHtml;
-          else
-            return false;
+    data_source->SetRequestFilter(
+        base::BindRepeating([](const std::string& path) {
+          return path == "manifest.json" || path == "pwa.html";
+        }),
+        base::BindRepeating(
+            [](const std::string& id,
+               const content::WebUIDataSource::GotDataCallback& callback) {
+              scoped_refptr<base::RefCountedString> ref_contents(
+                  new base::RefCountedString);
+              if (id == "manifest.json")
+                ref_contents->data() = kSystemAppManifestText;
+              else if (id == "pwa.html")
+                ref_contents->data() = kPwaHtml;
+              else
+                NOTREACHED();
 
-          callback.Run(ref_contents);
-          return true;
-        }));
+              callback.Run(ref_contents);
+            }));
     content::WebUIDataSource::Add(web_ui->GetWebContents()->GetBrowserContext(),
                                   data_source);
   }
@@ -99,21 +105,21 @@ class TestWebUIControllerFactory : public content::WebUIControllerFactory {
 
   std::unique_ptr<content::WebUIController> CreateWebUIControllerForURL(
       content::WebUI* web_ui,
-      const GURL& url) const override {
+      const GURL& url) override {
     return std::make_unique<TestWebUIController>(web_ui);
   }
 
   content::WebUI::TypeID GetWebUIType(content::BrowserContext* browser_context,
-                                      const GURL& url) const override {
+                                      const GURL& url) override {
     return reinterpret_cast<content::WebUI::TypeID>(1);
   }
 
   bool UseWebUIForURL(content::BrowserContext* browser_context,
-                      const GURL& url) const override {
+                      const GURL& url) override {
     return true;
   }
   bool UseWebUIBindingsForURL(content::BrowserContext* browser_context,
-                              const GURL& url) const override {
+                              const GURL& url) override {
     return true;
   }
 
@@ -126,8 +132,7 @@ SystemWebAppManagerBrowserTest::SystemWebAppManagerBrowserTest()
       test_web_app_provider_creator_(
           base::BindOnce(&SystemWebAppManagerBrowserTest::CreateWebAppProvider,
                          base::Unretained(this))) {
-  scoped_feature_list_.InitWithFeatures(
-      {features::kDesktopPWAWindowing, features::kSystemWebApps}, {});
+  scoped_feature_list_.InitWithFeatures({features::kSystemWebApps}, {});
   content::WebUIControllerFactory::RegisterFactory(factory_.get());
 }
 
@@ -140,43 +145,54 @@ SystemWebAppManagerBrowserTest::CreateWebAppProvider(Profile* profile) {
   DCHECK(SystemWebAppManager::IsEnabled());
 
   auto provider = std::make_unique<TestWebAppProvider>(profile);
-  // Create all real subsystems but do not start them:
-  provider->Init();
 
   // Override SystemWebAppManager with TestSystemWebAppManager:
   DCHECK(!test_system_web_app_manager_);
-  auto test_system_web_app_manager = std::make_unique<TestSystemWebAppManager>(
-      profile, &provider->pending_app_manager());
+  auto test_system_web_app_manager =
+      std::make_unique<TestSystemWebAppManager>(profile);
   test_system_web_app_manager_ = test_system_web_app_manager.get();
   provider->SetSystemWebAppManager(std::move(test_system_web_app_manager));
 
-  base::flat_map<SystemAppType, GURL> system_apps;
-  system_apps[SystemAppType::SETTINGS] =
-      GURL("chrome://test-system-app/pwa.html");
+  base::flat_map<SystemAppType, SystemAppInfo> system_apps;
+  system_apps[SystemAppType::SETTINGS] = {
+      content::GetWebUIURL("test-system-app/pwa.html")};
   test_system_web_app_manager_->SetSystemApps(std::move(system_apps));
 
   // Start registry and all dependent subsystems:
-  provider->StartRegistry();
+  provider->Start();
 
   return provider;
 }
 
-Browser* SystemWebAppManagerBrowserTest::WaitForSystemAppInstallAndLaunch() {
+Browser* SystemWebAppManagerBrowserTest::WaitForSystemAppInstallAndLaunch(
+    SystemAppType system_app_type) {
   Profile* profile = browser()->profile();
 
+  // Wait for the System Web Apps to install.
+  base::RunLoop run_loop;
+  test_system_web_app_manager_->on_apps_synchronized().Post(
+      FROM_HERE, run_loop.QuitClosure());
+  run_loop.Run();
+
+  base::Optional<AppId> app_id =
+      test_system_web_app_manager_->GetAppIdForSystemApp(system_app_type);
+  DCHECK(app_id.has_value());
+
   const extensions::Extension* app =
-      extensions::TestExtensionRegistryObserver(
-          extensions::ExtensionRegistry::Get(profile))
-          .WaitForExtensionInstalled();
+      extensions::ExtensionRegistry::Get(profile)->enabled_extensions().GetByID(
+          app_id.value());
+  DCHECK(app);
 
   return extensions::browsertest_util::LaunchAppBrowser(profile, app);
 }
 
 // Test that System Apps install correctly with a manifest.
 IN_PROC_BROWSER_TEST_F(SystemWebAppManagerBrowserTest, Install) {
-  const extensions::Extension* app = WaitForSystemAppInstallAndLaunch()
-                                         ->hosted_app_controller()
-                                         ->GetExtensionForTesting();
+  const extensions::Extension* app =
+      static_cast<extensions::HostedAppBrowserController*>(
+          WaitForSystemAppInstallAndLaunch(SystemAppType::SETTINGS)
+              ->app_controller())
+          ->GetExtensionForTesting();
   EXPECT_EQ("Test System App", app->name());
   EXPECT_EQ(SkColorSetRGB(0, 0xFF, 0),
             extensions::AppThemeColorInfo::GetThemeColor(app));
@@ -185,13 +201,40 @@ IN_PROC_BROWSER_TEST_F(SystemWebAppManagerBrowserTest, Install) {
 
   // The app should be a PWA.
   EXPECT_EQ(extensions::util::GetInstalledPwaForUrl(
-                browser()->profile(), GURL("chrome://test-system-app/")),
+                browser()->profile(), content::GetWebUIURL("test-system-app/")),
             app);
-  // The app should be retrievable from the Web Apps system.
-  EXPECT_EQ(app->id(),
-            WebAppProvider::Get(browser()->profile())
-                ->system_web_app_manager()
-                .GetAppIdForSystemApp(web_app::SystemAppType::SETTINGS));
+  EXPECT_TRUE(WebAppProvider::Get(browser()->profile())
+                  ->system_web_app_manager()
+                  .IsSystemWebApp(app->id()));
+}
+
+// Check the toolbar is not shown for system web apps for pages on the chrome://
+// scheme but is shown off the chrome:// scheme.
+IN_PROC_BROWSER_TEST_F(SystemWebAppManagerBrowserTest,
+                       ToolbarVisibilityForSystemWebApp) {
+  Browser* app_browser =
+      WaitForSystemAppInstallAndLaunch(SystemAppType::SETTINGS);
+  // In scope, the toolbar should not be visible.
+  EXPECT_FALSE(app_browser->app_controller()->ShouldShowToolbar());
+
+  // Because the first part of the url is on a different origin (settings vs.
+  // foo) a toolbar would normally be shown. However, because settings is a
+  // SystemWebApp and foo is served via chrome:// it is okay not to show the
+  // toolbar.
+  GURL out_of_scope_chrome_page(content::kChromeUIScheme +
+                                std::string("://foo"));
+  content::NavigateToURLBlockUntilNavigationsComplete(
+      app_browser->tab_strip_model()->GetActiveWebContents(),
+      out_of_scope_chrome_page, 1);
+  EXPECT_FALSE(app_browser->app_controller()->ShouldShowToolbar());
+
+  // Even though the url is secure it is not being served over chrome:// so a
+  // toolbar should be shown.
+  GURL off_scheme_page("https://example.com");
+  content::NavigateToURLBlockUntilNavigationsComplete(
+      app_browser->tab_strip_model()->GetActiveWebContents(), off_scheme_page,
+      1);
+  EXPECT_TRUE(app_browser->app_controller()->ShouldShowToolbar());
 }
 
 }  // namespace web_app

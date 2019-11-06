@@ -4,6 +4,8 @@
 
 #include "content/browser/renderer_host/media/service_launched_video_capture_device.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 
@@ -33,7 +35,7 @@ ServiceLaunchedVideoCaptureDevice::~ServiceLaunchedVideoCaptureDevice() {
 }
 
 void ServiceLaunchedVideoCaptureDevice::GetPhotoState(
-    media::VideoCaptureDevice::GetPhotoStateCallback callback) const {
+    media::VideoCaptureDevice::GetPhotoStateCallback callback) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
   subscription_->GetPhotoState(base::BindOnce(
       &ServiceLaunchedVideoCaptureDevice::OnGetPhotoStateResponse,
@@ -100,7 +102,7 @@ void ServiceLaunchedVideoCaptureDevice::
   DCHECK(sequence_checker_.CalledOnValidSequence());
   source_.reset();
   subscription_.reset();
-  base::ResetAndReturn(&connection_lost_cb_).Run();
+  std::move(connection_lost_cb_).Run();
 }
 
 void ServiceLaunchedVideoCaptureDevice::OnGetPhotoStateResponse(

@@ -23,6 +23,11 @@ namespace {
 // often to an observer.
 constexpr double kDoubleTickDivisor = 2.0;
 
+// kErrorMarginIntervalPct used to determine what percentage of the time tick
+// interval should be used as a margin of error when comparing times to
+// deadlines.
+constexpr double kErrorMarginIntervalPct = 0.05;
+
 base::AtomicSequenceNumber g_next_source_id;
 
 // Generates a source_id with upper 32 bits from |restart_id| and lower 32 bits
@@ -116,18 +121,40 @@ void BeginFrameSource::SetIsGpuBusy(bool busy) {
     return;
   is_gpu_busy_ = busy;
   if (is_gpu_busy_) {
-    DCHECK(!request_notification_on_gpu_availability_);
-  } else if (request_notification_on_gpu_availability_) {
-    request_notification_on_gpu_availability_ = false;
-    OnGpuNoLongerBusy();
+    DCHECK_EQ(gpu_busy_response_state_, GpuBusyThrottlingState::kIdle);
+    return;
   }
+
+  const bool was_throttled =
+      gpu_busy_response_state_ == GpuBusyThrottlingState::kThrottled;
+  gpu_busy_response_state_ = GpuBusyThrottlingState::kIdle;
+  if (was_throttled)
+    OnGpuNoLongerBusy();
 }
 
 bool BeginFrameSource::RequestCallbackOnGpuAvailable() {
-  if (!is_gpu_busy_)
+  if (!is_gpu_busy_) {
+    DCHECK_EQ(gpu_busy_response_state_, GpuBusyThrottlingState::kIdle);
     return false;
-  request_notification_on_gpu_availability_ = true;
-  return true;
+  }
+
+  switch (gpu_busy_response_state_) {
+    case GpuBusyThrottlingState::kIdle:
+      if (allow_one_begin_frame_after_gpu_busy_) {
+        gpu_busy_response_state_ =
+            GpuBusyThrottlingState::kOneBeginFrameAfterBusySent;
+        return false;
+      }
+      FALLTHROUGH;
+    case GpuBusyThrottlingState::kOneBeginFrameAfterBusySent:
+      gpu_busy_response_state_ = GpuBusyThrottlingState::kThrottled;
+      return true;
+    case GpuBusyThrottlingState::kThrottled:
+      return true;
+  }
+
+  NOTREACHED();
+  return false;
 }
 
 void BeginFrameSource::AsValueInto(
@@ -155,8 +182,7 @@ BackToBackBeginFrameSource::BackToBackBeginFrameSource(
     std::unique_ptr<DelayBasedTimeSource> time_source)
     : SyntheticBeginFrameSource(kNotRestartableId),
       time_source_(std::move(time_source)),
-      next_sequence_number_(BeginFrameArgs::kStartingFrameNumber),
-      weak_factory_(this) {
+      next_sequence_number_(BeginFrameArgs::kStartingFrameNumber) {
   time_source_->SetClient(this);
   // The time_source_ ticks immediately, so we SetActive(true) for a single
   // tick when we need it, and keep it as SetActive(false) otherwise.
@@ -167,7 +193,7 @@ BackToBackBeginFrameSource::~BackToBackBeginFrameSource() = default;
 
 void BackToBackBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
   DCHECK(obs);
-  DCHECK(!base::ContainsKey(observers_, obs));
+  DCHECK(!base::Contains(observers_, obs));
   observers_.insert(obs);
   pending_begin_frame_observers_.insert(obs);
   obs->OnBeginFrameSourcePausedChanged(false);
@@ -176,7 +202,7 @@ void BackToBackBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
 
 void BackToBackBeginFrameSource::RemoveObserver(BeginFrameObserver* obs) {
   DCHECK(obs);
-  DCHECK(base::ContainsKey(observers_, obs));
+  DCHECK(base::Contains(observers_, obs));
   observers_.erase(obs);
   pending_begin_frame_observers_.erase(obs);
   if (pending_begin_frame_observers_.empty())
@@ -184,7 +210,7 @@ void BackToBackBeginFrameSource::RemoveObserver(BeginFrameObserver* obs) {
 }
 
 void BackToBackBeginFrameSource::DidFinishFrame(BeginFrameObserver* obs) {
-  if (base::ContainsKey(observers_, obs)) {
+  if (base::Contains(observers_, obs)) {
     pending_begin_frame_observers_.insert(obs);
     time_source_->SetActive(true);
   }
@@ -244,16 +270,35 @@ void DelayBasedBeginFrameSource::OnUpdateVSyncParameters(
 
 BeginFrameArgs DelayBasedBeginFrameSource::CreateBeginFrameArgs(
     base::TimeTicks frame_time) {
-  uint64_t sequence_number = next_sequence_number_++;
+  base::TimeDelta interval = time_source_->Interval();
+  uint64_t sequence_number = next_sequence_number_;
+
+  base::TimeDelta error_margin = interval * kErrorMarginIntervalPct;
+
+  // We expect |sequence_number| to be the number for the frame at
+  // |expected_frame_time|. We adjust this sequence number according to the
+  // actual frame time in case it is later than expected.
+  if (next_expected_frame_time_ != base::TimeTicks()) {
+    // Add |error_margin| to round |frame_time| up to the next tick if it is
+    // close to the end of an interval. This happens when a timebase is a bit
+    // off because of an imperfect presentation timestamp that may be a bit
+    // later than the beginning of the next interval.
+    int ticks_since_estimated_frame_time =
+        (frame_time + error_margin - next_expected_frame_time_) / interval;
+    sequence_number += std::max(0, ticks_since_estimated_frame_time);
+  }
+
+  next_expected_frame_time_ = time_source_->NextTickTime();
+  next_sequence_number_ = sequence_number + 1;
+
   return BeginFrameArgs::Create(
       BEGINFRAME_FROM_HERE, source_id(), sequence_number, frame_time,
-      time_source_->NextTickTime(), time_source_->Interval(),
-      BeginFrameArgs::NORMAL);
+      time_source_->NextTickTime(), interval, BeginFrameArgs::NORMAL);
 }
 
 void DelayBasedBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
   DCHECK(obs);
-  DCHECK(!base::ContainsKey(observers_, obs));
+  DCHECK(!base::Contains(observers_, obs));
 
   observers_.insert(obs);
   obs->OnBeginFrameSourcePausedChanged(false);
@@ -280,7 +325,7 @@ void DelayBasedBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
 
 void DelayBasedBeginFrameSource::RemoveObserver(BeginFrameObserver* obs) {
   DCHECK(obs);
-  DCHECK(base::ContainsKey(observers_, obs));
+  DCHECK(base::Contains(observers_, obs));
 
   observers_.erase(obs);
   if (observers_.empty())
@@ -299,6 +344,10 @@ void DelayBasedBeginFrameSource::OnTimerTick() {
   if (RequestCallbackOnGpuAvailable())
     return;
   last_begin_frame_args_ = CreateBeginFrameArgs(time_source_->LastTickTime());
+  TRACE_EVENT2(
+      "viz", "DelayBasedBeginFrameSource::OnTimerTick", "frame_time",
+      last_begin_frame_args_.frame_time.since_origin().InMicroseconds(),
+      "interval", last_begin_frame_args_.interval.InMicroseconds());
   base::flat_set<BeginFrameObserver*> observers(observers_);
   for (auto* obs : observers)
     IssueBeginFrameToObserver(obs, last_begin_frame_args_);
@@ -347,7 +396,7 @@ void ExternalBeginFrameSource::AsValueInto(
 
 void ExternalBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
   DCHECK(obs);
-  DCHECK(!base::ContainsKey(observers_, obs));
+  DCHECK(!base::Contains(observers_, obs));
 
   bool observers_was_empty = observers_.empty();
   observers_.insert(obs);
@@ -365,7 +414,7 @@ void ExternalBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
 
 void ExternalBeginFrameSource::RemoveObserver(BeginFrameObserver* obs) {
   DCHECK(obs);
-  DCHECK(base::ContainsKey(observers_, obs));
+  DCHECK(base::Contains(observers_, obs));
 
   observers_.erase(obs);
   if (observers_.empty())
@@ -403,6 +452,11 @@ void ExternalBeginFrameSource::OnBeginFrame(const BeginFrameArgs& args) {
     pending_begin_frame_args_ = args;
     return;
   }
+
+  TRACE_EVENT2(
+      "viz", "ExternalBeginFrameSource::OnBeginFrame", "frame_time",
+      last_begin_frame_args_.frame_time.since_origin().InMicroseconds(),
+      "interval", last_begin_frame_args_.interval.InMicroseconds());
 
   last_begin_frame_args_ = args;
   base::flat_set<BeginFrameObserver*> observers(observers_);

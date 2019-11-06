@@ -239,10 +239,6 @@ const base::ListValue* EasyUnlockServiceSignin::GetRemoteDevices() const {
   return &data->remote_devices_value;
 }
 
-void EasyUnlockServiceSignin::SetRemoteDevices(const base::ListValue& devices) {
-  NOTREACHED();
-}
-
 std::string EasyUnlockServiceSignin::GetChallenge() const {
   const UserData* data = FindLoadedDataForCurrentUser();
   if (!data)
@@ -324,6 +320,10 @@ void EasyUnlockServiceSignin::ShutdownInternal() {
   if (!service_active_)
     return;
   service_active_ = false;
+
+  remote_device_cache_.reset();
+  challenge_wrapper_.reset();
+  pref_manager_.reset();
 
   weak_ptr_factory_.InvalidateWeakPtrs();
   proximity_auth::ScreenlockBridge::Get()->RemoveObserver(this);
@@ -411,6 +411,8 @@ void EasyUnlockServiceSignin::OnScreenDidUnlock(
           ? SmartLockMetricsRecorder::SmartLockAuthMethodChoice::kSmartLock
           : SmartLockMetricsRecorder::SmartLockAuthMethodChoice::kOther);
 
+  // TODO(crbug.com/972156): A KeyedService shutting itself seems dangerous;
+  // look into other ways to "reset state" besides this.
   Shutdown();
 }
 
@@ -542,7 +544,8 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
     }
 
     multidevice::RemoteDevice remote_device(
-        account_id.GetUserEmail(), std::string() /* name */, decoded_public_key,
+        account_id.GetUserEmail(), std::string() /* name */,
+        std::string() /* pii_free_name */, decoded_public_key,
         decoded_psk /* persistent_symmetric_key */,
         0L /* last_update_time_millis */, software_features, beacon_seeds);
 
@@ -580,8 +583,8 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
   std::string local_device_id;
 
   for (const auto& remote_device : remote_devices) {
-    if (base::ContainsKey(remote_device.software_features,
-                          multidevice::SoftwareFeature::kSmartLockHost) &&
+    if (base::Contains(remote_device.software_features,
+                       multidevice::SoftwareFeature::kSmartLockHost) &&
         remote_device.software_features.at(
             multidevice::SoftwareFeature::kSmartLockHost) ==
             multidevice::SoftwareFeatureState::kEnabled) {

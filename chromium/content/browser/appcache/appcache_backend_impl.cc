@@ -27,42 +27,16 @@ AppCacheBackendImpl::AppCacheBackendImpl(AppCacheServiceImpl* service,
 }
 
 AppCacheBackendImpl::~AppCacheBackendImpl() {
-  hosts_.clear();
   service_->UnregisterBackend(this);
 }
 
 void AppCacheBackendImpl::RegisterHost(
-    blink::mojom::AppCacheHostRequest host_request,
-    blink::mojom::AppCacheFrontendPtr frontend,
-    int32_t id,
-    int32_t render_frame_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (GetHost(id)) {
-    mojo::ReportBadMessage("ACDH_REGISTER");
-    return;
-  }
-
-  // The AppCacheHost could have been precreated in which case we want to
-  // register it with the backend here.
-  std::unique_ptr<AppCacheHost> host =
-      AppCacheNavigationHandleCore::GetPrecreatedHost(id);
-  if (host) {
-    // Switch the frontend proxy so that the host can make IPC calls from
-    // here on.
-    host->set_frontend(std::move(frontend), render_frame_id);
-  } else {
-    host = std::make_unique<AppCacheHost>(id, process_id(), render_frame_id,
-                                          std::move(frontend), service_);
-  }
-
-  host->BindRequest(std::move(host_request));
-  hosts_.emplace(std::piecewise_construct, std::forward_as_tuple(id),
-                 std::forward_as_tuple(std::move(host)));
-}
-
-void AppCacheBackendImpl::UnregisterHost(int32_t id) {
-  if (!hosts_.erase(id))
-    mojo::ReportBadMessage("ACDH_UNREGISTER");
+    mojo::PendingReceiver<blink::mojom::AppCacheHost> host_receiver,
+    mojo::PendingRemote<blink::mojom::AppCacheFrontend> frontend_remote,
+    const base::UnguessableToken& host_id) {
+  service_->RegisterHostInternal(
+      std::move(host_receiver), std::move(frontend_remote), host_id,
+      MSG_ROUTING_NONE, process_id_, mojo::GetBadMessageCallback());
 }
 
 }  // namespace content

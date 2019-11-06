@@ -12,18 +12,3 @@ const int VivaldiTabCheck::kVivaldiTabObserverContextKey = 0;
 bool VivaldiTabCheck::IsVivaldiTab(content::WebContents* web_contents) {
   return web_contents->GetUserData(&kVivaldiTabObserverContextKey);
 }
-
-// static
-bool VivaldiTabCheck::IsVivaldiTabFrame(
-    content::RenderWidgetHostViewChildFrame* child_frame) {
-  if (content::RenderWidgetHostImpl* host = child_frame->host()) {
-    if (content::RenderWidgetHostDelegate* delegate = host->delegate()) {
-      content::WebContents* web_contents = delegate->GetAsWebContents();
-      DCHECK(web_contents);
-      if (web_contents) {
-        return IsVivaldiTab(web_contents);
-      }
-    }
-  }
-  return false;
-}

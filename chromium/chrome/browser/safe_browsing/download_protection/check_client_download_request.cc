@@ -4,6 +4,7 @@
 
 #include "chrome/browser/safe_browsing/download_protection/check_client_download_request.h"
 
+#include <algorithm>
 #include <memory>
 
 #include "base/bind.h"
@@ -24,9 +25,10 @@
 #include "chrome/common/safe_browsing/archive_analyzer_results.h"
 #include "chrome/common/safe_browsing/download_type_util.h"
 #include "chrome/common/safe_browsing/file_type_policies.h"
-#include "components/data_use_measurement/core/data_use_user_data.h"
+#include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/utils.h"
 #include "components/safe_browsing/features.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "components/safe_browsing/web_ui/safe_browsing_ui.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -37,38 +39,18 @@
 #include "net/http/http_status_code.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "url/url_constants.h"
 
 namespace safe_browsing {
 
 namespace {
 
 const char kDownloadExtensionUmaName[] = "SBClientDownload.DownloadExtensions";
-const char kUnsupportedSchemeUmaPrefix[] = "SBClientDownload.UnsupportedScheme";
 
 void RecordFileExtensionType(const std::string& metric_name,
                              const base::FilePath& file) {
   base::UmaHistogramSparse(
       metric_name, FileTypePolicies::GetInstance()->UmaValueForFile(file));
-}
-
-std::string GetUnsupportedSchemeName(const GURL& download_url) {
-  if (download_url.SchemeIs(url::kContentScheme))
-    return "ContentScheme";
-  if (download_url.SchemeIs(url::kContentIDScheme))
-    return "ContentIdScheme";
-  if (download_url.SchemeIsFile())
-    return download_url.has_host() ? "RemoteFileScheme" : "LocalFileScheme";
-  if (download_url.SchemeIsFileSystem())
-    return "FileSystemScheme";
-  if (download_url.SchemeIs(url::kFtpScheme))
-    return "FtpScheme";
-  if (download_url.SchemeIs(url::kGopherScheme))
-    return "GopherScheme";
-  if (download_url.SchemeIs(url::kJavaScriptScheme))
-    return "JavaScriptScheme";
-  if (download_url.SchemeIsWSOrWSS())
-    return "WSOrWSSScheme";
-  return "OtherUnsupportedScheme";
 }
 
 bool CheckUrlAgainstWhitelist(
@@ -177,7 +159,7 @@ CheckClientDownloadRequest::CheckClientDownloadRequest(
       is_extended_reporting_(false),
       is_incognito_(false),
       is_under_advanced_protection_(false),
-      weakptr_factory_(this) {
+      requests_ap_verdicts_(false) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   item_->AddObserver(this);
 }
@@ -209,6 +191,10 @@ void CheckClientDownloadRequest::Start() {
     is_under_advanced_protection_ =
         profile &&
         AdvancedProtectionStatusManager::IsUnderAdvancedProtection(profile);
+    requests_ap_verdicts_ =
+        profile &&
+        AdvancedProtectionStatusManager::RequestsAdvancedProtectionVerdicts(
+            profile);
   }
 
   // If whitelist check passes, FinishRequest() will be called to avoid
@@ -389,11 +375,6 @@ void CheckClientDownloadRequest::AnalyzeFile() {
         FinishRequest(DownloadCheckResult::UNKNOWN, reason);
         return;
       case REASON_UNSUPPORTED_URL_SCHEME:
-        RecordFileExtensionType(
-            base::StringPrintf(
-                "%s.%s", kUnsupportedSchemeUmaPrefix,
-                GetUnsupportedSchemeName(item_->GetUrlChain().back()).c_str()),
-            item_->GetTargetFilePath());
         FinishRequest(DownloadCheckResult::UNKNOWN, reason);
         return;
       case REASON_NOT_BINARY_FILE:
@@ -432,6 +413,26 @@ void CheckClientDownloadRequest::OnFileFeatureExtractionDone(
       results.archive_is_valid == FileAnalyzer::ArchiveValid::VALID) {
     FinishRequest(DownloadCheckResult::UNKNOWN,
                   REASON_ARCHIVE_WITHOUT_BINARIES);
+    return;
+  }
+
+  content::BrowserContext* browser_context =
+      content::DownloadItemUtils::GetBrowserContext(item_);
+  bool password_protected_allowed = true;
+  if (browser_context) {
+    Profile* profile = Profile::FromBrowserContext(browser_context);
+    password_protected_allowed =
+        profile->GetPrefs()->GetBoolean(prefs::kPasswordProtectedAllowed);
+  }
+
+  if (!password_protected_allowed &&
+      std::any_of(results.archived_binaries.begin(),
+                  results.archived_binaries.end(),
+                  [](const ClientDownloadRequest::ArchivedBinary& binary) {
+                    return binary.is_encrypted();
+                  })) {
+    FinishRequest(DownloadCheckResult::BLOCKED_PASSWORD_PROTECTED,
+                  REASON_BLOCKED_PASSWORD_PROTECTED);
     return;
   }
 
@@ -549,20 +550,20 @@ void CheckClientDownloadRequest::GetTabRedirects() {
 
   history->QueryRedirectsTo(
       tab_url_,
-      base::Bind(&CheckClientDownloadRequest::OnGotTabRedirects,
-                 weakptr_factory_.GetWeakPtr(), tab_url_),
+      base::BindOnce(&CheckClientDownloadRequest::OnGotTabRedirects,
+                     weakptr_factory_.GetWeakPtr(), tab_url_),
       &request_tracker_);
 }
 
 void CheckClientDownloadRequest::OnGotTabRedirects(
     const GURL& url,
-    const history::RedirectList* redirect_list) {
+    history::RedirectList redirect_list) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(url, tab_url_);
 
-  if (!redirect_list->empty()) {
-    tab_redirects_.insert(tab_redirects_.end(), redirect_list->rbegin(),
-                          redirect_list->rend());
+  if (!redirect_list.empty()) {
+    tab_redirects_.insert(tab_redirects_.end(), redirect_list.rbegin(),
+                          redirect_list.rend());
   }
 
   SendRequest();
@@ -610,6 +611,7 @@ void CheckClientDownloadRequest::SendRequest() {
           g_browser_process->browser_policy_connector()));
   request->mutable_population()->set_is_under_advanced_protection(
       is_under_advanced_protection_);
+  request->mutable_population()->set_is_incognito(is_incognito_);
 
   request->set_url(SanitizeUrl(item_->GetUrlChain().back()));
   request->mutable_digests()->set_sha256(item_->GetHash());
@@ -704,8 +706,7 @@ void CheckClientDownloadRequest::SendRequest() {
     request->mutable_archived_binary()->Swap(&archived_binaries_);
   request->set_archive_file_count(file_count_);
   request->set_archive_directory_count(directory_count_);
-  request->set_request_ap_verdicts(
-      base::FeatureList::IsEnabled(kUseAPDownloadProtection));
+  request->set_request_ap_verdicts(requests_ap_verdicts_);
 
   if (!request->SerializeToString(&client_download_request_data_)) {
     FinishRequest(DownloadCheckResult::UNKNOWN, REASON_INVALID_REQUEST_PROTO);

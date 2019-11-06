@@ -30,7 +30,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/push_messaging_status.mojom.h"
+#include "third_party/blink/public/mojom/push_messaging/push_messaging_status.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_object.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_provider_type.mojom.h"
 #include "url/gurl.h"
@@ -153,8 +153,7 @@ ServiceWorkerHandler::ServiceWorkerHandler()
     : DevToolsDomainHandler(ServiceWorker::Metainfo::domainName),
       enabled_(false),
       browser_context_(nullptr),
-      storage_partition_(nullptr),
-      weak_factory_(this) {}
+      storage_partition_(nullptr) {}
 
 ServiceWorkerHandler::~ServiceWorkerHandler() {
 }
@@ -318,8 +317,9 @@ Response ServiceWorkerHandler::DeliverPushMessage(
   if (data.size() > 0)
     payload = data;
   BrowserContext::DeliverPushMessage(
-      browser_context_, GURL(origin), id, std::move(payload),
-      base::BindRepeating([](mojom::PushDeliveryStatus status) {}));
+      browser_context_, GURL(origin), id, /* push_message_id= */ std::string(),
+      std::move(payload),
+      base::BindRepeating([](blink::mojom::PushDeliveryStatus status) {}));
 
   return Response::OK();
 }
@@ -360,16 +360,16 @@ void ServiceWorkerHandler::OpenNewDevToolsWindow(int process_id,
 void ServiceWorkerHandler::OnWorkerRegistrationUpdated(
     const std::vector<ServiceWorkerRegistrationInfo>& registrations) {
   using Registration = ServiceWorker::ServiceWorkerRegistration;
-  std::unique_ptr<protocol::Array<Registration>> result =
-      protocol::Array<Registration>::create();
+  auto result = std::make_unique<protocol::Array<Registration>>();
   for (const auto& registration : registrations) {
-    result->addItem(Registration::Create()
-                        .SetRegistrationId(
-                            base::NumberToString(registration.registration_id))
-                        .SetScopeURL(registration.scope.spec())
-                        .SetIsDeleted(registration.delete_flag ==
-                                      ServiceWorkerRegistrationInfo::IS_DELETED)
-                        .Build());
+    result->emplace_back(
+        Registration::Create()
+            .SetRegistrationId(
+                base::NumberToString(registration.registration_id))
+            .SetScopeURL(registration.scope.spec())
+            .SetIsDeleted(registration.delete_flag ==
+                          ServiceWorkerRegistrationInfo::IS_DELETED)
+            .Build());
   }
   frontend_->WorkerRegistrationUpdated(std::move(result));
 }
@@ -377,8 +377,7 @@ void ServiceWorkerHandler::OnWorkerRegistrationUpdated(
 void ServiceWorkerHandler::OnWorkerVersionUpdated(
     const std::vector<ServiceWorkerVersionInfo>& versions) {
   using Version = ServiceWorker::ServiceWorkerVersion;
-  std::unique_ptr<protocol::Array<Version>> result =
-      protocol::Array<Version>::create();
+  auto result = std::make_unique<protocol::Array<Version>>();
   for (const auto& version : versions) {
     base::flat_set<std::string> client_set;
 
@@ -400,10 +399,9 @@ void ServiceWorkerHandler::OnWorkerVersionUpdated(
             DevToolsAgentHost::GetOrCreateFor(web_contents)->GetId());
       }
     }
-    std::unique_ptr<protocol::Array<std::string>> clients =
-        protocol::Array<std::string>::create();
-    for (auto& c : client_set)
-      clients->addItem(c);
+    auto clients = std::make_unique<protocol::Array<std::string>>();
+    for (std::string& client : client_set)
+      clients->emplace_back(std::move(client));
 
     std::unique_ptr<Version> version_value =
         Version::Create()
@@ -424,7 +422,7 @@ void ServiceWorkerHandler::OnWorkerVersionUpdated(
                 version.devtools_agent_route_id));
     if (host)
       version_value->SetTargetId(host->GetId());
-    result->addItem(std::move(version_value));
+    result->emplace_back(std::move(version_value));
   }
   frontend_->WorkerVersionUpdated(std::move(result));
 }

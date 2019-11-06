@@ -30,13 +30,12 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/display/display.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/geometry/rect.h"
@@ -330,30 +329,14 @@ class TopControlsSlideControllerTest : public InProcessBrowserTest {
     const int top_container_bottom = top_container_bounds.bottom();
     const gfx::Rect& contents_container_bounds =
         browser_view->contents_container()->bounds();
-    // The top of the contents depends on whether there is a detached bookmark
-    // bar as in the NTP page.
-    int detached_bookmark_bar_height = 0;
-    if (browser_view->bookmark_bar() &&
-        browser_view->bookmark_bar()->IsDetached()) {
-      // The detached bookmark bar appears to be part of the contents. It starts
-      // right after the top container, and the contents container starts right
-      // after it.
-      const gfx::Rect& bookmark_bar_bounds =
-          browser_view->bookmark_bar()->bounds();
-      detached_bookmark_bar_height = bookmark_bar_bounds.height();
-      EXPECT_EQ(top_container_bottom, bookmark_bar_bounds.y());
-      EXPECT_EQ(bookmark_bar_bounds.bottom(), contents_container_bounds.y());
-    } else {
-      EXPECT_EQ(top_container_bottom, contents_container_bounds.y());
-    }
+    EXPECT_EQ(top_container_bottom, contents_container_bounds.y());
 
     if (shown_state == TopChromeShownState::kFullyHidden) {
       // Top container is shifted up.
       EXPECT_EQ(top_container_bounds.y(), -top_controls_height);
 
-      // Contents should occupy the entire height of the browser view, minus
-      // the height of a detached bookmark bar if any.
-      EXPECT_EQ(browser_view->height() - detached_bookmark_bar_height,
+      // Contents should occupy the entire height of the browser view.
+      EXPECT_EQ(browser_view->height(),
                 browser_view->contents_container()->height());
 
       // Widget should not allow things to show outside its bounds.
@@ -367,9 +350,8 @@ class TopControlsSlideControllerTest : public InProcessBrowserTest {
       EXPECT_EQ(top_container_bounds.y(), 0);
 
       // Contents should occupy the remainder of the browser view after the top
-      // container and the detached bookmark bar if any.
-      EXPECT_EQ(browser_view->height() - top_controls_height -
-                    detached_bookmark_bar_height,
+      // container.
+      EXPECT_EQ(browser_view->height() - top_controls_height,
                 browser_view->contents_container()->height());
 
       EXPECT_FALSE(browser_view->frame()->GetLayer()->GetMasksToBounds());
@@ -811,9 +793,8 @@ IN_PROC_BROWSER_TEST_F(TopControlsSlideControllerTest, DisplayRotation) {
   };
 
   ash::mojom::CrosDisplayConfigControllerPtr cros_display_config;
-  content::ServiceManagerConnection::GetForProcess()
-      ->GetConnector()
-      ->BindInterface(ash::mojom::kServiceName, &cros_display_config);
+  content::GetSystemConnector()->BindInterface(ash::mojom::kServiceName,
+                                               &cros_display_config);
   ash::mojom::CrosDisplayConfigControllerAsyncWaiter waiter_for(
       cros_display_config.get());
   std::vector<ash::mojom::DisplayUnitInfoPtr> info_list;
@@ -826,6 +807,7 @@ IN_PROC_BROWSER_TEST_F(TopControlsSlideControllerTest, DisplayRotation) {
       config_properties->rotation = ash::mojom::DisplayRotation::New(rotation);
       ash::mojom::DisplayConfigResult result;
       waiter_for.SetDisplayProperties(display_id, std::move(config_properties),
+                                      ash::mojom::DisplayConfigSource::kUser,
                                       &result);
       EXPECT_EQ(result, ash::mojom::DisplayConfigResult::kSuccess);
 
@@ -907,11 +889,8 @@ IN_PROC_BROWSER_TEST_F(TopControlsSlideControllerTest, TestDropDowns) {
   OpenUrlAtIndex(embedded_test_server()->GetURL("/top_controls_scroll.html"),
                  0);
 
-  // On mash, use nullptr root windows to route events over mojo to ash.
   aura::Window* browser_window = browser()->window()->GetNativeWindow();
-  ui::test::EventGenerator event_generator(
-      features::IsUsingWindowService() ? nullptr
-                                       : browser_window->GetRootWindow());
+  ui::test::EventGenerator event_generator(browser_window->GetRootWindow());
 
   // Send a mouse click event that should open the popup drop-down menu of the
   // <select> html element on the page.
@@ -1129,7 +1108,9 @@ IN_PROC_BROWSER_TEST_F(TopControlsSlideControllerTest,
   }
 }
 
-IN_PROC_BROWSER_TEST_F(TopControlsSlideControllerTest, TestPermissionBubble) {
+// Disabled due to flakiness: https://crbug.com/983791.
+IN_PROC_BROWSER_TEST_F(TopControlsSlideControllerTest,
+                       DISABLED_TestPermissionBubble) {
   ToggleTabletMode();
   ASSERT_TRUE(GetTabletModeEnabled());
   EXPECT_TRUE(top_controls_slide_controller()->IsEnabled());

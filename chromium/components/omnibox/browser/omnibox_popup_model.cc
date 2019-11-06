@@ -37,8 +37,7 @@ OmniboxPopupModel::OmniboxPopupModel(OmniboxPopupView* popup_view,
       edit_model_(edit_model),
       selected_line_(kNoMatch),
       selected_line_state_(NORMAL),
-      has_selected_match_(false),
-      weak_factory_(this) {
+      has_selected_match_(false) {
   edit_model->set_popup_model(this);
 }
 
@@ -169,15 +168,11 @@ void OmniboxPopupModel::ResetToDefaultMatch() {
   view_->OnDragCanceled();
 }
 
-void OmniboxPopupModel::Move(int count) {
-  const AutocompleteResult& result = this->result();
-  if (result.empty())
+void OmniboxPopupModel::MoveTo(size_t new_line) {
+  if (result().empty())
     return;
 
-  // Clamp the new line to [0, result_.count() - 1].
-  const size_t new_line = selected_line_ + count;
-  SetSelectedLine(((count < 0) && (new_line >= selected_line_)) ? 0 : new_line,
-                  false, false);
+  SetSelectedLine(new_line, false, false);
 }
 
 void OmniboxPopupModel::SetSelectedLineState(LineState state) {
@@ -212,19 +207,20 @@ void OmniboxPopupModel::SetSelectedLineState(LineState state) {
   }
 }
 
-void OmniboxPopupModel::TryDeletingCurrentItem() {
-  // We could use GetInfoForCurrentText() here, but it seems better to try
-  // and shift-delete the actual selection, rather than any "in progress, not
-  // yet visible" one.
-  if (selected_line_ == kNoMatch)
+void OmniboxPopupModel::TryDeletingLine(size_t line) {
+  // When called with line == selected_line(), we could use
+  // GetInfoForCurrentText() here, but it seems better to try and delete the
+  // actual selection, rather than any "in progress, not yet visible" one.
+  if (line == kNoMatch)
     return;
 
   // Cancel the query so the matches don't change on the user.
   autocomplete_controller()->Stop(false);
 
-  const AutocompleteMatch& match = result().match_at(selected_line_);
+  const AutocompleteMatch& match = result().match_at(line);
   if (match.SupportsDeletion()) {
-    const size_t selected_line = selected_line_;
+    // Try to preserve the selection even after match deletion.
+    const size_t old_selected_line = selected_line_;
     const bool was_temporary_text = has_selected_match_;
 
     // This will synchronously notify both the edit and us that the results
@@ -232,14 +228,14 @@ void OmniboxPopupModel::TryDeletingCurrentItem() {
     autocomplete_controller()->DeleteMatch(match);
     const AutocompleteResult& result = this->result();
     if (!result.empty() &&
-        (was_temporary_text || selected_line != selected_line_)) {
+        (was_temporary_text || old_selected_line != selected_line_)) {
       // Move the selection to the next choice after the deleted one.
       // SetSelectedLine() will clamp to take care of the case where we deleted
       // the last item.
       // TODO(pkasting): Eventually the controller should take care of this
       // before notifying us, reducing flicker.  At that point the check for
       // deletability can move there too.
-      SetSelectedLine(selected_line, false, true);
+      SetSelectedLine(old_selected_line, false, true);
     }
   }
 }
@@ -308,7 +304,8 @@ gfx::Image OmniboxPopupModel::GetMatchIcon(const AutocompleteMatch& match,
   // Get the favicon for navigational suggestions.
   if (base::FeatureList::IsEnabled(
           omnibox::kUIExperimentShowSuggestionFavicons) &&
-      !AutocompleteMatch::IsSearchType(match.type)) {
+      !AutocompleteMatch::IsSearchType(match.type) &&
+      match.type != AutocompleteMatchType::DOCUMENT_SUGGESTION) {
     // Because the Views UI code calls GetMatchIcon in both the layout and
     // painting code, we may generate multiple OnFaviconFetched callbacks,
     // all run one after another. This seems to be harmless as the callback

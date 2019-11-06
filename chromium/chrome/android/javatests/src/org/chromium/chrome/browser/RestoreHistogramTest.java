@@ -7,13 +7,10 @@ package org.chromium.chrome.browser;
 import android.support.test.filters.SmallTest;
 
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ContextUtils;
-import org.chromium.base.PathUtils;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
@@ -31,19 +28,6 @@ import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 public class RestoreHistogramTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
-
-    private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "chrome";
-
-    @Before
-    public void setUp() throws Exception {
-        // TODO(aberent): Find the correct place to put this.  Calling ensureInitialized() on the
-        //                current pathway fails to set this variable with the modern linker.
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
-    }
-
-    private void clearPrefs() {
-        ContextUtils.getAppSharedPreferences().edit().clear().apply();
-    }
 
     /**
      * Test that the fundamental method for writing the histogram
@@ -70,7 +54,6 @@ public class RestoreHistogramTest {
                         ChromeBackupAgent.RestoreStatus.RESTORE_STATUS_RECORDED);
 
         // Check behavior with no preference set
-        clearPrefs();
         ChromeBackupAgent.recordRestoreHistogram();
         Assert.assertEquals(1, noRestoreDelta.getDelta());
         Assert.assertEquals(0, restoreCompletedDelta.getDelta());

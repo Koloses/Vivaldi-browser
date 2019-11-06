@@ -10,7 +10,7 @@
 #include "third_party/blink/renderer/platform/heap/process_heap.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
@@ -109,6 +109,8 @@ struct PersistentNodeSlots final {
 template <ThreadAffinity affinity,
           WeaknessPersistentConfiguration weakness_configuration>
 class PersistentNodePtr {
+  STACK_ALLOCATED();
+
  public:
   PersistentNode* Get() const { return ptr_; }
   bool IsInitialized() const { return ptr_; }
@@ -128,6 +130,8 @@ class PersistentNodePtr {
 // but can be polled to see whether it is initialized without the mutex.
 template <WeaknessPersistentConfiguration weakness_configuration>
 class CrossThreadPersistentNodePtr {
+  STACK_ALLOCATED();
+
  public:
   PersistentNode* Get() const {
 #if DCHECK_IS_ON()

@@ -23,7 +23,6 @@
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/metrics/chrome_metrics_service_client.h"
 #include "chrome/browser/metrics/chrome_metrics_services_manager_client.h"
-#include "chrome/browser/metrics/persistent_histograms.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
@@ -33,6 +32,7 @@
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_reporting_default_state.h"
 #include "components/metrics/metrics_switches.h"
+#include "components/metrics/persistent_histograms.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/test/browser_test_utils.h"
@@ -163,7 +163,9 @@ IN_PROC_BROWSER_TEST_F(MetricsServiceBrowserTest, CloseRenderersNormally) {
 // Flaky on Linux. See http://crbug.com/131094
 // Child crashes fail the process on ASan (see crbug.com/411251,
 // crbug.com/368525).
-#if defined(OS_LINUX) || defined(ADDRESS_SANITIZER)
+// Flaky timeouts on Win7 Tests (dbg)(1); see https://crbug.com/985255.
+#if defined(OS_LINUX) || defined(ADDRESS_SANITIZER) || \
+    (defined(OS_WIN) && !defined(NDEBUG))
 #define MAYBE_CrashRenderers DISABLED_CrashRenderers
 #define MAYBE_CheckCrashRenderers DISABLED_CheckCrashRenderers
 #else

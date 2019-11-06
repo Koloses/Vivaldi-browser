@@ -9,10 +9,10 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/hash/sha1.h"
 #include "base/i18n/timezone.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/sha1.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -26,12 +26,13 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/consent_auditor/consent_auditor.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
 #include "extensions/browser/extension_registry.h"
-#include "services/identity/public/cpp/identity_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/chromeos/devicetype_utils.h"
@@ -128,7 +129,7 @@ void RequestOpenApp(Profile* profile) {
   DCHECK(extensions::util::IsAppLaunchable(arc::kPlayStoreAppId, profile));
   OpenApplication(CreateAppLaunchParamsUserContainer(
       profile, extension, WindowOpenDisposition::NEW_WINDOW,
-      extensions::SOURCE_CHROME_INTERNAL));
+      extensions::AppLaunchSource::kSourceChromeInternal));
 }
 
 std::ostream& operator<<(std::ostream& os, ArcSupportHost::UIPage ui_page) {
@@ -739,7 +740,7 @@ void ArcSupportHost::OnMessage(const base::DictionaryValue& message) {
     DCHECK(error_delegate_);
     error_delegate_->OnSendFeedbackClicked();
   } else if (event == kEventOnOpenPrivacySettingsPageClicked) {
-    chrome::ShowSettingsSubPageForProfile(profile_, "privacy");
+    chrome::ShowSettingsSubPageForProfile(profile_, chrome::kPrivacySubPage);
   } else {
     LOG(ERROR) << "Unknown message: " << event;
     NOTREACHED();

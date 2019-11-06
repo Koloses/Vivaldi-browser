@@ -34,10 +34,6 @@
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-#include "mojo/core/embedder/default_mach_broker.h"
-#endif
-
 #if !defined(OS_FUCHSIA)
 #include "mojo/public/cpp/platform/named_platform_channel.h"
 #endif
@@ -123,7 +119,10 @@ ScopedMessagePipeHandle MultiprocessTestHelper::StartChildWithExtraSwitch(
 #if !defined(OS_FUCHSIA)
     case LaunchType::NAMED_CHILD:
     case LaunchType::NAMED_PEER: {
-#if defined(OS_POSIX)
+#if defined(OS_MACOSX)
+      server_name = NamedPlatformChannel::ServerNameFromUTF8(
+          "mojo.test." + base::NumberToString(base::RandUint64()));
+#elif defined(OS_POSIX)
       base::FilePath temp_dir;
       CHECK(base::PathService::Get(base::DIR_TEMP, &temp_dir));
       server_name =
@@ -202,25 +201,8 @@ ScopedMessagePipeHandle MultiprocessTestHelper::StartChildWithExtraSwitch(
       break;
   }
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  // This lock needs to be held while launching the child because the Mach port
-  // broker only allows task ports to be received from known child processes.
-  // However, it can only know the child process's pid after the child has
-  // launched. To prevent a race where the child process sends its task port
-  // before the pid has been registered, the lock needs to be held over both
-  // launch and child pid registration.
-  auto* mach_broker = mojo::core::DefaultMachBroker::Get();
-  mach_broker->GetLock().Acquire();
-#endif
-
   test_child_ =
       base::SpawnMultiProcessTestChild(test_child_main, command_line, options);
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  if (test_child_.IsValid())
-    mach_broker->ExpectPid(test_child_.Pid());
-  mach_broker->GetLock().Release();
-#endif
 
   if (launch_type == LaunchType::CHILD || launch_type == LaunchType::PEER)
     channel.RemoteProcessLaunchAttempted();
@@ -250,13 +232,6 @@ int MultiprocessTestHelper::WaitForChildShutdown() {
   int rv = -1;
   WaitForMultiprocessTestChildExit(test_child_, TestTimeouts::action_timeout(),
                                    &rv);
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  auto* mach_broker = mojo::core::DefaultMachBroker::Get();
-  base::AutoLock lock(mach_broker->GetLock());
-  mach_broker->RemovePid(test_child_.Pid());
-#endif
-
   test_child_.Close();
   return rv;
 }
@@ -272,10 +247,6 @@ void MultiprocessTestHelper::ChildSetup() {
   auto& command_line = *base::CommandLine::ForCurrentProcess();
 
   bool run_as_broker_client = command_line.HasSwitch(kRunAsBrokerClient);
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  if (run_as_broker_client)
-    DefaultMachBroker::SendTaskPortToParent();
-#endif
 
   PlatformChannelEndpoint endpoint;
 #if !defined(OS_FUCHSIA)

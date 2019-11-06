@@ -111,6 +111,22 @@ void glClearColorFn(GLclampf red,
 void glClearDepthFn(GLclampd depth) override;
 void glClearDepthfFn(GLclampf depth) override;
 void glClearStencilFn(GLint s) override;
+void glClearTexImageFn(GLuint texture,
+                       GLint level,
+                       GLenum format,
+                       GLenum type,
+                       const GLvoid* data) override;
+void glClearTexSubImageFn(GLuint texture,
+                          GLint level,
+                          GLint xoffset,
+                          GLint yoffset,
+                          GLint zoffset,
+                          GLint width,
+                          GLint height,
+                          GLint depth,
+                          GLenum format,
+                          GLenum type,
+                          const GLvoid* data) override;
 GLenum glClientWaitSyncFn(GLsync sync,
                           GLbitfield flags,
                           GLuint64 timeout) override;
@@ -385,12 +401,12 @@ void glFramebufferTextureLayerFn(GLenum target,
                                  GLuint texture,
                                  GLint level,
                                  GLint layer) override;
-void glFramebufferTextureMultiviewLayeredANGLEFn(GLenum target,
-                                                 GLenum attachment,
-                                                 GLuint texture,
-                                                 GLint level,
-                                                 GLint baseViewIndex,
-                                                 GLsizei numViews) override;
+void glFramebufferTextureMultiviewOVRFn(GLenum target,
+                                        GLenum attachment,
+                                        GLuint texture,
+                                        GLint level,
+                                        GLint baseViewIndex,
+                                        GLsizei numViews) override;
 void glFrontFaceFn(GLenum mode) override;
 void glGenBuffersARBFn(GLsizei n, GLuint* buffers) override;
 void glGenerateMipmapEXTFn(GLenum target) override;
@@ -858,6 +874,7 @@ void glInvalidateSubFramebufferFn(GLenum target,
                                   GLint y,
                                   GLint width,
                                   GLint height) override;
+void glInvalidateTextureANGLEFn(GLenum target) override;
 GLboolean glIsBufferFn(GLuint buffer) override;
 GLboolean glIsEnabledFn(GLenum cap) override;
 GLboolean glIsFenceAPPLEFn(GLuint fence) override;
@@ -1264,6 +1281,14 @@ void glTexImage2DFn(GLenum target,
                     GLenum format,
                     GLenum type,
                     const void* pixels) override;
+void glTexImage2DExternalANGLEFn(GLenum target,
+                                 GLint level,
+                                 GLint internalformat,
+                                 GLsizei width,
+                                 GLsizei height,
+                                 GLint border,
+                                 GLenum format,
+                                 GLenum type) override;
 void glTexImage2DRobustANGLEFn(GLenum target,
                                GLint level,
                                GLint internalformat,

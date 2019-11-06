@@ -37,7 +37,7 @@
 #include "base/debug/alias.h"
 #include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
-#include "third_party/blink/renderer/platform/fonts/bitmap_glyphs_blacklist.h"
+#include "third_party/blink/renderer/platform/fonts/bitmap_glyphs_block_list.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/fonts/font_face_creation_params.h"
 #include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
@@ -151,20 +151,6 @@ void FontCache::SetStatusFontMetrics(const wchar_t* family_name,
   status_font_height_ = EnsureMinimumFontHeightIfNeeded(font_height);
 }
 
-FontCache::FontCache() : purge_prevent_count_(0) {
-  font_manager_ = sk_ref_sp(static_font_manager_);
-  if (!font_manager_) {
-    // This code path is only for unit tests. This SkFontMgr does not work in
-    // sandboxed environments, but injecting this initialization code to all
-    // unit tests isn't easy.
-    font_manager_ = SkFontMgr_New_DirectWrite();
-    // Set |is_test_font_mgr_| to capture if this is not happening in the
-    // production code. crbug.com/561873
-    is_test_font_mgr_ = true;
-  }
-  DCHECK(font_manager_.get());
-}
-
 // Given the desired base font, this will create a SimpleFontData for a specific
 // font that can be used to render the given range of characters.
 scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
@@ -197,22 +183,12 @@ scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
   }
 
   if (use_skia_font_fallback_) {
-    const char* bcp47_locale = nullptr;
-    int locale_count = 0;
-    // If the font description has a locale, use that. Otherwise, Skia will
-    // fall back on the user's default locale.
-    // TODO(kulshin): extract locale fallback logic from
-    //   FontCacheAndroid.cpp and share that code
-    if (font_description.Locale()) {
-      bcp47_locale = font_description.Locale()->LocaleForSkFontMgr();
-      locale_count = 1;
-    }
-
-    CString family_name = font_description.Family().Family().Utf8();
-
+    std::string family_name = font_description.Family().Family().Utf8();
+    Bcp47Vector locales =
+        GetBcp47LocaleForRequest(font_description, fallback_priority);
     SkTypeface* typeface = font_manager_->matchFamilyStyleCharacter(
-        family_name.data(), font_description.SkiaFontStyle(), &bcp47_locale,
-        locale_count, character);
+        family_name.c_str(), font_description.SkiaFontStyle(), locales.data(),
+        locales.size(), character);
     if (typeface) {
       SkString skia_family;
       typeface->getFamilyName(&skia_family);
@@ -404,11 +380,11 @@ std::unique_ptr<FontPlatformData> FontCache::CreateFontPlatformData(
   DCHECK_EQ(creation_params.CreationType(), kCreateFontByFamily);
   sk_sp<SkTypeface> typeface;
 
-  CString name;
+  std::string name;
 
   if (alternate_font_name == AlternateFontName::kLocalUniqueFace &&
       RuntimeEnabledFeatures::FontSrcLocalMatchingEnabled()) {
-    typeface = CreateTypefaceFromUniqueName(creation_params, name);
+    typeface = CreateTypefaceFromUniqueName(creation_params);
 
     if (!typeface && sideloaded_fonts_) {
       typeface = FindUniqueFontNameFromSideloadedFonts(creation_params.Family(),
@@ -488,7 +464,7 @@ std::unique_ptr<FontPlatformData> FontCache::CreateFontPlatformData(
       font_description.Orientation());
 
   result->SetAvoidEmbeddedBitmaps(
-      BitmapGlyphsBlacklist::AvoidEmbeddedBitmapsForTypeface(typeface.get()));
+      BitmapGlyphsBlockList::ShouldAvoidEmbeddedBitmapsForTypeface(*typeface));
 
   return result;
 }

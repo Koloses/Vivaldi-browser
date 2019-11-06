@@ -34,7 +34,7 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -65,12 +65,6 @@ class MODULES_EXPORT AudioBuffer final : public ScriptWrappable {
   static AudioBuffer* CreateUninitialized(unsigned number_of_channels,
                                           uint32_t number_of_frames,
                                           float sample_rate);
-
-  // Returns 0 if data is not a valid audio file.
-  static AudioBuffer* CreateFromAudioFileData(const void* data,
-                                              size_t data_size,
-                                              bool mix_to_mono,
-                                              float sample_rate);
 
   static AudioBuffer* CreateFromAudioBus(AudioBus*);
 

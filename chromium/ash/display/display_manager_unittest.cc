@@ -44,11 +44,11 @@
 #include "ui/display/display_layout_builder.h"
 #include "ui/display/display_observer.h"
 #include "ui/display/display_switches.h"
+#include "ui/display/fake/fake_display_snapshot.h"
 #include "ui/display/manager/display_change_observer.h"
 #include "ui/display/manager/display_layout_store.h"
 #include "ui/display/manager/display_manager_utilities.h"
 #include "ui/display/manager/display_util.h"
-#include "ui/display/manager/fake_display_snapshot.h"
 #include "ui/display/manager/managed_display_info.h"
 #include "ui/display/manager/test/touch_device_manager_test_api.h"
 #include "ui/display/screen.h"
@@ -2072,7 +2072,7 @@ TEST_F(DisplayManagerTest, UpdateMouseCursorAfterRotateZoom) {
   // Make sure just rotating will not change native location.
   UpdateDisplay("300x200,200x150");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  aura::Env* env = Shell::Get()->aura_env();
+  aura::Env* env = aura::Env::GetInstance();
 
   ui::test::EventGenerator generator1(root_windows[0]);
   ui::test::EventGenerator generator2(root_windows[1]);
@@ -3014,7 +3014,7 @@ TEST_F(DisplayManagerTest, UnifiedDesktopTabletMode) {
 
   // Turn on tablet mode, expect that we switch to mirror mode without any
   // crashes.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(display_manager()->IsInSoftwareMirrorMode());
 
@@ -3023,18 +3023,18 @@ TEST_F(DisplayManagerTest, UnifiedDesktopTabletMode) {
   // asynchronously.
   auto* app_list_controller = Shell::Get()->app_list_controller();
   auto* tablet_mode_controller = Shell::Get()->tablet_mode_controller();
-  EXPECT_TRUE(tablet_mode_controller->IsTabletModeWindowManagerEnabled());
+  EXPECT_TRUE(tablet_mode_controller->InTabletMode());
   EXPECT_TRUE(app_list_controller->IsVisible());
 
   // Exiting tablet mode should exit mirror mode and return back to Unified
   // mode.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(display_manager()->IsInSoftwareMirrorMode());
   EXPECT_TRUE(display_manager()->IsInUnifiedMode());
 
   // Home Launcher should be dismissed.
-  EXPECT_FALSE(tablet_mode_controller->IsTabletModeWindowManagerEnabled());
+  EXPECT_FALSE(tablet_mode_controller->InTabletMode());
   EXPECT_FALSE(app_list_controller->IsVisible());
 }
 
@@ -3055,7 +3055,7 @@ TEST_F(DisplayManagerTest, DisplayPrefsAndForcedMirrorMode) {
 
   // Turn on tablet mode, and expect that it's not possible to persist the
   // display prefs while forced mirror mode is active.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(display_manager()->IsInSoftwareMirrorMode());
   EXPECT_TRUE(
@@ -3066,7 +3066,7 @@ TEST_F(DisplayManagerTest, DisplayPrefsAndForcedMirrorMode) {
   EXPECT_TRUE(display_manager()->external_display_mirror_info().empty());
 
   // Exit tablet mode and expect everything is back to normal.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(display_manager()->IsInSoftwareMirrorMode());
   EXPECT_FALSE(
@@ -3529,10 +3529,12 @@ class DisplayManagerOrientationTest : public DisplayManagerTest {
   void SetUp() override {
     DisplayManagerTest::SetUp();
     const float kMeanGravity = 9.8066f;
-    portrait_primary->Set(ACCELEROMETER_SOURCE_SCREEN, -kMeanGravity, 0.f, 0.f);
-    portrait_secondary->Set(ACCELEROMETER_SOURCE_SCREEN, kMeanGravity, 0.f,
-                            0.f);
-    landscape_primary->Set(ACCELEROMETER_SOURCE_SCREEN, 0, -kMeanGravity, 0.f);
+    portrait_primary->Set(ACCELEROMETER_SOURCE_SCREEN, false,
+                          -kMeanGravity, 0.f, 0.f);
+    portrait_secondary->Set(ACCELEROMETER_SOURCE_SCREEN, false,
+                            kMeanGravity, 0.f, 0.f);
+    landscape_primary->Set(ACCELEROMETER_SOURCE_SCREEN, false,
+                           0, -kMeanGravity, 0.f);
   }
 
  protected:
@@ -3614,7 +3616,7 @@ TEST_F(DisplayManagerOrientationTest, SaveRestoreUserRotationLock) {
 
   EXPECT_EQ(0, test_observer.countAndReset());
   // Just enabling will not save the lock.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   EXPECT_EQ(1, test_observer.countAndReset());
 
   EXPECT_EQ(display::Display::ROTATE_0, screen->GetPrimaryDisplay().rotation());
@@ -3656,13 +3658,13 @@ TEST_F(DisplayManagerOrientationTest, SaveRestoreUserRotationLock) {
   EXPECT_EQ(0, test_observer.countAndReset());
 
   // Exit tablet mode reset to clamshell's rotation, which is 90.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
   EXPECT_EQ(1, test_observer.countAndReset());
   EXPECT_EQ(display::Display::ROTATE_270,
             screen->GetPrimaryDisplay().rotation());
   // Activate Any.
   wm::ActivateWindow(window_a);
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   EXPECT_EQ(1, test_observer.countAndReset());
   // Entering with active ANY will lock again to landscape.
   EXPECT_EQ(display::Display::ROTATE_0, screen->GetPrimaryDisplay().rotation());
@@ -3707,7 +3709,7 @@ TEST_F(DisplayManagerOrientationTest, UserRotationLockReverse) {
   display::Screen* screen = display::Screen::GetScreen();
 
   // Just enabling will not save the lock.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
 
   orientation_controller->LockOrientationForWindow(
       window, OrientationLockType::kPortrait);
@@ -3752,7 +3754,7 @@ TEST_F(DisplayManagerOrientationTest, LockToSpecificOrientation) {
                                                      OrientationLockType::kAny);
   }
   wm::ActivateWindow(window_a);
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
 
   orientation_controller->OnAccelerometerUpdated(portrait_primary);
 
@@ -3819,7 +3821,7 @@ TEST_F(DisplayManagerOrientationTest, DisplayChangeShouldNotSaveUserRotation) {
   test_api.SetFirstDisplayAsInternalDisplay();
   display::Screen* screen = display::Screen::GetScreen();
 
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   // Emulate that Animator is calling this async when animation is completed.
   display_manager->SetDisplayRotation(
       screen->GetPrimaryDisplay().id(), display::Display::ROTATE_90,
@@ -3827,7 +3829,7 @@ TEST_F(DisplayManagerOrientationTest, DisplayChangeShouldNotSaveUserRotation) {
   EXPECT_EQ(display::Display::ROTATE_90,
             screen->GetPrimaryDisplay().rotation());
 
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
   EXPECT_EQ(display::Display::ROTATE_0, screen->GetPrimaryDisplay().rotation());
 }
 
@@ -4373,7 +4375,7 @@ TEST_F(DisplayManagerTest, SoftwareMirrorRotationForTablet) {
       .SetFirstDisplayAsInternalDisplay();
 
   // Simulate turning on mirror mode triggered by tablet mode on.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(display_manager()->IsInSoftwareMirrorMode());
   EXPECT_EQ(gfx::Rect(0, 0, 400, 300),

@@ -7,13 +7,19 @@ package org.chromium.chrome.browser.omnibox.status;
 import static org.chromium.chrome.browser.toolbar.top.ToolbarPhone.URL_FOCUS_CHANGE_ANIMATION_DURATION_MS;
 
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.TransitionDrawable;
 import android.support.annotation.ColorRes;
 import android.support.annotation.DrawableRes;
+import android.support.annotation.Nullable;
 import android.support.annotation.StringRes;
+import android.support.v4.view.ViewCompat;
+import android.support.v7.content.res.AppCompatResources;
 import android.util.AttributeSet;
 import android.view.View;
+import android.view.ViewStub;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -21,12 +27,16 @@ import android.widget.TextView;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.util.AccessibilityUtil;
-import org.chromium.chrome.browser.widget.TintedDrawable;
+import org.chromium.ui.UiUtils;
 
 /**
  * StatusView is a location bar's view displaying status (icons and/or text).
  */
 public class StatusView extends LinearLayout {
+    private @Nullable View mIncognitoBadge;
+    private int mIncognitoBadgeEndPaddingWithIcon;
+    private int mIncognitoBadgeEndPaddingWithoutIcon;
+
     private ImageView mIconView;
     private TextView mVerboseStatusTextView;
     private View mSeparatorView;
@@ -39,6 +49,8 @@ public class StatusView extends LinearLayout {
     private @DrawableRes int mIconRes;
     private @ColorRes int mIconTintRes;
     private @StringRes int mAccessibilityToast;
+
+    private Bitmap mIconBitmap;
 
     public StatusView(Context context, AttributeSet attributes) {
         super(context, attributes);
@@ -64,10 +76,11 @@ public class StatusView extends LinearLayout {
         boolean wantIconHidden = false;
 
         if (mIconRes != 0 && mIconTintRes != 0) {
-            targetIcon =
-                    TintedDrawable.constructTintedDrawable(getContext(), mIconRes, mIconTintRes);
+            targetIcon = UiUtils.getTintedDrawable(getContext(), mIconRes, mIconTintRes);
         } else if (mIconRes != 0) {
-            targetIcon = ApiCompatibilityUtils.getDrawable(getContext().getResources(), mIconRes);
+            targetIcon = AppCompatResources.getDrawable(getContext(), mIconRes);
+        } else if (mIconBitmap != null) {
+            targetIcon = new BitmapDrawable(getResources(), mIconBitmap);
         } else {
             // Do not specify any icon here and do not replace existing icon, either.
             // TransitionDrawable uses different timing mechanism than Animations, and that may,
@@ -104,6 +117,7 @@ public class StatusView extends LinearLayout {
 
             mAnimatingStatusIconShow = true;
             mIconView.setVisibility(View.VISIBLE);
+            updateIncognitoBadgeEndPadding();
             mIconView.animate()
                     .alpha(1.0f)
                     .setDuration(URL_FOCUS_CHANGE_ANIMATION_DURATION_MS)
@@ -126,6 +140,9 @@ public class StatusView extends LinearLayout {
                     .withEndAction(() -> {
                         mIconView.setVisibility(View.GONE);
                         mAnimatingStatusIconHide = false;
+                        // Update incognito badge padding after the animation to avoid a glitch on
+                        // focusing location bar.
+                        updateIncognitoBadgeEndPadding();
                     })
                     .start();
         }
@@ -191,6 +208,9 @@ public class StatusView extends LinearLayout {
      */
     void setStatusIcon(@DrawableRes int imageRes) {
         mIconRes = imageRes;
+        // mIconRes and mIconBitmap are mutually exclusive and therefore when one is set, the other
+        // should be unset.
+        mIconBitmap = null;
         animateStatusIcon();
     }
 
@@ -204,6 +224,17 @@ public class StatusView extends LinearLayout {
         // UI thread (including status icon configuration) are complete, but can be avoided
         // entirely, making the code also more intuitive.
         mIconTintRes = colorRes;
+        animateStatusIcon();
+    }
+
+    /**
+     * Specify the icon drawable.
+     */
+    void setStatusIcon(Bitmap icon) {
+        mIconBitmap = icon;
+        // mIconRes and mIconBitmap are mutually exclusive and therefore when one is set, the other
+        // should be unset.
+        mIconRes = 0;
         animateStatusIcon();
     }
 
@@ -263,6 +294,37 @@ public class StatusView extends LinearLayout {
      */
     void setVerboseStatusTextWidth(int width) {
         mVerboseStatusTextView.setMaxWidth(width);
+    }
+
+    /**
+     * @param incognitoBadgeVisible Whether or not the incognito badge is visible.
+     */
+    void setIncognitoBadgeVisibility(boolean incognitoBadgeVisible) {
+        // Initialize the incognito badge on the first time it becomes visible.
+        if (mIncognitoBadge == null && !incognitoBadgeVisible) return;
+        if (mIncognitoBadge == null) initializeIncognitoBadge();
+
+        mIncognitoBadge.setVisibility(incognitoBadgeVisible ? View.VISIBLE : View.GONE);
+    }
+
+    private void initializeIncognitoBadge() {
+        ViewStub viewStub = findViewById(R.id.location_bar_incognito_badge_stub);
+        mIncognitoBadge = viewStub.inflate();
+        mIncognitoBadgeEndPaddingWithIcon = getResources().getDimensionPixelSize(
+                R.dimen.location_bar_incognito_badge_end_padding_with_status_icon);
+        mIncognitoBadgeEndPaddingWithoutIcon = getResources().getDimensionPixelSize(
+                R.dimen.location_bar_incognito_badge_end_padding_without_status_icon);
+        updateIncognitoBadgeEndPadding();
+    }
+
+    private void updateIncognitoBadgeEndPadding() {
+        if (mIncognitoBadge == null) return;
+
+        ViewCompat.setPaddingRelative(mIncognitoBadge, ViewCompat.getPaddingStart(mIncognitoBadge),
+                mIncognitoBadge.getPaddingTop(),
+                mIconRes != 0 ? mIncognitoBadgeEndPaddingWithIcon
+                              : mIncognitoBadgeEndPaddingWithoutIcon,
+                mIncognitoBadge.getPaddingBottom());
     }
 
     // TODO(ender): The final last purpose of this method is to allow

@@ -6,10 +6,12 @@
 
 #include <algorithm>
 #include <map>
+#include <numeric>
 
 #include "ash/assistant/model/assistant_query.h"
 #include "ash/assistant/ui/assistant_ui_constants.h"
 #include "ash/assistant/ui/assistant_view_delegate.h"
+#include "ash/assistant/ui/base/stack_layout.h"
 #include "ash/assistant/ui/main_stage/assistant_footer_view.h"
 #include "ash/assistant/ui/main_stage/assistant_header_view.h"
 #include "ash/assistant/ui/main_stage/assistant_progress_indicator.h"
@@ -100,97 +102,6 @@ constexpr base::TimeDelta kProgressAnimationFadeInDuration =
 constexpr base::TimeDelta kProgressAnimationFadeOutDuration =
     base::TimeDelta::FromMilliseconds(83);
 
-// StackLayout -----------------------------------------------------------------
-
-// A layout manager which lays out its views atop each other. This differs from
-// FillLayout in that we respect the preferred size of views during layout. It's
-// possible to explicitly specify which dimension to respect. In contrast,
-// FillLayout will cause its views to match the bounds of the host.
-class StackLayout : public views::LayoutManager {
- public:
-  enum class RespectDimension : uint32_t {
-    // Respect width. If enabled, child's preferred width will be used and will
-    // be horizontally center positioned. Otherwise, the child will be stretched
-    // to match parent width.
-    kWidth = 1,
-    // Repect height. If enabled, child's preferred height will be used.
-    // Otherwise, the child will be stretched to match parent height.
-    // Note that the child is always top-aligned.
-    kHeight = 1 << 1,
-    kAll = kWidth | kHeight,
-  };
-
-  StackLayout() = default;
-  ~StackLayout() override = default;
-
-  void Installed(views::View* host) override { host_ = host; }
-
-  void ViewRemoved(views::View* host, views::View* view) override {
-    DCHECK(view);
-    respect_dimension_map_.erase(view);
-  }
-
-  void SetRespectDimensionForView(views::View* view,
-                                  RespectDimension dimension) {
-    DCHECK(host_ && view->parent() == host_);
-    respect_dimension_map_[view] = dimension;
-  }
-
-  gfx::Size GetPreferredSize(const views::View* host) const override {
-    gfx::Size preferred_size;
-
-    for (int i = 0; i < host->child_count(); ++i)
-      preferred_size.SetToMax(host->child_at(i)->GetPreferredSize());
-    return preferred_size;
-  }
-
-  int GetPreferredHeightForWidth(const views::View* host,
-                                 int width) const override {
-    int preferred_height = 0;
-
-    for (int i = 0; i < host->child_count(); ++i) {
-      preferred_height = std::max(host->child_at(i)->GetHeightForWidth(width),
-                                  preferred_height);
-    }
-
-    return preferred_height;
-  }
-
-  void Layout(views::View* host) override {
-    const int host_width = host->GetContentsBounds().width();
-    const int host_height = host->GetContentsBounds().height();
-
-    for (int i = 0; i < host->child_count(); ++i) {
-      views::View* child = host->child_at(i);
-
-      int child_width = host_width;
-      int child_height = host_height;
-
-      int child_x = 0;
-      uint32_t dimension = static_cast<uint32_t>(RespectDimension::kAll);
-
-      if (respect_dimension_map_.find(child) != respect_dimension_map_.end())
-        dimension = static_cast<uint32_t>(respect_dimension_map_[child]);
-
-      if (dimension & static_cast<uint32_t>(RespectDimension::kWidth)) {
-        child_width = std::min(child->GetPreferredSize().width(), host_width);
-        child_x = (host_width - child_width) / 2;
-      }
-
-      if (dimension & static_cast<uint32_t>(RespectDimension::kHeight))
-        child_height = child->GetHeightForWidth(child_width);
-
-      child->SetBounds(child_x, /*y=*/0, child_width, child_height);
-    }
-  }
-
- private:
-  views::View* host_ = nullptr;
-  std::map<views::View*, RespectDimension> respect_dimension_map_;
-
-  DISALLOW_COPY_AND_ASSIGN(StackLayout);
-};
-
 }  // namespace
 
 // AssistantMainStage ----------------------------------------------------------
@@ -251,7 +162,8 @@ void AssistantMainStage::OnViewPreferredSizeChanged(views::View* view) {
   PreferredSizeChanged();
 }
 
-void AssistantMainStage::OnViewVisibilityChanged(views::View* view) {
+void AssistantMainStage::OnViewVisibilityChanged(views::View* view,
+                                                 views::View* starting_view) {
   PreferredSizeChanged();
 }
 
@@ -503,7 +415,7 @@ void AssistantMainStage::OnActiveQueryCleared() {
 bool AssistantMainStage::OnActiveQueryExitAnimationEnded(
     const ui::CallbackLayerAnimationObserver& observer) {
   // The exited active query view will always be the first child of its parent.
-  delete query_layout_container_->child_at(0);
+  delete query_layout_container_->children().front();
 
   // TODO(https://crbug.com/896079): Remove this when view.cc handles the
   // event notification.
@@ -553,7 +465,7 @@ void AssistantMainStage::OnPendingQueryChanged(const AssistantQuery& query) {
   pending_query_view_->SetQuery(query);
 }
 
-void AssistantMainStage::OnPendingQueryCleared() {
+void AssistantMainStage::OnPendingQueryCleared(bool due_to_commit) {
   if (pending_query_view_) {
     delete pending_query_view_;
     pending_query_view_ = nullptr;

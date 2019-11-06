@@ -63,7 +63,7 @@ PowerButtonMenuItemView::PowerButtonMenuItemView(
   title_->SetText(title_text);
   AddChildView(title_);
   GetViewAccessibility().OverrideRole(ax::mojom::Role::kMenuItem);
-  GetViewAccessibility().OverrideName(title_->text());
+  GetViewAccessibility().OverrideName(title_->GetText());
 
   SetBorder(views::CreateEmptyBorder(kItemBorderThickness, kItemBorderThickness,
                                      kItemBorderThickness,
@@ -71,6 +71,10 @@ PowerButtonMenuItemView::PowerButtonMenuItemView(
 }
 
 PowerButtonMenuItemView::~PowerButtonMenuItemView() = default;
+
+const char* PowerButtonMenuItemView::GetClassName() const {
+  return "PowerButtonMenuItemView";
+}
 
 void PowerButtonMenuItemView::Layout() {
   const gfx::Rect rect(GetContentsBounds());

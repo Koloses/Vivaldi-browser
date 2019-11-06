@@ -6,52 +6,29 @@ package org.chromium.chrome.browser.autofill_assistant.payment;
 
 import android.support.annotation.Nullable;
 
-import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.JNINamespace;
-import org.chromium.chrome.browser.autofill.PersonalDataManager;
+import org.chromium.chrome.browser.payments.AutofillAddress;
+import org.chromium.chrome.browser.payments.AutofillContact;
+import org.chromium.chrome.browser.payments.AutofillPaymentInstrument;
 
-/** Delegate for the Payment Request UI. */
-@JNINamespace("autofill_assistant")
-class AssistantPaymentRequestDelegate {
-    private long mNativeAssistantOverlayDelegate;
+/**
+ * Common interface for autofill assistant payment request delegates.
+ *
+ * Methods in this delegate are automatically invoked by the PR UI as the user interacts with the
+ * UI.
+ */
+public interface AssistantPaymentRequestDelegate {
+    /** The currently selected contact has changed. */
+    void onContactInfoChanged(@Nullable AutofillContact contact);
 
-    @CalledByNative
-    private static AssistantPaymentRequestDelegate create(
-            long nativeAssistantPaymentRequestDelegate) {
-        return new AssistantPaymentRequestDelegate(nativeAssistantPaymentRequestDelegate);
-    }
+    /** The currently selected shipping address has changed. */
+    void onShippingAddressChanged(@Nullable AutofillAddress address);
 
-    private AssistantPaymentRequestDelegate(long nativeAssistantPaymentRequestDelegate) {
-        mNativeAssistantOverlayDelegate = nativeAssistantPaymentRequestDelegate;
-    }
+    /** The currently selected payment method has changed. */
+    void onPaymentMethodChanged(@Nullable AutofillPaymentInstrument paymentInstrument);
 
-    public void onPaymentInformationSelected(
-            AutofillAssistantPaymentRequest.SelectedPaymentInformation selectedInformation) {
-        if (mNativeAssistantOverlayDelegate != 0) {
-            nativeOnGetPaymentInformation(mNativeAssistantOverlayDelegate,
-                    selectedInformation.succeed, selectedInformation.card,
-                    selectedInformation.address, selectedInformation.payerName,
-                    selectedInformation.payerPhone, selectedInformation.payerEmail,
-                    selectedInformation.isTermsAndConditionsAccepted);
-        }
-    }
+    /** The currently selected terms & conditions state has changed. */
+    void onTermsAndConditionsChanged(@AssistantTermsAndConditionsState int state);
 
-    public void onCancelButtonClicked() {
-        if (mNativeAssistantOverlayDelegate != 0) {
-            nativeOnCancelButtonClicked(mNativeAssistantOverlayDelegate);
-        }
-    }
-
-    @CalledByNative
-    private void clearNativePtr() {
-        mNativeAssistantOverlayDelegate = 0;
-    }
-
-    private native void nativeOnGetPaymentInformation(long nativeAssistantPaymentRequestDelegate,
-            boolean succeed, @Nullable PersonalDataManager.CreditCard card,
-            @Nullable PersonalDataManager.AutofillProfile address, @Nullable String payerName,
-            @Nullable String payerPhone, @Nullable String payerEmail,
-            boolean isTermsAndConditionsAccepted);
-
-    private native void nativeOnCancelButtonClicked(long nativeAssistantPaymentRequestDelegate);
+    /** Called when a link on the terms and conditions message is clicked. */
+    void onTermsAndConditionsLinkClicked(int link);
 }

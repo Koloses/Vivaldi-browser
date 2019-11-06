@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.appmenu;
 
 import android.animation.Animator;
 import android.animation.Animator.AnimatorListener;
-import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.content.Context;
 import android.content.res.Resources;
@@ -27,7 +26,6 @@ import android.view.View.OnKeyListener;
 import android.view.ViewGroup;
 import android.view.ViewStub;
 import android.view.WindowManager;
-import android.view.accessibility.AccessibilityEvent;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemClickListener;
 import android.widget.ImageButton;
@@ -48,12 +46,11 @@ import java.util.List;
 
 /**
  * Shows a popup of menuitems anchored to a host view. When a item is selected we call
- * Activity.onOptionsItemSelected with the appropriate MenuItem.
+ * AppMenuHandlerImpl.AppMenuDelegate.onOptionsItemSelected with the appropriate MenuItem.
  *   - Only visible MenuItems are shown.
  *   - Disabled items are grayed out.
  */
-public class AppMenu implements OnItemClickListener, OnKeyListener {
-
+class AppMenu implements OnItemClickListener, OnKeyListener {
     private static final float LAST_ITEM_SHOW_FRACTION = 0.5f;
 
     private final Menu mMenu;
@@ -67,7 +64,7 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
     private PopupWindow mPopup;
     private ListView mListView;
     private AppMenuAdapter mAdapter;
-    private AppMenuHandler mHandler;
+    private AppMenuHandlerImpl mHandler;
     private View mFooterView;
     private int mCurrentScreenRotation = -1;
     private boolean mIsByPermanentButton;
@@ -81,10 +78,10 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
      * @param menu Original menu created by the framework.
      * @param itemRowHeight Desired height for each app menu row.
      * @param itemDividerHeight Desired height for the divider between app menu items.
-     * @param handler AppMenuHandler receives callbacks from AppMenu.
+     * @param handler AppMenuHandlerImpl receives callbacks from AppMenu.
      * @param res Resources object used to get dimensions and style attributes.
      */
-    AppMenu(Menu menu, int itemRowHeight, int itemDividerHeight, AppMenuHandler handler,
+    AppMenu(Menu menu, int itemRowHeight, int itemDividerHeight, AppMenuHandlerImpl handler,
             Resources res) {
         mMenu = menu;
 
@@ -536,21 +533,7 @@ public class AppMenu implements OnItemClickListener, OnKeyListener {
         }
 
         mMenuItemEnterAnimator.addListener(mAnimationHistogramRecorder);
-        mMenuItemEnterAnimator.addListener(new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(Animator animation) {
-                focusHighlightedView();
-            }
-        });
         mMenuItemEnterAnimator.start();
-    }
-
-    private void focusHighlightedView() {
-        View highlightedView = mAdapter.getHighlightedView();
-        if (highlightedView == null) return;
-
-        highlightedView.requestFocus();
-        highlightedView.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED);
     }
 
     private int inflateFooter(int footerResourceId, View contentView, int menuWidth) {

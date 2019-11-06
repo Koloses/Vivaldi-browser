@@ -45,8 +45,8 @@ import java.util.concurrent.Callable;
  */
 @RunWith(ParameterizedRunner.class)
 @UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE, "enable-webvr"})
-@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT) // WebVR is only supported on K+
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        "enable-features=LogJsConsoleMessages", "enable-webvr"})
 public class WebXrVrDeviceTest {
     @ClassParameter
     private static List<ParameterSet> sClassParams =
@@ -76,6 +76,7 @@ public class WebXrVrDeviceTest {
     @Test
     @MediumTest
     @XrActivityRestriction({XrActivityRestriction.SupportedActivity.ALL})
+    @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP) // WebVR is only supported on L+
     public void testDeviceCapabilitiesMatchExpectations() throws InterruptedException {
         mWebVrTestFramework.loadUrlAndAwaitInitialization(
                 WebVrTestFramework.getFileUrlForHtmlTestFile(
@@ -94,6 +95,7 @@ public class WebXrVrDeviceTest {
     @MediumTest
     @XrActivityRestriction({XrActivityRestriction.SupportedActivity.ALL})
     @Restriction(RESTRICTION_TYPE_SVR)
+    // Sensorless still works on older devices since it doesn't rely on anything in the DFM.
     public void testGvrlessMagicWindowCapabilities() throws InterruptedException {
         // Make Chrome think that VrCore is not installed
         VrShellDelegateUtils.setVrCoreCompatibility(VrCoreCompatibility.VR_NOT_AVAILABLE);
@@ -118,6 +120,7 @@ public class WebXrVrDeviceTest {
             .Remove({"enable-webvr"})
             @CommandLineFlags.Add({"enable-features=WebXR"})
             @XrActivityRestriction({XrActivityRestriction.SupportedActivity.ALL})
+            @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP) // WebXR is only supported on L+
             public void testWebXrCapabilities() throws InterruptedException {
         mWebXrVrTestFramework.loadUrlAndAwaitInitialization(
                 WebXrVrTestFramework.getFileUrlForHtmlTestFile("test_webxr_capabilities"),
@@ -140,6 +143,7 @@ public class WebXrVrDeviceTest {
             .Remove({"enable-webvr"})
             @CommandLineFlags.Add({"enable-features=WebXR"})
             @Restriction(RESTRICTION_TYPE_VIEWER_DAYDREAM)
+            @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP) // WebXR is only supported on L+
             public void testForNullPosesInInlineVrPostImmersive() throws InterruptedException {
         mWebXrVrTestFramework.loadUrlAndAwaitInitialization(
                 WebXrVrTestFramework.getFileUrlForHtmlTestFile("test_inline_vr_poses"),
@@ -175,6 +179,7 @@ public class WebXrVrDeviceTest {
             .Remove({"enable-webvr"})
             @CommandLineFlags.Add({"enable-features=WebXR"})
             @Restriction(RESTRICTION_TYPE_VIEWER_DAYDREAM)
+            @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP) // WebVR is only supported on L+
             public void testForNullPosesInInlineVrFromNfc() throws InterruptedException {
         mWebXrVrTestFramework.loadUrlAndAwaitInitialization(
                 WebXrVrTestFramework.getFileUrlForHtmlTestFile("test_inline_vr_poses"),
@@ -208,6 +213,7 @@ public class WebXrVrDeviceTest {
             .Remove({"enable-webvr"})
             @CommandLineFlags.Add({"enable-features=WebXR"})
             @Restriction(RESTRICTION_TYPE_VIEWER_DAYDREAM)
+            @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP) // WebVR is only supported on L+
             public void testForNullPosesInInlineVrOnNavigation() throws InterruptedException {
         NfcSimUtils.simNfcScanUntilVrEntry(mTestRule.getActivity());
         mWebXrVrTestFramework.loadUrlAndAwaitInitialization(

@@ -33,8 +33,8 @@ SharedQuadState* CreateSharedQuadState(RenderPass* render_pass) {
   SkBlendMode blend_mode = SkBlendMode::kSrcOver;
 
   SharedQuadState* state = render_pass->CreateAndAppendSharedQuadState();
-  state->SetAll(quad_transform, content_rect, visible_layer_rect, clip_rect,
-                is_clipped, are_contents_opaque, opacity, blend_mode,
+  state->SetAll(quad_transform, content_rect, visible_layer_rect, gfx::RRectF(),
+                clip_rect, is_clipped, are_contents_opaque, opacity, blend_mode,
                 sorting_context_id);
   return state;
 }
@@ -77,7 +77,7 @@ class DrawQuadPerfTest : public testing::Test {
                    premultiplied_alpha, uv_top_left, uv_bottom_right,
                    background_color, vertex_opacity, y_flipped,
                    nearest_neighbor, /*secure_output_only=*/false,
-                   ui::ProtectedVideoType::kClear);
+                   gfx::ProtectedVideoType::kClear);
       quads->push_back(quad);
     }
   }

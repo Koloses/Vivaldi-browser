@@ -38,9 +38,10 @@ using RedirectDataMap = std::map<std::string, RedirectData>;
 using OriginDataMap = std::map<std::string, OriginData>;
 
 template <typename T>
-class FakeGlowplugKeyValueTable : public GlowplugKeyValueTable<T> {
+class FakeLoadingPredictorKeyValueTable
+    : public LoadingPredictorKeyValueTable<T> {
  public:
-  FakeGlowplugKeyValueTable() : GlowplugKeyValueTable<T>("") {}
+  FakeLoadingPredictorKeyValueTable() : LoadingPredictorKeyValueTable<T>("") {}
   void GetAllData(std::map<std::string, T>* data_map,
                   sql::Database* db) const override {
     *data_map = data_;
@@ -75,16 +76,16 @@ class MockResourcePrefetchPredictorTables
     std::move(task).Run(nullptr);
   }
 
-  GlowplugKeyValueTable<RedirectData>* host_redirect_table() override {
+  LoadingPredictorKeyValueTable<RedirectData>* host_redirect_table() override {
     return &host_redirect_table_;
   }
 
-  GlowplugKeyValueTable<OriginData>* origin_table() override {
+  LoadingPredictorKeyValueTable<OriginData>* origin_table() override {
     return &origin_table_;
   }
 
-  FakeGlowplugKeyValueTable<RedirectData> host_redirect_table_;
-  FakeGlowplugKeyValueTable<OriginData> origin_table_;
+  FakeLoadingPredictorKeyValueTable<RedirectData> host_redirect_table_;
+  FakeLoadingPredictorKeyValueTable<OriginData> origin_table_;
 
  protected:
   ~MockResourcePrefetchPredictorTables() override = default;
@@ -186,14 +187,18 @@ void ResourcePrefetchPredictorTest::TearDown() {
 void ResourcePrefetchPredictorTest::InitializeSampleData() {
   {  // Host redirect data.
     RedirectData bbc = CreateRedirectData("bbc.com", 9);
-    InitializeRedirectStat(bbc.add_redirect_endpoints(), "www.bbc.com", 8, 4,
-                           1);
-    InitializeRedirectStat(bbc.add_redirect_endpoints(), "m.bbc.com", 5, 8, 0);
-    InitializeRedirectStat(bbc.add_redirect_endpoints(), "bbc.co.uk", 1, 3, 0);
+    InitializeRedirectStat(bbc.add_redirect_endpoints(),
+                           GURL("https://www.bbc.com"), 8, 4, 1);
+    InitializeRedirectStat(bbc.add_redirect_endpoints(),
+                           GURL("https://m.bbc.com"), 5, 8, 0);
+    InitializeRedirectStat(bbc.add_redirect_endpoints(),
+                           GURL("http://bbc.co.uk"), 1, 3, 0);
+    InitializeRedirectStat(bbc.add_redirect_endpoints(),
+                           GURL("https://bbc.co.uk"), 1, 3, 0);
 
     RedirectData microsoft = CreateRedirectData("microsoft.com", 10);
     InitializeRedirectStat(microsoft.add_redirect_endpoints(),
-                           "www.microsoft.com", 10, 0, 0);
+                           GURL("https://www.microsoft.com"), 10, 0, 0);
 
     test_host_redirect_data_.clear();
     test_host_redirect_data_.insert(std::make_pair(bbc.primary_key(), bbc));
@@ -245,27 +250,27 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDB) {
   std::vector<content::mojom::ResourceLoadInfoPtr> resources;
   resources.push_back(CreateResourceLoadInfo("http://www.google.com"));
   resources.push_back(CreateResourceLoadInfo(
-      "http://google.com/style1.css", content::RESOURCE_TYPE_STYLESHEET));
+      "http://google.com/style1.css", content::ResourceType::kStylesheet));
   resources.push_back(CreateResourceLoadInfo("http://google.com/script1.js",
-                                             content::RESOURCE_TYPE_SCRIPT));
+                                             content::ResourceType::kScript));
   resources.push_back(CreateResourceLoadInfo("http://google.com/script2.js",
-                                             content::RESOURCE_TYPE_SCRIPT));
+                                             content::ResourceType::kScript));
   resources.push_back(CreateResourceLoadInfo("http://google.com/script1.js",
-                                             content::RESOURCE_TYPE_SCRIPT));
+                                             content::ResourceType::kScript));
   resources.push_back(CreateResourceLoadInfo("http://google.com/image1.png",
-                                             content::RESOURCE_TYPE_IMAGE));
+                                             content::ResourceType::kImage));
   resources.push_back(CreateResourceLoadInfo("http://google.com/image2.png",
-                                             content::RESOURCE_TYPE_IMAGE));
+                                             content::ResourceType::kImage));
   resources.push_back(CreateResourceLoadInfo(
-      "http://google.com/style2.css", content::RESOURCE_TYPE_STYLESHEET));
+      "http://google.com/style2.css", content::ResourceType::kStylesheet));
   resources.push_back(
       CreateResourceLoadInfo("http://static.google.com/style2-no-store.css",
-                             content::RESOURCE_TYPE_STYLESHEET,
+                             content::ResourceType::kStylesheet,
                              /* always_access_network */ true));
   resources.push_back(CreateResourceLoadInfoWithRedirects(
       {"http://reader.google.com/style.css",
        "http://dev.null.google.com/style.css"},
-      content::RESOURCE_TYPE_STYLESHEET));
+      content::ResourceType::kStylesheet));
   resources.back()->network_info->always_access_network = true;
 
   auto page_summary = CreatePageRequestSummary(
@@ -294,7 +299,7 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDB) {
 
   RedirectData host_redirect_data = CreateRedirectData("www.google.com");
   InitializeRedirectStat(host_redirect_data.add_redirect_endpoints(),
-                         "www.google.com", 1, 0, 0);
+                         GURL("http://www.google.com"), 1, 0, 0);
   EXPECT_EQ(mock_tables_->host_redirect_table_.data_,
             RedirectDataMap(
                 {{host_redirect_data.primary_key(), host_redirect_data}}));
@@ -309,22 +314,22 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlInDB) {
   std::vector<content::mojom::ResourceLoadInfoPtr> resources;
   resources.push_back(CreateResourceLoadInfo("http://www.google.com"));
   resources.push_back(CreateResourceLoadInfo(
-      "http://google.com/style1.css", content::RESOURCE_TYPE_STYLESHEET));
+      "http://google.com/style1.css", content::ResourceType::kStylesheet));
   resources.push_back(CreateResourceLoadInfo("http://google.com/script1.js",
-                                             content::RESOURCE_TYPE_SCRIPT));
+                                             content::ResourceType::kScript));
   resources.push_back(CreateResourceLoadInfo("http://google.com/script2.js",
-                                             content::RESOURCE_TYPE_SCRIPT));
+                                             content::ResourceType::kScript));
   resources.push_back(CreateResourceLoadInfo("http://google.com/script1.js",
-                                             content::RESOURCE_TYPE_SCRIPT));
+                                             content::ResourceType::kScript));
   resources.push_back(CreateResourceLoadInfo("http://google.com/image1.png",
-                                             content::RESOURCE_TYPE_IMAGE));
+                                             content::ResourceType::kImage));
   resources.push_back(CreateResourceLoadInfo("http://google.com/image2.png",
-                                             content::RESOURCE_TYPE_IMAGE));
+                                             content::ResourceType::kImage));
   resources.push_back(CreateResourceLoadInfo(
-      "http://google.com/style2.css", content::RESOURCE_TYPE_STYLESHEET));
+      "http://google.com/style2.css", content::ResourceType::kStylesheet));
   resources.push_back(CreateResourceLoadInfo(
       "http://static.google.com/style2-no-store.css",
-      content::RESOURCE_TYPE_STYLESHEET, /* always_access_network */ true));
+      content::ResourceType::kStylesheet, /* always_access_network */ true));
 
   auto page_summary = CreatePageRequestSummary(
       "http://www.google.com", "http://www.google.com", resources);
@@ -338,7 +343,7 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlInDB) {
 
   RedirectData host_redirect_data = CreateRedirectData("www.google.com");
   InitializeRedirectStat(host_redirect_data.add_redirect_endpoints(),
-                         "www.google.com", 1, 0, 0);
+                         GURL("http://www.google.com"), 1, 0, 0);
   EXPECT_EQ(mock_tables_->host_redirect_table_.data_,
             RedirectDataMap(
                 {{host_redirect_data.primary_key(), host_redirect_data}}));
@@ -364,9 +369,9 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDBAndDBFull) {
   std::vector<content::mojom::ResourceLoadInfoPtr> resources;
   resources.push_back(CreateResourceLoadInfo("http://www.nike.com"));
   resources.push_back(CreateResourceLoadInfo(
-      "http://nike.com/style1.css", content::RESOURCE_TYPE_STYLESHEET));
+      "http://nike.com/style1.css", content::ResourceType::kStylesheet));
   resources.push_back(CreateResourceLoadInfo("http://nike.com/image2.png",
-                                             content::RESOURCE_TYPE_IMAGE));
+                                             content::ResourceType::kImage));
 
   auto page_summary = CreatePageRequestSummary(
       "http://www.nike.com", "http://www.nike.com", resources);
@@ -380,7 +385,7 @@ TEST_F(ResourcePrefetchPredictorTest, NavigationUrlNotInDBAndDBFull) {
 
   RedirectData host_redirect_data = CreateRedirectData("www.nike.com");
   InitializeRedirectStat(host_redirect_data.add_redirect_endpoints(),
-                         "www.nike.com", 1, 0, 0);
+                         GURL("http://www.nike.com"), 1, 0, 0);
   EXPECT_EQ(mock_tables_->host_redirect_table_.data_,
             RedirectDataMap(
                 {{host_redirect_data.primary_key(), host_redirect_data}}));
@@ -407,7 +412,7 @@ TEST_F(ResourcePrefetchPredictorTest,
   const int num_resources = predictor_->config_.max_origins_per_entry + 10;
   for (int i = 1; i <= num_resources; ++i) {
     resources.push_back(
-        CreateResourceLoadInfo(gen(i), content::RESOURCE_TYPE_SCRIPT));
+        CreateResourceLoadInfo(gen(i), content::ResourceType::kScript));
   }
 
   auto page_summary = CreatePageRequestSummary(
@@ -450,7 +455,7 @@ TEST_F(ResourcePrefetchPredictorTest, RedirectUrlNotInDB) {
 
   RedirectData host_redirect_data = CreateRedirectData("fb.com");
   InitializeRedirectStat(host_redirect_data.add_redirect_endpoints(),
-                         "facebook.com", 1, 0, 0);
+                         GURL("https://facebook.com"), 1, 0, 0);
   EXPECT_EQ(mock_tables_->host_redirect_table_.data_,
             RedirectDataMap(
                 {{host_redirect_data.primary_key(), host_redirect_data}}));
@@ -479,13 +484,92 @@ TEST_F(ResourcePrefetchPredictorTest, RedirectUrlInDB) {
 
   RedirectData host_redirect_data = CreateRedirectData("fb.com");
   InitializeRedirectStat(host_redirect_data.add_redirect_endpoints(),
-                         "facebook.com", 1, 0, 0);
+                         GURL("https://facebook.com"), 1, 0, 0);
   RedirectDataMap expected_host_redirect_data = test_host_redirect_data_;
   expected_host_redirect_data.erase("bbc.com");
   expected_host_redirect_data[host_redirect_data.primary_key()] =
       host_redirect_data;
   EXPECT_EQ(mock_tables_->host_redirect_table_.data_,
             expected_host_redirect_data);
+}
+
+// Tests that redirect is recorded correctly for URL already present in
+// the database cache. Test with both https and http schemes for the same
+// host.
+TEST_F(ResourcePrefetchPredictorTest, RedirectUrlInDB_MultipleSchemes) {
+  mock_tables_->host_redirect_table_.data_ = test_host_redirect_data_;
+
+  ResetPredictor();
+  InitializePredictor();
+
+  {
+    std::vector<content::mojom::ResourceLoadInfoPtr> resources_https;
+    resources_https.push_back(CreateResourceLoadInfoWithRedirects(
+        {"https://fb.com/google", "https://facebook.com/google"}));
+    auto page_summary_https =
+        CreatePageRequestSummary("https://facebook.com/google",
+                                 "https://fb.com/google", resources_https);
+
+    StrictMock<MockResourcePrefetchPredictorObserver> mock_observer(predictor_);
+    EXPECT_CALL(mock_observer, OnNavigationLearned(page_summary_https));
+
+    predictor_->RecordPageRequestSummary(
+        std::make_unique<PageRequestSummary>(page_summary_https));
+    profile_->BlockUntilHistoryProcessesPendingRequests();
+
+    RedirectData host_redirect_data_https = CreateRedirectData("fb.com");
+    InitializeRedirectStat(host_redirect_data_https.add_redirect_endpoints(),
+                           GURL("https://facebook.com"), 1, 0, 0);
+    RedirectDataMap expected_host_redirect_data_https =
+        test_host_redirect_data_;
+    expected_host_redirect_data_https.erase("bbc.com");
+    expected_host_redirect_data_https[host_redirect_data_https.primary_key()] =
+        host_redirect_data_https;
+    EXPECT_EQ(mock_tables_->host_redirect_table_.data_,
+              expected_host_redirect_data_https);
+    EXPECT_EQ(1, mock_tables_->host_redirect_table_
+                     .data_[host_redirect_data_https.primary_key()]
+                     .redirect_endpoints()
+                     .size());
+    EXPECT_EQ("https", mock_tables_->host_redirect_table_
+                           .data_[host_redirect_data_https.primary_key()]
+                           .redirect_endpoints(0)
+                           .url_scheme());
+  }
+  {
+    std::vector<content::mojom::ResourceLoadInfoPtr> resources_http;
+    resources_http.push_back(CreateResourceLoadInfoWithRedirects(
+        {"http://fb.com/google", "http://facebook.com/google"}));
+    auto page_summary_http = CreatePageRequestSummary(
+        "http://facebook.com/google", "http://fb.com/google", resources_http);
+
+    StrictMock<MockResourcePrefetchPredictorObserver> mock_observer(predictor_);
+    EXPECT_CALL(mock_observer, OnNavigationLearned(page_summary_http));
+
+    predictor_->RecordPageRequestSummary(
+        std::make_unique<PageRequestSummary>(page_summary_http));
+    profile_->BlockUntilHistoryProcessesPendingRequests();
+
+    RedirectData host_redirect_data_http = CreateRedirectData("fb.com");
+    InitializeRedirectStat(host_redirect_data_http.add_redirect_endpoints(),
+                           GURL("http://facebook.com"), 1, 0, 0);
+    RedirectDataMap expected_host_redirect_data_http = test_host_redirect_data_;
+    expected_host_redirect_data_http.erase("bbc.com");
+    expected_host_redirect_data_http[host_redirect_data_http.primary_key()] =
+        host_redirect_data_http;
+    EXPECT_EQ(2, mock_tables_->host_redirect_table_
+                     .data_[host_redirect_data_http.primary_key()]
+                     .redirect_endpoints()
+                     .size());
+    EXPECT_EQ("facebook.com", mock_tables_->host_redirect_table_
+                                  .data_[host_redirect_data_http.primary_key()]
+                                  .redirect_endpoints(1)
+                                  .url());
+    EXPECT_EQ("http", mock_tables_->host_redirect_table_
+                          .data_[host_redirect_data_http.primary_key()]
+                          .redirect_endpoints(1)
+                          .url_scheme());
+  }
 }
 
 TEST_F(ResourcePrefetchPredictorTest, DeleteUrls) {
@@ -554,8 +638,8 @@ TEST_F(ResourcePrefetchPredictorTest, GetRedirectEndpoint) {
 
   // The data to be requested for the confident endpoint.
   RedirectData nyt = CreateRedirectData("nyt.com", 1);
-  InitializeRedirectStat(nyt.add_redirect_endpoints(), "mobile.nytimes.com", 10,
-                         0, 0);
+  InitializeRedirectStat(nyt.add_redirect_endpoints(),
+                         GURL("https://mobile.nytimes.com"), 10, 0, 0);
   redirect_data.UpdateData(nyt.primary_key(), nyt);
   EXPECT_TRUE(predictor_->GetRedirectEndpoint("nyt.com", redirect_data,
                                               &redirect_endpoint));
@@ -563,20 +647,20 @@ TEST_F(ResourcePrefetchPredictorTest, GetRedirectEndpoint) {
 
   // The data to check negative result due not enough confidence.
   RedirectData facebook = CreateRedirectData("fb.com", 3);
-  InitializeRedirectStat(facebook.add_redirect_endpoints(), "facebook.com", 5,
-                         5, 0);
+  InitializeRedirectStat(facebook.add_redirect_endpoints(),
+                         GURL("https://facebook.com"), 5, 5, 0);
   redirect_data.UpdateData(facebook.primary_key(), facebook);
   EXPECT_FALSE(predictor_->GetRedirectEndpoint("fb.com", redirect_data,
                                                &redirect_endpoint));
 
   // The data to check negative result due ambiguity.
   RedirectData google = CreateRedirectData("google.com", 4);
-  InitializeRedirectStat(google.add_redirect_endpoints(), "google.com", 10, 0,
-                         0);
-  InitializeRedirectStat(google.add_redirect_endpoints(), "google.fr", 10, 1,
-                         0);
-  InitializeRedirectStat(google.add_redirect_endpoints(), "google.ws", 20, 20,
-                         0);
+  InitializeRedirectStat(google.add_redirect_endpoints(),
+                         GURL("https://google.com"), 10, 0, 0);
+  InitializeRedirectStat(google.add_redirect_endpoints(),
+                         GURL("https://google.fr"), 10, 1, 0);
+  InitializeRedirectStat(google.add_redirect_endpoints(),
+                         GURL("https://google.ws"), 20, 20, 0);
   redirect_data.UpdateData(google.primary_key(), google);
   EXPECT_FALSE(predictor_->GetRedirectEndpoint("google.com", redirect_data,
                                                &redirect_endpoint));
@@ -616,8 +700,8 @@ TEST_F(ResourcePrefetchPredictorTest, TestPredictPreconnectOrigins) {
 
   // Add a redirect.
   RedirectData redirect = CreateRedirectData("google.com", 3);
-  InitializeRedirectStat(redirect.add_redirect_endpoints(), "www.google.com",
-                         10, 0, 0);
+  InitializeRedirectStat(redirect.add_redirect_endpoints(),
+                         GURL("https://www.google.com"), 10, 0, 0);
   predictor_->host_redirect_data_->UpdateData(redirect.primary_key(), redirect);
 
   // Prediction failed: no data associated with the redirect endpoint.

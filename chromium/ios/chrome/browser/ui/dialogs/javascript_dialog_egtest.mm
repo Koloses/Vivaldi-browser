@@ -17,6 +17,7 @@
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/test/app/chrome_test_util.h"
+#include "ios/chrome/test/app/tab_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
@@ -45,7 +46,6 @@ using chrome_test_util::SettingsDoneButton;
 using base::test::ios::kWaitForJSCompletionTimeout;
 using base::test::ios::kWaitForUIElementTimeout;
 using base::test::ios::WaitUntilConditionOrTimeout;
-using web::test::ElementSelector;
 
 namespace {
 
@@ -390,12 +390,12 @@ void TapSuppressDialogsButton() {
 
 - (void)loadBlankTestPage {
   [ChromeEarlGrey loadURL:self.emptyPageURL];
-  [ChromeEarlGrey waitForWebViewContainingText:std::string()];
+  [ChromeEarlGrey waitForWebStateContainingText:std::string()];
 }
 
 - (void)loadPageWithLink {
   [ChromeEarlGrey loadURL:self.linkPageURL];
-  [ChromeEarlGrey waitForWebViewContainingText:kLinkPageLinkText];
+  [ChromeEarlGrey waitForWebStateContainingText:kLinkPageLinkText];
 }
 
 #pragma mark - Tests
@@ -409,7 +409,7 @@ void TapSuppressDialogsButton() {
   [[EarlGrey selectElementWithMatcher:OKButton()] performAction:grey_tap()];
 
   // Wait for the html body to be reset to the correct value.
-  [ChromeEarlGrey waitForWebViewContainingText:kAlertResultBody];
+  [ChromeEarlGrey waitForWebStateContainingText:kAlertResultBody];
 }
 
 // Tests that a confirmation dialog is shown, and that the completion block is
@@ -422,7 +422,7 @@ void TapSuppressDialogsButton() {
   [[EarlGrey selectElementWithMatcher:OKButton()] performAction:grey_tap()];
 
   // Wait for the html body to be reset to the correct value.
-  [ChromeEarlGrey waitForWebViewContainingText:kConfirmationResultBodyOK];
+  [ChromeEarlGrey waitForWebStateContainingText:kConfirmationResultBodyOK];
 }
 
 // Tests that a confirmation dialog is shown, and that the completion block is
@@ -437,7 +437,7 @@ void TapSuppressDialogsButton() {
 
   // Wait for the html body to be reset to the correct value.
   [ChromeEarlGrey
-      waitForWebViewContainingText:kConfirmationResultBodyCancelled];
+      waitForWebStateContainingText:kConfirmationResultBodyCancelled];
 }
 
 // Tests that a prompt dialog is shown, and that the completion block is called
@@ -445,7 +445,7 @@ void TapSuppressDialogsButton() {
 - (void)testShowJavaScriptPromptOK {
   // TODO(crbug.com/753098): Re-enable this test on iPad once grey_typeText
   // works.
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     EARL_GREY_TEST_DISABLED(@"Test disabled on iPad.");
   }
 
@@ -459,7 +459,7 @@ void TapSuppressDialogsButton() {
   [[EarlGrey selectElementWithMatcher:OKButton()] performAction:grey_tap()];
 
   // Wait for the html body to be reset to the input text.
-  [ChromeEarlGrey waitForWebViewContainingText:kPromptTestUserInput];
+  [ChromeEarlGrey waitForWebStateContainingText:kPromptTestUserInput];
 }
 
 // Tests that a prompt dialog is shown, and that the completion block is called
@@ -467,7 +467,7 @@ void TapSuppressDialogsButton() {
 - (void)testShowJavaScriptPromptCancelled {
   // TODO(crbug.com/753098): Re-enable this test on iPad once grey_typeText
   // works.
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     EARL_GREY_TEST_DISABLED(@"Test disabled on iPad.");
   }
 
@@ -482,7 +482,7 @@ void TapSuppressDialogsButton() {
   TapCancel();
 
   // Wait for the html body to be reset to the cancel text.
-  [ChromeEarlGrey waitForWebViewContainingText:kPromptResultBodyCancelled];
+  [ChromeEarlGrey waitForWebStateContainingText:kPromptResultBodyCancelled];
 }
 
 // Tests that JavaScript alerts that are shown in a loop can be suppressed.
@@ -509,7 +509,7 @@ void TapSuppressDialogsButton() {
   TapSuppressDialogsButton();
 
   // Wait for the html body to be reset to the loop finished text.
-  [ChromeEarlGrey waitForWebViewContainingText:kAlertLoopFinishedText];
+  [ChromeEarlGrey waitForWebStateContainingText:kAlertLoopFinishedText];
 }
 
 // Tests to ensure crbug.com/658260 does not regress.
@@ -546,7 +546,7 @@ void TapSuppressDialogsButton() {
   [[EarlGrey selectElementWithMatcher:OKButton()] performAction:grey_tap()];
 
   // Wait for the html body to be reset to the correct value.
-  [ChromeEarlGrey waitForWebViewContainingText:kAlertResultBody];
+  [ChromeEarlGrey waitForWebStateContainingText:kAlertResultBody];
 }
 
 // Tests that an alert is presented after displaying the share menu.
@@ -572,7 +572,7 @@ void TapSuppressDialogsButton() {
   [[EarlGrey selectElementWithMatcher:OKButton()] performAction:grey_tap()];
 
   // Wait for the html body to be reset to the correct value.
-  [ChromeEarlGrey waitForWebViewContainingText:kAlertResultBody];
+  [ChromeEarlGrey waitForWebStateContainingText:kAlertResultBody];
 }
 
 // Tests that an alert is presented after a new tab animation is finished.
@@ -587,7 +587,7 @@ void TapSuppressDialogsButton() {
 
   [[EarlGrey selectElementWithMatcher:webViewMatcher]
       performAction:chrome_test_util::LongPressElementForContextMenu(
-                        ElementSelector::ElementSelectorId(kLinkID),
+                        [ElementSelector selectorWithElementID:kLinkID],
                         true /* menu should appear */)];
 
   // Tap on the "Open In New Tab" button.
@@ -603,7 +603,7 @@ void TapSuppressDialogsButton() {
   // continues to animate until the dialog is closed.  Disabling EarlGrey
   // synchronization code for iPad allows the test to detect and dismiss the
   // dialog while this animation is occurring.
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     [[GREYConfiguration sharedInstance]
             setValue:@(NO)
         forConfigKey:kGREYConfigKeySynchronizationEnabled];
@@ -621,7 +621,7 @@ void TapSuppressDialogsButton() {
   [[EarlGrey selectElementWithMatcher:OKButton()] performAction:grey_tap()];
 
   // Reenable synchronization on iPads now that the dialog has been dismissed.
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     [[GREYConfiguration sharedInstance]
             setValue:@(YES)
         forConfigKey:kGREYConfigKeySynchronizationEnabled];

@@ -36,9 +36,12 @@ void OnStartCallback(
 
 ChromiumServiceWrapper::ChromiumServiceWrapper(
     ExternalConnector* connector,
+    service_manager::mojom::ServicePtr service_ptr,
     std::unique_ptr<service_manager::Service> chromium_service,
     const std::string& service_name)
-    : chromium_service_(std::move(chromium_service)), service_binding_(this) {
+    : service_ptr_(std::move(service_ptr)),
+      chromium_service_(std::move(chromium_service)),
+      service_binding_(this) {
   DCHECK(connector);
   DCHECK(chromium_service_);
 
@@ -52,12 +55,18 @@ ChromiumServiceWrapper::~ChromiumServiceWrapper() = default;
 void ChromiumServiceWrapper::OnBindInterface(
     const std::string& interface_name,
     mojo::ScopedMessagePipeHandle interface_pipe) {
-  chromium_service_->OnBindInterface(service_manager::BindSourceInfo(),
-                                     interface_name, std::move(interface_pipe));
+  chromium_service_->OnBindInterface(
+      service_manager::BindSourceInfo(
+          service_manager::Identity("unique", base::Token::CreateRandom(),
+                                    base::Token::CreateRandom(),
+                                    base::Token::CreateRandom()),
+          service_manager::CapabilitySet()),
+      interface_name, std::move(interface_pipe));
 }
 
 service_manager::mojom::ServiceRequest CreateChromiumServiceRequest(
     ExternalConnector* connector,
+    service_manager::mojom::ServicePtr* service_ptr,
     service_manager::Identity identity) {
   DCHECK(connector);
 
@@ -67,9 +76,9 @@ service_manager::mojom::ServiceRequest CreateChromiumServiceRequest(
         base::Token::CreateRandom());
   }
 
-  service_manager::mojom::ServicePtr service_ptr;
-  auto request = mojo::MakeRequest(&service_ptr);
-  service_ptr->OnStart(identity, base::BindOnce(&OnStartCallback, connector));
+  auto request = mojo::MakeRequest(service_ptr);
+  (*service_ptr)
+      ->OnStart(identity, base::BindOnce(&OnStartCallback, connector));
   return request;
 }
 

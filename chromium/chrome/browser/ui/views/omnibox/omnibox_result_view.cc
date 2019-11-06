@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_contents_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_tab_switch_button.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_text_view.h"
+#include "chrome/browser/ui/views/omnibox/remove_suggestion_bubble.h"
 #include "chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
@@ -41,13 +42,16 @@
 #include "base/win/atl.h"
 #endif
 
+static size_t kKeywordSuggestionIndent = 70;
+
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxResultView, public:
 
 OmniboxResultView::OmniboxResultView(
     OmniboxPopupContentsView* popup_contents_view,
     int model_index)
-    : popup_contents_view_(popup_contents_view),
+    : AnimationDelegateViews(this),
+      popup_contents_view_(popup_contents_view),
       model_index_(model_index),
       is_hovered_(false),
       animation_(new gfx::SlideAnimation(this)) {
@@ -63,10 +67,11 @@ OmniboxResultView::OmniboxResultView(
   keyword_view_->icon()->SizeToPreferredSize();
 
   if (base::FeatureList::IsEnabled(
-          omnibox::kOmniboxContextMenuForSuggestions)) {
-    // TODO(tommycli): Replace this with the real translated string from UX.
-    context_menu_contents_.AddItem(COMMAND_REMOVE_SUGGESTION,
-                                   base::ASCIIToUTF16("Remove suggestion..."));
+          omnibox::kOmniboxSuggestionTransparencyOptions)) {
+    context_menu_contents_.AddItemWithStringId(IDS_OMNIBOX_WHY_THIS_SUGGESTION,
+                                               IDS_OMNIBOX_WHY_THIS_SUGGESTION);
+    context_menu_contents_.AddItemWithStringId(IDS_OMNIBOX_REMOVE_SUGGESTION,
+                                               IDS_OMNIBOX_REMOVE_SUGGESTION);
     set_context_menu_controller(this);
   }
 }
@@ -74,25 +79,7 @@ OmniboxResultView::OmniboxResultView(
 OmniboxResultView::~OmniboxResultView() {}
 
 SkColor OmniboxResultView::GetColor(OmniboxPart part) const {
-  if (!AutocompleteMatch::IsSearchType(match_.type)) {
-    // These recoloring experiments affect all non-search matches.
-    bool color_titles_blue =
-        base::FeatureList::IsEnabled(
-            omnibox::kUIExperimentBlueTitlesAndGrayUrlsOnPageSuggestions) ||
-        base::FeatureList::IsEnabled(
-            omnibox::kUIExperimentBlueTitlesOnPageSuggestions);
-    bool color_urls_gray = base::FeatureList::IsEnabled(
-        omnibox::kUIExperimentBlueTitlesAndGrayUrlsOnPageSuggestions);
-
-    // If these recoloring experiments are enabled, change |part| to fetch an
-    // alternate color for this text.
-    if (color_titles_blue && part == OmniboxPart::RESULTS_TEXT_DEFAULT)
-      part = OmniboxPart::RESULTS_TEXT_URL;
-    else if (color_urls_gray && part == OmniboxPart::RESULTS_TEXT_URL)
-      part = OmniboxPart::RESULTS_TEXT_DIMMED;
-  }
-
-  return GetOmniboxColor(part, GetTint(), GetThemeState());
+  return GetOmniboxColor(part, CalculateTint(), GetThemeState());
 }
 
 void OmniboxResultView::SetMatch(const AutocompleteMatch& match) {
@@ -134,7 +121,7 @@ void OmniboxResultView::ShowKeyword(bool show_keyword) {
     animation_->Hide();
 }
 
-void OmniboxResultView::Invalidate() {
+void OmniboxResultView::Invalidate(bool force_reapply_styles) {
   bool high_contrast =
       GetNativeTheme() && GetNativeTheme()->UsesHighContrastColors();
   // TODO(tapted): Consider using background()->SetNativeControlColor() and
@@ -164,26 +151,22 @@ void OmniboxResultView::Invalidate() {
   // Answers use their own styling for additional content text and the
   // description text, whereas non-answer suggestions use the match text and
   // calculated classifications for the description text.
-  bool blue_search_query = base::FeatureList::IsEnabled(
-      omnibox::kUIExperimentBlueSearchLoopAndSearchQuery);
   if (match_.answer) {
     const bool reverse = OmniboxFieldTrial::IsReverseAnswersEnabled() &&
-                         !match_.IsExceptedFromLineReversal();
+                         !match_.answer->IsExceptedFromLineReversal();
     if (reverse) {
       suggestion_view_->content()->SetText(match_.answer->second_line());
       suggestion_view_->description()->SetText(match_.contents,
                                                match_.contents_class, true);
       suggestion_view_->description()->ApplyTextColor(
-          blue_search_query ? OmniboxPart::RESULTS_TEXT_URL
-                            : OmniboxPart::RESULTS_TEXT_DIMMED);
+          OmniboxPart::RESULTS_TEXT_DIMMED);
       suggestion_view_->description()->AppendExtraText(
           match_.answer->first_line());
     } else {
       suggestion_view_->content()->SetText(match_.contents,
                                            match_.contents_class);
       suggestion_view_->content()->ApplyTextColor(
-          blue_search_query ? OmniboxPart::RESULTS_TEXT_URL
-                            : OmniboxPart::RESULTS_TEXT_DEFAULT);
+          OmniboxPart::RESULTS_TEXT_DEFAULT);
       suggestion_view_->content()->AppendExtraText(match_.answer->first_line());
       suggestion_view_->description()->SetText(match_.answer->second_line(),
                                                true);
@@ -194,10 +177,6 @@ void OmniboxResultView::Invalidate() {
     // adjustments like answers above.  Pedals do likewise.
     suggestion_view_->content()->SetText(match_.contents,
                                          match_.contents_class);
-    if (blue_search_query) {
-      suggestion_view_->content()->ApplyTextColor(
-          OmniboxPart::RESULTS_TEXT_URL);
-    }
     suggestion_view_->description()->SetText(match_.description,
                                              match_.description_class, -1);
     suggestion_view_->description()->ApplyTextColor(
@@ -212,16 +191,9 @@ void OmniboxResultView::Invalidate() {
     // Normally, OmniboxTextView caches its appearance, but in high contrast,
     // selected-ness changes the text colors, so the styling of the text part of
     // the results needs to be recomputed.
-    if (high_contrast) {
+    if (high_contrast || force_reapply_styles) {
       suggestion_view_->content()->ReapplyStyling();
       suggestion_view_->description()->ReapplyStyling();
-    }
-
-    // If the blue search query experiment is on, search suggestions are
-    // recolored at the end.
-    if (blue_search_query && AutocompleteMatch::IsSearchType(match_.type)) {
-      suggestion_view_->content()->ApplyTextColor(
-          OmniboxPart::RESULTS_TEXT_URL);
     }
   }
 
@@ -242,6 +214,14 @@ void OmniboxResultView::Invalidate() {
 void OmniboxResultView::OnSelected() {
   DCHECK(IsSelected());
 
+  // Immediately before notifying screen readers that the selected item has
+  // changed, we want to update the name of the newly-selected item so that any
+  // cached values get updated prior to the selection change.
+  EmitTextChangedAccessiblityEvent();
+
+  // Send accessibility event on the popup box that its selection has changed.
+  EmitSelectedChildrenChangedAccessibilityEvent();
+
   // The text is also accessible via text/value change events in the omnibox but
   // this selection event allows the screen reader to get more details about the
   // list and the user's position within it.
@@ -260,8 +240,8 @@ OmniboxPartState OmniboxResultView::GetThemeState() const {
   return is_hovered_ ? OmniboxPartState::HOVERED : OmniboxPartState::NORMAL;
 }
 
-OmniboxTint OmniboxResultView::GetTint() const {
-  return popup_contents_view_->GetTint();
+OmniboxTint OmniboxResultView::CalculateTint() const {
+  return popup_contents_view_->CalculateTint();
 }
 
 void OmniboxResultView::OnMatchIconUpdated() {
@@ -271,7 +251,7 @@ void OmniboxResultView::OnMatchIconUpdated() {
 }
 
 void OmniboxResultView::SetRichSuggestionImage(const gfx::ImageSkia& image) {
-  suggestion_view_->answer_image()->SetImage(image);
+  suggestion_view_->SetImage(image);
   Layout();
   SchedulePaint();
 }
@@ -324,8 +304,15 @@ void OmniboxResultView::Layout() {
       suggestion_tab_switch_button_->SetVisible(false);
     }
   }
-  keyword_view_->SetBounds(suggestion_width, 0, width(), height());
-  suggestion_view_->SetBounds(0, 0, suggestion_width, height());
+  keyword_view_->SetBounds(suggestion_width, 0, width() - suggestion_width,
+                           height());
+  if (popup_contents_view_->InExplicitExperimentalKeywordMode()) {
+    suggestion_view_->SetBounds(kKeywordSuggestionIndent, 0,
+                                suggestion_width - kKeywordSuggestionIndent,
+                                height());
+  } else {
+    suggestion_view_->SetBounds(0, 0, suggestion_width, height());
+  }
 }
 
 bool OmniboxResultView::OnMousePressed(const ui::MouseEvent& event) {
@@ -401,7 +388,7 @@ void OmniboxResultView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->AddIntAttribute(ax::mojom::IntAttribute::kPosInSet,
                              model_index_ + 1);
   node_data->AddIntAttribute(ax::mojom::IntAttribute::kSetSize,
-                             popup_contents_view_->child_count());
+                             popup_contents_view_->model()->result().size());
 
   node_data->AddBoolAttribute(ax::mojom::BoolAttribute::kSelected,
                               IsSelected());
@@ -416,8 +403,8 @@ gfx::Size OmniboxResultView::CalculatePreferredSize() const {
   return suggestion_view_->CalculatePreferredSize();
 }
 
-void OmniboxResultView::OnNativeThemeChanged(const ui::NativeTheme* theme) {
-  Invalidate();
+void OmniboxResultView::OnThemeChanged() {
+  Invalidate(true);
   SchedulePaint();
 }
 
@@ -435,9 +422,9 @@ void OmniboxResultView::ShowContextMenuForViewImpl(
       &context_menu_contents_,
       views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU,
       set_hovered_false);
-  context_menu_runner_->RunMenuAt(GetWidget(), nullptr,
-                                  gfx::Rect(point, gfx::Size()),
-                                  views::MENU_ANCHOR_TOPLEFT, source_type);
+  context_menu_runner_->RunMenuAt(
+      GetWidget(), nullptr, gfx::Rect(point, gfx::Size()),
+      views::MenuAnchorPosition::kTopLeft, source_type);
 
   // Opening the context menu unsets the hover state, but we still want the
   // result 'hovered' as long as the context menu is open.
@@ -445,36 +432,74 @@ void OmniboxResultView::ShowContextMenuForViewImpl(
 }
 
 // ui::SimpleMenuModel::Delegate overrides:
-bool OmniboxResultView::IsCommandIdEnabled(int command_id) const {
-  DCHECK_EQ(COMMAND_REMOVE_SUGGESTION, command_id);
-  return match_.SupportsDeletion();
+bool OmniboxResultView::IsCommandIdVisible(int command_id) const {
+  if (command_id == IDS_OMNIBOX_REMOVE_SUGGESTION)
+    return match_.SupportsDeletion();
+
+  DCHECK(command_id == IDS_OMNIBOX_WHY_THIS_SUGGESTION);
+  return true;
 }
 
 void OmniboxResultView::ExecuteCommand(int command_id, int event_flags) {
-  DCHECK_EQ(COMMAND_REMOVE_SUGGESTION, command_id);
+  // Temporarily inhibit the popup closing on blur while we open the remove
+  // suggestion confirmation bubble.
+  popup_contents_view_->model()->set_popup_closes_on_blur(false);
 
-  // TODO(tommycli): Launch modal bubble to confirm removing the suggestion.
+  // TODO(tommycli): We re-fetch the original match from the popup model,
+  // because |match_| already has its contents and description swapped by this
+  // class, and we don't want that for the bubble. We should improve this.
+  AutocompleteMatch raw_match =
+      popup_contents_view_->model()->result().match_at(model_index_);
+
+  if (command_id == IDS_OMNIBOX_REMOVE_SUGGESTION) {
+    TemplateURLService* template_url_service = popup_contents_view_->model()
+                                                   ->edit_model()
+                                                   ->client()
+                                                   ->GetTemplateURLService();
+    ShowRemoveSuggestion(template_url_service, this, raw_match,
+                         base::BindOnce(&OmniboxResultView::RemoveSuggestion,
+                                        weak_factory_.GetWeakPtr()));
+  } else if (command_id == IDS_OMNIBOX_WHY_THIS_SUGGESTION) {
+    ShowWhyThisSuggestion(this, raw_match);
+  }
+
+  popup_contents_view_->model()->set_popup_closes_on_blur(true);
 }
 
 void OmniboxResultView::ProvideButtonFocusHint() {
   suggestion_tab_switch_button_->ProvideFocusHint();
 }
 
+void OmniboxResultView::RemoveSuggestion() const {
+  popup_contents_view_->model()->TryDeletingLine(model_index_);
+}
+
+void OmniboxResultView::EmitTextChangedAccessiblityEvent() {
+  if (!popup_contents_view_->IsOpen())
+    return;
+
+  // The omnibox results list reuses the same items, but the text displayed for
+  // these items is updated as the value of omnibox changes. The displayed text
+  // for a given item is exposed to screen readers as the item's name/label.
+  base::string16 current_name = AutocompleteMatchType::ToAccessibilityLabel(
+      match_, match_.contents, false);
+  if (accessible_name_ != current_name) {
+    NotifyAccessibilityEvent(ax::mojom::Event::kTextChanged, true);
+    accessible_name_ = current_name;
+  }
+}
+
+void OmniboxResultView::EmitSelectedChildrenChangedAccessibilityEvent() {
+  popup_contents_view_->NotifyAccessibilityEvent(
+      ax::mojom::Event::kSelectedChildrenChanged, true);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxResultView, private:
 
 gfx::Image OmniboxResultView::GetIcon() const {
-  SkColor color = GetColor(OmniboxPart::RESULTS_ICON);
-
-  // If the blue search loop experiment is enabled, set the color of search
-  // match icons to be the same as result URLs (conventionally blue).
-  if (base::FeatureList::IsEnabled(
-          omnibox::kUIExperimentBlueSearchLoopAndSearchQuery) &&
-      AutocompleteMatch::IsSearchType(match_.type)) {
-    color = GetColor(OmniboxPart::RESULTS_TEXT_URL);
-  }
-
-  return popup_contents_view_->GetMatchIcon(match_, color);
+  return popup_contents_view_->GetMatchIcon(
+      match_, GetColor(OmniboxPart::RESULTS_ICON));
 }
 
 void OmniboxResultView::SetHovered(bool hovered) {

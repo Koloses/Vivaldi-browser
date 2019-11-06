@@ -79,6 +79,7 @@ class VideoDetectorTest : public testing::Test {
       : frame_sink_manager_(&shared_bitmap_manager_),
         surface_aggregator_(frame_sink_manager_.surface_manager(),
                             nullptr,
+                            false,
                             false) {}
 
   ~VideoDetectorTest() override {}
@@ -121,7 +122,8 @@ class VideoDetectorTest : public testing::Test {
 
   void CreateDisplayFrame() {
     surface_aggregator_.Aggregate(root_frame_sink_->last_activated_surface_id(),
-                                  mock_task_runner_->NowTicks());
+                                  mock_task_runner_->NowTicks(),
+                                  gfx::OVERLAY_TRANSFORM_NONE);
   }
 
   void EmbedClient(CompositorFrameSinkSupport* frame_sink) {

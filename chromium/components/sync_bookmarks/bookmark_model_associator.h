@@ -17,7 +17,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/containers/stack.h"
-#include "base/hash.h"
+#include "base/hash/hash.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
@@ -279,7 +279,7 @@ class BookmarkModelAssociator : public syncer::AssociatorInterface {
   // Helper method for creating a new native bookmark node.
   const bookmarks::BookmarkNode* CreateBookmarkNode(
       const bookmarks::BookmarkNode* parent_node,
-      int bookmark_index,
+      size_t bookmark_index,
       const syncer::BaseNode* sync_child_node,
       const GURL& url,
       Context* context,
@@ -306,7 +306,7 @@ class BookmarkModelAssociator : public syncer::AssociatorInterface {
   // Used to post PersistAssociation tasks to the current message loop and
   // guarantees no invocations can occur if |this| has been deleted. (This
   // allows this class to be non-refcounted).
-  base::WeakPtrFactory<BookmarkModelAssociator> weak_factory_;
+  base::WeakPtrFactory<BookmarkModelAssociator> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkModelAssociator);
 };

@@ -11,28 +11,31 @@
 #include "ash/ash_export.h"
 #include "ash/home_screen/home_launcher_gesture_handler_observer.h"
 #include "ash/public/cpp/shelf_types.h"
+#include "ash/public/cpp/wallpaper_controller_observer.h"
+#include "ash/rotator/screen_rotation_animator_observer.h"
 #include "ash/session/session_observer.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell_observer.h"
-#include "ash/system/locale/locale_update_controller.h"
-#include "ash/wallpaper/wallpaper_controller_observer.h"
+#include "ash/system/locale/locale_update_controller_impl.h"
 #include "ash/wm/lock_state_observer.h"
 #include "ash/wm/overview/overview_observer.h"
-#include "ash/wm/wm_snap_to_pixel_layout_manager.h"
+#include "ash/wm/wm_default_layout_manager.h"
 #include "ash/wm/workspace/workspace_types.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/scoped_observer.h"
 #include "base/timer/timer.h"
+#include "ui/compositor/layer_animation_observer.h"
+#include "ui/display/display.h"
 #include "ui/display/display_observer.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/wm/public/activation_change_observer.h"
 
 namespace ui {
 class ImplicitAnimationObserver;
 class MouseEvent;
+class LocatedEvent;
 }  // namespace ui
 
 namespace ash {
@@ -43,6 +46,7 @@ class Shelf;
 class ShelfLayoutManagerObserver;
 class ShelfLayoutManagerTest;
 class ShelfWidget;
+class WallpaperController;
 
 // ShelfLayoutManager is the layout manager responsible for the shelf and
 // status widgets. The shelf is given the total available width and told the
@@ -51,22 +55,24 @@ class ShelfWidget;
 // To respond to bounds changes in the status area StatusAreaLayoutManager works
 // closely with ShelfLayoutManager.
 // On mus, widget bounds management is handled by the window manager.
-class ASH_EXPORT ShelfLayoutManager
-    : public AppListControllerObserver,
-      public HomeLauncherGestureHandlerObserver,
-      public ShellObserver,
-      public OverviewObserver,
-      public ::wm::ActivationChangeObserver,
-      public keyboard::KeyboardControllerObserver,
-      public LockStateObserver,
-      public wm::WmSnapToPixelLayoutManager,
-      public display::DisplayObserver,
-      public SessionObserver,
-      public WallpaperControllerObserver,
-      public LocaleChangeObserver {
+class ASH_EXPORT ShelfLayoutManager : public AppListControllerObserver,
+                                      public HomeLauncherGestureHandlerObserver,
+                                      public ShellObserver,
+                                      public OverviewObserver,
+                                      public ::wm::ActivationChangeObserver,
+                                      public LockStateObserver,
+                                      public WmDefaultLayoutManager,
+                                      public display::DisplayObserver,
+                                      public SessionObserver,
+                                      public WallpaperControllerObserver,
+                                      public LocaleChangeObserver,
+                                      public ScreenRotationAnimatorObserver {
  public:
   ShelfLayoutManager(ShelfWidget* shelf_widget, Shelf* shelf);
   ~ShelfLayoutManager() override;
+
+  // Initializes observers.
+  void InitObservers();
 
   // Clears internal data for shutdown process.
   void PrepareForShutdown();
@@ -77,19 +83,9 @@ class ASH_EXPORT ShelfLayoutManager
   // Returns the ideal bounds of the shelf assuming it is visible.
   gfx::Rect GetIdealBounds() const;
 
-  // Returns the preferred size of the shelf for the target visibility state.
-  gfx::Size GetPreferredSize();
-
-  // Stops any animations and sets the bounds of the shelf and status widgets.
-  void LayoutShelfAndUpdateBounds();
-
   // Stops any animations, sets the bounds of the shelf and status widgets, and
   // changes the work area
   void LayoutShelf();
-
-  // Returns shelf visibility state based on current value of auto hide
-  // behavior setting.
-  ShelfVisibilityState CalculateShelfVisibility();
 
   // Updates the visibility state.
   void UpdateVisibilityState();
@@ -113,22 +109,11 @@ class ASH_EXPORT ShelfLayoutManager
   // be processed any further, false otherwise.
   bool ProcessGestureEvent(const ui::GestureEvent& event_in_screen);
 
-  // Returns true if a maximized or fullscreen window is being dragged from the
-  // top of the display or from the caption area. Note currently for this case
-  // it's only allowed in tablet mode, not in laptop mode.
-  bool IsDraggingWindowFromTopOrCaptionArea() const;
+  // Handles mouse events from the shelf.
+  void ProcessMouseEventFromShelf(const ui::MouseEvent& event_in_screen);
 
   // Returns how the shelf background should be painted.
   ShelfBackgroundType GetShelfBackgroundType() const;
-
-  // Set the height of the accessibility panel, which takes away space from the
-  // available work area from the top of the screen. Used by ChromeVox.
-  void SetAccessibilityPanelHeight(int height);
-
-  // Set the height of the Docked Magnifier viewport at the top of the screen,
-  // which will reduce the available screen work area similarly to the ChromeVox
-  // panel height. The Docked Magnifier appears above the ChromeVox panel.
-  void SetDockedMagnifierHeight(int height);
 
   // Updates the background of the shelf if it has changed.
   void MaybeUpdateShelfBackground(AnimationChangeType change_type);
@@ -138,19 +123,28 @@ class ASH_EXPORT ShelfLayoutManager
   // state.
   bool ShouldBlurShelfBackground();
 
-  // wm::WmSnapToPixelLayoutManager:
+  // Returns true if at least one window is visible.
+  bool HasVisibleWindow() const;
+
+  // Cancel the drag if the shelf is in drag progress.
+  void CancelDragOnShelfIfInProgress();
+
+  // WmDefaultLayoutManager:
   void OnWindowResized() override;
   void SetChildBounds(aura::Window* child,
                       const gfx::Rect& requested_bounds) override;
 
   // ShellObserver:
   void OnShelfAutoHideBehaviorChanged(aura::Window* root_window) override;
+  void OnUserWorkAreaInsetsChanged(aura::Window* root_window) override;
   void OnPinnedStateChanged(aura::Window* pinned_window) override;
   void OnSplitViewModeStarted() override;
   void OnSplitViewModeEnded() override;
 
   // OverviewObserver:
+  void OnOverviewModeStarting() override;
   void OnOverviewModeStartingAnimationComplete(bool canceled) override;
+  void OnOverviewModeEnding(OverviewSession* overview_session) override;
   void OnOverviewModeEndingAnimationComplete(bool canceled) override;
 
   // AppListControllerObserver:
@@ -165,11 +159,6 @@ class ASH_EXPORT ShelfLayoutManager
   void OnWindowActivated(ActivationReason reason,
                          aura::Window* gained_active,
                          aura::Window* lost_active) override;
-
-  // keyboard::KeyboardControllerObserver:
-  void OnKeyboardAppearanceChanged(
-      const keyboard::KeyboardStateDescriptor& state) override;
-  void OnKeyboardVisibilityStateChanged(bool is_visible) override;
 
   // LockStateObserver:
   void OnLockStateEvent(LockStateObserver::EventType event) override;
@@ -189,27 +178,25 @@ class ASH_EXPORT ShelfLayoutManager
   // LocaleChangeObserver:
   void OnLocaleChanged() override;
 
-  // Returns the bounds within the root window not occupied by the shelf nor the
-  // virtual keyboard.
-  const gfx::Rect& user_work_area_bounds() const {
-    return user_work_area_bounds_;
-  }
-
-  // Returns the stable work area which is the work area when the shelf is
-  // visible.
-  gfx::Rect ComputeStableWorkArea() const;
+  // ScreenRotationAnimatorObserver:
+  void OnScreenCopiedBeforeRotation() override;
+  void OnScreenRotationAnimationFinished(ScreenRotationAnimator* animator,
+                                         bool canceled) override;
 
   ShelfVisibilityState visibility_state() const {
     return state_.visibility_state;
   }
+
+  void LockAutoHideState(bool lock_auto_hide_state) {
+    is_auto_hide_state_locked_ = lock_auto_hide_state;
+  }
+
   bool updating_bounds() const { return updating_bounds_; }
   ShelfAutoHideState auto_hide_state() const { return state_.auto_hide_state; }
-  int accessibility_panel_height() const { return accessibility_panel_height_; }
-  int docked_magnifier_height() const { return docked_magnifier_height_; }
-  ShelfWidget* shelf_widget() { return shelf_widget_; }
 
-  // Returns whether background blur is enabled.
-  bool IsBackgroundBlurEnabled() { return is_background_blur_enabled_; }
+  void set_suspend_visibility_update(bool value) {
+    suspend_visibility_update_ = value;
+  }
 
   // TODO(harrym|oshima): These templates will be moved to a new Shelf class.
   // A helper function for choosing values specific to a shelf alignment.
@@ -243,12 +230,13 @@ class ASH_EXPORT ShelfLayoutManager
     TargetBounds();
     ~TargetBounds();
 
-    float opacity;
+    float shelf_opacity;
     float status_opacity;
+
     gfx::Rect shelf_bounds;            // Bounds of the shelf within the screen
     gfx::Rect shelf_bounds_in_shelf;   // Bounds of the shelf minus status area
     gfx::Rect status_bounds_in_shelf;  // Bounds of status area within shelf
-    gfx::Insets work_area_insets;
+    gfx::Insets shelf_insets;          // Shelf insets within the screen
   };
 
   struct State {
@@ -262,6 +250,12 @@ class ASH_EXPORT ShelfLayoutManager
     // Returns whether the session is in an active state.
     bool IsActiveSessionState() const;
 
+    // Returns whether shelf is in auto hide mode and is currently hidden.
+    bool IsShelfAutoHidden() const;
+
+    // Returns whether shelf is currently visible.
+    bool IsShelfVisible() const;
+
     // Returns true if the two states are considered equal. As
     // |auto_hide_state| only matters if |visibility_state| is
     // |SHELF_AUTO_HIDE|, Equals() ignores the |auto_hide_state| as
@@ -270,7 +264,8 @@ class ASH_EXPORT ShelfLayoutManager
 
     ShelfVisibilityState visibility_state;
     ShelfAutoHideState auto_hide_state;
-    wm::WorkspaceWindowState window_state;
+    WorkspaceWindowState window_state;
+
     // True when the system is in the cancelable, pre-lock screen animation.
     bool pre_lock_screen_animation_active;
     session_manager::SessionState session_state;
@@ -279,6 +274,13 @@ class ASH_EXPORT ShelfLayoutManager
   // Sets the visibility of the shelf to |state|.
   void SetState(ShelfVisibilityState visibility_state);
 
+  // Returns shelf visibility state based on current value of auto hide
+  // behavior setting.
+  ShelfVisibilityState CalculateShelfVisibility();
+
+  // Stops any animations and sets the bounds of the shelf and status widgets.
+  void LayoutShelfAndUpdateBounds();
+
   // Updates the bounds and opacity of the shelf and status widgets.
   // If |observer| is specified, it will be called back when the animations, if
   // any, are complete.
@@ -286,16 +288,18 @@ class ASH_EXPORT ShelfLayoutManager
                               bool animate,
                               ui::ImplicitAnimationObserver* observer);
 
-  // Returns whether the virtual keyboard is currently being shown.
-  bool IsKeyboardShown() const;
+  // Returns true if a maximized or fullscreen window is being dragged from the
+  // top of the display or from the caption area. Note currently for this case
+  // it's only allowed in tablet mode, not in laptop mode.
+  bool IsDraggingWindowFromTopOrCaptionArea() const;
 
   // Stops any animations and progresses them to the end.
   void StopAnimating();
 
-  // Calculates the target bounds assuming visibility of
-  // |state.visibilty_state|, and returns the work area.
-  gfx::Rect CalculateTargetBounds(const State& state,
-                                  TargetBounds* target_bounds) const;
+  // Calculates shelf target bounds assuming visibility of
+  // |state.visibilty_state|.
+  void CalculateTargetBounds(const State& state,
+                             TargetBounds* target_bounds) const;
 
   // Calculate the target bounds using |state_|, and updates the
   // |user_work_area_bounds_|.
@@ -327,9 +331,6 @@ class ASH_EXPORT ShelfLayoutManager
   // two displays.
   gfx::Rect GetAutoHideShowShelfRegionInScreen() const;
 
-  // Returns true if at least one window is visible.
-  bool HasVisibleWindow() const;
-
   // Returns the AutoHideState. This value is determined from the shelf and
   // tray.
   ShelfAutoHideState CalculateAutoHideState(
@@ -340,8 +341,6 @@ class ASH_EXPORT ShelfLayoutManager
 
   // Returns true if |window| is a descendant of the status area.
   bool IsStatusAreaWindow(aura::Window* window);
-
-  int GetWorkAreaInsets(const State& state, int size) const;
 
   // Called when the LoginUI changes from visible to invisible.
   void UpdateShelfVisibilityAfterLoginUIChange();
@@ -360,13 +359,28 @@ class ASH_EXPORT ShelfLayoutManager
   // Returns true if the home gesture handler should handle the event.
   bool ShouldHomeGestureHandleEvent(float scroll_y) const;
 
-  // Gesture related functions:
+  // Gesture drag related functions:
   bool StartGestureDrag(const ui::GestureEvent& gesture_in_screen);
   void UpdateGestureDrag(const ui::GestureEvent& gesture_in_screen);
-  void CompleteGestureDrag(const ui::GestureEvent& gesture_in_screen);
-  void CompleteAppListDrag(const ui::GestureEvent& gesture_in_screen);
-  void CancelGestureDrag();
-  bool CanStartFullscreenAppListDrag(float scroll_y_hint) const;
+
+  // Mouse drag related functions:
+  void AttemptToDragByMouse(const ui::MouseEvent& mouse_in_screen);
+  void StartMouseDrag(const ui::MouseEvent& mouse_in_screen);
+  void UpdateMouseDrag(const ui::MouseEvent& mouse_in_screen);
+  void ReleaseMouseDrag(const ui::MouseEvent& mouse_in_screen);
+
+  // Drag related functions, utilized by both gesture drag and mouse drag:
+  bool IsDragAllowed() const;
+  bool StartAppListDrag(const ui::LocatedEvent& event_in_screen,
+                        float scroll_y_hint);
+  bool StartShelfDrag();
+  void UpdateDrag(const ui::LocatedEvent& event_in_screen,
+                  float scroll_x,
+                  float scroll_y);
+  void CompleteDrag(const ui::LocatedEvent& event_in_screen);
+  void CompleteAppListDrag(const ui::LocatedEvent& event_in_screen);
+  void CancelDrag();
+
   float GetAppListBackgroundOpacityOnShelfOpacity();
 
   // Returns true if the gesture is swiping up on a hidden shelf or swiping down
@@ -375,12 +389,17 @@ class ASH_EXPORT ShelfLayoutManager
 
   // Returns true if should change the visibility of the shelf after drag.
   bool ShouldChangeVisibilityAfterDrag(
-      const ui::GestureEvent& gesture_in_screen);
+      const ui::LocatedEvent& gesture_in_screen);
 
   // Updates the mask to limit the content to the non lock screen container.
   // The mask will be removed if the workspace state is either in fullscreen
   // or maximized.
-  void UpdateWorkspaceMask(wm::WorkspaceWindowState window_state);
+  void UpdateWorkspaceMask(WorkspaceWindowState window_state);
+
+  // Sends a11y alert for entering/exiting
+  // WorkspaceWindowState::kFullscreen workspace state.
+  void SendA11yAlertForFullscreenWorkspaceState(
+      WorkspaceWindowState current_workspace_window_state);
 
   // True when inside UpdateBoundsAndOpacity() method. Used to prevent calling
   // UpdateBoundsAndOpacity() again from SetChildBounds().
@@ -398,16 +417,22 @@ class ASH_EXPORT ShelfLayoutManager
   Shelf* shelf_;
 
   // Whether the app list is visible. This is maintained by
-  // OnAppListVisibilityChanged.
+  // OnAppListVisibilityChanged. Used to determine AppList visibility in
+  // clamshell mode.
   bool is_app_list_visible_ = false;
 
   // Whether the HomeLauncher is being dragged to, or animating to fullscreen.
-  // This is maintained by OnHomeLauncherTargetPositionChanged.
+  // This is maintained by OnHomeLauncherTargetPositionChanged. Used to
+  // determine AppList visibility in tablet mode.
   bool is_home_launcher_target_position_shown_ = false;
 
   // Whether the HomeLauncher is shown. This is maintained by
-  // OnHomeLauncherAnimationComplete.
+  // OnHomeLauncherAnimationComplete. Used to determine AppList visibility in
+  // tablet mode.
   bool is_home_launcher_shown_ = false;
+
+  // True to skip updating shelf visibility state.
+  bool suspend_visibility_update_ = false;
 
   base::OneShotTimer auto_hide_timer_;
 
@@ -422,60 +447,49 @@ class ASH_EXPORT ShelfLayoutManager
 
   base::ObserverList<ShelfLayoutManagerObserver>::Unchecked observers_;
 
-  // The shelf reacts to gesture-drags, and can be set to auto-hide for certain
-  // gestures. Swiping up from the shelf in tablet mode can open the
+  // The enum keeps track of the present status of the drag (from gesture or
+  // mouse). The shelf reacts to drags, and can be set to auto-hide for certain
+  // events. For example, swiping up from the shelf in tablet mode can open the
   // fullscreen app list. Some shelf behaviour (e.g. visibility state,
-  // background color etc.) are affected by various stages of the drag. The enum
-  // keeps track of the present status of the gesture drag.
-  enum GestureDragStatus {
-    GESTURE_DRAG_NONE,
-    GESTURE_DRAG_IN_PROGRESS,
-    GESTURE_DRAG_CANCEL_IN_PROGRESS,
-    GESTURE_DRAG_COMPLETE_IN_PROGRESS,
-    GESTURE_DRAG_APPLIST_IN_PROGRESS,
+  // background color etc.) are affected by various stages of the drag.
+  enum DragStatus {
+    kDragNone,
+    kDragAttempt,
+    kDragInProgress,
+    kDragCancelInProgress,
+    kDragCompleteInProgress,
+    kDragAppListInProgress,
   };
 
-  GestureDragStatus gesture_drag_status_ = GESTURE_DRAG_NONE;
+  DragStatus drag_status_ = kDragNone;
 
   // Tracks the amount of the drag. The value is only valid when
-  // |gesture_drag_status_| is set to GESTURE_DRAG_IN_PROGRESS.
-  float gesture_drag_amount_ = 0.f;
+  // |drag_status_| is set to kDragInProgress.
+  float drag_amount_ = 0.f;
 
   // Tracks the amount of launcher that above the shelf bottom during dragging.
   float launcher_above_shelf_bottom_amount_ = 0.f;
 
-  // Manage the auto-hide state during the gesture.
-  ShelfAutoHideState gesture_drag_auto_hide_state_ = SHELF_AUTO_HIDE_SHOWN;
+  // Manage the auto-hide state during drag.
+  ShelfAutoHideState drag_auto_hide_state_ = SHELF_AUTO_HIDE_SHOWN;
 
   // Used to delay updating shelf background.
   UpdateShelfObserver* update_shelf_observer_ = nullptr;
 
-  // The occluded bounds of the keyboard. See
-  // ui/keyboard/keyboard_controller_observer.h for details.
-  gfx::Rect keyboard_occluded_bounds_;
-
-  // The displaced bounds of the keyboard. See
-  // ui/keyboard/keyboard_controller_observer.h for details.
-  gfx::Rect keyboard_displaced_bounds_;
-
-  // The bounds within the root window not occupied by the shelf nor the virtual
-  // keyboard.
-  gfx::Rect user_work_area_bounds_;
-
-  // The height of the accessibility panel at the top of the screen, which
-  // needs to be removed from the available work area. Used by ChromeVox.
-  int accessibility_panel_height_ = 0;
-
-  // The height of the Docked Magnifier viewport at the top of the screen, which
-  // similarly to |accessibility_panel_height_| needs to be removed from the
-  // available work area.
-  int docked_magnifier_height_ = 0;
-
   // Whether background blur is enabled.
   const bool is_background_blur_enabled_;
 
+  // Stores the previous workspace state. Used by
+  // SendA11yAlertForFullscreenWorkspaceState to compare with current workspace
+  // state to determite whether need to send an a11y alert.
+  WorkspaceWindowState previous_workspace_window_state_ =
+      WorkspaceWindowState::kDefault;
+
   // The display on which this shelf is shown.
   display::Display display_;
+
+  // Sets shelf opacity to 0 after all animations have completed.
+  std::unique_ptr<ui::ImplicitAnimationObserver> hide_animation_observer_;
 
   // The current shelf background. Should not be assigned to directly, use
   // MaybeUpdateShelfBackground() instead.
@@ -490,6 +504,13 @@ class ASH_EXPORT ShelfLayoutManager
   ScopedSessionObserver scoped_session_observer_{this};
   ScopedObserver<WallpaperController, ShelfLayoutManager>
       wallpaper_controller_observer_{this};
+
+  // Location of the most recent mouse drag event in screen coordinate.
+  gfx::Point last_mouse_drag_position_;
+
+  // When it is true, |CalculateAutoHideState| returns the current auto hide
+  // state.
+  bool is_auto_hide_state_locked_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ShelfLayoutManager);
 };

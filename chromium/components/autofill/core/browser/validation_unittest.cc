@@ -10,7 +10,7 @@
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "components/autofill/core/browser/credit_card.h"
+#include "components/autofill/core/browser/data_model/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/strings/grit/components_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -451,11 +451,13 @@ INSTANTIATE_TEST_SUITE_P(
 class AutofillIsUPIVirtualPaymentAddress
     : public testing::TestWithParam<std::string> {};
 
-TEST_P(AutofillIsUPIVirtualPaymentAddress, IsUPIVirtualPaymentAddress) {
+TEST_P(AutofillIsUPIVirtualPaymentAddress, IsUPIVirtualPaymentAddress_Banks) {
   // Expected format is user@bank
-  EXPECT_TRUE(IsUPIVirtualPaymentAddress(ASCIIToUTF16("user@" + GetParam())));
+  EXPECT_TRUE(
+      IsUPIVirtualPaymentAddress(ASCIIToUTF16("user.name-1@" + GetParam())));
 
-  // Deviations should not match: bank, @bank, user@prefixbank, user@banksuffix.
+  // Deviations should not match: bank, @bank, user@prefixbank, user@banksuffix,
+  // disallowed symbols.
   EXPECT_FALSE(IsUPIVirtualPaymentAddress(ASCIIToUTF16(GetParam())));
   EXPECT_FALSE(IsUPIVirtualPaymentAddress(ASCIIToUTF16(GetParam() + "@")));
   EXPECT_FALSE(IsUPIVirtualPaymentAddress(ASCIIToUTF16("@" + GetParam())));
@@ -463,6 +465,7 @@ TEST_P(AutofillIsUPIVirtualPaymentAddress, IsUPIVirtualPaymentAddress) {
       IsUPIVirtualPaymentAddress(ASCIIToUTF16("user@invalid" + GetParam())));
   EXPECT_FALSE(
       IsUPIVirtualPaymentAddress(ASCIIToUTF16("user@" + GetParam() + ".com")));
+  EXPECT_FALSE(IsUPIVirtualPaymentAddress(ASCIIToUTF16("~user@" + GetParam())));
 }
 
 INSTANTIATE_TEST_SUITE_P(UPIVirtualPaymentAddress,
@@ -493,5 +496,44 @@ INSTANTIATE_TEST_SUITE_P(UPIVirtualPaymentAddress,
                                          "united",
                                          "vijb",
                                          "ybl"));
+
+TEST(AutofillValidation, IsUPIVirtualPaymentAddress_Others) {
+  EXPECT_TRUE(
+      IsUPIVirtualPaymentAddress(ASCIIToUTF16("12345@HDFC0000001.ifsc.npci")));
+  EXPECT_TRUE(
+      IsUPIVirtualPaymentAddress(ASCIIToUTF16("234567890123@aadhaar.npci")));
+  EXPECT_TRUE(
+      IsUPIVirtualPaymentAddress(ASCIIToUTF16("9800011111@mobile.npci")));
+  EXPECT_TRUE(
+      IsUPIVirtualPaymentAddress(ASCIIToUTF16("1234123412341234@rupay.npci")));
+}
+
+class AutofillIsInternationalBankAccountNumber
+    : public testing::TestWithParam<std::string> {};
+
+INSTANTIATE_TEST_SUITE_P(InternationalBankAccountNumber,
+                         AutofillIsInternationalBankAccountNumber,
+                         testing::Values("MT84MALT011000012345MTLCAST001S",
+                                         "SC18SSCB11010000000000001497USD",
+                                         "MD24AG000225100013104168",
+                                         "BH67BMAG00001299123456",
+                                         "LI21088100002324013AA",
+                                         "NO9386011117947",
+                                         "FR1420041010050500013M02606",
+                                         "LB62099900000001001901229114"));
+
+TEST_P(AutofillIsInternationalBankAccountNumber,
+       IsInternationalBankAccountNumber) {
+  EXPECT_TRUE(IsInternationalBankAccountNumber(ASCIIToUTF16(GetParam())))
+      << GetParam();
+  EXPECT_TRUE(
+      IsInternationalBankAccountNumber(ASCIIToUTF16(" " + GetParam() + " ")));
+  EXPECT_FALSE(
+      IsInternationalBankAccountNumber(ASCIIToUTF16("DE" + GetParam())));
+  EXPECT_FALSE(
+      IsInternationalBankAccountNumber(ASCIIToUTF16(GetParam() + ".")));
+  EXPECT_FALSE(IsInternationalBankAccountNumber(
+      ASCIIToUTF16(GetParam() + "0000000000000000000000000000000000000")));
+}
 
 }  // namespace autofill

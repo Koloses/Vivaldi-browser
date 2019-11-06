@@ -1,7 +1,11 @@
 import("//vivaldi/gn/config/features.gni")
 import("//vivaldi/gn/config/product.gni")
 import("//vivaldi/gn/config/version.gni")
-import("//vivaldi/app/resources/untranslated.gni")
+import("//vivaldi/app/resources/generate_untranslated.gni")
+
+if (is_android) {
+ import("//build/config/android/internal_rules.gni")
+}
 
 update_target("//base:base") {
   if (!defined(sources)) {
@@ -25,6 +29,10 @@ update_target("//base:base_static") {
       "//vivaldi/update_notifier/update_notifier_switches.h",
     ]
   }
+  if (!defined(deps)) {
+    deps = []
+  }
+  deps += ["//base:logging_buildflags"]
 }
 
 update_target("//chrome:visual_elements_resources") {
@@ -114,13 +122,6 @@ foreach(
         },
       ],
       [
-        "//chrome/browser:resources",
-        "//vivaldi/app/resources/browser/vivaldi_browser_resources.grd",
-        {
-          have_strings_flag = false
-        },
-      ],
-      [
         "//chrome/renderer:resources",
         "//vivaldi/app/resources/renderer/vivaldi_renderer_resources.grd",
         {
@@ -191,7 +192,8 @@ foreach(
         "//components/strings:components_locale_settings",
         "//vivaldi/app/resources/components_locale_settings/vivaldi_components_locale_settings.grd",
         {
-          have_strings_flag = false
+          translation_dir_setting = "strings"
+          pak_file_prefix="components_locale_settings_"
         },
       ],
       [

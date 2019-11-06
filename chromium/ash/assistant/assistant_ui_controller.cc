@@ -12,17 +12,19 @@
 #include "ash/assistant/util/assistant_util.h"
 #include "ash/assistant/util/deep_link_util.h"
 #include "ash/assistant/util/histogram_util.h"
-#include "ash/multi_user/multi_user_window_manager.h"
+#include "ash/keyboard/ui/keyboard_ui_controller.h"
+#include "ash/multi_user/multi_user_window_manager_impl.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
-#include "ash/session/session_controller.h"
+#include "ash/public/cpp/toast_data.h"
+#include "ash/public/cpp/voice_interaction_controller.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/system/toast/toast_data.h"
-#include "ash/system/toast/toast_manager.h"
-#include "ash/voice_interaction/voice_interaction_controller.h"
+#include "ash/system/toast/toast_manager_impl.h"
 #include "base/bind.h"
 #include "base/optional.h"
 #include "chromeos/services/assistant/public/mojom/assistant.mojom.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace ash {
@@ -122,6 +124,15 @@ void AssistantUiController::OnInteractionStateChanged(
   // not already showing. We don't have enough information here to know what
   // the interaction source is.
   ShowUi(AssistantEntryPoint::kUnspecified);
+
+  // We also need to ensure that we're in the appropriate UI mode if we aren't
+  // already so that the interaction is visible to the user. Note that we
+  // indicate that this UI mode change is occurring due to an interaction so
+  // that we won't inadvertently stop the interaction due to the UI mode change.
+  UpdateUiMode(app_list_features::IsEmbeddedAssistantUIEnabled()
+                   ? AssistantUiMode::kLauncherEmbeddedUi
+                   : AssistantUiMode::kMainUi,
+               /*due_to_interaction=*/true);
 }
 
 void AssistantUiController::OnMicStateChanged(MicState mic_state) {
@@ -236,24 +247,33 @@ void AssistantUiController::OnAssistantControllerDestroying() {
 void AssistantUiController::OnDeepLinkReceived(
     assistant::util::DeepLinkType type,
     const std::map<std::string, std::string>& params) {
-  if (!assistant::util::IsWebDeepLinkType(type))
+  if (!assistant::util::IsWebDeepLinkType(type, params))
     return;
 
   ShowUi(AssistantEntryPoint::kDeepLink);
   UpdateUiMode(AssistantUiMode::kWebUi);
 }
 
-void AssistantUiController::OnUrlOpened(const GURL& url, bool from_server) {
+void AssistantUiController::OnOpeningUrl(const GURL& url,
+                                         bool in_background,
+                                         bool from_server) {
   if (model_.visibility() != AssistantVisibility::kVisible)
     return;
 
+  // If the specified |url| should be opening |in_background| with respect to
+  // Assistant UI, we transition into mini state so as not to obstruct the
+  // browser.
+  // TODO(b/134931713): Desired behavior is not yet defined when Assistant is
+  // embedded in the launcher.
   // We close the Assistant UI entirely when opening a new browser tab if the
   // navigation was initiated by a server response. Otherwise the navigation
   // was user initiated so we only hide the UI to retain session state. That way
   // the user can choose to resume their session if they are so inclined.
   // However, we close the UI if the feature |IsEmbeddedAssistantUIEnabled| is
   // enabled, where we only maintain |kVisible| and |kClosed| two states.
-  if (from_server)
+  if (in_background && !app_list_features::IsEmbeddedAssistantUIEnabled())
+    UpdateUiMode(AssistantUiMode::kMiniUi);
+  else if (from_server)
     CloseUi(AssistantExitPoint::kNewBrowserTabFromServer);
   else if (app_list_features::IsEmbeddedAssistantUIEnabled())
     CloseUi(AssistantExitPoint::kNewBrowserTabFromUser);
@@ -266,7 +286,7 @@ void AssistantUiController::OnUiVisibilityChanged(
     AssistantVisibility old_visibility,
     base::Optional<AssistantEntryPoint> entry_point,
     base::Optional<AssistantExitPoint> exit_point) {
-  Shell::Get()->voice_interaction_controller()->NotifyStatusChanged(
+  VoiceInteractionController::Get()->NotifyStatusChanged(
       new_visibility == AssistantVisibility::kVisible
           ? mojom::VoiceInteractionState::RUNNING
           : mojom::VoiceInteractionState::STOPPED);
@@ -315,15 +335,16 @@ void AssistantUiController::OnUiVisibilityChanged(
 
       // We also want to associate the window for Assistant UI with the active
       // user so that we don't leak across user sessions.
-      auto* window_manager = MultiUserWindowManager::Get();
+      auto* window_manager = MultiUserWindowManagerImpl::Get();
       if (window_manager) {
-        const mojom::UserSession* user_session =
+        const UserSession* user_session =
             Shell::Get()->session_controller()->GetUserSession(0);
         if (user_session) {
+          container_view_->GetWidget()->GetNativeWindow()->SetProperty(
+              aura::client::kCreatedByUserGesture, true);
           window_manager->SetWindowOwner(
               container_view_->GetWidget()->GetNativeWindow(),
-              user_session->user_info->account_id,
-              /*show_for_current_user=*/true);
+              user_session->user_info.account_id);
         }
       }
       break;
@@ -341,15 +362,16 @@ void AssistantUiController::OnUiVisibilityChanged(
 }
 
 void AssistantUiController::ShowUi(AssistantEntryPoint entry_point) {
-  if (!Shell::Get()
-           ->voice_interaction_controller()
-           ->settings_enabled()
-           .value_or(false)) {
+  auto* voice_interaction_controller = VoiceInteractionController::Get();
+
+  if (!voice_interaction_controller->settings_enabled().value_or(false) ||
+      voice_interaction_controller->locked_full_screen_enabled().value_or(
+          false)) {
     return;
   }
 
   // TODO(dmblack): Show a more helpful message to the user.
-  if (Shell::Get()->voice_interaction_controller()->voice_interaction_state() ==
+  if (VoiceInteractionController::Get()->voice_interaction_state() ==
       mojom::VoiceInteractionState::NOT_READY) {
     ShowToast(kUnboundServiceToastId, IDS_ASH_ASSISTANT_ERROR_GENERIC);
     return;
@@ -428,7 +450,8 @@ void AssistantUiController::ToggleUi(
 }
 
 void AssistantUiController::UpdateUiMode(
-    base::Optional<AssistantUiMode> ui_mode) {
+    base::Optional<AssistantUiMode> ui_mode,
+    bool due_to_interaction) {
   // If a UI mode is provided, we will use it in lieu of updating UI mode on the
   // basis of interaction/widget visibility state.
   if (ui_mode.has_value()) {
@@ -436,12 +459,12 @@ void AssistantUiController::UpdateUiMode(
     // TODO(wutao): Behavior is not defined.
     if (model_.ui_mode() == AssistantUiMode::kLauncherEmbeddedUi)
       DCHECK_NE(AssistantUiMode::kMiniUi, mode);
-    model_.SetUiMode(mode);
+    model_.SetUiMode(mode, due_to_interaction);
     return;
   }
 
   if (app_list_features::IsEmbeddedAssistantUIEnabled()) {
-    model_.SetUiMode(AssistantUiMode::kLauncherEmbeddedUi);
+    model_.SetUiMode(AssistantUiMode::kLauncherEmbeddedUi, due_to_interaction);
     return;
   }
 
@@ -453,28 +476,31 @@ void AssistantUiController::UpdateUiMode(
   // Otherwise we fall back to main UI mode.
   model_.SetUiMode(input_modality == InputModality::kStylus
                        ? AssistantUiMode::kMiniUi
-                       : AssistantUiMode::kMainUi);
+                       : AssistantUiMode::kMainUi,
+                   due_to_interaction);
 }
 
-void AssistantUiController::OnKeyboardWorkspaceOccludedBoundsChanged(
-    const gfx::Rect& new_bounds) {
+void AssistantUiController::OnKeyboardOccludedBoundsChanged(
+    const gfx::Rect& new_bounds_in_screen) {
   DCHECK(container_view_);
 
   // Check the display for root window and where the keyboard shows to handle
   // the case when there are multiple monitors and the virtual keyboard is shown
   // on a different display other than Assistant UI.
+  // TODO(https://crbug.com/943446): Directly compare with the root window of
+  // the virtual keyboard controller.
   aura::Window* root_window =
       container_view_->GetWidget()->GetNativeWindow()->GetRootWindow();
   display::Display keyboard_display =
-      display::Screen::GetScreen()->GetDisplayMatching(new_bounds);
-  if (!new_bounds.IsEmpty() &&
+      display::Screen::GetScreen()->GetDisplayMatching(new_bounds_in_screen);
+  if (!new_bounds_in_screen.IsEmpty() &&
       root_window !=
           Shell::Get()->GetRootWindowForDisplayId(keyboard_display.id())) {
     return;
   }
 
   // Cache the keyboard workspace occluded bounds.
-  keyboard_workspace_occluded_bounds_ = new_bounds;
+  keyboard_workspace_occluded_bounds_ = new_bounds_in_screen;
 
   // This keyboard event handles the Assistant UI change when:
   // 1. accessibility keyboard or normal virtual keyboard pops up or
@@ -492,7 +518,7 @@ void AssistantUiController::OnDisplayMetricsChanged(
   // inconsistency between normal virtual keyboard and accessibility keyboard in
   // changing the work area (accessibility keyboard will change the display work
   // area but virtual keyboard won't). Display metrics change with keyboard
-  // showing is instead handled by OnKeyboardWorkspaceOccludedBoundsChanged.
+  // showing is instead handled by OnKeyboardOccludedBoundsChanged.
   if (keyboard_workspace_occluded_bounds_.IsEmpty()) {
     aura::Window* root_window =
         container_view_->GetWidget()->GetNativeWindow()->GetRootWindow();
@@ -520,8 +546,8 @@ void AssistantUiController::OnEvent(const ui::Event& event) {
 
   const gfx::Rect screen_bounds =
       container_view_->GetWidget()->GetWindowBoundsInScreen();
-  const gfx::Rect keyboard_bounds =
-      keyboard::KeyboardController::Get()->GetWorkspaceOccludedBounds();
+  const gfx::Rect keyboard_bounds = keyboard::KeyboardUIController::Get()
+                                        ->GetWorkspaceOccludedBoundsInScreen();
 
   // Pressed events outside our widget bounds should result in hiding of the
   // Assistant UI. The exception to this rule is if the user is interacting
@@ -572,11 +598,12 @@ void AssistantUiController::CreateContainerView() {
 
   // To save resources, only watch these events while Assistant UI exists.
   display::Screen::GetScreen()->AddObserver(this);
-  keyboard::KeyboardController::Get()->AddObserver(this);
+  keyboard::KeyboardUIController::Get()->AddObserver(this);
 
   // Retrieve the current keyboard occluded bounds.
   keyboard_workspace_occluded_bounds_ =
-      keyboard::KeyboardController::Get()->GetWorkspaceOccludedBounds();
+      keyboard::KeyboardUIController::Get()
+          ->GetWorkspaceOccludedBoundsInScreen();
 
   // Set the initial usable work area for Assistant views.
   aura::Window* root_window =
@@ -586,7 +613,7 @@ void AssistantUiController::CreateContainerView() {
 
 void AssistantUiController::ResetContainerView() {
   // Remove observers when the Assistant UI is closed.
-  keyboard::KeyboardController::Get()->RemoveObserver(this);
+  keyboard::KeyboardUIController::Get()->RemoveObserver(this);
   display::Screen::GetScreen()->RemoveObserver(this);
 
   container_view_->GetWidget()->RemoveObserver(this);

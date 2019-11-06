@@ -6,18 +6,18 @@
 #include "base/files/file_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
+#include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 
+using base::Value;
+
 namespace {
-const char kMailDirectory[] = "Mail";
-const char kMailFileEnding[] = ".vmail";
-const char kFlagsFileEnding[] = ".vflags";
+const base::FilePath::CharType kMailDirectory[] = FILE_PATH_LITERAL("Mail");
 
 bool deleteFile(base::FilePath file_path,
-                std::string file_name,
-                std::string ending) {
+                base::FilePath::StringType file_name) {
   if (file_name.length() > 0) {
-    file_path = file_path.AppendASCII(file_name + ending);
+    file_path = file_path.Append(file_name);
   }
 
   if (!file_path.IsAbsolute()) {
@@ -31,20 +31,64 @@ bool deleteFile(base::FilePath file_path,
   return base::DeleteFile(file_path, false);
 }
 
-std::string FilePathAsString(const base::FilePath& path) {
+bool Rename(base::FilePath file_path,
+            base::FilePath::StringType old_file_name,
+            base::FilePath::StringType new_file_name) {
+  base::FilePath new_file_path = file_path;
+
+  if (old_file_name.length() > 0) {
+    file_path = file_path.Append(old_file_name);
+  }
+
+  if (new_file_name.length() > 0) {
+    new_file_path = new_file_path.Append(new_file_name);
+  }
+
+  if (!file_path.IsAbsolute()) {
+    return false;
+  }
+
+  if (!new_file_path.IsAbsolute()) {
+    return false;
+  }
+
+  if (!base::PathExists(file_path)) {
+    return false;
+  }
+
+  return base::Move(file_path, new_file_path);
+}
+
+base::FilePath::StringType FilePathAsString(const base::FilePath& path) {
 #if defined(OS_WIN)
-  return base::UTF16ToUTF8(path.value());
+  return path.value();
 #else
   return path.value().c_str();
 #endif
 }
 
-std::vector<std::string> FindMailFiles(base::FilePath file_path) {
+base::FilePath::StringType StringToStringType(const std::string& str) {
+#if defined(OS_WIN)
+  return base::UTF8ToUTF16(str);
+#else
+  return str;
+#endif
+}
+
+std::string StringTypeToString(const base::FilePath::StringType& str) {
+#if defined(OS_WIN)
+  return base::UTF16ToUTF8(str);
+#else
+  return str;
+#endif
+}
+
+std::vector<base::FilePath::StringType> FindMailFiles(
+    base::FilePath file_path) {
   base::FileEnumerator file_enumerator(
       file_path, true, base::FileEnumerator::FILES, FILE_PATH_LITERAL("*.*"));
 
-  std::vector<std::string> string_paths;
-
+  std::vector<base::FilePath::StringType> string_paths;
   for (base::FilePath locale_file_path = file_enumerator.Next();
        !locale_file_path.empty(); locale_file_path = file_enumerator.Next()) {
     string_paths.push_back(FilePathAsString(locale_file_path));
@@ -63,17 +107,21 @@ ExtensionFunction::ResponseAction MailPrivateGetPathsFunction::Run() {
   Profile* profile = Profile::FromBrowserContext(browser_context());
 
   std::unique_ptr<vivaldi::mail_private::GetPaths::Params> params(
-    vivaldi::mail_private::GetPaths::Params::Create(*args_));
+      vivaldi::mail_private::GetPaths::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   base::FilePath file_path = profile->GetPath();
-  file_path = file_path.AppendASCII(kMailDirectory);
+  file_path = file_path.Append(kMailDirectory);
 
-  std::vector<std::string>& string_paths = params->paths;
+  std::vector<base::FilePath::StringType> string_paths;
+  for (const auto& path : params->paths) {
+    string_paths.push_back(StringToStringType(path));
+  }
+
   size_t count = string_paths.size();
 
   for (size_t i = 0; i < count; i++) {
-    file_path = file_path.AppendASCII(string_paths[i]);
+    file_path = file_path.Append(string_paths[i]);
   }
 
   if (!file_path.IsAbsolute()) {
@@ -90,47 +138,67 @@ ExtensionFunction::ResponseAction MailPrivateGetPathsFunction::Run() {
 }
 
 void MailPrivateGetPathsFunction::OnFinished(
-    const std::vector<std::string>& string_paths) {
+    const std::vector<base::FilePath::StringType>& results) {
+  std::vector<std::string> string_paths;
+  for (const auto& result : results) {
+    string_paths.push_back(StringTypeToString(result));
+  }
   Respond(
       ArgumentList(extensions::vivaldi::mail_private::GetPaths::Results::Create(
           string_paths)));
 }
 
-bool Save(base::FilePath file_path,
-          std::vector<std::string> string_paths,
-          std::string file_name,
-          std::string data) {
+base::FilePath GetSavePath(base::FilePath file_path,
+                           std::vector<base::FilePath::StringType> string_paths,
+                           base::FilePath::StringType file_name) {
+  base::FilePath data_dir;
   size_t count = string_paths.size();
 
-  file_path = file_path.AppendASCII(kMailDirectory);
-
-  if (!file_path.IsAbsolute()) {
-    return false;
-  }
-
+  file_path = file_path.Append(kMailDirectory);
   for (size_t i = 0; i < count; i++) {
-    file_path = file_path.AppendASCII(string_paths[i]);
+    file_path = file_path.Append(string_paths[i]);
     if (!base::DirectoryExists(file_path))
       base::CreateDirectory(file_path);
   }
 
   if (file_name.length() > 0) {
-    file_path = file_path.AppendASCII(file_name);
+    file_path = file_path.Append(file_name);
   }
 
-  std::vector<base::FilePath> paths;
-  paths.push_back(file_path);
+  return file_path;
+}
+
+bool Save(base::FilePath file_path,
+          std::vector<base::FilePath::StringType> string_paths,
+          base::FilePath::StringType file_name,
+          std::string data) {
+  file_path = GetSavePath(file_path, string_paths, file_name);
+  if (!file_path.IsAbsolute()) {
+    return false;
+  }
 
   int size = data.size();
   int wrote = base::WriteFile(file_path, data.data(), size);
   return size == wrote;
 }
 
+bool SaveBuffer(base::FilePath file_path,
+                std::vector<base::FilePath::StringType> string_paths,
+                base::FilePath::StringType file_name,
+                const std::vector<uint8_t>& data) {
+  file_path = GetSavePath(file_path, string_paths, file_name);
+  if (!file_path.IsAbsolute()) {
+    return false;
+  }
+  return base::WriteFile(file_path, reinterpret_cast<const char*>(data.data()),
+                         data.size()) != -1;
+}
+
 GetDataDirectoryResult CreateDirectory(base::FilePath file_path,
                                        std::string directory) {
   GetDataDirectoryResult result;
 
-  file_path = file_path.AppendASCII(kMailDirectory);
+  file_path = file_path.Append(kMailDirectory);
   file_path = file_path.AppendASCII(directory);
 
   if (!file_path.IsAbsolute()) {
@@ -150,8 +218,12 @@ ExtensionFunction::ResponseAction MailPrivateSaveFunction::Run() {
       vivaldi::mail_private::Save::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  std::vector<std::string>& string_paths = params->paths;
-  std::string file_name = params->file_name;
+  std::vector<base::FilePath::StringType> string_paths;
+  for (const auto& path : params->paths) {
+    string_paths.push_back(StringToStringType(path));
+  }
+
+  base::FilePath::StringType file_name = StringToStringType(params->file_name);
   std::string data = params->raw;
   Profile* profile = Profile::FromBrowserContext(browser_context());
   base::FilePath file_path = profile->GetPath();
@@ -171,9 +243,37 @@ void MailPrivateSaveFunction::OnFinished(bool result) {
   }
 }
 
-bool Delete(base::FilePath file_path, std::string file_name) {
-  return (deleteFile(file_path, file_name, kMailFileEnding) &&
-          deleteFile(file_path, file_name, kFlagsFileEnding));
+ExtensionFunction::ResponseAction MailPrivateSaveBufferFunction::Run() {
+  std::unique_ptr<vivaldi::mail_private::SaveBuffer::Params> params(
+      vivaldi::mail_private::SaveBuffer::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  std::vector<base::FilePath::StringType> string_paths;
+  for (const auto& path : params->paths) {
+    string_paths.push_back(StringToStringType(path));
+  }
+
+  base::FilePath::StringType file_name = StringToStringType(params->file_name);
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  base::FilePath file_path = profile->GetPath();
+
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::Bind(&SaveBuffer, file_path, string_paths, file_name, params->raw),
+      base::Bind(&MailPrivateSaveBufferFunction::OnFinished, this));
+
+  return RespondLater();
+}
+void MailPrivateSaveBufferFunction::OnFinished(bool result) {
+  if (result == true) {
+    Respond(NoArguments());
+  } else {
+    Respond(Error(base::StringPrintf("Error saving file")));
+  }
+}
+
+bool Delete(base::FilePath file_path, base::FilePath::StringType file_name) {
+  return deleteFile(file_path, file_name);
 }
 
 ExtensionFunction::ResponseAction MailPrivateDeleteFunction::Run() {
@@ -182,12 +282,12 @@ ExtensionFunction::ResponseAction MailPrivateDeleteFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   std::vector<std::string>& string_paths = params->paths;
-  std::string file_name = params->file_name;
+  base::FilePath::StringType file_name = StringToStringType(params->file_name);
 
   Profile* profile = Profile::FromBrowserContext(browser_context());
   base::FilePath file_path = profile->GetPath();
 
-  file_path = file_path.AppendASCII(kMailDirectory);
+  file_path = file_path.Append(kMailDirectory);
 
   size_t count = string_paths.size();
 
@@ -241,7 +341,7 @@ ExtensionFunction::ResponseAction MailPrivateReadFunction::Run() {
   Profile* profile = Profile::FromBrowserContext(browser_context());
   base::FilePath file_path = profile->GetPath();
 
-  file_path = file_path.AppendASCII(kMailDirectory);
+  file_path = file_path.Append(kMailDirectory);
 
   size_t count = string_paths.size();
 
@@ -265,6 +365,45 @@ void MailPrivateReadFunction::OnFinished(ReadFileResult result) {
   if (result.success == true) {
     Respond(ArgumentList(
         extensions::vivaldi::mail_private::Read::Results::Create(result.raw)));
+  } else {
+    Respond(Error(base::StringPrintf("Error reading file")));
+  }
+}
+ExtensionFunction::ResponseAction MailPrivateReadBufferFunction::Run() {
+  std::unique_ptr<vivaldi::mail_private::ReadBuffer::Params> params(
+      vivaldi::mail_private::ReadBuffer::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  std::vector<std::string>& string_paths = params->paths;
+  std::string file_name = params->file_name;
+
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  base::FilePath file_path = profile->GetPath();
+
+  file_path = file_path.Append(kMailDirectory);
+
+  size_t count = string_paths.size();
+
+  for (size_t i = 0; i < count; i++) {
+    file_path = file_path.AppendASCII(string_paths[i]);
+  }
+
+  if (file_name.length() > 0) {
+    file_path = file_path.AppendASCII(file_name);
+  }
+
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::Bind(&Read, file_path),
+      base::Bind(&MailPrivateReadBufferFunction::OnFinished, this));
+
+  return RespondLater();
+}
+
+void MailPrivateReadBufferFunction::OnFinished(ReadFileResult result) {
+  if (result.success == true) {
+    Respond(OneArgument(Value::CreateWithCopiedBuffer((&result.raw)->c_str(),
+                                                      (&result.raw)->size())));
   } else {
     Respond(Error(base::StringPrintf("Error reading file")));
   }
@@ -317,13 +456,14 @@ ExtensionFunction::ResponseAction MailPrivateGetDataDirectoryFunction::Run() {
       vivaldi::mail_private::GetDataDirectory::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  std::string hashed_account_id = params->hashed_account_id;
+  base::FilePath::StringType hashed_account_id =
+      StringToStringType(params->hashed_account_id);
 
   Profile* profile = Profile::FromBrowserContext(browser_context());
   base::FilePath file_path = profile->GetPath();
 
-  file_path = file_path.AppendASCII(kMailDirectory);
-  file_path = file_path.AppendASCII(hashed_account_id);
+  file_path = file_path.Append(kMailDirectory);
+  file_path = file_path.Append(hashed_account_id);
 
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
@@ -338,7 +478,7 @@ void MailPrivateGetDataDirectoryFunction::OnFinished(
   if (result.success == true) {
     Respond(ArgumentList(
         extensions::vivaldi::mail_private::GetDataDirectory::Results::Create(
-            result.path)));
+            StringTypeToString(result.path))));
   } else {
     Respond(Error("Directory not found"));
   }
@@ -368,9 +508,50 @@ void MailPrivateCreateDataDirectoryFunction::OnFinished(
   if (result.success == true) {
     Respond(ArgumentList(
         extensions::vivaldi::mail_private::CreateDataDirectory::Results::Create(
-            result.path)));
+            StringTypeToString(result.path))));
   } else {
     Respond(Error("Directory not created"));
+  }
+}
+
+ExtensionFunction::ResponseAction MailPrivateRenameFunction::Run() {
+  std::unique_ptr<vivaldi::mail_private::Rename::Params> params(
+      vivaldi::mail_private::Rename::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  std::vector<base::FilePath::StringType> string_paths;
+  for (const auto& path : params->paths) {
+    string_paths.push_back(StringToStringType(path));
+  }
+
+  base::FilePath::StringType file_name = StringToStringType(params->file_name);
+  base::FilePath::StringType new_file_name =
+      StringToStringType(params->new_file_name);
+
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  base::FilePath file_path = profile->GetPath();
+
+  file_path = file_path.Append(kMailDirectory);
+
+  size_t count = string_paths.size();
+
+  for (size_t i = 0; i < count; i++) {
+    file_path = file_path.Append(string_paths[i]);
+  }
+
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::Bind(&Rename, file_path, file_name, new_file_name),
+      base::Bind(&MailPrivateRenameFunction::OnFinished, this));
+
+  return RespondLater();
+}
+
+void MailPrivateRenameFunction::OnFinished(bool result) {
+  if (result == true) {
+    Respond(NoArguments());
+  } else {
+    Respond(Error(base::StringPrintf("Error renaming file")));
   }
 }
 

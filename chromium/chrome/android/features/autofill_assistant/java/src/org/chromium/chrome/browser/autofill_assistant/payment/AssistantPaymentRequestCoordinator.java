@@ -4,64 +4,109 @@
 
 package org.chromium.chrome.browser.autofill_assistant.payment;
 
-import android.content.Context;
-import android.support.annotation.Nullable;
+import android.app.Activity;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 
-import org.chromium.content_public.browser.WebContents;
+import org.chromium.chrome.autofill_assistant.R;
+import org.chromium.chrome.browser.autofill_assistant.AssistantTagsForTesting;
+import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
-// TODO(crbug.com/806868): Refactor AutofillAssistantPaymentRequest and merge with this file.
 // TODO(crbug.com/806868): Use mCarouselCoordinator to show chips.
 
 /**
  * Coordinator for the Payment Request.
  */
 public class AssistantPaymentRequestCoordinator {
-    private final ViewGroup mView;
+    public static final String DIVIDER_TAG = "divider";
+    private final Activity mActivity;
+    private final LinearLayout mPaymentRequestUI;
+    private final AssistantPaymentRequestModel mModel;
+    private AssistantPaymentRequestBinder.ViewHolder mViewHolder;
 
-    private AutofillAssistantPaymentRequest mPaymentRequest;
+    public AssistantPaymentRequestCoordinator(
+            Activity activity, AssistantPaymentRequestModel model) {
+        mActivity = activity;
+        mModel = model;
+        int sectionToSectionPadding = activity.getResources().getDimensionPixelSize(
+                R.dimen.autofill_assistant_payment_request_section_padding);
 
-    public AssistantPaymentRequestCoordinator(Context context, AssistantPaymentRequestModel model) {
-        // TODO(crbug.com/806868): Remove this.
-        mView = new LinearLayout(context);
-        mView.addView(new View(context));
+        mPaymentRequestUI = new LinearLayout(mActivity);
+        mPaymentRequestUI.setOrientation(LinearLayout.VERTICAL);
+        mPaymentRequestUI.setLayoutParams(
+                new ViewGroup.LayoutParams(/* width= */ ViewGroup.LayoutParams.MATCH_PARENT,
+                        /* height= */ ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // Payment request is initially hidden.
-        setVisible(false);
+        AssistantVerticalExpanderAccordion paymentRequestExpanderAccordion =
+                new AssistantVerticalExpanderAccordion(mActivity, null);
+        paymentRequestExpanderAccordion.setOrientation(LinearLayout.VERTICAL);
+        paymentRequestExpanderAccordion.setLayoutParams(
+                new LinearLayout.LayoutParams(/* width= */ ViewGroup.LayoutParams.MATCH_PARENT,
+                        /* height= */ 0, /* weight= */ 1));
+        paymentRequestExpanderAccordion.setOnExpandedViewChangedListener(
+                expander -> mModel.set(AssistantPaymentRequestModel.EXPANDED_SECTION, expander));
 
-        // Listen for model changes.
-        model.addObserver((source, propertyKey)
-                                  -> resetView(model.get(AssistantPaymentRequestModel.WEB_CONTENTS),
-                                          model.get(AssistantPaymentRequestModel.OPTIONS),
-                                          model.get(AssistantPaymentRequestModel.DELEGATE)));
+        mPaymentRequestUI.addView(paymentRequestExpanderAccordion,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        AssistantPaymentRequestContactDetailsSection contactDetailsSection =
+                new AssistantPaymentRequestContactDetailsSection(
+                        mActivity, paymentRequestExpanderAccordion);
+        createSeparator(paymentRequestExpanderAccordion);
+        AssistantPaymentRequestPaymentMethodSection paymentMethodSection =
+                new AssistantPaymentRequestPaymentMethodSection(
+                        mActivity, paymentRequestExpanderAccordion);
+        createSeparator(paymentRequestExpanderAccordion);
+        AssistantPaymentRequestShippingAddressSection shippingAddressSection =
+                new AssistantPaymentRequestShippingAddressSection(
+                        mActivity, paymentRequestExpanderAccordion);
+        createSeparator(paymentRequestExpanderAccordion);
+        AssistantPaymentRequestTermsSection termsSection = new AssistantPaymentRequestTermsSection(
+                mActivity, paymentRequestExpanderAccordion, /* showAsSingleCheckbox= */ false);
+        AssistantPaymentRequestTermsSection termsAsCheckboxSection =
+                new AssistantPaymentRequestTermsSection(mActivity, paymentRequestExpanderAccordion,
+                        /* showAsSingleCheckbox= */ true);
+
+        paymentRequestExpanderAccordion.setTag(
+                AssistantTagsForTesting.PAYMENT_REQUEST_ACCORDION_TAG);
+        contactDetailsSection.getView().setTag(
+                AssistantTagsForTesting.PAYMENT_REQUEST_CONTACT_DETAILS_SECTION_TAG);
+        paymentMethodSection.getView().setTag(
+                AssistantTagsForTesting.PAYMENT_REQUEST_PAYMENT_METHOD_SECTION_TAG);
+        shippingAddressSection.getView().setTag(
+                AssistantTagsForTesting.PAYMENT_REQUEST_SHIPPING_ADDRESS_SECTION_TAG);
+
+        // Bind view and mediator through the model.
+        mViewHolder = new AssistantPaymentRequestBinder.ViewHolder(mPaymentRequestUI,
+                paymentRequestExpanderAccordion, sectionToSectionPadding, contactDetailsSection,
+                paymentMethodSection, shippingAddressSection, termsSection, termsAsCheckboxSection,
+                DIVIDER_TAG, activity);
+        AssistantPaymentRequestBinder binder = new AssistantPaymentRequestBinder();
+        PropertyModelChangeProcessor.create(model, mViewHolder, binder);
+
+        // View is initially invisible.
+        model.set(AssistantPaymentRequestModel.VISIBLE, false);
     }
 
     public View getView() {
-        return mView;
+        return mPaymentRequestUI;
     }
 
-    private void setVisible(boolean visible) {
-        int visibility = visible ? View.VISIBLE : View.GONE;
-        if (mView.getVisibility() != visibility) {
-            mView.setVisibility(visibility);
-        }
+    /**
+     * Explicitly clean up.
+     */
+    public void destroy() {
+        mViewHolder.destroy();
+        mViewHolder = null;
     }
 
-    private void resetView(@Nullable WebContents webContents,
-            @Nullable AssistantPaymentRequestOptions options,
-            @Nullable AssistantPaymentRequestDelegate delegate) {
-        if (mPaymentRequest != null) {
-            mPaymentRequest.close();
-            mPaymentRequest = null;
-        }
-        if (options == null || webContents == null || delegate == null) {
-            setVisible(false);
-            return;
-        }
-        mPaymentRequest = new AutofillAssistantPaymentRequest(webContents, options, delegate);
-        mPaymentRequest.show(mView.getChildAt(0));
-        setVisible(true);
+    private void createSeparator(ViewGroup parent) {
+        View divider = LayoutInflater.from(mActivity).inflate(
+                R.layout.autofill_assistant_payment_request_section_divider, parent, false);
+        divider.setTag(DIVIDER_TAG);
+        parent.addView(divider);
     }
 }

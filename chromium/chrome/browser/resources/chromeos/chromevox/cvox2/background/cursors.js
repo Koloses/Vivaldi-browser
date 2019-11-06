@@ -91,19 +91,12 @@ cursors.Cursor = function(node, index) {
       node = nextNode;
       index = 0;
     }
-  } else if (
-      node.role == RoleType.GENERIC_CONTAINER && node.state.richlyEditable &&
-      (node.firstChild &&
-       (node.firstChild.role == RoleType.LINE_BREAK ||
-        node.firstChild.role == RoleType.STATIC_TEXT))) {
-    // Re-interpret this case as pointing to the text under the div.
-    node = node.find({role: RoleType.INLINE_TEXT_BOX}) || node;
   }
 
   /** @type {number} @private */
   this.index_ = index;
   /** @type {RecoveryStrategy} */
-  this.recovery_ = new TreePathRecoveryStrategy(node);
+  this.recovery_ = new AncestryRecoveryStrategy(node);
 };
 
 /**
@@ -340,33 +333,41 @@ cursors.Cursor.prototype = {
 
         switch (movement) {
           case Movement.BOUND:
+            var wordStarts, wordEnds;
             if (newNode.role == RoleType.INLINE_TEXT_BOX) {
-              var start, end;
-              for (var i = 0; i < newNode.wordStarts.length; i++) {
-                if (newIndex >= newNode.wordStarts[i] &&
-                    newIndex <= newNode.wordEnds[i]) {
-                  start = newNode.wordStarts[i];
-                  end = newNode.wordEnds[i];
-                  break;
-                }
-              }
-              if (goog.isDef(start) && goog.isDef(end))
-                newIndex = dir == Dir.FORWARD ? end : start;
+              wordStarts = newNode.wordStarts;
+              wordEnds = newNode.wordEnds;
             } else {
-              newIndex = cursors.NODE_INDEX;
+              wordStarts = newNode.nonInlineTextWordStarts;
+              wordEnds = newNode.nonInlineTextWordEnds;
             }
+            var start, end;
+            for (var i = 0; i < wordStarts.length; i++) {
+              if (newIndex >= wordStarts[i] && newIndex <= wordEnds[i]) {
+                start = wordStarts[i];
+                end = wordEnds[i];
+                break;
+              }
+            }
+            if (goog.isDef(start) && goog.isDef(end))
+              newIndex = dir == Dir.FORWARD ? end : start;
             break;
           case Movement.DIRECTIONAL:
+            var wordStarts, wordEnds;
             var start;
             if (newNode.role == RoleType.INLINE_TEXT_BOX) {
-              // Go to the next word stop in the same piece of text.
-              for (var i = 0; i < newNode.wordStarts.length; i++) {
-                if (newIndex >= newNode.wordStarts[i] &&
-                    newIndex <= newNode.wordEnds[i]) {
-                  var nextIndex = dir == Dir.FORWARD ? i + 1 : i - 1;
-                  start = newNode.wordStarts[nextIndex];
-                  break;
-                }
+              wordStarts = newNode.wordStarts;
+              wordEnds = newNode.wordEnds;
+            } else {
+              wordStarts = newNode.nonInlineTextWordStarts;
+              wordEnds = newNode.nonInlineTextWordEnds;
+            }
+            // Go to the next word stop in the same piece of text.
+            for (var i = 0; i < wordStarts.length; i++) {
+              if (newIndex >= wordStarts[i] && newIndex <= wordEnds[i]) {
+                var nextIndex = dir == Dir.FORWARD ? i + 1 : i - 1;
+                start = wordStarts[nextIndex];
+                break;
               }
             }
             if (goog.isDef(start)) {
@@ -381,16 +382,14 @@ cursors.Cursor.prototype = {
                 newNode = AutomationUtil.findNextNode(
                     newNode, dir, AutomationPredicate.leafWithWordStop);
                 if (newNode) {
-                  if (newNode.role == RoleType.INLINE_TEXT_BOX) {
-                    var starts = newNode.wordStarts;
-                    if (starts.length) {
-                      newIndex = dir == Dir.BACKWARD ?
-                          starts[starts.length - 1] :
-                          starts[0];
-                    }
-                  } else {
-                    // For non-text nodes, move by word = by object.
-                    newIndex = cursors.NODE_INDEX;
+                  var starts;
+                  if (newNode.role == RoleType.INLINE_TEXT_BOX)
+                    starts = newNode.wordStarts;
+                  else
+                    starts = newNode.nonInlineTextWordStarts;
+                  if (starts.length) {
+                    newIndex = dir == Dir.BACKWARD ? starts[starts.length - 1] :
+                                                     starts[0];
                   }
                 }
               }
@@ -443,10 +442,12 @@ cursors.Cursor.prototype = {
   get deepEquivalent() {
     var newNode = this.node;
     var newIndex = this.index_;
+    var isTextIndex = false;
     while (newNode.firstChild) {
       if (newNode.role == RoleType.STATIC_TEXT) {
         // Text offset.
         // Re-interpret the index as an offset into an inlineTextBox.
+        isTextIndex = true;
         var target = newNode.firstChild;
         var length = 0;
         while (target && length < newIndex) {
@@ -467,13 +468,20 @@ cursors.Cursor.prototype = {
         break;
       } else if (
           newNode.role != RoleType.INLINE_TEXT_BOX &&
-          !newNode.state[StateType.EDITABLE] && newNode.children[newIndex]) {
-        // Valid node offset.
+          // An index inside a content editable or a descendant of a content
+          // editable should be treated as a child offset.
+          // However, an index inside a simple editable, such as an input
+          // element, should be treated as a character offset.
+          (!newNode.state[StateType.EDITABLE] ||
+           newNode.state[StateType.RICHLY_EDITABLE]) &&
+          newNode.children[newIndex]) {
+        // Valid child node offset.
         newNode = newNode.children[newIndex];
         newIndex = 0;
       } else {
         // This offset is a text offset into the descendant visible
         // text. Approximate this by indexing into the inline text boxes.
+        isTextIndex = true;
         var lines = this.getAllLeaves_(newNode);
         if (!lines.length)
           break;
@@ -503,6 +511,8 @@ cursors.Cursor.prototype = {
         break;
       }
     }
+    if (!isTextIndex)
+      newIndex = cursors.NODE_INDEX;
 
     return new cursors.Cursor(newNode, newIndex);
   },
@@ -598,7 +608,6 @@ cursors.WrappingCursor.prototype = {
       var directedFocus;
       while (!AutomationPredicate.root(endpoint) && endpoint.parent) {
         if (directedFocus = getDirectedFocus(endpoint)) {
-          window.last = directedFocus;
           break;
         }
         endpoint = endpoint.parent;

@@ -9,13 +9,13 @@
 #import "base/test/ios/wait_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ios/web/grit/ios_web_resources.h"
-#import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#include "ios/web/public/service/web_state_interface_provider.h"
 #import "ios/web/public/test/navigation_test_util.h"
 #import "ios/web/public/web_state/web_state.h"
-#include "ios/web/public/web_state/web_state_interface_provider.h"
-#include "ios/web/public/web_ui_ios_data_source.h"
 #include "ios/web/public/webui/web_ui_ios_controller.h"
 #include "ios/web/public/webui/web_ui_ios_controller_factory.h"
+#include "ios/web/public/webui/web_ui_ios_data_source.h"
 #include "ios/web/test/grit/test_resources.h"
 #include "ios/web/test/mojo_test.mojom.h"
 #include "ios/web/test/test_url_constants.h"
@@ -103,7 +103,6 @@ class TestUI : public WebUIIOSController {
     source->AddResourcePath("mojo_bindings.js", IDR_IOS_MOJO_BINDINGS_JS);
     source->AddResourcePath("mojo_test.mojom.js", IDR_MOJO_TEST_MOJO_JS);
     source->SetDefaultResource(IDR_MOJO_TEST_HTML);
-    source->UseGzip();
 
     web::WebState* web_state = web_ui->GetWebState();
     web::WebUIIOSDataSource::Add(web_state->GetBrowserState(), source);
@@ -131,6 +130,12 @@ class TestWebUIControllerFactory : public WebUIIOSControllerFactory {
     return std::make_unique<TestUI>(web_ui, ui_handler_);
   }
 
+  NSInteger GetErrorCodeForWebUIURL(const GURL& url) const override {
+    if (url.SchemeIs(kTestWebUIScheme))
+      return 0;
+    return NSURLErrorUnsupportedURL;
+  }
+
  private:
   // UI handler class which communicates with test WebUI page.
   TestUIHandler* ui_handler_;
@@ -146,8 +151,9 @@ class WebUIMojoTest : public WebIntTest {
       ui_handler_ = std::make_unique<TestUIHandler>();
       WebState::CreateParams params(GetBrowserState());
       web_state_ = WebState::Create(params);
-      WebUIIOSControllerFactory::RegisterFactory(
-          new TestWebUIControllerFactory(ui_handler_.get()));
+      factory_ =
+          std::make_unique<TestWebUIControllerFactory>(ui_handler_.get());
+      WebUIIOSControllerFactory::RegisterFactory(factory_.get());
     }
   }
 
@@ -163,6 +169,7 @@ class WebUIMojoTest : public WebIntTest {
       // WebThread::UI once WebThreadBundle is destroyed.
       web_state_.reset();
       ui_handler_.reset();
+      WebUIIOSControllerFactory::DeregisterFactory(factory_.get());
     }
 
     WebIntTest::TearDown();
@@ -176,6 +183,7 @@ class WebUIMojoTest : public WebIntTest {
  private:
   std::unique_ptr<WebState> web_state_;
   std::unique_ptr<TestUIHandler> ui_handler_;
+  std::unique_ptr<TestWebUIControllerFactory> factory_;
 };
 
 // Tests that JS can send messages to the native code and vice versa.

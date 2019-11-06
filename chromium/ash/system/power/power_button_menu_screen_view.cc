@@ -96,6 +96,11 @@ class PowerButtonMenuScreenView::PowerButtonMenuBackgroundView
     layer()->SetOpacity(show ? kPowerButtonMenuOpacity : 0.f);
   }
 
+  // views::View:
+  const char* GetClassName() const override {
+    return "PowerButtonMenuBackgroundView";
+  }
+
  private:
   // A callback for when the animation that shows the power menu has finished.
   base::RepeatingClosure show_animation_done_;
@@ -130,6 +135,10 @@ PowerButtonMenuScreenView::~PowerButtonMenuScreenView() {
 void PowerButtonMenuScreenView::ScheduleShowHideAnimation(bool show) {
   power_button_screen_background_shield_->ScheduleShowHideAnimation(show);
   power_button_menu_view_->ScheduleShowHideAnimation(show);
+}
+
+const char* PowerButtonMenuScreenView::GetClassName() const {
+  return "PowerButtonMenuScreenView";
 }
 
 void PowerButtonMenuScreenView::Layout() {
@@ -302,9 +311,7 @@ gfx::Rect PowerButtonMenuScreenView::GetMenuBounds() {
   gfx::Rect menu_bounds;
 
   if (power_button_position_ == PowerButtonPosition::NONE ||
-      !Shell::Get()
-           ->tablet_mode_controller()
-           ->IsTabletModeWindowManagerEnabled()) {
+      !Shell::Get()->tablet_mode_controller()->InTabletMode()) {
     menu_bounds = GetContentsBounds();
     menu_bounds.ClampToCenteredSize(
         power_button_menu_view_->GetPreferredSize());

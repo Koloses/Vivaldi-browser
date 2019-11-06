@@ -8,8 +8,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/message_loop/message_loop.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/scoped_task_environment.h"
 #include "gpu/command_buffer/service/abstract_texture.h"
 #include "media/base/media_switches.h"
 #include "media/gpu/android/image_reader_gl_owner.h"
@@ -79,7 +79,7 @@ class ImageReaderGLOwnerTest : public testing::Test {
   scoped_refptr<gl::GLContext> context_;
   scoped_refptr<gl::GLShareGroup> share_group_;
   scoped_refptr<gl::GLSurface> surface_;
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 };
 
 TEST_F(ImageReaderGLOwnerTest, ImageReaderObjectCreation) {
@@ -143,14 +143,25 @@ TEST_F(ImageReaderGLOwnerTest, DestructionWorksWithWrongContext) {
   new_surface = nullptr;
 }
 
-class ImageReaderGLOwnerSecureTest : public ImageReaderGLOwnerTest {
+// The max number of images used by the ImageReader must be 2 for non-Surface
+// control.
+TEST_F(ImageReaderGLOwnerTest, MaxImageExpectation) {
+  if (!IsImageReaderSupported())
+    return;
+  EXPECT_EQ(static_cast<ImageReaderGLOwner*>(image_reader_.get())
+                ->max_images_for_testing(),
+            2);
+}
+
+class ImageReaderGLOwnerSecureSurfaceControlTest
+    : public ImageReaderGLOwnerTest {
  public:
   TextureOwner::Mode SecureMode() final {
-    return TextureOwner::Mode::kAImageReaderSecure;
+    return TextureOwner::Mode::kAImageReaderSecureSurfaceControl;
   }
 };
 
-TEST_F(ImageReaderGLOwnerSecureTest, CreatesSecureAImageReader) {
+TEST_F(ImageReaderGLOwnerSecureSurfaceControlTest, CreatesSecureAImageReader) {
   if (!IsImageReaderSupported())
     return;
 
@@ -161,6 +172,34 @@ TEST_F(ImageReaderGLOwnerSecureTest, CreatesSecureAImageReader) {
   base::android::AndroidImageReader::GetInstance().AImageReader_getFormat(
       a_image_reader, &format);
   EXPECT_EQ(format, AIMAGE_FORMAT_PRIVATE);
+}
+
+// The max number of images used by the ImageReader must be 3 for Surface
+// control.
+TEST_F(ImageReaderGLOwnerSecureSurfaceControlTest, MaxImageExpectation) {
+  if (!IsImageReaderSupported())
+    return;
+  EXPECT_EQ(static_cast<ImageReaderGLOwner*>(image_reader_.get())
+                ->max_images_for_testing(),
+            3);
+}
+
+class ImageReaderGLOwnerInsecureSurfaceControlTest
+    : public ImageReaderGLOwnerTest {
+ public:
+  TextureOwner::Mode SecureMode() final {
+    return TextureOwner::Mode::kAImageReaderInsecureSurfaceControl;
+  }
+};
+
+// The max number of images used by the ImageReader must be 3 for Surface
+// control.
+TEST_F(ImageReaderGLOwnerInsecureSurfaceControlTest, MaxImageExpectation) {
+  if (!IsImageReaderSupported())
+    return;
+  EXPECT_EQ(static_cast<ImageReaderGLOwner*>(image_reader_.get())
+                ->max_images_for_testing(),
+            3);
 }
 
 }  // namespace media

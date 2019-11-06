@@ -9,15 +9,14 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "chrome/browser/chromeos/login/screens/arc_terms_of_service_screen_view_observer.h"
 #include "chrome/browser/chromeos/login/screens/base_screen.h"
+#include "chrome/browser/ui/webui/chromeos/login/arc_terms_of_service_screen_handler.h"
 
 class Profile;
 
 namespace chromeos {
 
 class ArcTermsOfServiceScreenView;
-class BaseScreenDelegate;
 
 class ArcTermsOfServiceScreen : public BaseScreen,
                                 public ArcTermsOfServiceScreenViewObserver {
@@ -29,8 +28,7 @@ class ArcTermsOfServiceScreen : public BaseScreen,
   static void MaybeLaunchArcSettings(Profile* profile);
 
   using ScreenExitCallback = base::RepeatingCallback<void(Result result)>;
-  ArcTermsOfServiceScreen(BaseScreenDelegate* base_screen_delegate,
-                          ArcTermsOfServiceScreenView* view,
+  ArcTermsOfServiceScreen(ArcTermsOfServiceScreenView* view,
                           const ScreenExitCallback& exit_callback);
   ~ArcTermsOfServiceScreen() override;
 

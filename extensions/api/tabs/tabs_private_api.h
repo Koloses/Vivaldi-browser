@@ -23,12 +23,6 @@
 #include "renderer/vivaldi_render_messages.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
-typedef base::Callback<void(base::SharedMemoryHandle handle,
-                            const gfx::Size image_size,
-                            int callback_id,
-                            bool success)>
-    CaptureTabDoneCallback;
-
 typedef base::OnceCallback<void(
     std::vector<VivaldiViewMsg_AccessKeyDefinition>)>
     AccessKeysCallback;
@@ -87,13 +81,18 @@ class VivaldiPrivateTabObserver
       public zoom::ZoomObserver,
       public content::WebContentsUserData<VivaldiPrivateTabObserver> {
  public:
-   explicit VivaldiPrivateTabObserver(content::WebContents* web_contents);
-   ~VivaldiPrivateTabObserver() override;
+  explicit VivaldiPrivateTabObserver(content::WebContents* web_contents);
+  ~VivaldiPrivateTabObserver() override;
+
+  static VivaldiPrivateTabObserver* FromTabId(
+      content::BrowserContext* browser_context,
+      int tab_id,
+      std::string* error);
 
   void BroadcastTabInfo();
 
   // content::WebContentsObserver implementation.
-  void DidChangeThemeColor(SkColor theme_color) override;
+  void DidChangeThemeColor(base::Optional<SkColor> theme_color) override;
   void RenderViewCreated(content::RenderViewHost* render_view_host) override;
   void RenderViewHostChanged(content::RenderViewHost* old_host,
                              content::RenderViewHost* new_host) override;
@@ -109,6 +108,9 @@ class VivaldiPrivateTabObserver
   void SetContentsMimeType(std::string mimetype) {
     contents_mime_type_ = mimetype;
   }
+
+  void SetMuted(bool mute);
+
   void UpdateAllowTabCycleIntoUI();
   void UpdateAllowAccessKeys();
 
@@ -116,6 +118,7 @@ class VivaldiPrivateTabObserver
   bool load_from_cache_only() { return load_from_cache_only_; }
   bool enable_plugins() { return enable_plugins_; }
   std::string contents_mime_type() { return contents_mime_type_; }
+  bool mute() { return mute_; }
 
   // Commit setting to the active RenderViewHost
   void CommitSettings();
@@ -124,28 +127,15 @@ class VivaldiPrivateTabObserver
   void OnZoomChanged(
       const zoom::ZoomController::ZoomChangedEventData& data) override;
 
-  void SetZoomLevelForTab(double level);
-
-  void CaptureTab(gfx::Size size,
-                  bool full_page,
-                  const CaptureTabDoneCallback& callback);
+  void SetZoomLevelForTab(double new_level, double old_level);
 
   // Message handlers
-  void OnRequestThumbnailForFrameResponse(base::SharedMemoryHandle handle,
-                                          const gfx::Size image_size,
-                                          int callback_id,
-                                          bool success);
-
   void OnGetAccessKeysForPageResponse(
       std::vector<VivaldiViewMsg_AccessKeyDefinition> access_keys);
 
-  void GetAccessKeys(content::WebContents* tabstrip_contents,
-                     AccessKeysCallback callback);
+  void GetAccessKeys(AccessKeysCallback callback);
 
-  void AccessKeyAction(content::WebContents* tabstrip_contents, std::string);
-
-  // Returns true if a capture is already underway for this WebContents.
-  bool IsCapturing();
+  void AccessKeyAction(std::string);
 
   // If a page is accessing a resource controlled by a permission this will
   // fire.
@@ -169,13 +159,13 @@ private:
   bool enable_plugins_ = true;
 
   // Vivaldi tab zoom level
-  double tab_zoom_level_ = 0;
+  double tab_zoom_level_ = -1;
 
   // Mimetype of displayed document.
   std::string contents_mime_type_;
 
-  // Callback to call when we get an capture response message from the renderer.
-  CaptureTabDoneCallback capture_callback_;
+  // The tab is muted.
+  bool mute_ = false;
 
   AccessKeysCallback access_keys_callback_;
 

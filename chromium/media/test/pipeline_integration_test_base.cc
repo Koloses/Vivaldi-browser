@@ -79,7 +79,8 @@ std::vector<std::unique_ptr<VideoDecoder>> PipelineIntegrationTestBase::CreateVi
 #endif
 
 #if BUILDFLAG(ENABLE_DAV1D_DECODER)
-  video_decoders.push_back(std::make_unique<Dav1dVideoDecoder>(media_log));
+  video_decoders.push_back(
+      std::make_unique<OffloadingDav1dVideoDecoder>(media_log));
 #elif BUILDFLAG(ENABLE_LIBAOM_DECODER)
   video_decoders.push_back(std::make_unique<AomVideoDecoder>(media_log));
 #endif
@@ -261,10 +262,7 @@ PipelineStatus PipelineIntegrationTestBase::StartInternal(
   EXPECT_CALL(*this, OnMetadata(_))
       .Times(AtMost(1))
       .WillRepeatedly(SaveArg<0>(&metadata_));
-  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
-      .Times(AnyNumber());
-  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_NOTHING))
-      .Times(AnyNumber());
+  EXPECT_CALL(*this, OnBufferingStateChange(_, _)).Times(AnyNumber());
   // If the test is expected to have reliable duration information, permit at
   // most two calls to OnDurationChange.  CheckDuration will make sure that no
   // more than one of them is a finite duration.  This allows the pipeline to
@@ -374,12 +372,12 @@ bool PipelineIntegrationTestBase::Seek(base::TimeDelta seek_time) {
   base::RunLoop run_loop;
 
   // Should always transition to HAVE_ENOUGH once the seek completes.
-  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
+  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH, _))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
 
   // After initial HAVE_ENOUGH, any buffering state change is allowed as
   // playback may cause any number of underflow/preroll events.
-  EXPECT_CALL(*this, OnBufferingStateChange(_)).Times(AnyNumber());
+  EXPECT_CALL(*this, OnBufferingStateChange(_, _)).Times(AnyNumber());
 
   pipeline_->Seek(seek_time, base::Bind(&PipelineIntegrationTestBase::OnSeeked,
                                         base::Unretained(this), seek_time));
@@ -400,7 +398,7 @@ bool PipelineIntegrationTestBase::Resume(base::TimeDelta seek_time) {
   ended_ = false;
 
   base::RunLoop run_loop;
-  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
+  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH, _))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
   pipeline_->Resume(renderer_factory_->CreateRenderer(CreateVideoDecodersCB(),
                                                       CreateAudioDecodersCB()),
@@ -561,14 +559,14 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
 }
 
 void PipelineIntegrationTestBase::OnVideoFramePaint(
-    const scoped_refptr<VideoFrame>& frame) {
+    scoped_refptr<VideoFrame> frame) {
   last_video_frame_format_ = frame->format();
   last_video_frame_color_space_ = frame->ColorSpace();
   if (!hashing_enabled_ || last_frame_ == frame)
     return;
-  last_frame_ = frame;
   DVLOG(3) << __func__ << " pts=" << frame->timestamp().InSecondsF();
-  VideoFrame::HashFrameForTesting(&md5_context_, *frame.get());
+  VideoFrame::HashFrameForTesting(&md5_context_, *frame);
+  last_frame_ = std::move(frame);
 }
 
 void PipelineIntegrationTestBase::CheckDuration() {
@@ -639,10 +637,7 @@ PipelineStatus PipelineIntegrationTestBase::StartPipelineWithMediaSource(
   EXPECT_CALL(*this, OnMetadata(_))
       .Times(AtMost(1))
       .WillRepeatedly(SaveArg<0>(&metadata_));
-  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
-      .Times(AnyNumber());
-  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_NOTHING))
-      .Times(AnyNumber());
+  EXPECT_CALL(*this, OnBufferingStateChange(_, _)).Times(AnyNumber());
   EXPECT_CALL(*this, OnDurationChange()).Times(AnyNumber());
   EXPECT_CALL(*this, OnVideoNaturalSizeChange(_)).Times(AnyNumber());
   EXPECT_CALL(*this, OnVideoOpacityChange(_)).Times(AtMost(1));

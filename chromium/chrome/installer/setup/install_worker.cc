@@ -812,7 +812,6 @@ bool AppendPostInstallTasks(const InstallerState& installer_state,
         product_rename_cmd.GetCommandLineString(), true);
 
     // Delay deploying the new chrome_proxy while chrome is running.
-    if (!installer_state.is_vivaldi())
     in_use_update_work_items->AddCopyTreeWorkItem(
         src_path.Append(kChromeProxyExe).value(),
         target_path.Append(kChromeProxyNewExe).value(), temp_path.value(),
@@ -840,7 +839,6 @@ bool AppendPostInstallTasks(const InstallerState& installer_state,
 
     // Only copy chrome_proxy.exe directly when chrome.exe isn't in use to avoid
     // different versions getting mixed up between the two binaries.
-    if (!installer_state.is_vivaldi())
     regular_update_work_items->AddCopyTreeWorkItem(
         src_path.Append(kChromeProxyExe).value(),
         target_path.Append(kChromeProxyExe).value(), temp_path.value(),
@@ -893,6 +891,32 @@ void AddInstallWorkItems(const InstallationState& original_state,
   install_list->AddCreateDirWorkItem(temp_path);
   install_list->AddCreateDirWorkItem(target_path);
 
+  // Set permissions early on both temp and target, since moved files may not
+  // inherit permissions.
+  WorkItem* add_ac_acl_to_install =
+      install_list->AddCallbackWorkItem(base::BindRepeating(
+          [](const base::FilePath& target_path, const base::FilePath& temp_path,
+             const CallbackWorkItem& work_item) {
+            DCHECK(!work_item.IsRollback());
+            std::vector<const wchar_t*> sids = {
+                kChromeInstallFilesCapabilitySid,
+                kLpacChromeInstallFilesCapabilitySid};
+            bool success_target = AddAclToPath(
+                target_path, sids, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE);
+            bool success_temp = AddAclToPath(
+                temp_path, sids, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+                CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE);
+
+            bool success = (success_target && success_temp);
+            base::UmaHistogramBoolean("Setup.Install.AddAppContainerAce",
+                                      success);
+            return success;
+          },
+          target_path, temp_path));
+  add_ac_acl_to_install->set_best_effort(true);
+  add_ac_acl_to_install->set_rollback_enabled(false);
+
   // Create the directory in which persistent metrics will be stored.
   const base::FilePath histogram_storage_dir(
       target_path.AppendASCII(kSetupHistogramAllocatorName));
@@ -921,25 +945,6 @@ void AddInstallWorkItems(const InstallationState& original_state,
   // Copy installer in install directory
   AddInstallerCopyTasks(installer_state, setup_path, archive_path, temp_path,
                         new_version, install_list);
-
-  WorkItem* add_ac_acl_to_install =
-      install_list->AddCallbackWorkItem(base::BindRepeating(
-          [](const base::FilePath& target_path,
-             const CallbackWorkItem& work_item) {
-            DCHECK(!work_item.IsRollback());
-            std::vector<const wchar_t*> sids = {
-                kChromeInstallFilesCapabilitySid,
-                kLpacChromeInstallFilesCapabilitySid};
-            bool success = AddAclToPath(
-                target_path, sids, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
-                CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE);
-            base::UmaHistogramBoolean("Setup.Install.AddAppContainerAce",
-                                      success);
-            return success;
-          },
-          target_path));
-  add_ac_acl_to_install->set_best_effort(true);
-  add_ac_acl_to_install->set_rollback_enabled(false);
 
   const HKEY root = installer_state.root_key();
   // Only set "lang" for user-level installs since for system-level, the install

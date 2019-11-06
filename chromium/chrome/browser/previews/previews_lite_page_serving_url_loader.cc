@@ -12,6 +12,7 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/task/post_task.h"
@@ -51,10 +52,9 @@ void BlacklistBypassedHostOnUIThread(const std::string& host,
   if (!web_contents)
     return;
 
-  static_cast<PreviewsLitePageNavigationThrottleManager*>(
-      PreviewsServiceFactory::GetForProfile(
-          Profile::FromBrowserContext(web_contents->GetBrowserContext()))
-          ->previews_lite_page_decider())
+  PreviewsServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(web_contents->GetBrowserContext()))
+      ->previews_lite_page_decider()
       ->BlacklistBypassedHost(host, duration);
 }
 
@@ -75,10 +75,9 @@ void SetServerUnavailableForOnUIThread(base::TimeDelta duration,
   if (!web_contents)
     return;
 
-  static_cast<PreviewsLitePageNavigationThrottleManager*>(
-      PreviewsServiceFactory::GetForProfile(
-          Profile::FromBrowserContext(web_contents->GetBrowserContext()))
-          ->previews_lite_page_decider())
+  PreviewsServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(web_contents->GetBrowserContext()))
+      ->previews_lite_page_decider()
       ->SetServerUnavailableFor(duration);
 }
 
@@ -99,10 +98,9 @@ void ReportDataSavingsOnUIThread(int64_t network_bytes,
   if (!web_contents)
     return;
 
-  static_cast<PreviewsLitePageNavigationThrottleManager*>(
-      PreviewsServiceFactory::GetForProfile(
-          Profile::FromBrowserContext(web_contents->GetBrowserContext()))
-          ->previews_lite_page_decider())
+  PreviewsServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(web_contents->GetBrowserContext()))
+      ->previews_lite_page_decider()
       ->ReportDataSavings(network_bytes, original_bytes, host);
 }
 
@@ -159,8 +157,7 @@ PreviewsLitePageServingURLLoader::PreviewsLitePageServingURLLoader(
     ResultCallback result_callback)
     : url_loader_binding_(this),
       result_callback_(std::move(result_callback)),
-      binding_(this),
-      weak_ptr_factory_(this) {}
+      binding_(this) {}
 
 void PreviewsLitePageServingURLLoader::StartNetworkRequest(
     const network::ResourceRequest& request,
@@ -376,7 +373,7 @@ void PreviewsLitePageServingURLLoader::OnUploadProgress(
 }
 
 void PreviewsLitePageServingURLLoader::OnReceiveCachedMetadata(
-    const std::vector<uint8_t>& data) {
+    mojo_base::BigBuffer data) {
   // Do nothing. This is not supported for navigation loader.
 }
 
@@ -394,6 +391,9 @@ void PreviewsLitePageServingURLLoader::OnStartLoadingResponseBody(
 
 void PreviewsLitePageServingURLLoader::OnComplete(
     const network::URLLoaderCompletionStatus& status) {
+  base::UmaHistogramSparse("Previews.ServerLitePage.ServerNetError",
+                           -status.error_code);
+
   if (forwarding_client_) {
     forwarding_client_->OnComplete(status);
     return;

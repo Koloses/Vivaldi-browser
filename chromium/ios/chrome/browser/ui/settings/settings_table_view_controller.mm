@@ -9,6 +9,7 @@
 #include "base/feature_list.h"
 #import "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "build/branding_buildflags.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/password_manager/core/browser/password_store.h"
@@ -16,15 +17,17 @@
 #import "components/prefs/ios/pref_observer_bridge.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/util.h"
-#include "components/signin/core/browser/signin_metrics.h"
+#include "components/signin/public/base/signin_metrics.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
+#import "components/signin/public/identity_manager/objc/identity_manager_observer_bridge.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/unified_consent/feature.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/ios_chrome_flag_descriptions.h"
 #include "ios/chrome/browser/passwords/ios_chrome_password_store_factory.h"
 #include "ios/chrome/browser/pref_names.h"
+#include "ios/chrome/browser/search_engines/search_engine_observer_bridge.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
 #import "ios/chrome/browser/signin/authentication_service.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
@@ -44,12 +47,13 @@
 #import "ios/chrome/browser/ui/settings/autofill/autofill_profile_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/bandwidth_management_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/cells/account_sign_in_item.h"
-#import "ios/chrome/browser/ui/settings/cells/settings_detail_item.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_cell.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_switch_item.h"
 #import "ios/chrome/browser/ui/settings/content_settings_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/google_services/accounts_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/google_services/google_services_settings_coordinator.h"
+#import "ios/chrome/browser/ui/settings/language/language_settings_mediator.h"
+#import "ios/chrome/browser/ui/settings/language/language_settings_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/material_cell_catalog_view_controller.h"
 #import "ios/chrome/browser/ui/settings/password/passwords_table_view_controller.h"
 #import "ios/chrome/browser/ui/settings/privacy_table_view_controller.h"
@@ -61,18 +65,20 @@
 #import "ios/chrome/browser/ui/signin_interaction/public/signin_presenter.h"
 #import "ios/chrome/browser/ui/signin_interaction/signin_interaction_coordinator.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
+#import "ios/chrome/browser/ui/table_view/cells/table_view_detail_icon_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_image_item.h"
 #import "ios/chrome/browser/ui/table_view/table_view_model.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/browser/voice/speech_input_locale_config.h"
+#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
 #import "ios/public/provider/chrome/browser/signin/signin_resources_provider.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_prefs.h"
-#include "services/identity/public/cpp/identity_manager.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -84,11 +90,6 @@ NSString* const kSettingsSignInCellId = @"kSettingsSignInCellId";
 NSString* const kSettingsAccountCellId = @"kSettingsAccountCellId";
 NSString* const kSettingsSearchEngineCellId = @"Search Engine";
 NSString* const kSettingsVoiceSearchCellId = @"Voice Search Settings";
-
-@interface SettingsTableViewController (NotificationBridgeDelegate)
-// Notifies this controller that the sign in state has changed.
-- (void)onSignInStateChanged;
-@end
 
 namespace {
 
@@ -108,6 +109,8 @@ NSString* const kSettingsAutofillCreditCardImageName =
 NSString* const kSettingsAutofillProfileImageName = @"settings_addresses";
 NSString* const kSettingsVoiceSearchImageName = @"settings_voice_search";
 NSString* const kSettingsPrivacyImageName = @"settings_privacy";
+NSString* const kSettingsLanguageSettingsImageName =
+    @"settings_language_settings";
 NSString* const kSettingsContentSettingsImageName =
     @"settings_content_settings";
 NSString* const kSettingsBandwidthImageName = @"settings_bandwidth";
@@ -137,6 +140,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeAutofillProfile,
   ItemTypeVoiceSearch,
   ItemTypePrivacy,
+  ItemTypeLanguageSettings,
   ItemTypeContentSettings,
   ItemTypeBandwidth,
   ItemTypeAboutChrome,
@@ -147,50 +151,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeArticlesForYou,
 };
 
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 NSString* kDevViewSourceKey = @"DevViewSource";
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
-
-#pragma mark - IdentityObserverBridge Class
-
-class IdentityObserverBridge : public identity::IdentityManager::Observer {
- public:
-  IdentityObserverBridge(ios::ChromeBrowserState* browserState,
-                         SettingsTableViewController* owner);
-  ~IdentityObserverBridge() override {}
-
-  // IdentityManager::Observer implementation:
-  void OnPrimaryAccountSet(
-      const CoreAccountInfo& primary_account_info) override;
-  void OnPrimaryAccountCleared(
-      const CoreAccountInfo& previous_primary_account_info) override;
-
- private:
-  __weak SettingsTableViewController* owner_;
-  ScopedObserver<identity::IdentityManager, IdentityObserverBridge> observer_;
-};
-
-IdentityObserverBridge::IdentityObserverBridge(
-    ios::ChromeBrowserState* browserState,
-    SettingsTableViewController* owner)
-    : owner_(owner), observer_(this) {
-  DCHECK(owner_);
-  identity::IdentityManager* identity_manager =
-      IdentityManagerFactory::GetForBrowserState(browserState);
-  if (!identity_manager)
-    return;
-  observer_.Add(identity_manager);
-}
-
-void IdentityObserverBridge::OnPrimaryAccountSet(
-    const CoreAccountInfo& primary_account_info) {
-  [owner_ onSignInStateChanged];
-}
-
-void IdentityObserverBridge::OnPrimaryAccountCleared(
-    const CoreAccountInfo& previous_primary_account_info) {
-  [owner_ onSignInStateChanged];
-}
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 
 }  // namespace
 
@@ -200,16 +163,20 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
     BooleanObserver,
     ChromeIdentityServiceObserver,
     GoogleServicesSettingsCoordinatorDelegate,
+    IdentityManagerObserverBridgeDelegate,
     PrefObserverDelegate,
     SettingsControllerProtocol,
+    SearchEngineObserving,
     SettingsMainPageCommands,
     SigninPresenter,
     SigninPromoViewConsumer,
     SyncObserverModelBridge> {
   // The current browser state that hold the settings. Never off the record.
   ios::ChromeBrowserState* _browserState;  // weak
-
-  std::unique_ptr<IdentityObserverBridge> _notificationBridge;
+  // Bridge for TemplateURLServiceObserver.
+  std::unique_ptr<SearchEngineObserverBridge> _searchEngineObserverBridge;
+  std::unique_ptr<signin::IdentityManagerObserverBridge>
+      _identityObserverBridge;
   std::unique_ptr<SyncObserverBridge> _syncObserverBridge;
   // Whether the impression of the Signin button has already been recorded.
   BOOL _hasRecordedSigninImpression;
@@ -245,11 +212,11 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
   PrefChangeRegistrar _prefChangeRegistrar;
 
   // Updatable Items.
-  SettingsDetailItem* _voiceSearchDetailItem;
-  SettingsDetailItem* _defaultSearchEngineItem;
-  SettingsDetailItem* _passwordsDetailItem;
-  SettingsDetailItem* _autoFillProfileDetailItem;
-  SettingsDetailItem* _autoFillCreditCardDetailItem;
+  TableViewDetailIconItem* _voiceSearchDetailItem;
+  TableViewDetailIconItem* _defaultSearchEngineItem;
+  TableViewDetailIconItem* _passwordsDetailItem;
+  TableViewDetailIconItem* _autoFillProfileDetailItem;
+  TableViewDetailIconItem* _autoFillCreditCardDetailItem;
 
   // YES if the user used at least once the sign-in promo view buttons.
   BOOL _signinStarted;
@@ -288,7 +255,16 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
   if (self) {
     _browserState = browserState;
     self.title = l10n_util::GetNSStringWithFixup(IDS_IOS_SETTINGS_TITLE);
-    _notificationBridge.reset(new IdentityObserverBridge(_browserState, self));
+    _searchEngineObserverBridge.reset(new SearchEngineObserverBridge(
+        self,
+        ios::TemplateURLServiceFactory::GetForBrowserState(_browserState)));
+    signin::IdentityManager* identityManager =
+        IdentityManagerFactory::GetForBrowserState(_browserState);
+    // It is expected that |identityManager| should never be nil except in
+    // tests. In that case, the tests should be fixed.
+    DCHECK(identityManager);
+    _identityObserverBridge.reset(
+        new signin::IdentityManagerObserverBridge(identityManager, self));
     syncer::SyncService* syncService =
         ProfileSyncServiceFactory::GetForBrowserState(_browserState);
     _syncObserverBridge.reset(new SyncObserverBridge(self, syncService));
@@ -344,7 +320,7 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
 
 - (void)stopBrowserStateServiceObservers {
   _syncObserverBridge.reset();
-  _notificationBridge.reset();
+  _identityObserverBridge.reset();
   _identityServiceObserver.reset();
   [_showMemoryDebugToolsEnabled setObserver:nil];
   [_articlesEnabled setObserver:nil];
@@ -364,14 +340,6 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
 
   self.navigationItem.largeTitleDisplayMode =
       UINavigationItemLargeTitleDisplayModeAlways;
-}
-
-// TODO(crbug.com/661915): Refactor TemplateURLObserver and re-implement this so
-// it observes the default search engine name instead of reloading on
-// ViewWillAppear.
-- (void)viewWillAppear:(BOOL)animated {
-  [super viewWillAppear:animated];
-  [self updateSearchCell];
 }
 
 #pragma mark SettingsRootTableViewController
@@ -443,6 +411,10 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
   _articlesForYouItem = [self articlesForYouSwitchItem];
   [model addItem:_articlesForYouItem
       toSectionWithIdentifier:SectionIdentifierAdvanced];
+  if (base::FeatureList::IsEnabled(kLanguageSettings)) {
+    [model addItem:[self languageSettingsDetailItem]
+        toSectionWithIdentifier:SectionIdentifierAdvanced];
+  }
   [model addItem:[self contentSettingsDetailItem]
       toSectionWithIdentifier:SectionIdentifierAdvanced];
   [model addItem:[self bandwidthManagementDetailItem]
@@ -464,14 +436,14 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
         toSectionWithIdentifier:SectionIdentifierDebug];
   }
 
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
   [model addItem:[self viewSourceSwitchItem]
       toSectionWithIdentifier:SectionIdentifierDebug];
   [model addItem:[self collectionViewCatalogDetailItem]
       toSectionWithIdentifier:SectionIdentifierDebug];
   [model addItem:[self tableViewCatalogDetailItem]
       toSectionWithIdentifier:SectionIdentifierDebug];
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 }
 
 #pragma mark - Model Items
@@ -621,6 +593,14 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
                  iconImageName:kSettingsPrivacyImageName];
 }
 
+- (TableViewItem*)languageSettingsDetailItem {
+  return [self
+      detailItemWithType:ItemTypeLanguageSettings
+                    text:l10n_util::GetNSString(IDS_IOS_LANGUAGE_SETTINGS_TITLE)
+              detailText:nil
+           iconImageName:kSettingsLanguageSettingsImageName];
+}
+
 - (TableViewItem*)contentSettingsDetailItem {
   return [self
       detailItemWithType:ItemTypeContentSettings
@@ -666,7 +646,7 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
 
   return articlesForYouSwitchItem;
 }
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 
 - (SettingsSwitchItem*)viewSourceSwitchItem {
   return [self switchItemWithType:ItemTypeViewSource
@@ -675,40 +655,29 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
                   withDefaultsKey:kDevViewSourceKey];
 }
 
-- (SettingsDetailItem*)collectionViewCatalogDetailItem {
+- (TableViewDetailIconItem*)collectionViewCatalogDetailItem {
   return [self detailItemWithType:ItemTypeCollectionCellCatalog
                              text:@"Collection Cell Catalog"
                        detailText:nil
                     iconImageName:kSettingsDebugImageName];
 }
 
-- (SettingsDetailItem*)tableViewCatalogDetailItem {
+- (TableViewDetailIconItem*)tableViewCatalogDetailItem {
   return [self detailItemWithType:ItemTypeTableCellCatalog
                              text:@"TableView Cell Catalog"
                        detailText:nil
                     iconImageName:kSettingsDebugImageName];
 }
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
-
-#pragma mark Item Updaters
-
-- (void)updateSearchCell {
-  NSString* defaultSearchEngineName =
-      base::SysUTF16ToNSString(GetDefaultSearchEngineName(
-          ios::TemplateURLServiceFactory::GetForBrowserState(_browserState)));
-
-  _defaultSearchEngineItem.detailText = defaultSearchEngineName;
-  [self reconfigureCellsForItems:@[ _defaultSearchEngineItem ]];
-}
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 
 #pragma mark Item Constructors
 
-- (SettingsDetailItem*)detailItemWithType:(NSInteger)type
-                                     text:(NSString*)text
-                               detailText:(NSString*)detailText
-                            iconImageName:(NSString*)iconImageName {
-  SettingsDetailItem* detailItem =
-      [[SettingsDetailItem alloc] initWithType:type];
+- (TableViewDetailIconItem*)detailItemWithType:(NSInteger)type
+                                          text:(NSString*)text
+                                    detailText:(NSString*)detailText
+                                 iconImageName:(NSString*)iconImageName {
+  TableViewDetailIconItem* detailItem =
+      [[TableViewDetailIconItem alloc] initWithType:type];
   detailItem.text = text;
   detailItem.detailText = detailText;
   detailItem.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -742,9 +711,9 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
                      cellForRowAtIndexPath:indexPath];
   NSInteger itemType = [self.tableViewModel itemTypeForIndexPath:indexPath];
 
-  if ([cell isKindOfClass:[SettingsDetailCell class]]) {
-    SettingsDetailCell* detailCell =
-        base::mac::ObjCCastStrict<SettingsDetailCell>(cell);
+  if ([cell isKindOfClass:[TableViewDetailIconCell class]]) {
+    TableViewDetailIconCell* detailCell =
+        base::mac::ObjCCastStrict<TableViewDetailIconCell>(cell);
     if (itemType == ItemTypePasswords) {
       scoped_refptr<password_manager::PasswordStore> passwordStore =
           IOSChromePasswordStoreFactory::GetForBrowserState(
@@ -756,14 +725,13 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
         LOG(ERROR) << "Save passwords cell was disabled as the password store"
                       " cannot be created.";
         [detailCell setUserInteractionEnabled:NO];
-        detailCell.textLabel.textColor =
-            UIColorFromRGB(kTableViewSecondaryLabelLightGrayTextColor);
+        detailCell.textLabel.textColor = UIColor.cr_secondaryLabelColor;
         return cell;
       }
     }
 
     [detailCell setUserInteractionEnabled:YES];
-    detailCell.textLabel.textColor = UIColor.blackColor;
+    detailCell.textLabel.textColor = UIColor.cr_labelColor;
   }
 
   switch (itemType) {
@@ -784,7 +752,7 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
       break;
     }
     case ItemTypeViewSource: {
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
       SettingsSwitchCell* switchCell =
           base::mac::ObjCCastStrict<SettingsSwitchCell>(cell);
       [switchCell.switchView addTarget:self
@@ -792,7 +760,7 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
                       forControlEvents:UIControlEventValueChanged];
 #else
       NOTREACHED();
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
       break;
     }
     default:
@@ -859,6 +827,17 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
       controller = [[PrivacyTableViewController alloc]
           initWithBrowserState:_browserState];
       break;
+    case ItemTypeLanguageSettings: {
+      LanguageSettingsMediator* mediator =
+          [[LanguageSettingsMediator alloc] initWithBrowserState:_browserState];
+      LanguageSettingsTableViewController* languageSettingsTableViewController =
+          [[LanguageSettingsTableViewController alloc]
+              initWithDataSource:mediator
+                  commandHandler:mediator];
+      mediator.consumer = languageSettingsTableViewController;
+      controller = languageSettingsTableViewController;
+      break;
+    }
     case ItemTypeContentSettings:
       controller = [[ContentSettingsTableViewController alloc]
           initWithBrowserState:_browserState];
@@ -923,7 +902,7 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
   [_articlesEnabled setValue:newSwitchValue];
 }
 
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 - (void)viewSourceSwitchToggled:(UISwitch*)sender {
   NSIndexPath* switchPath =
       [self.tableViewModel indexPathForItemType:ItemTypeViewSource
@@ -937,7 +916,7 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
   switchItem.on = newSwitchValue;
   [self setBooleanNSUserDefaultsValue:newSwitchValue forKey:kDevViewSourceKey];
 }
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 
 #pragma mark Private methods
 
@@ -946,7 +925,8 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
   _googleServicesSettingsCoordinator =
       [[GoogleServicesSettingsCoordinator alloc]
           initWithBaseViewController:self.navigationController
-                        browserState:_browserState];
+                        browserState:_browserState
+                                mode:GoogleServicesSettingsModeSettings];
   _googleServicesSettingsCoordinator.dispatcher = self.dispatcher;
   _googleServicesSettingsCoordinator.navigationController =
       self.navigationController;
@@ -965,14 +945,14 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
 // Chromium builds, but for official builds it is gated by an experimental flag
 // because the "Debug" section should never be showing in stable channel.
 - (BOOL)hasDebugSection {
-#if CHROMIUM_BUILD && !defined(NDEBUG)
+#if BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
   return YES;
 #else
   if (experimental_flags::IsMemoryDebuggingEnabled()) {
     return YES;
   }
   return NO;
-#endif  // CHROMIUM_BUILD && !defined(NDEBUG)
+#endif  // BUILDFLAG(CHROMIUM_BRANDING) && !defined(NDEBUG)
 }
 
 // Updates the identity cell.
@@ -1037,6 +1017,8 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
 // in the detail text of the cell.
 - (void)updateGoogleServicesItem:(TableViewImageItem*)googleServicesItem {
   googleServicesItem.detailTextColor = nil;
+  syncer::SyncService* syncService =
+      ProfileSyncServiceFactory::GetForBrowserState(_browserState);
   SyncSetupService* syncSetupService =
       SyncSetupServiceFactory::GetForBrowserState(_browserState);
   AuthenticationService* authService =
@@ -1046,13 +1028,20 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
     googleServicesItem.detailText = nil;
     googleServicesItem.image =
         [UIImage imageNamed:kSyncAndGoogleServicesImageName];
+  } else if (syncService->GetDisableReasons() &
+             syncer::SyncService::DISABLE_REASON_ENTERPRISE_POLICY) {
+    googleServicesItem.detailText = l10n_util::GetNSString(
+        IDS_IOS_GOOGLE_SERVICES_SETTINGS_SYNC_DISABLBED_BY_ADMINISTRATOR_STATUS);
+    googleServicesItem.image =
+        [UIImage imageNamed:kSyncAndGoogleServicesSyncOffImageName];
   } else if (!syncSetupService->HasFinishedInitialSetup()) {
     googleServicesItem.detailText =
         l10n_util::GetNSString(IDS_IOS_SYNC_SETUP_IN_PROGRESS);
     googleServicesItem.image =
         [UIImage imageNamed:kSyncAndGoogleServicesSyncOnImageName];
   } else if (!IsTransientSyncError(syncSetupService->GetSyncServiceState())) {
-    googleServicesItem.detailTextColor = UIColor.redColor;
+    googleServicesItem.detailTextColor =
+        [UIColor colorNamed:kDestructiveTintColor];
     googleServicesItem.detailText =
         GetSyncErrorDescriptionForSyncSetupService(syncSetupService);
     googleServicesItem.image =
@@ -1095,7 +1084,7 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
 - (void)showSignInWithIdentity:(ChromeIdentity*)identity
                    promoAction:(signin_metrics::PromoAction)promoAction
                     completion:(ShowSigninCommandCompletionCallback)completion {
-  DCHECK(!self.signinInteractionCoordinator.isActive);
+  DCHECK(![self.signinInteractionCoordinator isActive]);
   if (!self.signinInteractionCoordinator) {
     self.signinInteractionCoordinator = [[SigninInteractionCoordinator alloc]
         initWithBrowserState:_browserState
@@ -1131,25 +1120,13 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
                 animated:YES];
 }
 
-#pragma mark NotificationBridgeDelegate
-
-- (void)onSignInStateChanged {
-  // While the sign-in interaction coordinator is presenting UI, the TableView
-  // should not be updated. Otherwise, it would lead to have an UI glitch either
-  // while the sign in UI is appearing or while it is disappearing. The
-  // TableView will be reloaded once the animation is finished.
-  // See: -[SettingsTableViewController didFinishSignin:].
-  if (!self.signinInteractionCoordinator.isActive) {
-    // Sign in state changes are rare. Just reload the entire table when
-    // this happens.
-    [self reloadData];
-  }
-}
-
 #pragma mark SettingsControllerProtocol
 
 - (void)settingsWillBeDismissed {
   DCHECK(!_settingsHasBeenDismissed);
+  [_googleServicesSettingsCoordinator stop];
+  _googleServicesSettingsCoordinator.delegate = nil;
+  _googleServicesSettingsCoordinator = nil;
   _settingsHasBeenDismissed = YES;
   [self.signinInteractionCoordinator cancel];
   [_signinPromoViewMediator signinPromoViewRemoved];
@@ -1182,8 +1159,7 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
     // (including the corresponding AccountViewBase).
     ios::GetChromeBrowserProvider()
         ->GetChromeIdentityService()
-        ->GetAvatarForIdentity(_identity, ^(UIImage*){
-                               });
+        ->GetAvatarForIdentity(_identity, nil);
   }
 
   // If the currently used image has already been resized, use it.
@@ -1200,6 +1176,15 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
   }
   _resizedImage = image;
   return _resizedImage;
+}
+
+#pragma mark - SearchEngineObserverBridge
+
+- (void)searchEngineChanged {
+  _defaultSearchEngineItem.detailText =
+      base::SysUTF16ToNSString(GetDefaultSearchEngineName(
+          ios::TemplateURLServiceFactory::GetForBrowserState(_browserState)));
+  [self reconfigureCellsForItems:@[ _defaultSearchEngineItem ]];
 }
 
 #pragma mark ChromeIdentityServiceObserver
@@ -1281,7 +1266,7 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
 - (void)configureSigninPromoWithConfigurator:
             (SigninPromoViewConfigurator*)configurator
                              identityChanged:(BOOL)identityChanged {
-  DCHECK(!self.signinInteractionCoordinator.isActive);
+  DCHECK(![self.signinInteractionCoordinator isActive]);
   if (![self.tableViewModel hasItemForItemType:ItemTypeSigninPromo
                              sectionIdentifier:SectionIdentifierSignIn]) {
     return;
@@ -1320,7 +1305,33 @@ void IdentityObserverBridge::OnPrimaryAccountCleared(
 - (void)googleServicesSettingsCoordinatorDidRemove:
     (GoogleServicesSettingsCoordinator*)coordinator {
   DCHECK_EQ(_googleServicesSettingsCoordinator, coordinator);
+  [_googleServicesSettingsCoordinator stop];
+  _googleServicesSettingsCoordinator.delegate = nil;
   _googleServicesSettingsCoordinator = nil;
+}
+
+#pragma mark - IdentityManagerObserverBridgeDelegate
+
+// Notifies this controller that the sign in state has changed.
+- (void)signinStateDidChange {
+  // While the sign-in interaction coordinator is presenting UI, the TableView
+  // should not be updated. Otherwise, it would lead to an UI glitch either
+  // while the sign in UI is appearing or disappearing. The TableView will be
+  // reloaded once the animation is finished.
+  // See: -[SettingsTableViewController didFinishSignin:].
+  if ([self.signinInteractionCoordinator isActive])
+    return;
+  // Sign in state changes are rare. Just reload the entire table when
+  // this happens.
+  [self reloadData];
+}
+- (void)onPrimaryAccountSet:(const CoreAccountInfo&)primaryAccountInfo {
+  [self signinStateDidChange];
+}
+
+- (void)onPrimaryAccountCleared:
+    (const CoreAccountInfo&)previousPrimaryAccountInfo {
+  [self signinStateDidChange];
 }
 
 @end

@@ -29,7 +29,6 @@
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/fileapi/file.h"
 #include "third_party/blink/renderer/core/fileapi/file_list.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/forms/form_controller.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
@@ -41,6 +40,8 @@
 #include "third_party/blink/renderer/core/page/drag_data.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -67,14 +68,10 @@ Vector<String> CollectAcceptTypes(const HTMLInputElement& input) {
 
 }  // namespace
 
-inline FileInputType::FileInputType(HTMLInputElement& element)
+FileInputType::FileInputType(HTMLInputElement& element)
     : InputType(element),
       KeyboardClickableInputTypeView(element),
-      file_list_(FileList::Create()) {}
-
-InputType* FileInputType::Create(HTMLInputElement& element) {
-  return MakeGarbageCollected<FileInputType>(element);
-}
+      file_list_(MakeGarbageCollected<FileList>()) {}
 
 void FileInputType::Trace(Visitor* visitor) {
   visitor->Trace(file_list_);
@@ -124,7 +121,7 @@ void FileInputType::RestoreFormControlState(const FormControlState& state) {
   HeapVector<Member<File>> file_vector =
       CreateFilesFrom<File*, HeapVector<Member<File>>>(
           state, &File::CreateFromControlState);
-  FileList* file_list = FileList::Create();
+  auto* file_list = MakeGarbageCollected<FileList>();
   for (const auto& file : file_vector)
     file_list->Append(file);
   SetFilesAndDispatchEvents(file_list);
@@ -164,8 +161,9 @@ void FileInputType::HandleDOMActivateEvent(Event& event) {
   if (!LocalFrame::HasTransientUserActivation(document.GetFrame())) {
     String message =
         "File chooser dialog can only be shown with a user activation.";
-    document.AddConsoleMessage(ConsoleMessage::Create(
-        kJSMessageSource, mojom::ConsoleMessageLevel::kWarning, message));
+    document.AddConsoleMessage(
+        ConsoleMessage::Create(mojom::ConsoleMessageSource::kJavaScript,
+                               mojom::ConsoleMessageLevel::kWarning, message));
     return;
   }
 
@@ -196,7 +194,8 @@ void FileInputType::HandleDOMActivateEvent(Event& event) {
   event.SetDefaultHandled();
 }
 
-LayoutObject* FileInputType::CreateLayoutObject(const ComputedStyle&) const {
+LayoutObject* FileInputType::CreateLayoutObject(const ComputedStyle&,
+                                                LegacyLayout) const {
   return new LayoutFileUploadControl(&GetElement());
 }
 
@@ -250,7 +249,7 @@ void FileInputType::SetValue(const String&,
 
 FileList* FileInputType::CreateFileList(const FileChooserFileInfoList& files,
                                         const base::FilePath& base_dir) {
-  FileList* file_list(FileList::Create());
+  auto* file_list(MakeGarbageCollected<FileList>());
   wtf_size_t size = files.size();
 
   // If a directory is being selected, the UI allows a directory to be chosen
@@ -309,8 +308,8 @@ void FileInputType::CountUsage() {
 
 void FileInputType::CreateShadowSubtree() {
   DCHECK(IsShadowHost(GetElement()));
-  auto* button = HTMLInputElement::Create(GetElement().GetDocument(),
-                                          CreateElementFlags());
+  auto* button = MakeGarbageCollected<HTMLInputElement>(
+      GetElement().GetDocument(), CreateElementFlags());
   button->setType(input_type_names::kButton);
   button->setAttribute(
       kValueAttr,
@@ -324,16 +323,20 @@ void FileInputType::CreateShadowSubtree() {
 
 void FileInputType::DisabledAttributeChanged() {
   DCHECK(IsShadowHost(GetElement()));
+  CHECK(!GetElement().UserAgentShadowRoot()->firstChild() ||
+        IsA<Element>(GetElement().UserAgentShadowRoot()->firstChild()));
   if (Element* button =
-          ToElementOrDie(GetElement().UserAgentShadowRoot()->firstChild()))
+          To<Element>(GetElement().UserAgentShadowRoot()->firstChild()))
     button->SetBooleanAttribute(kDisabledAttr,
                                 GetElement().IsDisabledFormControl());
 }
 
 void FileInputType::MultipleAttributeChanged() {
   DCHECK(IsShadowHost(GetElement()));
+  CHECK(!GetElement().UserAgentShadowRoot()->firstChild() ||
+        IsA<Element>(GetElement().UserAgentShadowRoot()->firstChild()));
   if (Element* button =
-          ToElementOrDie(GetElement().UserAgentShadowRoot()->firstChild()))
+          To<Element>(GetElement().UserAgentShadowRoot()->firstChild()))
     button->setAttribute(
         kValueAttr,
         AtomicString(GetLocale().QueryString(

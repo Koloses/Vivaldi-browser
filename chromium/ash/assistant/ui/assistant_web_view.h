@@ -15,9 +15,8 @@
 #include "base/component_export.h"
 #include "base/macros.h"
 #include "base/optional.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/content/public/cpp/navigable_contents.h"
-#include "ui/aura/window_observer.h"
 #include "ui/views/view.h"
 
 namespace ash {
@@ -31,7 +30,6 @@ class AssistantViewDelegate;
 // Service.
 class COMPONENT_EXPORT(ASSISTANT_UI) AssistantWebView
     : public views::View,
-      public aura::WindowObserver,
       public AssistantViewDelegateObserver,
       public CaptionBarDelegate,
       public content::NavigableContentsObserver,
@@ -48,13 +46,6 @@ class COMPONENT_EXPORT(ASSISTANT_UI) AssistantWebView
   void OnFocus() override;
   void AboutToRequestFocusFromTabTraversal(bool reverse) override;
 
-  // views::WindowObserver:
-  void OnWindowBoundsChanged(aura::Window* window,
-                             const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds,
-                             ui::PropertyChangeReason reason) override;
-  void OnWindowDestroying(aura::Window* window) override;
-
   // CaptionBarDelegate:
   bool OnCaptionButtonPressed(AssistantButtonId id) override;
 
@@ -64,7 +55,6 @@ class COMPONENT_EXPORT(ASSISTANT_UI) AssistantWebView
       const std::map<std::string, std::string>& params) override;
 
   // content::NavigableContentsObserver:
-  void DidAutoResizeView(const gfx::Size& new_size) override;
   void DidStopLoading() override;
   void DidSuppressNavigation(const GURL& url,
                              WindowOpenDisposition disposition,
@@ -76,23 +66,25 @@ class COMPONENT_EXPORT(ASSISTANT_UI) AssistantWebView
       AssistantVisibility old_visibility,
       base::Optional<AssistantEntryPoint> entry_point,
       base::Optional<AssistantExitPoint> exit_point) override;
+  void OnUsableWorkAreaChanged(const gfx::Rect& usable_work_area) override;
 
  private:
   void InitLayout();
   void RemoveContents();
 
+  // Updates the size of the web contents by changing its view size to avoid
+  // either being cut or not fully filling the whole container when the usable
+  // work area changed.
+  void UpdateContentSize();
+
   AssistantViewDelegate* const delegate_;
 
   CaptionBar* caption_bar_;  // Owned by view hierarchy.
 
-  content::mojom::NavigableContentsFactoryPtr contents_factory_;
+  mojo::Remote<content::mojom::NavigableContentsFactory> contents_factory_;
   std::unique_ptr<content::NavigableContents> contents_;
 
-  // Our contents are drawn to a layer that is not masked by our widget's layer.
-  // This causes our contents to ignore the corner radius that we have set on
-  // the widget. To address this, we apply a separate layer mask to the
-  // contents' native view layer enforcing our desired corner radius.
-  std::unique_ptr<ui::LayerOwner> contents_mask_;
+  bool contents_view_initialized_ = false;
 
   base::WeakPtrFactory<AssistantWebView> weak_factory_;
 

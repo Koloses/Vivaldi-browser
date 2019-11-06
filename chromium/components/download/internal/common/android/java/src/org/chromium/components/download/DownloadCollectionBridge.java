@@ -161,6 +161,15 @@ public class DownloadCollectionBridge {
     protected void refreshExpirationDate(final String intermediateUri) {}
 
     /**
+     * Gets the display name for a download.
+     * @param downloadUri Uri of the download.
+     * @return the display name of the download.
+     */
+    protected String getDisplayNameForUri(final String downloadUri) {
+        return null;
+    }
+
+    /**
      * Creates an intermediate URI for download to be written into. On completion, call
      * nativeOnCreateIntermediateUriResult() with |callbackId|.
      * @param fileName Name of the file.
@@ -169,7 +178,7 @@ public class DownloadCollectionBridge {
      * @param referrer Referrer of the download.
      */
     @CalledByNative
-    private static String createIntermediateUriForPublish(final String fileName,
+    public static String createIntermediateUriForPublish(final String fileName,
             final String mimeType, final String originalUrl, final String referrer) {
         Uri uri = getDownloadCollectionBridge().createPendingSession(
                 fileName, mimeType, originalUrl, referrer);
@@ -193,7 +202,7 @@ public class DownloadCollectionBridge {
      * @return True on success, or false otherwise.
      */
     @CalledByNative
-    private static boolean copyFileToIntermediateUri(
+    public static boolean copyFileToIntermediateUri(
             final String sourcePath, final String destinationUri) {
         return getDownloadCollectionBridge().copyFileToPendingUri(sourcePath, destinationUri);
     }
@@ -203,7 +212,7 @@ public class DownloadCollectionBridge {
      * @param uri Intermediate Uri that is going to be deleted.
      */
     @CalledByNative
-    private static void deleteIntermediateUri(final String uri) {
+    public static void deleteIntermediateUri(final String uri) {
         getDownloadCollectionBridge().abandonPendingUri(uri);
     }
 
@@ -213,7 +222,7 @@ public class DownloadCollectionBridge {
      * @return Uri of the published file.
      */
     @CalledByNative
-    private static String publishDownload(final String intermediateUri) {
+    public static String publishDownload(final String intermediateUri) {
         Uri uri = getDownloadCollectionBridge().publishCompletedDownload(intermediateUri);
         return uri == null ? null : uri.toString();
     }
@@ -285,6 +294,16 @@ public class DownloadCollectionBridge {
      */
     public static int getExpirationDurationInDays() {
         return nativeGetExpirationDurationInDays();
+    }
+
+    /**
+     * Gets the display name for a download.
+     * @param downloadUri Uri of the download.
+     * @return the display name of the download.
+     */
+    @CalledByNative
+    private static String getDisplayName(final String downloadUri) {
+        return getDownloadCollectionBridge().getDisplayNameForUri(downloadUri);
     }
 
     private static native int nativeGetExpirationDurationInDays();

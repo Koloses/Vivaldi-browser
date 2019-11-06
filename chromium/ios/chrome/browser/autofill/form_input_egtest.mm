@@ -16,18 +16,16 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
+#import "ios/web/public/deprecated/crw_js_injection_receiver.h"
 #import "ios/web/public/test/earl_grey/web_view_actions.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #include "ios/web/public/test/element_selector.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
-#import "ios/web/public/web_state/js/crw_js_injection_receiver.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
-
-using web::test::ElementSelector;
 
 namespace {
 
@@ -84,7 +82,7 @@ void AssertElementIsFocused(const std::string& element_id) {
   // the previous and next buttons are not shown in our keyboard input
   // accessory. Instead, they appear in the native keyboard's shortcut bar (to
   // the left and right of the QuickType suggestions).
-  if (IsIPadIdiom()) {
+  if ([ChromeEarlGrey isIPadIdiom]) {
     EARL_GREY_TEST_SKIPPED(@"Skipped for iPad (no hidden toolbar in tablet)");
   }
 
@@ -93,7 +91,7 @@ void AssertElementIsFocused(const std::string& element_id) {
       "http://ios/testing/data/http_server_files/multi_field_form.html");
   [ChromeEarlGrey loadURL:URL];
 
-  [ChromeEarlGrey waitForWebViewContainingText:"hello!"];
+  [ChromeEarlGrey waitForWebStateContainingText:"hello!"];
 
   // Opening the keyboard from a webview blocks EarlGrey's synchronization.
   [[GREYConfiguration sharedInstance]
@@ -106,7 +104,8 @@ void AssertElementIsFocused(const std::string& element_id) {
                                    chrome_test_util::GetCurrentWebState())]
       performAction:web::WebViewTapElement(
                         chrome_test_util::GetCurrentWebState(),
-                        ElementSelector::ElementSelectorId(kFormElementId1))];
+                        [ElementSelector
+                            selectorWithElementID:kFormElementId1])];
 
   id<GREYMatcher> nextButtonMatcher =
       chrome_test_util::ButtonWithAccessibilityLabelId(

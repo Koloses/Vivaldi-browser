@@ -159,7 +159,7 @@ AwRenderFrameExt::AwRenderFrameExt(content::RenderFrame* render_frame)
   new autofill::AutofillAgent(render_frame, password_autofill_agent, nullptr,
                               &registry_);
   if (content_capture::features::IsContentCaptureEnabled())
-    new content_capture::ContentCaptureSender(render_frame);
+    new content_capture::ContentCaptureSender(render_frame, &registry_);
 
   // Add myself to the RenderFrame => AwRenderFrameExt register.
   render_frame_ext_map.Get().emplace(render_frame, this);
@@ -256,20 +256,18 @@ void AwRenderFrameExt::OnDocumentHasImagesRequest(uint32_t id) {
                                                    has_images));
 }
 
-void AwRenderFrameExt::FocusedNodeChanged(const blink::WebNode& node) {
-  if (node.IsNull() || !node.IsElementNode() || !render_frame() ||
-      !render_frame()->GetRenderView())
+void AwRenderFrameExt::FocusedElementChanged(const blink::WebElement& element) {
+  if (element.IsNull() || !render_frame() || !render_frame()->GetRenderView())
     return;
 
-  const blink::WebElement element = node.ToConst<blink::WebElement>();
   AwHitTestData data;
 
   data.href = GetHref(element);
   data.anchor_text = element.TextContent().Utf16();
 
   GURL absolute_link_url;
-  if (node.IsLink())
-    absolute_link_url = GetAbsoluteUrl(node, data.href);
+  if (element.IsLink())
+    absolute_link_url = GetAbsoluteUrl(element, data.href);
 
   GURL absolute_image_url = GetChildImageUrlFromElement(element);
 
@@ -343,12 +341,12 @@ void AwRenderFrameExt::OnSetBackgroundColor(SkColor c) {
 
 void AwRenderFrameExt::OnSmoothScroll(int target_x,
                                       int target_y,
-                                      int duration_ms) {
+                                      uint64_t duration_ms) {
   blink::WebView* webview = GetWebView();
   if (!webview)
     return;
 
-  webview->SmoothScroll(target_x, target_y, static_cast<long>(duration_ms));
+  webview->SmoothScroll(target_x, target_y, duration_ms);
 }
 
 void AwRenderFrameExt::OnSetWillSuppressErrorPage(bool suppress) {
@@ -368,10 +366,9 @@ blink::WebView* AwRenderFrameExt::GetWebView() {
 }
 
 blink::WebFrameWidget* AwRenderFrameExt::GetWebFrameWidget() {
-  if (!render_frame() || !render_frame()->GetRenderView())
-    return nullptr;
-
-  return render_frame()->GetRenderView()->GetWebFrameWidget();
+  return render_frame()
+             ? render_frame()->GetWebFrame()->LocalRoot()->FrameWidget()
+             : nullptr;
 }
 
 void AwRenderFrameExt::OnDestruct() {

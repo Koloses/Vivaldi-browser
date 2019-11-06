@@ -18,6 +18,11 @@ const char kEnableExperimentalAccessibilityFeatures[] =
 const char kEnableExperimentalAccessibilityAutoclick[] =
     "enable-experimental-accessibility-autoclick";
 
+// Enables support for visually debugging the accessibility labels
+// feature, which provides images descriptions for screen reader users.
+const char kEnableExperimentalAccessibilityLabelsDebugging[] =
+    "enable-experimental-accessibility-labels-debugging";
+
 // Enables language detection on in-page text content which is then exposed to
 // accessibility technology such as screen readers.
 const char kEnableExperimentalAccessibilityLanguageDetection[] =
@@ -27,9 +32,17 @@ const char kEnableExperimentalAccessibilityLanguageDetection[] =
 const char kEnableExperimentalAccessibilitySwitchAccess[] =
     "enable-experimental-accessibility-switch-access";
 
+// Enables in progress Switch Access features for text input.
+const char kEnableExperimentalAccessibilitySwitchAccessText[] =
+    "enable-experimental-accessibility-switch-access-text";
+
 // Enables language switching feature that hasn't launched yet.
 const char kEnableExperimentalAccessibilityChromeVoxLanguageSwitching[] =
     "enable-experimental-accessibility-chromevox-language-switching";
+
+// Enables automatic rich text indication in ChromeVox that hasn't launched yet.
+const char kEnableExperimentalAccessibilityChromeVoxRichTextIndication[] =
+    "enable-experimental-accessibility-chromevox-rich-text-indication";
 
 bool AreExperimentalAccessibilityFeaturesEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -39,6 +52,11 @@ bool AreExperimentalAccessibilityFeaturesEnabled() {
 bool IsExperimentalAccessibilityLanguageDetectionEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       ::switches::kEnableExperimentalAccessibilityLanguageDetection);
+}
+
+bool IsExperimentalAccessibilitySwitchAccessTextEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      ::switches::kEnableExperimentalAccessibilitySwitchAccessText);
 }
 
 #if defined(OS_WIN)

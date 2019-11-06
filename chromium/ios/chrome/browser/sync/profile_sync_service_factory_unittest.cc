@@ -10,7 +10,7 @@
 
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "base/task/task_scheduler/task_scheduler.h"
+#include "base/task/thread_pool/thread_pool.h"
 #include "components/browser_sync/browser_sync_switches.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/pref_names.h"
@@ -37,13 +37,13 @@ class ProfileSyncServiceFactoryTest : public PlatformTest {
   }
 
   void TearDown() override {
-    base::TaskScheduler::GetInstance()->FlushForTesting();
+    base::ThreadPoolInstance::Get()->FlushForTesting();
   }
 
  protected:
   // Returns the collection of default datatypes.
   std::vector<syncer::ModelType> DefaultDatatypes() {
-    static_assert(44 == syncer::MODEL_TYPE_COUNT,
+    static_assert(46 == syncer::ModelType::NUM_ENTRIES,
                   "When adding a new type, you probably want to add it here as "
                   "well (assuming it is already enabled).");
 
@@ -59,7 +59,12 @@ class ProfileSyncServiceFactoryTest : public PlatformTest {
     datatypes.push_back(syncer::FAVICON_TRACKING);
     datatypes.push_back(syncer::FAVICON_IMAGES);
     datatypes.push_back(syncer::HISTORY_DELETE_DIRECTIVES);
-    datatypes.push_back(syncer::PASSWORDS);
+    if (!base::FeatureList::IsEnabled(switches::kSyncUSSPasswords)) {
+      // Password store factory is null for testing. For directory
+      // implementation, a controller was added anyway. For USS, no controller
+      // gets added, and hence the type isn't available.
+      datatypes.push_back(syncer::PASSWORDS);
+    }
     datatypes.push_back(syncer::PREFERENCES);
     datatypes.push_back(syncer::PRIORITY_PREFERENCES);
     datatypes.push_back(syncer::READING_LIST);

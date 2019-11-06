@@ -258,10 +258,10 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, PageAction) {
   ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(1));
   int tab_id = SessionTabHelper::FromWebContents(
       browser()->tab_strip_model()->GetActiveWebContents())->session_id().id();
-  ExtensionAction* action =
-      ExtensionActionManager::Get(browser()->profile())->
-      GetPageAction(*extension);
+  ExtensionAction* action = ExtensionActionManager::Get(browser()->profile())
+                                ->GetExtensionAction(*extension);
   ASSERT_TRUE(action);
+  EXPECT_EQ(ActionInfo::TYPE_PAGE, action->action_type());
   EXPECT_EQ("Send message", action->GetTitle(tab_id));
 
   ExtensionTestMessageListener test_listener(false);  // Won't reply.
@@ -1079,8 +1079,8 @@ IN_PROC_BROWSER_TEST_P(IncognitoCommandsApiTest, IncognitoMode) {
                                               true, true, false, false));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(is_incognito_enabled,
-            base::ContainsKey(test_observer.dispatched_events(),
-                              "browserAction.onClicked"));
+            base::Contains(test_observer.dispatched_events(),
+                           "browserAction.onClicked"));
 
   test_observer.ClearEvents();
 
@@ -1088,9 +1088,9 @@ IN_PROC_BROWSER_TEST_P(IncognitoCommandsApiTest, IncognitoMode) {
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(incognito_browser, ui::VKEY_Y,
                                               true, true, false, false));
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(is_incognito_enabled,
-            base::ContainsKey(test_observer.dispatched_events(),
-                              "commands.onCommand"));
+  EXPECT_EQ(
+      is_incognito_enabled,
+      base::Contains(test_observer.dispatched_events(), "commands.onCommand"));
 }
 
 INSTANTIATE_TEST_SUITE_P(, IncognitoCommandsApiTest, testing::Bool());

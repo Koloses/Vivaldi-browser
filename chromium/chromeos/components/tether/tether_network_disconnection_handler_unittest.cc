@@ -17,6 +17,7 @@
 #include "chromeos/components/tether/network_configuration_remover.h"
 #include "chromeos/components/tether/tether_session_completion_logger.h"
 #include "chromeos/network/network_state.h"
+#include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_state_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/shill/dbus-constants.h"
@@ -169,7 +170,7 @@ TEST_F(TetherNetworkDisconnectionHandlerTest,
   SetWiFiTechnologyStateEnabled(false);
 
   std::unique_ptr<NetworkState> network =
-      std::make_unique<NetworkState>(kWifiNetworkGuid);
+      std::make_unique<NetworkState>(wifi_service_path_);
   network->SetGuid(kWifiNetworkGuid);
   handler_->NetworkConnectionStateChanged(network.get());
 

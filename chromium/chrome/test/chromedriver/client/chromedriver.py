@@ -147,7 +147,7 @@ class ChromeDriver(object):
       debugger_address=None, logging_prefs=None,
       mobile_emulation=None, experimental_options=None,
       download_dir=None, network_connection=None,
-      send_w3c_capability=None, send_w3c_request=None,
+      send_w3c_capability=True, send_w3c_request=True,
       page_load_strategy=None, unexpected_alert_behaviour=None,
       devtools_events_to_log=None, accept_insecure_certs=None,
       timeouts=None, test_name=None):
@@ -226,12 +226,14 @@ class ChromeDriver(object):
         options['prefs']['download'] = {}
       options['prefs']['download']['default_directory'] = download_dir
 
-    if send_w3c_capability:
+    if send_w3c_capability is not None:
       options['w3c'] = send_w3c_capability
 
     params = {
         'goog:chromeOptions': options,
-        'loggingPrefs': logging_prefs
+        'se:options': {
+            'loggingPrefs': logging_prefs
+        }
     }
 
     if page_load_strategy:
@@ -314,10 +316,10 @@ class ChromeDriver(object):
   def _ExecuteCommand(self, command, params={}):
     params = self._WrapValue(params)
     response = self._executor.Execute(command, params)
-    if (not self.w3c_compliant and 'status' in response
+    if ('status' in response
         and response['status'] != 0):
       raise _ExceptionForLegacyResponse(response)
-    elif (self.w3c_compliant and type(response['value']) is dict
+    elif (type(response['value']) is dict
           and 'error' in response['value']):
       raise _ExceptionForStandardResponse(response)
     return response
@@ -331,7 +333,10 @@ class ChromeDriver(object):
     return self.ExecuteCommand(Command.GET_WINDOW_HANDLES)
 
   def SwitchToWindow(self, handle_or_name):
-    self.ExecuteCommand(Command.SWITCH_TO_WINDOW, {'name': handle_or_name})
+    if self.w3c_compliant:
+      self.ExecuteCommand(Command.SWITCH_TO_WINDOW, {'handle': handle_or_name})
+    else:
+      self.ExecuteCommand(Command.SWITCH_TO_WINDOW, {'name': handle_or_name})
 
   def GetCurrentWindowHandle(self):
     return self.ExecuteCommand(Command.GET_CURRENT_WINDOW_HANDLE)
@@ -357,6 +362,16 @@ class ChromeDriver(object):
         {'script': script, 'args': converted_args})
 
   def SwitchToFrame(self, id_or_name):
+    if isinstance(id_or_name, basestring) and self.w3c_compliant:
+        try:
+          id_or_name = self.FindElement('css selector',
+                                        '[id="%s"]' % id_or_name)
+        except NoSuchElement:
+          try:
+            id_or_name = self.FindElement('css selector',
+                                          '[name="%s"]' % id_or_name)
+          except NoSuchElement:
+            raise NoSuchFrame(id_or_name)
     self.ExecuteCommand(Command.SWITCH_TO_FRAME, {'id': id_or_name})
 
   def SwitchToFrameByIndex(self, index):
@@ -447,10 +462,6 @@ class ChromeDriver(object):
     }
     self.ExecuteCommand(Command.TOUCH_FLICK, params)
 
-  def TouchPinch(self, x, y, scale):
-    params = {'x': x, 'y': y, 'scale': scale}
-    self.ExecuteCommand(Command.TOUCH_PINCH, params)
-
   def PerformActions(self, actions):
     """
     actions: a dictionary containing the specified actions users wish to perform
@@ -507,6 +518,10 @@ class ChromeDriver(object):
                                {'windowHandle': 'current'})
     return [size['width'], size['height']]
 
+  def NewWindow(self, window_type="window"):
+    return self.ExecuteCommand(Command.NEW_WINDOW,
+                               {'type': window_type})
+
   def GetWindowRect(self):
     rect = self.ExecuteCommand(Command.GET_WINDOW_RECT)
     return [rect['width'], rect['height'], rect['x'], rect['y']]
@@ -545,12 +560,6 @@ class ChromeDriver(object):
   def GetAvailableLogTypes(self):
     return self.ExecuteCommand(Command.GET_AVAILABLE_LOG_TYPES)
 
-  def IsAutoReporting(self):
-    return self.ExecuteCommand(Command.IS_AUTO_REPORTING)
-
-  def SetAutoReporting(self, enabled):
-    self.ExecuteCommand(Command.SET_AUTO_REPORTING, {'enabled': enabled})
-
   def SetNetworkConditions(self, latency, download_throughput,
                            upload_throughput, offline=False):
     # Until http://crbug.com/456324 is resolved, we'll always set 'offline' to
@@ -588,26 +597,9 @@ class ChromeDriver(object):
     params = {'parameters': {'type': connection_type}}
     return self.ExecuteCommand(Command.SET_NETWORK_CONNECTION, params)
 
-  def SendCommand(self, cmd, cmd_params):
-    params = {'parameters': {'cmd': cmd, 'params': cmd_params}};
-    return self.ExecuteCommand(Command.SEND_COMMAND, params)
-
   def SendCommandAndGetResult(self, cmd, cmd_params):
     params = {'cmd': cmd, 'params': cmd_params};
     return self.ExecuteCommand(Command.SEND_COMMAND_AND_GET_RESULT, params)
-
-  def GetScreenOrientation(self):
-    screen_orientation = self.ExecuteCommand(Command.GET_SCREEN_ORIENTATION)
-    return {
-       'orientation': screen_orientation['orientation']
-    }
-
-  def SetScreenOrientation(self, orientation_type):
-    params = {'parameters': {'orientation': orientation_type}}
-    self.ExecuteCommand(Command.SET_SCREEN_ORIENTATION, params)
-
-  def DeleteScreenOrientationLock(self):
-    self.ExecuteCommand(Command.DELETE_SCREEN_ORIENTATION)
 
   def SendKeys(self, *values):
     typing = []
@@ -620,3 +612,24 @@ class ChromeDriver(object):
 
   def GenerateTestReport(self, message):
     self.ExecuteCommand(Command.GENERATE_TEST_REPORT, {'message': message})
+
+  def AddVirtualAuthenticator(self, protocol=None, transport=None,
+                              hasResidentKey=None, hasUserVerification=None,
+                              isUserVerified=None):
+    options = {}
+    if protocol is not None:
+      options['protocol'] = protocol
+    if transport is not None:
+      options['transport'] = transport
+    if hasResidentKey is not None:
+      options['hasResidentKey'] = hasResidentKey
+    if hasUserVerification is not None:
+      options['hasUserVerification'] = hasUserVerification
+    if isUserVerified is not None:
+      options['isUserVerified'] = isUserVerified
+
+    return self.ExecuteCommand(Command.ADD_VIRTUAL_AUTHENTICATOR, options)
+
+  def RemoveVirtualAuthenticator(self, authenticatorId):
+    params = {'authenticatorId': authenticatorId}
+    return self.ExecuteCommand(Command.REMOVE_VIRTUAL_AUTHENTICATOR, params)

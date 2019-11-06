@@ -197,7 +197,7 @@ class StorageService : public service_manager::Service,
 
  private:
   // service_manager::Service:
-  void OnBindInterface(const service_mangaer::BindSourceInfo& source,
+  void OnBindInterface(const service_manager::BindSourceInfo& source,
                        const std::string& interface_name,
                        mojo::ScopedMessagePipeHandle interface_pipe) override {
     if (interface_name == mojom::BlockAllocator::Name_) {
@@ -475,7 +475,7 @@ entry point for your service:
 #include "services/storage/storage_service.h"
 
 void ServiceMain(service_manager::ServiceRequest request) {
-  base::MessageLoop message_loop;
+  base::SingleThreadTaskExecutor main_task_executor;
   storage::StorageService(std::move(request)).RunUntilTermination();
 }
 ```

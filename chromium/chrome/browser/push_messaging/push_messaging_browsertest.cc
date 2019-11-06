@@ -10,11 +10,13 @@
 #include <string>
 
 #include "base/barrier_closure.h"
+#include "base/base64url.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
@@ -42,7 +44,7 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#include "components/gcm_driver/common/gcm_messages.h"
+#include "components/gcm_driver/common/gcm_message.h"
 #include "components/gcm_driver/fake_gcm_profile_service.h"
 #include "components/gcm_driver/gcm_client.h"
 #include "components/gcm_driver/instance_id/fake_gcm_driver_for_instance_id.h"
@@ -53,14 +55,14 @@
 #include "content/public/browser/browsing_data_remover.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/push_messaging_status.mojom.h"
-#include "content/public/common/push_subscription_options.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/browsing_data_remover_test_util.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "third_party/blink/public/mojom/push_messaging/push_messaging_status.mojom.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/message_center/public/cpp/notification.h"
 
@@ -71,10 +73,13 @@
 namespace {
 
 const char kManifestSenderId[] = "1234567890";
+const int32_t kApplicationServerKeyLength = 65;
+
+enum class PushSubscriptionKeyFormat { kOmitKey, kBinary, kBase64UrlEncoded };
 
 // NIST P-256 public key made available to tests. Must be an uncompressed
 // point in accordance with SEC1 2.3.3.
-const uint8_t kApplicationServerKey[65] = {
+const uint8_t kApplicationServerKey[kApplicationServerKeyLength] = {
     0x04, 0x55, 0x52, 0x6A, 0xA5, 0x6E, 0x8E, 0xAA, 0x47, 0x97, 0x36,
     0x10, 0xC1, 0x66, 0x3C, 0x1E, 0x65, 0xBF, 0xA1, 0x7B, 0xEE, 0x48,
     0xC9, 0xC6, 0xBB, 0xBF, 0x02, 0x18, 0x53, 0x72, 0x1D, 0x0C, 0x7B,
@@ -87,9 +92,20 @@ const char kEncodedApplicationServerKey[] =
     "BFVSaqVujqpHlzYQwWY8HmW_oXvuSMnGu78CGFNyHQx7qeMRtwNSIdNxkBOowc_tIPcf0X_ydr"
     "YBINg1pdk8Q_0";
 
-std::string GetTestApplicationServerKey() {
-  return std::string(kApplicationServerKey,
-                     kApplicationServerKey + base::size(kApplicationServerKey));
+std::string GetTestApplicationServerKey(bool base64_url_encoded = false) {
+  std::string application_server_key;
+
+  if (base64_url_encoded) {
+    base::Base64UrlEncode(reinterpret_cast<const char*>(kApplicationServerKey),
+                          base::Base64UrlEncodePolicy::OMIT_PADDING,
+                          &application_server_key);
+  } else {
+    application_server_key =
+        std::string(kApplicationServerKey,
+                    kApplicationServerKey + base::size(kApplicationServerKey));
+  }
+
+  return application_server_key;
 }
 
 void LegacyRegisterCallback(const base::Closure& done_callback,
@@ -106,10 +122,11 @@ void LegacyRegisterCallback(const base::Closure& done_callback,
 
 void DidRegister(base::Closure done_callback,
                  const std::string& registration_id,
+                 const GURL& endpoint,
                  const std::vector<uint8_t>& p256dh,
                  const std::vector<uint8_t>& auth,
-                 content::mojom::PushRegistrationStatus status) {
-  EXPECT_EQ(content::mojom::PushRegistrationStatus::SUCCESS_FROM_PUSH_SERVICE,
+                 blink::mojom::PushRegistrationStatus status) {
+  EXPECT_EQ(blink::mojom::PushRegistrationStatus::SUCCESS_FROM_PUSH_SERVICE,
             status);
   done_callback.Run();
 }
@@ -137,7 +154,7 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
   void SetUp() override {
     https_server_.reset(
         new net::EmbeddedTestServer(net::EmbeddedTestServer::TYPE_HTTPS));
-    https_server_->ServeFilesFromSourceDirectory("chrome/test/data");
+    https_server_->ServeFilesFromSourceDirectory(GetChromeTestDataDir());
     ASSERT_TRUE(https_server_->Start());
 
     SiteEngagementScore::SetParamValuesForTesting();
@@ -235,8 +252,9 @@ class PushMessagingBrowserTest : public InProcessBrowserTest {
 
   // Sets out_token to the subscription token (not including server URL).
   // Calls should be wrapped in the ASSERT_NO_FATAL_FAILURE() macro.
-  void SubscribeSuccessfully(bool use_key = true,
-                             std::string* out_token = nullptr);
+  void SubscribeSuccessfully(
+      PushSubscriptionKeyFormat key_format = PushSubscriptionKeyFormat::kBinary,
+      std::string* out_token = nullptr);
 
   // Sets up the state corresponding to a dangling push subscription whose
   // service worker registration no longer exists. Some users may be left with
@@ -353,8 +371,9 @@ void PushMessagingBrowserTest::RequestAndDenyPermission() {
   ASSERT_EQ("permission status - denied", script_result);
 }
 
-void PushMessagingBrowserTest::SubscribeSuccessfully(bool use_key,
-                                                     std::string* out_token) {
+void PushMessagingBrowserTest::SubscribeSuccessfully(
+    PushSubscriptionKeyFormat key_format,
+    std::string* out_token) {
   std::string script_result;
 
   ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
@@ -362,17 +381,31 @@ void PushMessagingBrowserTest::SubscribeSuccessfully(bool use_key,
 
   ASSERT_NO_FATAL_FAILURE(RequestAndAcceptPermission());
 
-  if (use_key) {
-    ASSERT_TRUE(RunScript("removeManifest()", &script_result));
-    ASSERT_EQ("manifest removed", script_result);
+  switch (key_format) {
+    case PushSubscriptionKeyFormat::kBinary:
+      ASSERT_TRUE(RunScript("removeManifest()", &script_result));
+      ASSERT_EQ("manifest removed", script_result);
 
-    ASSERT_TRUE(RunScript("documentSubscribePush()", &script_result));
-  } else {
-    // Test backwards compatibility with old ID based subscriptions.
-    ASSERT_TRUE(RunScript("documentSubscribePushWithoutKey()", &script_result));
+      ASSERT_TRUE(RunScript("documentSubscribePush()", &script_result));
+      ASSERT_NO_FATAL_FAILURE(EndpointToToken(script_result, true, out_token));
+      break;
+    case PushSubscriptionKeyFormat::kBase64UrlEncoded:
+      ASSERT_TRUE(RunScript("removeManifest()", &script_result));
+      ASSERT_EQ("manifest removed", script_result);
+
+      ASSERT_TRUE(RunScript("documentSubscribePushWithBase64URLEncodedString()",
+                            &script_result));
+      ASSERT_NO_FATAL_FAILURE(EndpointToToken(script_result, true, out_token));
+      break;
+    case PushSubscriptionKeyFormat::kOmitKey:
+      // Test backwards compatibility with old ID based subscriptions.
+      ASSERT_TRUE(
+          RunScript("documentSubscribePushWithoutKey()", &script_result));
+      ASSERT_NO_FATAL_FAILURE(EndpointToToken(script_result, false, out_token));
+      break;
+    default:
+      NOTREACHED();
   }
-
-  ASSERT_NO_FATAL_FAILURE(EndpointToToken(script_result, use_key, out_token));
 }
 
 void PushMessagingBrowserTest::SetupOrphanedPushSubscription(
@@ -383,12 +416,16 @@ void PushMessagingBrowserTest::SetupOrphanedPushSubscription(
   // registration id (they increment from 0).
   const int64_t service_worker_registration_id = 1234LL;
 
-  content::PushSubscriptionOptions options;
-  options.user_visible_only = true;
-  options.sender_info = GetTestApplicationServerKey();
+  auto options = blink::mojom::PushSubscriptionOptions::New();
+  options->user_visible_only = true;
+
+  std::string test_application_server_key = GetTestApplicationServerKey();
+  options->application_server_key = std::vector<uint8_t>(
+      test_application_server_key.begin(), test_application_server_key.end());
+
   base::RunLoop run_loop;
   push_service()->SubscribeFromWorker(
-      requesting_origin, service_worker_registration_id, options,
+      requesting_origin, service_worker_registration_id, std::move(options),
       base::Bind(&DidRegister, run_loop.QuitClosure()));
   run_loop.Run();
 
@@ -452,8 +489,7 @@ void PushMessagingBrowserTest::EndpointToToken(const std::string& endpoint,
                                                std::string* out_token) {
   size_t last_slash = endpoint.rfind('/');
 
-  ASSERT_EQ(push_service()->GetEndpoint(standard_protocol).spec(),
-            endpoint.substr(0, last_slash + 1));
+  ASSERT_EQ(kPushMessagingGcmEndpoint, endpoint.substr(0, last_slash + 1));
 
   ASSERT_LT(last_slash + 1, endpoint.length());  // Token must not be empty.
 
@@ -508,7 +544,8 @@ void PushMessagingBrowserTest::SendMessageAndWaitUntilHandled(
 
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
                        SubscribeWithoutKeySuccessNotificationsGranted) {
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(false /* use_key */));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kOmitKey));
   EXPECT_EQ(kManifestSenderId, gcm_driver_->last_gettoken_authorized_entity());
   EXPECT_EQ(GetAppIdentifierForServiceWorkerRegistration(0LL).app_id(),
             gcm_driver_->last_gettoken_app_id());
@@ -517,6 +554,16 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
                        SubscribeSuccessNotificationsGranted) {
   ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully());
+  EXPECT_EQ(kEncodedApplicationServerKey,
+            gcm_driver_->last_gettoken_authorized_entity());
+  EXPECT_EQ(GetAppIdentifierForServiceWorkerRegistration(0LL).app_id(),
+            gcm_driver_->last_gettoken_app_id());
+}
+
+IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
+                       SubscribeSuccessNotificationsGrantedWithBase64URLKey) {
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBase64UrlEncoded));
   EXPECT_EQ(kEncodedApplicationServerKey,
             gcm_driver_->last_gettoken_authorized_entity());
   EXPECT_EQ(GetAppIdentifierForServiceWorkerRegistration(0LL).app_id(),
@@ -606,11 +653,13 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribeWithInvalidation) {
   std::string token1, token2, token3;
 
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token1));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token1));
   ASSERT_FALSE(token1.empty());
 
   // Repeated calls to |subscribe()| should yield the same token.
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token2));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token2));
   ASSERT_EQ(token1, token2);
 
   PushMessagingAppIdentifier app_identifier =
@@ -629,7 +678,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribeWithInvalidation) {
   EXPECT_EQ(app_identifier.app_id(), gcm_driver_->last_deletetoken_app_id());
 
   // Repeated calls to |subscribe()| will now (silently) result in a new token.
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token3));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token3));
   ASSERT_FALSE(token3.empty());
   EXPECT_NE(token1, token3);
 }
@@ -656,6 +706,37 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribeWorker) {
 
   // Now run the subscribe with a key. This should succeed.
   ASSERT_TRUE(RunScript("workerSubscribePush()", &script_result));
+  ASSERT_NO_FATAL_FAILURE(
+      EndpointToToken(script_result, true /* standard_protocol */));
+
+  ASSERT_TRUE(RunScript("unsubscribePush()", &script_result));
+  EXPECT_EQ("unsubscribe result: true", script_result);
+}
+
+IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
+                       SubscribeWorkerWithBase64URLEncodedString) {
+  std::string script_result;
+
+  ASSERT_TRUE(RunScript("registerServiceWorker()", &script_result));
+  ASSERT_EQ("ok - service worker registered", script_result);
+
+  ASSERT_NO_FATAL_FAILURE(RequestAndAcceptPermission());
+
+  LoadTestPage();  // Reload to become controlled.
+
+  ASSERT_TRUE(RunScript("isControlled()", &script_result));
+  ASSERT_EQ("true - is controlled", script_result);
+
+  // Try to subscribe from a worker without a key. This should fail.
+  ASSERT_TRUE(RunScript("workerSubscribePushNoKey()", &script_result));
+  EXPECT_EQ(
+      "AbortError - Registration failed - missing applicationServerKey, and "
+      "gcm_sender_id not found in manifest",
+      script_result);
+
+  // Now run the subscribe with a key. This should succeed.
+  ASSERT_TRUE(RunScript("workerSubscribePushWithBase64URLEncodedString()",
+                        &script_result));
   ASSERT_NO_FATAL_FAILURE(
       EndpointToToken(script_result, true /* standard_protocol */));
 
@@ -992,7 +1073,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribePersisted) {
   // different).
 
   std::string token1;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token1));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token1));
   PushMessagingAppIdentifier sw0_identifier =
       GetAppIdentifierForServiceWorkerRegistration(0LL);
   EXPECT_EQ(sw0_identifier.app_id(), gcm_driver_->last_gettoken_app_id());
@@ -1010,7 +1092,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribePersisted) {
   // Service Worker which still controls the page.
   LoadTestPage("/push_messaging/subscope2/test.html");
   std::string token2;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token2));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token2));
   EXPECT_NE(token1, token2);
   PushMessagingAppIdentifier sw2_identifier =
       GetAppIdentifierForServiceWorkerRegistration(2LL);
@@ -1018,7 +1101,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribePersisted) {
 
   LoadTestPage("/push_messaging/subscope1/test.html");
   std::string token3;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token3));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token3));
   EXPECT_NE(token1, token3);
   EXPECT_NE(token2, token3);
   PushMessagingAppIdentifier sw1_identifier =
@@ -1031,19 +1115,22 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, SubscribePersisted) {
 
   LoadTestPage("/push_messaging/subscope1/test.html");
   std::string token4;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token4));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token4));
   EXPECT_EQ(token3, token4);
   EXPECT_EQ(sw1_identifier.app_id(), gcm_driver_->last_gettoken_app_id());
 
   LoadTestPage("/push_messaging/subscope2/test.html");
   std::string token5;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token5));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token5));
   EXPECT_EQ(token2, token5);
   EXPECT_EQ(sw2_identifier.app_id(), gcm_driver_->last_gettoken_app_id());
 
   LoadTestPage();
   std::string token6;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token6));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token6));
   EXPECT_EQ(token1, token6);
   EXPECT_EQ(sw0_identifier.app_id(), gcm_driver_->last_gettoken_app_id());
 }
@@ -1110,7 +1197,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PushEventSuccess) {
       0 /* SERVICE_WORKER_OK */, 1);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.DeliveryStatus",
-      static_cast<int>(content::mojom::PushDeliveryStatus::SUCCESS), 1);
+      static_cast<int>(blink::mojom::PushDeliveryStatus::SUCCESS), 1);
 }
 
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PushEventOnShutdown) {
@@ -1212,15 +1299,14 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PushEventNoServiceWorker) {
       "PushMessaging.DeliveryStatus.ServiceWorkerEvent", 0);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.DeliveryStatus",
-      static_cast<int>(content::mojom::PushDeliveryStatus::NO_SERVICE_WORKER),
-      1);
+      static_cast<int>(blink::mojom::PushDeliveryStatus::NO_SERVICE_WORKER), 1);
 
   // Missing Service Workers should trigger an automatic unsubscription attempt.
   EXPECT_EQ(app_id, gcm_driver_->last_deletetoken_app_id());
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::DELIVERY_NO_SERVICE_WORKER),
+          blink::mojom::PushUnregistrationReason::DELIVERY_NO_SERVICE_WORKER),
       1);
 
   // |app_identifier| should no longer be stored in prefs.
@@ -1245,8 +1331,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, NoSubscription) {
   EXPECT_EQ("unsubscribe result: true", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       1);
 
   gcm::IncomingMessage message;
@@ -1266,14 +1351,14 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, NoSubscription) {
       "PushMessaging.DeliveryStatus.ServiceWorkerEvent", 0);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.DeliveryStatus",
-      static_cast<int>(content::mojom::PushDeliveryStatus::UNKNOWN_APP_ID), 1);
+      static_cast<int>(blink::mojom::PushDeliveryStatus::UNKNOWN_APP_ID), 1);
 
   // Missing subscriptions should trigger an automatic unsubscription attempt.
   EXPECT_EQ(app_identifier.app_id(), gcm_driver_->last_deletetoken_app_id());
   histogram_tester_.ExpectBucketCount(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::DELIVERY_UNKNOWN_APP_ID),
+          blink::mojom::PushUnregistrationReason::DELIVERY_UNKNOWN_APP_ID),
       1);
 }
 
@@ -1317,8 +1402,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PushEventWithoutPermission) {
       "PushMessaging.DeliveryStatus.ServiceWorkerEvent", 0);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.DeliveryStatus",
-      static_cast<int>(content::mojom::PushDeliveryStatus::PERMISSION_DENIED),
-      1);
+      static_cast<int>(blink::mojom::PushDeliveryStatus::PERMISSION_DENIED), 1);
 
   // Missing permission should trigger an automatic unsubscription attempt.
   EXPECT_EQ(app_identifier.app_id(), gcm_driver_->last_deletetoken_app_id());
@@ -1332,7 +1416,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, PushEventWithoutPermission) {
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::DELIVERY_PERMISSION_DENIED),
+          blink::mojom::PushUnregistrationReason::DELIVERY_PERMISSION_DENIED),
       1);
 }
 
@@ -1518,6 +1602,56 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
+                       PushEventIgnoresScheduledNotificationsForEnforcement) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kNotificationTriggers);
+
+  std::string script_result;
+
+  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully());
+  PushMessagingAppIdentifier app_identifier =
+      GetAppIdentifierForServiceWorkerRegistration(0LL);
+
+  LoadTestPage();  // Reload to become controlled.
+
+  RemoveAllNotifications();
+
+  // We'll need to specify the web_contents in which to eval script, since we're
+  // going to run script in a background tab.
+  content::WebContents* web_contents =
+      GetBrowser()->tab_strip_model()->GetActiveWebContents();
+
+  // Initialize site engagement score to have no budget for silent pushes.
+  SetSiteEngagementScore(web_contents->GetURL(), 0);
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      GetBrowser(), GURL("about:blank"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
+
+  gcm::IncomingMessage message;
+  message.sender_id = GetTestApplicationServerKey();
+  message.raw_data = "shownotification-with-showtrigger";
+  message.decrypted = true;
+
+  // If the Service Worker push event handler only schedules a notification, we
+  // should show a forced one providing there is no foreground tab and the
+  // origin ran out of budget.
+  SendMessageAndWaitUntilHandled(app_identifier, message);
+  ASSERT_TRUE(RunScript("resultQueue.pop()", &script_result, web_contents));
+  EXPECT_EQ("shownotification-with-showtrigger", script_result);
+
+  // Because scheduled notifications do not count as displayed notifications,
+  // this should have shown a default notification.
+  std::vector<message_center::Notification> notifications =
+      GetDisplayedNotifications();
+  ASSERT_EQ(notifications.size(), 1u);
+
+  EXPECT_TRUE(TagEquals(notifications[0], kPushMessagingForcedNotificationTag));
+  EXPECT_TRUE(notifications[0].silent());
+}
+
+IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
                        PushEventEnforcesUserVisibleNotificationAfterQueue) {
   std::string script_result;
 
@@ -1655,7 +1789,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeSuccess) {
   std::string script_result;
 
   std::string token1;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(false /* use_key */, &token1));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kOmitKey, &token1));
   ASSERT_TRUE(RunScript("storePushSubscription()", &script_result));
   EXPECT_EQ("ok - stored", script_result);
 
@@ -1664,8 +1799,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeSuccess) {
   EXPECT_EQ("unsubscribe result: true", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       1);
 
   // Resolves false if there was no longer a subscription.
@@ -1673,8 +1807,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeSuccess) {
   EXPECT_EQ("unsubscribe result: false", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       2);
 
   // TODO(johnme): Test that doesn't reject if there was a network error (should
@@ -1686,7 +1819,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeSuccess) {
   // replacing the Service Worker, actually still works, as the Service Worker
   // registration is unchanged.
   std::string token2;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(false /* use_key */, &token2));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kOmitKey, &token2));
   EXPECT_NE(token1, token2);
   ASSERT_TRUE(RunScript("storePushSubscription()", &script_result));
   EXPECT_EQ("ok - stored", script_result);
@@ -1696,14 +1830,14 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeSuccess) {
   EXPECT_EQ("unsubscribe result: true", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       3);
 
   // Unsubscribing (with an existing reference to a PushSubscription), after
   // unregistering the Service Worker, should fail.
   std::string token3;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(false /* use_key */, &token3));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kOmitKey, &token3));
   EXPECT_NE(token1, token3);
   EXPECT_NE(token2, token3);
   ASSERT_TRUE(RunScript("storePushSubscription()", &script_result));
@@ -1720,8 +1854,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeSuccess) {
   // Unregistering should have triggered an automatic unsubscribe.
   histogram_tester_.ExpectBucketCount(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(content::mojom::PushUnregistrationReason::
-                           SERVICE_WORKER_UNREGISTERED),
+      static_cast<int>(
+          blink::mojom::PushUnregistrationReason::SERVICE_WORKER_UNREGISTERED),
       1);
   histogram_tester_.ExpectTotalCount("PushMessaging.UnregistrationReason", 4);
 
@@ -1753,8 +1887,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   EXPECT_EQ("unsubscribe result: true", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       1);
 
   // Resolves false if there was no longer a subscription.
@@ -1762,8 +1895,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   EXPECT_EQ("unsubscribe result: false", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       2);
 
   // Doesn't reject if there was a network error (deactivates subscription
@@ -1776,8 +1908,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   EXPECT_EQ("unsubscribe result: true", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       3);
   ASSERT_TRUE(RunScript("hasSubscription()", &script_result));
   EXPECT_EQ("false - not subscribed", script_result);
@@ -1794,8 +1925,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   EXPECT_EQ("unsubscribe result: true", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       4);
 
   // Unsubscribing (with an existing reference to a PushSubscription), after
@@ -1814,8 +1944,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   EXPECT_EQ("unsubscribe result: true", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       5);
 
   // Unsubscribing (with an existing reference to a PushSubscription), after
@@ -1840,8 +1969,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   // Unregistering should have triggered an automatic unsubscribe.
   histogram_tester_.ExpectBucketCount(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(content::mojom::PushUnregistrationReason::
-                           SERVICE_WORKER_UNREGISTERED),
+      static_cast<int>(
+          blink::mojom::PushUnregistrationReason::SERVICE_WORKER_UNREGISTERED),
       1);
   histogram_tester_.ExpectTotalCount("PushMessaging.UnregistrationReason", 6);
 
@@ -1856,7 +1985,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeOffline) {
   EXPECT_NE(push_service(), GetAppHandler());
 
   std::string token;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token));
 
   gcm_service_->set_offline(true);
 
@@ -1866,8 +1996,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, UnsubscribeOffline) {
   EXPECT_EQ("unsubscribe result: true", script_result);
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(
-          content::mojom::PushUnregistrationReason::JAVASCRIPT_API),
+      static_cast<int>(blink::mojom::PushUnregistrationReason::JAVASCRIPT_API),
       1);
 
   // Since the service is offline, the network request to GCM is still being
@@ -1900,8 +2029,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   // This should have unregistered the push subscription.
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(content::mojom::PushUnregistrationReason::
-                           SERVICE_WORKER_UNREGISTERED),
+      static_cast<int>(
+          blink::mojom::PushUnregistrationReason::SERVICE_WORKER_UNREGISTERED),
       1);
 
   // We should not be able to look up the app id.
@@ -1934,7 +2063,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   // This should have unregistered the push subscription.
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(content::mojom::PushUnregistrationReason::
+      static_cast<int>(blink::mojom::PushUnregistrationReason::
                            SERVICE_WORKER_DATABASE_WIPED),
       1);
 
@@ -1975,7 +2104,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   // This should have unsubscribed the push subscription.
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
-      static_cast<int>(content::mojom::PushUnregistrationReason::
+      static_cast<int>(blink::mojom::PushUnregistrationReason::
                            GET_SUBSCRIPTION_STORAGE_CORRUPT),
       1);
   // We should no longer be able to look up the app id.
@@ -2017,7 +2146,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
+          blink::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
       1);
 }
 
@@ -2055,7 +2184,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
+          blink::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
       1);
 }
 
@@ -2093,7 +2222,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
+          blink::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
       1);
 }
 
@@ -2128,7 +2257,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
+          blink::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
       1);
 }
 
@@ -2166,7 +2295,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
+          blink::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
       1);
 }
 
@@ -2204,7 +2333,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest,
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
+          blink::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
       1);
 }
 
@@ -2327,7 +2456,7 @@ IN_PROC_BROWSER_TEST_F(
   histogram_tester_.ExpectUniqueSample(
       "PushMessaging.UnregistrationReason",
       static_cast<int>(
-          content::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
+          blink::mojom::PushUnregistrationReason::PERMISSION_REVOKED),
       1);
 
   base::RunLoop().RunUntilIdle();
@@ -2338,7 +2467,8 @@ IN_PROC_BROWSER_TEST_F(
 
 IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, EncryptionKeyUniqueness) {
   std::string token1;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(false /* use_key */, &token1));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kOmitKey, &token1));
 
   std::string first_public_key;
   ASSERT_TRUE(RunScript("GetP256dh()", &first_public_key));
@@ -2349,7 +2479,8 @@ IN_PROC_BROWSER_TEST_F(PushMessagingBrowserTest, EncryptionKeyUniqueness) {
   EXPECT_EQ("unsubscribe result: true", script_result);
 
   std::string token2;
-  ASSERT_NO_FATAL_FAILURE(SubscribeSuccessfully(true /* use_key */, &token2));
+  ASSERT_NO_FATAL_FAILURE(
+      SubscribeSuccessfully(PushSubscriptionKeyFormat::kBinary, &token2));
   EXPECT_NE(token1, token2);
 
   std::string second_public_key;

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_CONTEXT_H_
 
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/webaudio/audio_context_manager.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
@@ -73,12 +74,14 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
   void set_was_audible_for_testing(bool value) { was_audible_ = value; }
 
   bool HandlePreRenderTasks(const AudioIOPosition* output_position,
-                            const AudioIOCallbackMetric* metric) final;
+                            const AudioCallbackMetric* metric) final;
 
   // Called at the end of each render quantum.
   void HandlePostRenderTasks() final;
 
   void HandleAudibility(AudioBus* destination_bus);
+
+  AudioCallbackMetric GetCallbackMetric() const;
 
  protected:
   void Uninitialize() final;
@@ -150,7 +153,7 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
   Member<ScriptPromiseResolver> close_resolver_;
 
   AudioIOPosition output_position_;
-  AudioIOCallbackMetric callback_metric_;
+  AudioCallbackMetric callback_metric_;
 
   // Whether a user gesture is required to start this AudioContext.
   bool user_gesture_required_ = false;
@@ -168,8 +171,11 @@ class MODULES_EXPORT AudioContext : public BaseAudioContext {
   // Records if start() was ever called for any source node in this context.
   bool source_node_started_ = false;
 
+  // Represents whether a context is suspended by explicit |context.suspend()|.
+  bool suspended_by_user_ = false;
+
   // AudioContextManager for reporting audibility.
-  mojom::blink::AudioContextManagerPtr audio_context_manager_;
+  mojo::Remote<mojom::blink::AudioContextManager> audio_context_manager_;
 
   // Keeps track if the output of this destination was audible, before the
   // current rendering quantum.  Used for recording "playback" time.

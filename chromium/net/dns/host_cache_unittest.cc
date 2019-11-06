@@ -14,7 +14,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "net/base/net_errors.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -396,7 +395,7 @@ TEST(HostCacheTest, PreferLessStaleMoreSecure) {
             cache.Lookup(insecure_key, now, true /* ignore_secure */)->first);
 
   // Simulate network change.
-  cache.OnNetworkChange();
+  cache.Invalidate();
 
   // Re-add insecure entry.
   cache.Set(insecure_key, entry, now, kSuccessEntryTTL);
@@ -598,7 +597,7 @@ TEST(HostCacheTest, Stale) {
   EXPECT_EQ(2, stale.stale_hits);
 
   // Simulate network change.
-  cache.OnNetworkChange();
+  cache.Invalidate();
 
   EXPECT_FALSE(cache.Lookup(key, now));
   EXPECT_TRUE(cache.LookupStale(key, now, &stale));
@@ -633,7 +632,7 @@ TEST(HostCacheTest, EvictStale) {
   EXPECT_FALSE(cache.Lookup(key3, now));
 
   // Simulate network change, expiring the cache.
-  cache.OnNetworkChange();
+  cache.Invalidate();
 
   EXPECT_EQ(1u, cache.size());
   EXPECT_FALSE(cache.Lookup(key1, now));

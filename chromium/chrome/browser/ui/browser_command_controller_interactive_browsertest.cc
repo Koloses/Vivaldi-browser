@@ -100,10 +100,10 @@ IN_PROC_BROWSER_TEST_F(
 #if defined(OS_MACOSX)
 // Triggers a DCHECK in MacViews: http://crbug.com/823478
 #define MAYBE_KeyEventsShouldBeConsumedByWebPageInJsFullscreenExceptForF11 \
-    DISABLED_KeyEventsShouldBeConsumedByWebPageInJsFullscreenExceptForF11
+  DISABLED_KeyEventsShouldBeConsumedByWebPageInJsFullscreenExceptForF11
 #else
 #define MAYBE_KeyEventsShouldBeConsumedByWebPageInJsFullscreenExceptForF11 \
-    KeyEventsShouldBeConsumedByWebPageInJsFullscreenExceptForF11
+  KeyEventsShouldBeConsumedByWebPageInJsFullscreenExceptForF11
 #endif
 IN_PROC_BROWSER_TEST_F(
     BrowserCommandControllerInteractiveTest,
@@ -112,21 +112,11 @@ IN_PROC_BROWSER_TEST_F(
 
   ASSERT_NO_FATAL_FAILURE(SendJsFullscreenShortcutAndWait());
   ASSERT_NO_FATAL_FAILURE(SendShortcutsAndExpectPrevented());
-#if defined(OS_MACOSX)
-  // On 10.9 or earlier, sending the exit fullscreen shortcut will crash the
-  // binary. See http://crbug.com/740250.
-  if (base::mac::IsAtLeastOS10_10()) {
-    // Current page should exit browser fullscreen mode.
-    ASSERT_NO_FATAL_FAILURE(SendFullscreenShortcutAndWait());
-    ASSERT_FALSE(IsActiveTabFullscreen());
-    ASSERT_FALSE(IsInBrowserFullscreen());
-  }
-#else
+
   // Current page should exit browser fullscreen mode.
   ASSERT_NO_FATAL_FAILURE(SendFullscreenShortcutAndWait());
   ASSERT_FALSE(IsActiveTabFullscreen());
   ASSERT_FALSE(IsInBrowserFullscreen());
-#endif
 
   ASSERT_NO_FATAL_FAILURE(FinishTestAndVerifyResult());
 }
@@ -135,19 +125,13 @@ IN_PROC_BROWSER_TEST_F(
 // TODO(zijiehe): Figure out why this test crashes on Mac OSX. The suspicious
 // command is "SendFullscreenShortcutAndWait()". See, http://crbug.com/738949.
 #define MAYBE_ShortcutsShouldTakeEffectInBrowserFullscreen \
-        DISABLED_ShortcutsShouldTakeEffectInBrowserFullscreen
+  DISABLED_ShortcutsShouldTakeEffectInBrowserFullscreen
 #else
 #define MAYBE_ShortcutsShouldTakeEffectInBrowserFullscreen \
-        ShortcutsShouldTakeEffectInBrowserFullscreen
+  ShortcutsShouldTakeEffectInBrowserFullscreen
 #endif
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerInteractiveTest,
                        MAYBE_ShortcutsShouldTakeEffectInBrowserFullscreen) {
-#if defined(OS_MACOSX)
-  // On 10.9 or earlier, sending the exit fullscreen shortcut will crash the
-  // binary. See http://crbug.com/740250.
-  if (base::mac::IsAtMostOS10_9())
-    return;
-#endif
   ASSERT_NO_FATAL_FAILURE(SendShortcutsAndExpectNotPrevented(false));
 }
 
@@ -165,10 +149,10 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerInteractiveTest,
 #if defined(OS_CHROMEOS)
 // This test is flaky on ChromeOS, see http://crbug.com/754878.
 #define MAYBE_ShortcutsShouldTakeEffectInJsFullscreen \
-        DISABLED_ShortcutsShouldTakeEffectInJsFullscreen
+  DISABLED_ShortcutsShouldTakeEffectInJsFullscreen
 #else
 #define MAYBE_ShortcutsShouldTakeEffectInJsFullscreen \
-        ShortcutsShouldTakeEffectInJsFullscreen
+  ShortcutsShouldTakeEffectInJsFullscreen
 #endif
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerInteractiveTest,
                        MAYBE_ShortcutsShouldTakeEffectInJsFullscreen) {

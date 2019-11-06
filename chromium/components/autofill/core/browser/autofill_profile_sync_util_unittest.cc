@@ -5,8 +5,8 @@
 #include "components/autofill/core/browser/autofill_profile_sync_util.h"
 
 #include "base/strings/utf_string_conversions.h"
-#include "components/autofill/core/browser/autofill_profile.h"
-#include "components/autofill/core/browser/country_names.h"
+#include "components/autofill/core/browser/data_model/autofill_profile.h"
+#include "components/autofill/core/browser/geo/country_names.h"
 #include "components/autofill/core/browser/test_autofill_clock.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/common/autofill_constants.h"
@@ -127,7 +127,7 @@ TEST_F(AutofillProfileSyncUtilTest, CreateEntityDataFromAutofillProfile) {
   std::unique_ptr<EntityData> entity_data =
       CreateEntityDataFromAutofillProfile(profile);
   // The non-unique name should be set to the guid of the profile.
-  EXPECT_EQ(entity_data->non_unique_name, profile.guid());
+  EXPECT_EQ(entity_data->name, profile.guid());
 
   EXPECT_EQ(specifics.SerializeAsString(),
             entity_data->specifics.autofill_profile().SerializeAsString());

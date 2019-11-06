@@ -33,10 +33,6 @@ FakeCiceroneClient::FakeCiceroneClient() {
   setup_lxd_container_user_response_.set_status(
       vm_tools::cicerone::SetUpLxdContainerUserResponse::SUCCESS);
 
-  vm_tools::cicerone::AppSearchResponse::AppSearchResult* app =
-      search_app_response_.add_packages();
-  app->set_package_name("fake app");
-
   export_lxd_container_response_.set_status(
       vm_tools::cicerone::ExportLxdContainerResponse::EXPORTING);
 
@@ -96,6 +92,12 @@ bool FakeCiceroneClient::IsExportLxdContainerProgressSignalConnected() {
 
 bool FakeCiceroneClient::IsImportLxdContainerProgressSignalConnected() {
   return is_import_lxd_container_progress_signal_connected_;
+}
+
+// Currently no tests need to change the output of this method. If you want to
+// add one, make it return a variable like the above examples.
+bool FakeCiceroneClient::IsPendingAppListUpdatesSignalConnected() {
+  return true;
 }
 
 void FakeCiceroneClient::LaunchContainerApplication(
@@ -205,12 +207,25 @@ void FakeCiceroneClient::StartLxdContainer(
         base::BindOnce(&FakeCiceroneClient::NotifyLxdContainerStarting,
                        base::Unretained(this), std::move(signal)));
   }
+  if (lxd_container_starting_signal_status_ ==
+      vm_tools::cicerone::LxdContainerStartingSignal::STARTED) {
+    // Trigger CiceroneClient::Observer::NotifyContainerStartedSignal.
+    vm_tools::cicerone::ContainerStartedSignal signal;
+    signal.set_owner_id(request.owner_id());
+    signal.set_vm_name(request.vm_name());
+    signal.set_container_name(request.container_name());
+    signal.set_container_username(last_container_username_);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(&FakeCiceroneClient::NotifyContainerStarted,
+                                  base::Unretained(this), std::move(signal)));
+  }
 }
 
 void FakeCiceroneClient::GetLxdContainerUsername(
     const vm_tools::cicerone::GetLxdContainerUsernameRequest& request,
     DBusMethodCallback<vm_tools::cicerone::GetLxdContainerUsernameResponse>
         callback) {
+  last_container_username_ = get_lxd_container_username_response_.username();
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(std::move(callback),
                                 get_lxd_container_username_response_));
@@ -220,26 +235,10 @@ void FakeCiceroneClient::SetUpLxdContainerUser(
     const vm_tools::cicerone::SetUpLxdContainerUserRequest& request,
     DBusMethodCallback<vm_tools::cicerone::SetUpLxdContainerUserResponse>
         callback) {
+  last_container_username_ = request.container_username();
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(std::move(callback), setup_lxd_container_user_response_));
-
-  // Trigger CiceroneClient::Observer::NotifyContainerStartedSignal.
-  vm_tools::cicerone::ContainerStartedSignal signal;
-  signal.set_owner_id(request.owner_id());
-  signal.set_vm_name(request.vm_name());
-  signal.set_container_name(request.container_name());
-  signal.set_container_username(request.container_username());
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(&FakeCiceroneClient::NotifyContainerStarted,
-                                base::Unretained(this), std::move(signal)));
-}
-
-void FakeCiceroneClient::SearchApp(
-    const vm_tools::cicerone::AppSearchRequest& request,
-    DBusMethodCallback<vm_tools::cicerone::AppSearchResponse> callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), search_app_response_));
 }
 
 void FakeCiceroneClient::ExportLxdContainer(
@@ -313,6 +312,13 @@ void FakeCiceroneClient::UninstallPackageProgress(
     const vm_tools::cicerone::UninstallPackageProgressSignal& signal) {
   for (auto& observer : observer_list_) {
     observer.OnUninstallPackageProgress(signal);
+  }
+}
+
+void FakeCiceroneClient::NotifyPendingAppListUpdates(
+    const vm_tools::cicerone::PendingAppListUpdatesSignal& proto) {
+  for (auto& observer : observer_list_) {
+    observer.OnPendingAppListUpdates(proto);
   }
 }
 

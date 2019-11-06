@@ -12,11 +12,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/chromeos/arc/arc_app_id_provider_impl.h"
 #include "chrome/browser/chromeos/arc/arc_support_host.h"
 #include "chrome/browser/chromeos/policy/android_management_client.h"
-#include "chromeos/dbus/session_manager_client.h"
-#include "components/arc/arc_session_runner.h"
-#include "components/arc/arc_stop_reason.h"
+#include "chromeos/dbus/session_manager/session_manager_client.h"
+#include "components/arc/session/arc_session_runner.h"
+#include "components/arc/session/arc_stop_reason.h"
 
 class ArcAppLauncher;
 class Profile;
@@ -143,6 +144,7 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   static ArcSessionManager* Get();
 
   static void SetUiEnabledForTesting(bool enabled);
+  static void SetArcTermsOfServiceOobeNegotiatorEnabledForTesting(bool enabled);
   static void EnableCheckAndroidManagementForTesting(bool enable);
 
   // Returns true if ARC is allowed to run for the current session.
@@ -379,6 +381,8 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // The time when ARC was about to start.
   base::Time arc_start_time_;
   base::Closure attempt_user_exit_callback_;
+
+  ArcAppIdProviderImpl app_id_provider_;
 
   // Must be the last member.
   base::WeakPtrFactory<ArcSessionManager> weak_ptr_factory_;

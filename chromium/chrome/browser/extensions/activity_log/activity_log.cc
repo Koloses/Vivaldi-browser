@@ -15,6 +15,7 @@
 #include "base/json/json_string_value_serializer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/one_shot_event.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -52,7 +53,6 @@
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
-#include "extensions/common/one_shot_event.h"
 #include "third_party/re2/src/re2/re2.h"
 #include "url/gurl.h"
 
@@ -564,8 +564,7 @@ ActivityLog::ActivityLog(content::BrowserContext* context)
       active_consumers_(0),
       cached_consumer_count_(0),
       has_listeners_(false),
-      is_active_(false),
-      weak_factory_(this) {
+      is_active_(false) {
   SetActivityHandlers();
 
   // This controls whether logging statements are printed & which policy is set.
@@ -581,9 +580,8 @@ ActivityLog::ActivityLog(content::BrowserContext* context)
   extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
   CheckActive(true);  // use cached
   extension_system_->ready().Post(
-      FROM_HERE,
-      base::Bind(&ActivityLog::OnExtensionSystemReady,
-                 weak_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&ActivityLog::OnExtensionSystemReady,
+                                weak_factory_.GetWeakPtr()));
 }
 
 void ActivityLog::SetDatabasePolicy(

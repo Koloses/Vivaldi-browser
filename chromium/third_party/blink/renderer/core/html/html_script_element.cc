@@ -32,29 +32,24 @@
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
 #include "third_party/blink/renderer/core/script/script_runner.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_script.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
 using namespace html_names;
 
-inline HTMLScriptElement::HTMLScriptElement(Document& document,
-                                            const CreateElementFlags flags)
+HTMLScriptElement::HTMLScriptElement(Document& document,
+                                     const CreateElementFlags flags)
     : HTMLElement(kScriptTag, document),
       loader_(InitializeScriptLoader(flags.IsCreatedByParser(),
                                      flags.WasAlreadyStarted())) {}
-
-HTMLScriptElement* HTMLScriptElement::Create(Document& document,
-                                             const CreateElementFlags flags) {
-  return MakeGarbageCollected<HTMLScriptElement>(document, flags);
-}
 
 const AttrNameToTrustedType& HTMLScriptElement::GetCheckedAttributeTypes()
     const {
@@ -95,7 +90,7 @@ void HTMLScriptElement::ParseAttribute(
   } else if (params.name == kAsyncAttr) {
     loader_->HandleAsyncAttribute();
   } else if (params.name == kImportanceAttr &&
-             origin_trials::PriorityHintsEnabled(&GetDocument())) {
+             RuntimeEnabledFeatures::PriorityHintsEnabled(&GetDocument())) {
     // The only thing we need to do for the the importance attribute/Priority
     // Hints is count usage upon parsing. Processing the value happens when the
     // element loads.
@@ -161,10 +156,6 @@ void HTMLScriptElement::setAsync(bool async) {
 
 bool HTMLScriptElement::async() const {
   return FastHasAttribute(kAsyncAttr) || loader_->IsNonBlocking();
-}
-
-KURL HTMLScriptElement::Src() const {
-  return GetDocument().CompleteURL(SourceAttributeValue());
 }
 
 String HTMLScriptElement::SourceAttributeValue() const {
@@ -244,9 +235,9 @@ bool HTMLScriptElement::AllowInlineScriptForCSP(
     const AtomicString& nonce,
     const WTF::OrdinalNumber& context_line,
     const String& script_content) {
-  return GetDocument().GetContentSecurityPolicy()->AllowInline(
-      ContentSecurityPolicy::InlineType::kInlineScriptElement, this,
-      script_content, nonce, GetDocument().Url(), context_line);
+  return GetDocument().GetContentSecurityPolicyForWorld()->AllowInline(
+      ContentSecurityPolicy::InlineType::kScript, this, script_content, nonce,
+      GetDocument().Url(), context_line);
 }
 
 Document& HTMLScriptElement::GetDocument() const {

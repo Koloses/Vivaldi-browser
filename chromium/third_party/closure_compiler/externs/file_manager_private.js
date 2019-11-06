@@ -75,6 +75,13 @@ chrome.fileManagerPrivate.MountCompletedStatus = {
 };
 
 /** @enum {string} */
+chrome.fileManagerPrivate.FormatFileSystemType = {
+  VFAT: 'vfat',
+  EXFAT: 'exfat',
+  NTFS: 'ntfs',
+};
+
+/** @enum {string} */
 chrome.fileManagerPrivate.TransferState = {
   IN_PROGRESS: 'in_progress',
   COMPLETED: 'completed',
@@ -395,7 +402,9 @@ chrome.fileManagerPrivate.FileWatchEvent;
  *   cellularDisabled: boolean,
  *   searchSuggestEnabled: boolean,
  *   use24hourClock: boolean,
- *   timezone: string
+ *   timezone: string,
+ *   arcEnabled: boolean,
+ *   arcRemovableMediaAccessEnabled: boolean
  * }}
  */
 chrome.fileManagerPrivate.Preferences;
@@ -403,6 +412,8 @@ chrome.fileManagerPrivate.Preferences;
 /**
  * @typedef {{
  *   cellularDisabled: (boolean|undefined),
+ *   arcEnabled: (boolean|undefined),
+ *   arcRemovableMediaAccessEnabled: (boolean|undefined)
  * }}
  */
 chrome.fileManagerPrivate.PreferencesChange;
@@ -476,10 +487,21 @@ chrome.fileManagerPrivate.LinuxPackageInfo;
 /**
  * @typedef {{
  * eventType: chrome.fileManagerPrivate.CrostiniEventType,
+ * vmName: string,
  * entries: !Array<!Entry>,
  * }}
  */
 chrome.fileManagerPrivate.CrostiniEvent;
+
+/**
+ * @typedef {{
+ *   name: string,
+ *   packageName: string,
+ *   activityName: string,
+ *   iconSet: !chrome.fileManagerPrivate.IconSet
+ * }}
+ */
+chrome.fileManagerPrivate.AndroidApp;
 
 /**
  * Logout the current user for navigating to the re-authentication screen for
@@ -723,8 +745,11 @@ chrome.fileManagerPrivate.getSizeStats = function(volumeId, callback) {};
 /**
  * Formats a mounted volume. |volumeId| ID of the volume to be formatted.
  * @param {string} volumeId
+ * @param {chrome.fileManagerPrivate.FormatFileSystemType} filesystem
+ * @param {string} volumeLabel
  */
-chrome.fileManagerPrivate.formatVolume = function(volumeId) {};
+chrome.fileManagerPrivate.formatVolume = function(volumeId, filesystem,
+    volumeLabel) {};
 
 /**
  * Renames a mounted volume. |volumeId| ID of the volume to be renamed to
@@ -746,6 +771,12 @@ chrome.fileManagerPrivate.getPreferences = function(callback) {};
  * @param {chrome.fileManagerPrivate.PreferencesChange} changeInfo
  */
 chrome.fileManagerPrivate.setPreferences = function(changeInfo) {};
+
+/**
+ * Sets the ARC flag and returns what was the value before setting.
+ * @param {function(boolean)} callback
+ */
+chrome.fileManagerPrivate.setArcStorageToastShownFlag = function(callback) {};
 
 /**
  * Performs drive content search. |searchParams| |callback|
@@ -774,6 +805,13 @@ chrome.fileManagerPrivate.searchDriveMetadata = function(searchParams,
  */
 chrome.fileManagerPrivate.searchFilesByHashes = function(volumeId, hashes,
     callback) {};
+
+/**
+ * Search files in My Files.
+ * @param {!chrome.fileManagerPrivate.SearchMetadataParams} searchParams
+ * @param {function(!Array<Object>):void} callback
+ */
+chrome.fileManagerPrivate.searchFiles = function(searchParams, callback) {};
 
 /**
  * Create a zip file for the selected files. |parentEntry| Entry of the
@@ -877,12 +915,6 @@ chrome.fileManagerPrivate.openSettingsSubpage = function(sub_page) {};
 chrome.fileManagerPrivate.computeChecksum = function(entry, callback) {};
 
 /**
- * Gets a flag indicating whether user metrics reporting is enabled.
- * @param {function((boolean|undefined))} callback
- */
-chrome.fileManagerPrivate.isUMAEnabled = function(callback) {};
-
-/**
  * Sets a tag on a file or a directory. Only Drive files are supported.
  * @param {!Entry} entry
  * @param {string} visibility 'private' or 'public'
@@ -967,22 +999,25 @@ chrome.fileManagerPrivate.mountCrostini = function(callback) {};
 
 /**
  * Shares paths with crostini container.
- * @param {!Array<!Entry>} entries Entries of the files and directories to share.
+ * @param {string} vmName VM to share path with.
+ * @param {!Array<!Entry>} entries Entries of the files and directories to
+ *     share.
  * @param {boolean} persist If true, share will persist across restarts.
  * @param {function()} callback Callback called after the paths are shared.
  *     chrome.runtime.lastError will be set if there was an error.
  */
 chrome.fileManagerPrivate.sharePathsWithCrostini = function(
-    entries, persist, callback) {};
+    vmName, entries, persist, callback) {};
 
 /**
  * Unshares path with crostini container.
+ * @param {string} vmName VM to unshare path from.
  * @param {!Entry} entry Entry of the file or directory to unshare.
  * @param {function()} callback Callback called after the path is unshared.
  *     chrome.runtime.lastError will be set if there was an error.
  */
 chrome.fileManagerPrivate.unsharePathWithCrostini = function(
-    entry, callback) {};
+    vmName, entry, callback) {};
 
 /**
  * Returns list of paths shared with the crostini container, and whether this is
@@ -990,10 +1025,11 @@ chrome.fileManagerPrivate.unsharePathWithCrostini = function(
  * @param {boolean} observeFirstForSession If true, callback provides whether
  *     this is the first time this function has been called with
  *     observeFirstForSession true.
+ * @param {string} vmName VM to get shared paths of.
  * @param {function(!Array<!Entry>, boolean)} callback
  */
 chrome.fileManagerPrivate.getCrostiniSharedPaths = function(
-    observeFirstForSession, callback) {};
+    observeFirstForSession, vmName, callback) {};
 
 /**
  * Requests information about a Linux package.
@@ -1037,6 +1073,19 @@ chrome.fileManagerPrivate.detectCharacterEncoding = function(bytes, callback) {
  *     available.
  */
 chrome.fileManagerPrivate.getThumbnail = function(entry, cropToSquare, callback) {};
+
+/**
+ * @param {!Array<string>} extensions
+ * @param {function(!Array<chrome.fileManagerPrivate.AndroidApp>):void} callback
+ *     Completion callback.
+ */
+chrome.fileManagerPrivate.getAndroidPickerApps = function(extensions, callback) {};
+
+/**
+ * @param {chrome.fileManagerPrivate.AndroidApp} androidApp
+ * @param {function()} callback Completion callback.
+ */
+chrome.fileManagerPrivate.selectAndroidPickerApp = function(androidApp, callback) {};
 
 /** @type {!ChromeEvent} */
 chrome.fileManagerPrivate.onMountCompleted;

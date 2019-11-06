@@ -21,6 +21,7 @@
 #include "ash/app_list/views/search_result_list_view.h"
 #include "ash/app_list/views/search_result_page_view.h"
 #include "ash/app_list/views/search_result_tile_item_list_view.h"
+#include "ash/keyboard/ui/keyboard_ui_controller.h"
 #include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/app_list_switches.h"
@@ -29,7 +30,6 @@
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/events/event.h"
-#include "ui/keyboard/keyboard_controller.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/view_model.h"
 #include "ui/views/widget/widget.h"
@@ -76,12 +76,10 @@ void ContentsView::Init(AppListModel* model) {
 
   horizontal_page_container_ = new HorizontalPageContainer(this, model);
 
-  // Add |horizontal_page_container_| as STATE_START corresponding page for
-  // fullscreen app list.
-  AddLauncherPage(horizontal_page_container_, ash::AppListState::kStateStart);
+  AddLauncherPage(horizontal_page_container_, ash::AppListState::kStateApps);
 
   // Search results UI.
-  search_results_page_view_ = new SearchResultPageView();
+  search_results_page_view_ = new SearchResultPageView(view_delegate);
 
   // Search result containers.
   SearchModel::SearchResults* results =
@@ -113,18 +111,17 @@ void ContentsView::Init(AppListModel* model) {
 
   if (app_list_features::IsEmbeddedAssistantUIEnabled()) {
     assistant_page_view_ =
-        new AssistantPageView(view_delegate->GetAssistantViewDelegate());
+        new AssistantPageView(view_delegate->GetAssistantViewDelegate(), this);
     assistant_page_view_->SetVisible(false);
     AddLauncherPage(assistant_page_view_,
                     ash::AppListState::kStateEmbeddedAssistant);
   }
 
-  AddLauncherPage(horizontal_page_container_, ash::AppListState::kStateApps);
-
-  int initial_page_index = GetPageIndexForState(ash::AppListState::kStateStart);
+  int initial_page_index = GetPageIndexForState(ash::AppListState::kStateApps);
   DCHECK_GE(initial_page_index, 0);
 
   page_before_search_ = initial_page_index;
+  page_before_assistant_ = initial_page_index;
   // Must only call SetTotalPages once all the launcher pages have been added
   // (as it will trigger a SelectedPageChanged call).
   pagination_model_.SetTotalPages(app_list_pages_.size());
@@ -140,6 +137,25 @@ void ContentsView::Init(AppListModel* model) {
   GetAppsContainerView()->UpdateSuggestionChips();
 
   ActivePageChanged();
+
+  // Hide the search results initially.
+  ShowSearchResults(false);
+}
+
+void ContentsView::ResetForShow() {
+  SetActiveState(ash::AppListState::kStateApps);
+  GetAppsContainerView()->ResetForShowApps();
+  GetSearchBoxView()->ResetForShow();
+  // In side shelf, the opacity of the contents is not animated so set it to the
+  // final state. In tablet mode, opacity of the elements is controlled by the
+  // HomeLauncherGestureHandler which expects these elements to be opaque.
+  // Otherwise the contents animate from 0 to 1 so set the initial opacity to 0.
+  const float initial_opacity =
+      app_list_view_->is_side_shelf() || app_list_view_->is_tablet_mode()
+          ? 1.0f
+          : 0.0f;
+  GetSearchBoxView()->layer()->SetOpacity(initial_opacity);
+  layer()->SetOpacity(initial_opacity);
 }
 
 void ContentsView::CancelDrag() {
@@ -160,6 +176,16 @@ void ContentsView::SetDragAndDropHostOfCurrentAppList(
       drag_and_drop_host);
 }
 
+void ContentsView::OnAppListViewTargetStateChanged(
+    ash::AppListViewState target_state) {
+  if (target_state == ash::AppListViewState::kClosed) {
+    CancelDrag();
+    expand_arrow_view_->MaybeEnableHintingAnimation(false);
+    return;
+  }
+  UpdateExpandArrowBehavior(target_state);
+}
+
 void ContentsView::SetActiveState(ash::AppListState state) {
   SetActiveState(state, !AppListView::ShortAnimationsForTesting());
 }
@@ -173,7 +199,10 @@ void ContentsView::SetActiveState(ash::AppListState state, bool animate) {
   DCHECK(state != ash::AppListState::kStateSearchResults &&
          state != ash::AppListState::kStateEmbeddedAssistant);
 
-  SetActiveStateInternal(GetPageIndexForState(state), false, animate);
+  const int page_index = GetPageIndexForState(state);
+  page_before_search_ = page_index;
+  page_before_assistant_ = page_index;
+  SetActiveStateInternal(page_index, animate);
 }
 
 int ContentsView::GetActivePageIndex() const {
@@ -218,22 +247,18 @@ AppsContainerView* ContentsView::GetAppsContainerView() {
   return horizontal_page_container_->apps_container_view();
 }
 
-void ContentsView::SetActiveStateInternal(int page_index,
-                                          bool show_search_or_assistant_results,
-                                          bool animate) {
-  if (!GetPageView(page_index)->visible())
+void ContentsView::SetActiveStateInternal(int page_index, bool animate) {
+  if (!GetPageView(page_index)->GetVisible())
     return;
-
-  if (!show_search_or_assistant_results)
-    page_before_search_ = page_index;
 
   app_list_pages_[GetActivePageIndex()]->OnWillBeHidden();
 
   // Start animating to the new page.
-  pagination_model_.SelectPage(page_index, animate);
+  const bool should_animate = animate && !set_active_state_without_animation_;
+  pagination_model_.SelectPage(page_index, should_animate);
   ActivePageChanged();
 
-  if (!animate)
+  if (!should_animate)
     Layout();
 }
 
@@ -248,9 +273,6 @@ void ContentsView::ActivePageChanged() {
   app_list_pages_[GetActivePageIndex()]->OnWillBeShown();
 
   GetAppListMainView()->model()->SetState(state);
-
-  UpdateExpandArrowFocusBehavior(state);
-
   UpdateSearchBoxVisibility(state);
 }
 
@@ -262,7 +284,8 @@ void ContentsView::ShowSearchResults(bool show) {
   // Hide or Show results
   GetPageView(search_page)->SetVisible(show);
 
-  SetActiveStateInternal(show ? search_page : page_before_search_, show,
+  page_before_assistant_ = show ? search_page : page_before_search_;
+  SetActiveStateInternal(show ? search_page : page_before_search_,
                          !AppListView::ShortAnimationsForTesting());
 }
 
@@ -280,16 +303,24 @@ void ContentsView::ShowEmbeddedAssistantUI(bool show) {
   if (show)
     GetPageView(assistant_page)->RequestFocus();
 
-  // Embedded Assistant UI can only be transitioned from/to
-  // |search_result_page_view_|.
   const int search_results_page =
       GetPageIndexForState(ash::AppListState::kStateSearchResults);
   DCHECK_GE(search_results_page, 0);
-  GetPageView(search_results_page)->SetVisible(!show);
-  SetActiveStateInternal(show ? assistant_page : search_results_page,
-                         /*show_search_or_assistant_results=*/true,
-                         /*animate=*/false);
-  expand_arrow_view_->layer()->SetOpacity(0.0f);
+  GetPageView(page_before_assistant_)->SetVisible(!show);
+
+  // No animation when transiting from/to |search_results_page| and in test.
+  const bool animate = !AppListView::ShortAnimationsForTesting() &&
+                       page_before_assistant_ != search_results_page;
+  SetActiveStateInternal(show ? assistant_page : page_before_assistant_,
+                         animate);
+  // If |page_before_assistant_| is kStateApps, we need to set app_list_view to
+  // kPeeking and layout the suggestion chips.
+  if (!show && page_before_assistant_ ==
+                   GetPageIndexForState(ash::AppListState::kStateApps)) {
+    GetSearchBoxView()->ClearSearch();
+    GetSearchBoxView()->SetSearchBoxActive(false, ui::ET_UNKNOWN);
+    GetAppsContainerView()->Layout();
+  }
 }
 
 bool ContentsView::IsShowingEmbeddedAssistantUI() const {
@@ -303,7 +334,7 @@ void ContentsView::UpdatePageBounds() {
   int target_page = current_page;
   double progress = 1;
   if (pagination_model_.has_transition()) {
-    const PaginationModel::Transition& transition =
+    const ash::PaginationModel::Transition& transition =
         pagination_model_.transition();
     if (pagination_model_.is_valid_page(transition.target_page)) {
       target_page = transition.target_page;
@@ -321,14 +352,12 @@ void ContentsView::UpdatePageBounds() {
     // Animate linearly (the PaginationModel handles easing).
     gfx::Rect bounds(
         gfx::Tween::RectValueBetween(progress, from_rect, to_rect));
-
     page->SetBoundsRect(bounds);
 
     if (ShouldLayoutPage(page, current_state, target_state))
       page->OnAnimationUpdated(progress, current_state, target_state);
   }
 
-  // Update the search box.
   UpdateSearchBox(progress, current_state, target_state);
 
   // Update the expand arrow view's opacity.
@@ -365,47 +394,43 @@ void ContentsView::UpdateSearchBox(double progress,
   gfx::Transform transform;
   transform.Scale(scale, scale);
   search_box->GetWidget()->GetNativeView()->SetTransform(transform);
-
-  for (auto& observer : search_box_observers_)
-    observer.OnSearchBoxBoundsUpdated();
+  NotifySearchBoxBoundsUpdated();
 }
 
 void ContentsView::UpdateExpandArrowOpacity(double progress,
                                             ash::AppListState current_state,
                                             ash::AppListState target_state) {
-  if ((current_state == ash::AppListState::kStateSearchResults ||
-       current_state == ash::AppListState::kStateEmbeddedAssistant) &&
-      (target_state == ash::AppListState::kStateStart ||
-       target_state == ash::AppListState::kStateApps)) {
-    // Fade in the expand arrow when search results page is opened.
+  if (target_state == ash::AppListState::kStateApps) {
+    // Fade in the expand arrow when search results page is closed.
     expand_arrow_view_->layer()->SetOpacity(
         gfx::Tween::FloatValueBetween(progress, 0, 1));
-  } else if ((target_state == ash::AppListState::kStateSearchResults ||
-              target_state == ash::AppListState::kStateEmbeddedAssistant) &&
-             (current_state == ash::AppListState::kStateStart ||
-              current_state == ash::AppListState::kStateApps)) {
-    // Fade out the expand arrow when search results page is closed.
+  } else if (target_state == ash::AppListState::kStateSearchResults ||
+             target_state == ash::AppListState::kStateEmbeddedAssistant) {
+    // Fade out the expand arrow when search results page is opened.
     expand_arrow_view_->layer()->SetOpacity(
         gfx::Tween::FloatValueBetween(progress, 1, 0));
   }
 }
 
-void ContentsView::UpdateExpandArrowFocusBehavior(
-    ash::AppListState current_state) {
-  bool state_start = current_state == ash::AppListState::kStateStart;
-
+void ContentsView::UpdateExpandArrowBehavior(
+    ash::AppListViewState target_state) {
+  const bool expand_arrow_enabled =
+      target_state == ash::AppListViewState::kPeeking;
   // The expand arrow is only focusable and has InkDropMode on in peeking
   // state.
-  expand_arrow_view_->SetFocusBehavior(state_start ? FocusBehavior::ALWAYS
-                                                   : FocusBehavior::NEVER);
+  expand_arrow_view_->SetFocusBehavior(
+      expand_arrow_enabled ? FocusBehavior::ALWAYS : FocusBehavior::NEVER);
   expand_arrow_view_->SetInkDropMode(
-      state_start ? views::InkDropHostView::InkDropMode::ON
-                  : views::InkDropHostView::InkDropMode::OFF);
+      expand_arrow_enabled ? views::InkDropHostView::InkDropMode::ON
+                           : views::InkDropHostView::InkDropMode::OFF);
 
   // Allow ChromeVox to focus the expand arrow only when peeking launcher.
-  expand_arrow_view_->GetViewAccessibility().OverrideIsIgnored(!state_start);
+  expand_arrow_view_->GetViewAccessibility().OverrideIsIgnored(
+      !expand_arrow_enabled);
   expand_arrow_view_->GetViewAccessibility().NotifyAccessibilityEvent(
       ax::mojom::Event::kTreeChanged);
+
+  expand_arrow_view_->MaybeEnableHintingAnimation(expand_arrow_enabled);
 }
 
 void ContentsView::UpdateSearchBoxVisibility(ash::AppListState current_state) {
@@ -418,7 +443,7 @@ void ContentsView::UpdateSearchBoxVisibility(ash::AppListState current_state) {
   }
 }
 
-PaginationModel* ContentsView::GetAppsPaginationModel() {
+ash::PaginationModel* ContentsView::GetAppsPaginationModel() {
   return GetAppsContainerView()->apps_grid_view()->pagination_model();
 }
 
@@ -480,7 +505,7 @@ gfx::Rect ContentsView::GetDefaultContentsBounds() const {
 
 bool ContentsView::Back() {
   // If the virtual keyboard is visible, dismiss the keyboard and return early
-  auto* const keyboard_controller = keyboard::KeyboardController::Get();
+  auto* const keyboard_controller = keyboard::KeyboardUIController::Get();
   if (keyboard_controller->IsKeyboardVisible()) {
     keyboard_controller->HideKeyboardByUser();
     return true;
@@ -488,11 +513,8 @@ bool ContentsView::Back() {
 
   ash::AppListState state = view_to_state_[GetActivePageIndex()];
   switch (state) {
-    case ash::AppListState::kStateStart:
-      // Close the app list when Back() is called from the start page.
-      return false;
     case ash::AppListState::kStateApps: {
-      PaginationModel* pagination_model =
+      ash::PaginationModel* pagination_model =
           GetAppsContainerView()->apps_grid_view()->pagination_model();
       if (GetAppsContainerView()->IsInFolderView()) {
         GetAppsContainerView()->app_list_folder_view()->CloseFolderPage();
@@ -508,14 +530,16 @@ bool ContentsView::Back() {
       break;
     }
     case ash::AppListState::kStateSearchResults:
-      GetSearchBoxView()->ClearSearch();
-      GetSearchBoxView()->SetSearchBoxActive(false, ui::ET_UNKNOWN);
+      GetSearchBoxView()->ClearSearchAndDeactivateSearchBox();
       ShowSearchResults(false);
+      for (auto& observer : search_box_observers_)
+        observer.OnSearchBoxClearAndDeactivated();
       break;
     case ash::AppListState::kStateEmbeddedAssistant:
       ShowEmbeddedAssistantUI(false);
       break;
-    case ash::AppListState::kInvalidState:  // Falls through.
+    case ash::AppListState::kStateStart_DEPRECATED:
+    case ash::AppListState::kInvalidState:
       NOTREACHED();
       break;
   }
@@ -570,8 +594,10 @@ void ContentsView::FadeOutOnClose(base::TimeDelta animation_duration) {
 }
 
 void ContentsView::FadeInOnOpen(base::TimeDelta animation_duration) {
-  GetSearchBoxView()->layer()->SetOpacity(0.0f);
-  layer()->SetOpacity(0.0f);
+  if (layer()->opacity() == 1.0f &&
+      GetSearchBoxView()->layer()->opacity() == 1.0f) {
+    return;
+  }
   DoAnimation(animation_duration, layer(), 1.0f);
   DoAnimation(animation_duration, GetSearchBoxView()->layer(), 1.0f);
 }
@@ -581,16 +607,15 @@ views::View* ContentsView::GetSelectedView() const {
 }
 
 void ContentsView::UpdateYPositionAndOpacity() {
-  AppListViewState state = app_list_view_->app_list_state();
-  if (state == AppListViewState::CLOSED ||
-      state == AppListViewState::FULLSCREEN_SEARCH ||
-      state == AppListViewState::HALF) {
+  ash::AppListViewState state = app_list_view_->app_list_state();
+  if (state == ash::AppListViewState::kFullscreenSearch ||
+      state == ash::AppListViewState::kHalf) {
     return;
   }
 
   const bool should_restore_opacity =
       !app_list_view_->is_in_drag() &&
-      (app_list_view_->app_list_state() != AppListViewState::CLOSED);
+      (app_list_view_->app_list_state() != ash::AppListViewState::kClosed);
 
   // Changes the opacity of expand arrow between 0 and 1 when app list
   // transition progress changes between |kExpandArrowOpacityStartProgress|
@@ -622,8 +647,7 @@ void ContentsView::UpdateYPositionAndOpacity() {
   search_box->GetWidget()->SetBounds(search_rect);
 
   search_results_page_view()->SetBoundsRect(
-      search_results_page_view()->AddShadowBorderToBounds(
-          apps_container_view->GetSearchBoxExpectedBounds()));
+      apps_container_view->GetSearchBoxExpectedBounds());
 
   apps_container_view->UpdateYPositionAndOpacity();
 }
@@ -634,10 +658,15 @@ float ContentsView::GetAppListMainViewScale() const {
 }
 
 void ContentsView::SetExpandArrowViewVisibility(bool show) {
-  if (expand_arrow_view_->visible() == show)
+  if (expand_arrow_view_->GetVisible() == show)
     return;
 
   expand_arrow_view_->SetVisible(show);
+}
+
+void ContentsView::NotifySearchBoxBoundsUpdated() {
+  for (auto& observer : search_box_observers_)
+    observer.OnSearchBoxBoundsUpdated();
 }
 
 void ContentsView::AddSearchBoxUpdateObserver(
@@ -654,20 +683,12 @@ bool ContentsView::ShouldLayoutPage(AppListPage* page,
                                     ash::AppListState current_state,
                                     ash::AppListState target_state) const {
   if (page == horizontal_page_container_) {
-    return (current_state == ash::AppListState::kStateStart &&
-            target_state == ash::AppListState::kStateApps) ||
-           (current_state == ash::AppListState::kStateApps &&
-            target_state == ash::AppListState::kStateStart) ||
-           (current_state == ash::AppListState::kStateSearchResults &&
-            target_state == ash::AppListState::kStateStart);
+    return (current_state == ash::AppListState::kStateSearchResults &&
+            target_state == ash::AppListState::kStateApps);
   }
 
   if (page == search_results_page_view_) {
     return ((current_state == ash::AppListState::kStateSearchResults &&
-             target_state == ash::AppListState::kStateStart) ||
-            (current_state == ash::AppListState::kStateStart &&
-             target_state == ash::AppListState::kStateSearchResults)) ||
-           ((current_state == ash::AppListState::kStateSearchResults &&
              target_state == ash::AppListState::kStateApps) ||
             (current_state == ash::AppListState::kStateApps &&
              target_state == ash::AppListState::kStateSearchResults));

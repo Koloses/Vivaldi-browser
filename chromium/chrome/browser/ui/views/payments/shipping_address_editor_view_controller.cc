@@ -13,14 +13,14 @@
 #include "chrome/browser/ui/views/payments/validating_combobox.h"
 #include "chrome/browser/ui/views/payments/validating_textfield.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/autofill/core/browser/address_i18n.h"
 #include "components/autofill/core/browser/autofill_address_util.h"
-#include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_type.h"
-#include "components/autofill/core/browser/country_combobox_model.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/geo/address_i18n.h"
+#include "components/autofill/core/browser/geo/autofill_country.h"
+#include "components/autofill/core/browser/geo/phone_number_i18n.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
-#include "components/autofill/core/browser/phone_number_i18n.h"
+#include "components/autofill/core/browser/ui/country_combobox_model.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_l10n_util.h"
@@ -100,13 +100,16 @@ bool ShippingAddressEditorViewController::ValidateModelAndSave() {
   } else {
     autofill::ServerFieldTypeSet all_fields;
     profile_to_edit_->GetSupportedTypes(&all_fields);
-    // Clear all the address data in |profile_to_edit_|, in anticipation of
-    // adding only the fields present in the editor.  Prefer this method to
-    // copying |profile| into |profile_to_edit_|, because the latter object
-    // needs to retain other properties (use count, use date, guid,
-    // etc.).
-    for (autofill::ServerFieldType type : all_fields)
-      profile_to_edit_->SetRawInfo(type, base::string16());
+    // Clear all the address data in |profile_to_edit_| except the email field,
+    // in anticipation of adding only the fields present in the editor. Prefer
+    // this method to copying |profile| into |profile_to_edit_|, because the
+    // latter object needs to retain other properties (use count, use date,
+    // guid, etc.).
+    for (autofill::ServerFieldType type : all_fields) {
+      if (type != autofill::ServerFieldType::EMAIL_ADDRESS) {
+        profile_to_edit_->SetRawInfo(type, base::string16());
+      }
+    }
 
     bool success = SaveFieldsToProfile(profile_to_edit_,
                                        /*ignore_errors=*/false);
@@ -174,11 +177,12 @@ ShippingAddressEditorViewController::GetComboboxModelForType(
 void ShippingAddressEditorViewController::OnPerformAction(
     views::Combobox* sender) {
   EditorViewController::OnPerformAction(sender);
-  if (sender->id() != GetInputFieldViewId(autofill::ADDRESS_HOME_COUNTRY))
+  if (sender->GetID() != GetInputFieldViewId(autofill::ADDRESS_HOME_COUNTRY))
     return;
-  DCHECK_GE(sender->selected_index(), 0);
-  if (chosen_country_index_ != static_cast<size_t>(sender->selected_index())) {
-    chosen_country_index_ = sender->selected_index();
+  DCHECK_GE(sender->GetSelectedIndex(), 0);
+  if (chosen_country_index_ !=
+      static_cast<size_t>(sender->GetSelectedIndex())) {
+    chosen_country_index_ = sender->GetSelectedIndex();
     failed_to_load_region_data_ = false;
     // View update must be asynchronous to let the combobox finish performing
     // the action.
@@ -216,7 +220,7 @@ std::unique_ptr<views::Button>
 ShippingAddressEditorViewController::CreatePrimaryButton() {
   std::unique_ptr<views::Button> button(
       EditorViewController::CreatePrimaryButton());
-  button->set_id(static_cast<int>(DialogViewID::SAVE_ADDRESS_BUTTON));
+  button->SetID(static_cast<int>(DialogViewID::SAVE_ADDRESS_BUTTON));
   return button;
 }
 
@@ -254,7 +258,7 @@ bool ShippingAddressEditorViewController::ShippingAddressValidationDelegate::
 
 bool ShippingAddressEditorViewController::ShippingAddressValidationDelegate::
     IsValidCombobox(views::Combobox* combobox, base::string16* error_message) {
-  return ValidateValue(combobox->GetTextForRow(combobox->selected_index()),
+  return ValidateValue(combobox->GetTextForRow(combobox->GetSelectedIndex()),
                        error_message);
 }
 
@@ -273,7 +277,7 @@ bool ShippingAddressEditorViewController::ShippingAddressValidationDelegate::
     ComboboxValueChanged(views::Combobox* combobox) {
   base::string16 error_message;
   bool is_valid = ValidateValue(
-      combobox->GetTextForRow(combobox->selected_index()), &error_message);
+      combobox->GetTextForRow(combobox->GetSelectedIndex()), &error_message);
   controller_->DisplayErrorMessageForField(field_.type, error_message);
   return is_valid;
 }
@@ -456,8 +460,8 @@ void ShippingAddressEditorViewController::UpdateEditorFields() {
         NOTREACHED();
         return;
       }
-      std::string field_length;
-      if (!component->GetString(autofill::kFieldLengthKey, &field_length)) {
+      bool field_length;
+      if (!component->GetBoolean(autofill::kFieldLengthKey, &field_length)) {
         NOTREACHED();
         return;
       }
@@ -513,7 +517,7 @@ void ShippingAddressEditorViewController::OnDataChanged(bool synchronous) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(&ShippingAddressEditorViewController::UpdateEditorView,
-                       base::Unretained(this)));
+                       weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -529,7 +533,8 @@ bool ShippingAddressEditorViewController::SaveFieldsToProfile(
   // The combobox can be null when saving to temporary profile while updating
   // the view.
   if (combobox) {
-    base::string16 country(combobox->GetTextForRow(combobox->selected_index()));
+    base::string16 country(
+        combobox->GetTextForRow(combobox->GetSelectedIndex()));
     bool success =
         profile->SetInfo(autofill::ADDRESS_HOME_COUNTRY, country, locale);
     LOG_IF(ERROR, !success && !ignore_errors)
@@ -556,18 +561,19 @@ bool ShippingAddressEditorViewController::SaveFieldsToProfile(
     // ValidatingCombobox* is the key, EditorField is the value.
     ValidatingCombobox* combobox = field.first;
     // The country has already been dealt with.
-    if (combobox->id() == GetInputFieldViewId(autofill::ADDRESS_HOME_COUNTRY))
+    if (combobox->GetID() ==
+        GetInputFieldViewId(autofill::ADDRESS_HOME_COUNTRY))
       continue;
     if (combobox->IsValid()) {
       success = profile->SetInfo(
           field.second.type,
-          combobox->GetTextForRow(combobox->selected_index()), locale);
+          combobox->GetTextForRow(combobox->GetSelectedIndex()), locale);
     } else {
       success = false;
     }
     LOG_IF(ERROR, !success && !ignore_errors)
         << "Can't setinfo(" << field.second.type << ", "
-        << combobox->GetTextForRow(combobox->selected_index());
+        << combobox->GetTextForRow(combobox->GetSelectedIndex());
     if (!success && !ignore_errors)
       return false;
   }
@@ -577,7 +583,7 @@ bool ShippingAddressEditorViewController::SaveFieldsToProfile(
 
 void ShippingAddressEditorViewController::OnComboboxModelChanged(
     views::Combobox* combobox) {
-  if (combobox->id() != GetInputFieldViewId(autofill::ADDRESS_HOME_STATE))
+  if (combobox->GetID() != GetInputFieldViewId(autofill::ADDRESS_HOME_STATE))
     return;
   autofill::RegionComboboxModel* model =
       static_cast<autofill::RegionComboboxModel*>(combobox->model());

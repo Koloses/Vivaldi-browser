@@ -42,7 +42,7 @@ class PaintControllerTestBase : public testing::Test {
       : root_paint_property_client_("root"),
         root_paint_chunk_id_(root_paint_property_client_,
                              DisplayItem::kUninitializedType),
-        paint_controller_(PaintController::Create()) {}
+        paint_controller_(std::make_unique<PaintController>()) {}
 
   void InitRootChunk() { InitRootChunk(GetPaintController()); }
   void InitRootChunk(PaintController& paint_controller) {
@@ -61,10 +61,10 @@ class PaintControllerTestBase : public testing::Test {
   size_t NumCachedNewSubsequences() const {
     return paint_controller_->num_cached_new_subsequences_;
   }
+#if DCHECK_IS_ON()
   size_t NumIndexedItems() const {
     return paint_controller_->num_indexed_items_;
   }
-#if DCHECK_IS_ON()
   size_t NumSequentialMatches() const {
     return paint_controller_->num_sequential_matches_;
   }

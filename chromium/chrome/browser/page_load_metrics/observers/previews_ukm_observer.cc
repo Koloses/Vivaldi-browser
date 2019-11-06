@@ -4,6 +4,7 @@
 
 #include "chrome/browser/page_load_metrics/observers/previews_ukm_observer.h"
 
+#include "base/base64.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/optional.h"
@@ -20,6 +21,7 @@
 #include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/offline_pages/buildflags/buildflags.h"
+#include "components/optimization_guide/proto/hints.pb.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/previews_state.h"
@@ -36,6 +38,16 @@ namespace previews {
 namespace {
 
 const char kOfflinePreviewsMimeType[] = "multipart/related";
+
+bool ShouldOptionalEligibilityReasonBeRecorded(
+    base::Optional<previews::PreviewsEligibilityReason> reason) {
+  if (!reason.has_value())
+    return false;
+
+  // Do not record ALLOWED values since we are only interested in recording
+  // reasons why a preview was not eligible to be shown.
+  return reason.value() != previews::PreviewsEligibilityReason::ALLOWED;
+}
 
 }  // namespace
 
@@ -61,9 +73,25 @@ PreviewsUKMObserver::OnCommit(content::NavigationHandle* navigation_handle,
   if (!previews_user_data)
     return STOP_OBSERVING;
 
-  committed_preview_ = previews_user_data->committed_previews_type();
+  committed_preview_ = previews_user_data->CommittedPreviewsType();
+
+  // Only check for preview types that are decided before commit in the
+  // |allowed_previews_state|.
+  previews_likely_ =
+      HasEnabledPreviews(previews_user_data->PreHoldbackAllowedPreviewsState() &
+                         kPreCommitPreviews);
   content::PreviewsState previews_state =
-      previews_user_data->committed_previews_state();
+      previews_user_data->PreHoldbackCommittedPreviewsState();
+
+  // Check all preview types in the |committed_previews_state|. In practice
+  // though, this will only set |previews_likely_| if it wasn't before for an
+  // Optimization Hints preview.
+  previews_likely_ |= HasEnabledPreviews(previews_state);
+
+  coin_flip_result_ = previews_user_data->coin_flip_holdback_result();
+
+  DCHECK(coin_flip_result_ == CoinFlipHoldbackResult::kNotSet ||
+         previews_likely_);
 
   if (navigation_handle->GetWebContents()->GetContentsMimeType() ==
       kOfflinePreviewsMimeType) {
@@ -90,15 +118,39 @@ PreviewsUKMObserver::OnCommit(content::NavigationHandle* navigation_handle,
                             previews::PreviewsType::RESOURCE_LOADING_HINTS) {
     resource_loading_hints_seen_ = true;
   }
-  if (previews_user_data &&
-      previews_user_data->cache_control_no_transform_directive()) {
+  if (previews_state && previews::GetMainFramePreviewsType(previews_state) ==
+                            previews::PreviewsType::DEFER_ALL_SCRIPT) {
+    defer_all_script_seen_ = true;
+  }
+  if (previews_user_data->cache_control_no_transform_directive()) {
     origin_opt_out_occurred_ = true;
   }
-  if (previews_user_data && previews_user_data->server_lite_page_info()) {
+  if (previews_user_data->server_lite_page_info()) {
     navigation_restart_penalty_ =
         navigation_handle->NavigationStart() -
         previews_user_data->server_lite_page_info()->original_navigation_start;
   }
+
+  lite_page_eligibility_reason_ =
+      previews_user_data->EligibilityReasonForPreview(
+          previews::PreviewsType::LITE_PAGE);
+  lite_page_redirect_eligibility_reason_ =
+      previews_user_data->EligibilityReasonForPreview(
+          previews::PreviewsType::LITE_PAGE_REDIRECT);
+  noscript_eligibility_reason_ =
+      previews_user_data->EligibilityReasonForPreview(
+          previews::PreviewsType::NOSCRIPT);
+  resource_loading_hints_eligibility_reason_ =
+      previews_user_data->EligibilityReasonForPreview(
+          previews::PreviewsType::RESOURCE_LOADING_HINTS);
+  defer_all_script_eligibility_reason_ =
+      previews_user_data->EligibilityReasonForPreview(
+          previews::PreviewsType::DEFER_ALL_SCRIPT);
+  offline_eligibility_reason_ = previews_user_data->EligibilityReasonForPreview(
+      previews::PreviewsType::OFFLINE);
+
+  serialized_hint_version_string_ =
+      previews_user_data->serialized_hint_version_string();
 
   return CONTINUE_OBSERVING;
 }
@@ -128,7 +180,7 @@ PreviewsUKMObserver::FlushMetricsOnAppEnterBackground(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  RecordPreviewsTypes(info);
+  RecordMetrics(info);
   return STOP_OBSERVING;
 }
 
@@ -137,7 +189,7 @@ PreviewsUKMObserver::OnHidden(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  RecordPreviewsTypes(info);
+  RecordMetrics(info);
   return STOP_OBSERVING;
 }
 
@@ -145,7 +197,13 @@ void PreviewsUKMObserver::OnComplete(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  RecordMetrics(info);
+}
+
+void PreviewsUKMObserver::RecordMetrics(
+    const page_load_metrics::PageLoadExtraInfo& info) {
   RecordPreviewsTypes(info);
+  RecordOptimizationGuideInfo(info);
 }
 
 void PreviewsUKMObserver::RecordPreviewsTypes(
@@ -167,19 +225,15 @@ void PreviewsUKMObserver::RecordPreviewsTypes(
   // |navigation_restart_penalty_| is included here because a Lite Page Redirect
   // preview can be attempted and not commit. This incurs the penalty but may
   // also cause no preview to be committed.
-  if (!server_lofi_seen_ && !client_lofi_seen_ && !lite_page_seen_ &&
-      !noscript_seen_ && !resource_loading_hints_seen_ &&
-      !offline_preview_seen_ && !origin_opt_out_occurred_ &&
-      !save_data_enabled_ && !lite_page_redirect_seen_ &&
-      !navigation_restart_penalty_.has_value()) {
+  if (!lite_page_seen_ && !noscript_seen_ && !resource_loading_hints_seen_ &&
+      !defer_all_script_seen_ && !offline_preview_seen_ &&
+      !origin_opt_out_occurred_ && !save_data_enabled_ &&
+      !lite_page_redirect_seen_ && !navigation_restart_penalty_.has_value()) {
     return;
   }
 
   ukm::builders::Previews builder(info.source_id);
-  if (server_lofi_seen_)
-    builder.Setserver_lofi(1);
-  if (client_lofi_seen_)
-    builder.Setclient_lofi(1);
+  builder.Setcoin_flip_result(static_cast<int>(coin_flip_result_));
   if (lite_page_seen_)
     builder.Setlite_page(1);
   if (lite_page_redirect_seen_)
@@ -188,35 +242,84 @@ void PreviewsUKMObserver::RecordPreviewsTypes(
     builder.Setnoscript(1);
   if (resource_loading_hints_seen_)
     builder.Setresource_loading_hints(1);
+  if (defer_all_script_seen_)
+    builder.Setdefer_all_script(1);
   if (offline_preview_seen_)
     builder.Setoffline_preview(1);
+  // 2 is set here for legacy reasons as it denotes an optout through the
+  // omnibox ui as opposed to the now deprecated infobar.
   if (opt_out_occurred_)
-    builder.Setopt_out(previews::params::IsPreviewsOmniboxUiEnabled() ? 2 : 1);
+    builder.Setopt_out(2);
   if (origin_opt_out_occurred_)
     builder.Setorigin_opt_out(1);
   if (save_data_enabled_)
     builder.Setsave_data_enabled(1);
+  if (previews_likely_)
+    builder.Setpreviews_likely(1);
   if (navigation_restart_penalty_.has_value()) {
     builder.Setnavigation_restart_penalty(
         navigation_restart_penalty_->InMilliseconds());
   }
+
+  if (ShouldOptionalEligibilityReasonBeRecorded(
+          lite_page_eligibility_reason_)) {
+    builder.Setproxy_lite_page_eligibility_reason(
+        static_cast<int>(lite_page_eligibility_reason_.value()));
+  }
+  if (ShouldOptionalEligibilityReasonBeRecorded(
+          lite_page_redirect_eligibility_reason_)) {
+    builder.Setlite_page_redirect_eligibility_reason(
+        static_cast<int>(lite_page_redirect_eligibility_reason_.value()));
+  }
+  if (ShouldOptionalEligibilityReasonBeRecorded(noscript_eligibility_reason_)) {
+    builder.Setnoscript_eligibility_reason(
+        static_cast<int>(noscript_eligibility_reason_.value()));
+  }
+  if (ShouldOptionalEligibilityReasonBeRecorded(
+          resource_loading_hints_eligibility_reason_)) {
+    builder.Setresource_loading_hints_eligibility_reason(
+        static_cast<int>(resource_loading_hints_eligibility_reason_.value()));
+  }
+  if (ShouldOptionalEligibilityReasonBeRecorded(
+          defer_all_script_eligibility_reason_)) {
+    builder.Setdefer_all_script_eligibility_reason(
+        static_cast<int>(defer_all_script_eligibility_reason_.value()));
+  }
+  if (ShouldOptionalEligibilityReasonBeRecorded(offline_eligibility_reason_)) {
+    builder.Setoffline_eligibility_reason(
+        static_cast<int>(offline_eligibility_reason_.value()));
+  }
   builder.Record(ukm::UkmRecorder::Get());
 }
 
-void PreviewsUKMObserver::OnLoadedResource(
-    const page_load_metrics::ExtraRequestCompleteInfo&
-        extra_request_complete_info) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (extra_request_complete_info.data_reduction_proxy_data) {
-    if (extra_request_complete_info.data_reduction_proxy_data
-            ->lofi_received()) {
-      server_lofi_seen_ = true;
-    }
-    if (extra_request_complete_info.data_reduction_proxy_data
-            ->client_lofi_requested()) {
-      client_lofi_seen_ = true;
-    }
+void PreviewsUKMObserver::RecordOptimizationGuideInfo(
+    const page_load_metrics::PageLoadExtraInfo& info) {
+  if (!serialized_hint_version_string_.has_value()) {
+    return;
   }
+
+  // Deserialize the serialized version string into its protobuffer.
+  std::string binary_version_pb;
+  if (!base::Base64Decode(serialized_hint_version_string_.value(),
+                          &binary_version_pb))
+    return;
+
+  optimization_guide::proto::Version hint_version;
+  if (!hint_version.ParseFromString(binary_version_pb))
+    return;
+
+  ukm::builders::OptimizationGuide builder(info.source_id);
+  if (hint_version.has_generation_timestamp() &&
+      hint_version.generation_timestamp().seconds() > 0) {
+    builder.SetHintGenerationTimestamp(
+        hint_version.generation_timestamp().seconds());
+  }
+  if (hint_version.has_hint_source() &&
+      hint_version.hint_source() !=
+          optimization_guide::proto::HINT_SOURCE_UNKNOWN) {
+    builder.SetHintSource(static_cast<int>(hint_version.hint_source()));
+  }
+  builder.Record(ukm::UkmRecorder::Get());
 }
 
 void PreviewsUKMObserver::OnEventOccurred(const void* const event_key) {

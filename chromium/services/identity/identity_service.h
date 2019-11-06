@@ -5,22 +5,23 @@
 #ifndef SERVICES_IDENTITY_IDENTITY_SERVICE_H_
 #define SERVICES_IDENTITY_IDENTITY_SERVICE_H_
 
-#include "components/signin/core/browser/signin_manager_base.h"
-#include "services/identity/public/cpp/identity_manager.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
+#include "mojo/public/cpp/bindings/strong_binding_set.h"
 #include "services/identity/public/mojom/identity_accessor.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_binding.h"
 #include "services/service_manager/public/mojom/service.mojom.h"
 
-class AccountTrackerService;
+namespace mojom {
+class IdentityAccessor;
+}
 
 namespace identity {
 
 class IdentityService : public service_manager::Service {
  public:
-  IdentityService(IdentityManager* identity_manager,
-                  AccountTrackerService* account_tracker,
+  IdentityService(signin::IdentityManager* identity_manager,
                   service_manager::mojom::ServiceRequest request);
   ~IdentityService() override;
 
@@ -40,8 +41,9 @@ class IdentityService : public service_manager::Service {
 
   service_manager::ServiceBinding service_binding_;
 
-  IdentityManager* identity_manager_;
-  AccountTrackerService* account_tracker_;
+  signin::IdentityManager* identity_manager_;
+
+  mojo::StrongBindingSet<mojom::IdentityAccessor> identity_accessor_bindings_;
 
   service_manager::BinderRegistry registry_;
 

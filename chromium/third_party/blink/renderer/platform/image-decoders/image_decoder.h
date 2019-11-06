@@ -42,7 +42,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
-#include "third_party/skia/third_party/skcms/skcms.h"
+#include "third_party/skia/include/third_party/skcms/skcms.h"
 
 class SkColorSpace;
 
@@ -65,6 +65,8 @@ class PLATFORM_EXPORT ImagePlanes final {
 
  public:
   ImagePlanes();
+  // TODO(crbug/910276): To support YUVA, ImagePlanes needs to support a
+  // variable number of planes.
   ImagePlanes(void* planes[3], const size_t row_bytes[3]);
 
   void* Plane(int);
@@ -128,6 +130,16 @@ class PLATFORM_EXPORT ImageDecoder {
     kHighBitDepthToHalfFloat
   };
 
+  // The first three values are as defined in webp/decode.h, the last value
+  // specifies WebP animation formats.
+  enum CompressionFormat {
+    kUndefinedFormat = 0,
+    kLossyFormat = 1,
+    kLosslessFormat = 2,
+    kWebPAnimationFormat = 3,
+    kMaxValue = kWebPAnimationFormat,
+  };
+
   virtual ~ImageDecoder() = default;
 
   // Returns a caller-owned decoder of the appropriate type.  Returns nullptr if
@@ -168,6 +180,14 @@ class PLATFORM_EXPORT ImageDecoder {
   // failure is due to insufficient or bad data.
   static bool HasSufficientDataToSniffImageType(const SharedBuffer&);
 
+  // Looks at the image data to determine and return the image MIME type.
+  static String SniffImageType(scoped_refptr<SharedBuffer> image_data);
+
+  // Returns the image data's compression format.
+  static CompressionFormat GetCompressionFormat(
+      scoped_refptr<SharedBuffer> image_data,
+      String mime_type);
+
   void SetData(scoped_refptr<SegmentReader> data, bool all_data_received) {
     if (failed_)
       return;
@@ -194,7 +214,7 @@ class PLATFORM_EXPORT ImageDecoder {
   bool IsDecodedSizeAvailable() const { return !failed_ && size_available_; }
 
   virtual IntSize Size() const { return size_; }
-  virtual std::vector<SkISize> GetSupportedDecodeSizes() const { return {}; }
+  virtual Vector<SkISize> GetSupportedDecodeSizes() const { return {}; }
 
   // Decoders which downsample images should override this method to
   // return the actual decoded size.
@@ -258,7 +278,9 @@ class PLATFORM_EXPORT ImageDecoder {
 
   // Duration for displaying a frame. This method is only used by animated
   // images.
-  virtual TimeDelta FrameDurationAtIndex(size_t) const { return TimeDelta(); }
+  virtual base::TimeDelta FrameDurationAtIndex(size_t) const {
+    return base::TimeDelta();
+  }
 
   // Number of bytes in the decoded frame. Returns 0 if the decoder doesn't
   // have this frame cached (either because it hasn't been decoded, or because
@@ -458,14 +480,13 @@ class PLATFORM_EXPORT ImageDecoder {
  private:
   // Some code paths compute the size of the image as "width * height * 4 or 8"
   // and return it as a (signed) int.  Avoid overflow.
-  static bool SizeCalculationMayOverflow(unsigned width,
+  inline bool SizeCalculationMayOverflow(unsigned width,
                                          unsigned height,
                                          unsigned decoded_bytes_per_pixel) {
-    unsigned long long total_size = static_cast<unsigned long long>(width) *
-                                    static_cast<unsigned long long>(height);
-    if (decoded_bytes_per_pixel == 4)
-      return total_size > ((1 << 29) - 1);
-    return total_size > ((1 << 28) - 1);
+    base::CheckedNumeric<int32_t> total_size = width;
+    total_size *= height;
+    total_size *= decoded_bytes_per_pixel;
+    return !total_size.IsValid();
   }
 
   bool purge_aggressively_;
@@ -482,7 +503,6 @@ class PLATFORM_EXPORT ImageDecoder {
   bool size_available_ = false;
   bool is_all_data_received_ = false;
   bool failed_ = false;
-  bool has_histogrammed_color_space_ = false;
 
   std::unique_ptr<ColorProfile> embedded_color_profile_;
   sk_sp<SkColorSpace> color_space_for_sk_images_;

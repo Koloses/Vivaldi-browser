@@ -15,9 +15,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/arc/arc_playstore_app_context_menu.h"
-#include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/common/app.mojom.h"
+#include "components/arc/session/arc_bridge_service.h"
 #include "components/crx_file/id_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
@@ -40,7 +40,7 @@ constexpr int kBadgePadding = 1;
 class BadgeBackgroundImageSource : public gfx::CanvasImageSource {
  public:
   explicit BadgeBackgroundImageSource(int size, float padding)
-      : CanvasImageSource(gfx::Size(size, size), false), padding_(padding) {}
+      : CanvasImageSource(gfx::Size(size, size)), padding_(padding) {}
   ~BadgeBackgroundImageSource() override = default;
 
  private:

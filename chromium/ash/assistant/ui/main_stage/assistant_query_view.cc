@@ -70,14 +70,14 @@ void AssistantQueryView::InitLayout() {
           views::BoxLayout::Orientation::kVertical));
 
   layout_manager->set_main_axis_alignment(
-      views::BoxLayout::MainAxisAlignment::MAIN_AXIS_ALIGNMENT_CENTER);
+      views::BoxLayout::MainAxisAlignment::kCenter);
 
   layout_manager->set_cross_axis_alignment(
-      views::BoxLayout::CrossAxisAlignment::CROSS_AXIS_ALIGNMENT_CENTER);
+      views::BoxLayout::CrossAxisAlignment::kCenter);
 
   // Label.
   label_ = new views::StyledLabel(base::string16(), /*listener=*/nullptr);
-  label_->set_auto_color_readability_enabled(false);
+  label_->SetAutoColorReadabilityEnabled(false);
   label_->SetHorizontalAlignment(gfx::HorizontalAlignment::ALIGN_CENTER);
   label_->SetLineHeight(kLineHeightDip);
   AddChildView(label_);

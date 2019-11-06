@@ -102,7 +102,8 @@ public class ConfirmSyncDataStateMachine
         mContext = context;
         mCallback = callback;
 
-        mCurrentlyManaged = SigninManager.get().getManagementDomain() != null;
+        mCurrentlyManaged =
+                IdentityServicesProvider.getSigninManager().getManagementDomain() != null;
 
         mDelegate = new ConfirmSyncDataStateMachineDelegate(mFragmentManager);
 
@@ -163,7 +164,7 @@ public class ConfirmSyncDataStateMachine
                     // This will call back into onConfirm() on success.
                     ConfirmManagedSyncDataDialog.showSwitchFromManagedAccountDialog(this,
                             mFragmentManager, mContext.getResources(),
-                            SigninManager.get().extractDomainName(mOldAccountName), mOldAccountName,
+                            SigninManager.extractDomainName(mOldAccountName), mOldAccountName,
                             mNewAccountName);
                 } else {
                     // This will call back into onConfirm(boolean wipeData) on success.
@@ -192,7 +193,8 @@ public class ConfirmSyncDataStateMachine
     }
 
     private void requestNewAccountManagementStatus() {
-        SigninManager.get().isUserManaged(mNewAccountName, this::setIsNewAccountManaged);
+        IdentityServicesProvider.getSigninManager().isAccountManaged(
+                mNewAccountName, this::setIsNewAccountManaged);
     }
 
     private void setIsNewAccountManaged(Boolean isManaged) {
@@ -215,7 +217,7 @@ public class ConfirmSyncDataStateMachine
             // This will call back into onConfirm on success.
             ConfirmManagedSyncDataDialog.showSignInToManagedAccountDialog(
                     ConfirmSyncDataStateMachine.this, mFragmentManager, mContext.getResources(),
-                    SigninManager.get().extractDomainName(mNewAccountName));
+                    SigninManager.extractDomainName(mNewAccountName));
         } else {
             progress();
         }
@@ -279,4 +281,3 @@ public class ConfirmSyncDataStateMachine
         cancel(false);
     }
 }
-

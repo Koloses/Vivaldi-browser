@@ -10,7 +10,6 @@
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
-#include "ios/chrome/test/app/navigation_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
@@ -57,8 +56,8 @@ const char kHTMLURL[] = "http://test";
   responses[url] = response;
   web::test::SetUpSimpleHttpServer(responses);
 
-  chrome_test_util::LoadUrl(url);
-  [ChromeEarlGrey waitForWebViewContainingText:response];
+  [ChromeEarlGrey loadURL:url];
+  [ChromeEarlGrey waitForWebStateContainingText:response];
 
   [self printCurrentPage];
 }
@@ -70,7 +69,7 @@ const char kHTMLURL[] = "http://test";
 
   web::test::SetUpFileBasedHttpServer();
   GURL url = web::test::HttpServer::MakeUrl(kPDFURL);
-  chrome_test_util::LoadUrl(url);
+  [ChromeEarlGrey loadURL:url waitForCompletion:NO];
 
   [self printCurrentPage];
 }

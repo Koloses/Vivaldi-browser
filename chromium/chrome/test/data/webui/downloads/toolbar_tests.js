@@ -12,9 +12,11 @@ suite('toolbar tests', function() {
       }
     }
 
+    PolymerTest.clearBody();
     toolbar = document.createElement('downloads-toolbar');
     downloads.SearchService.instance_ = new TestSearchService;
     document.body.appendChild(toolbar);
+    document.body.appendChild(document.createElement('cr-toast-manager'));
   });
 
   test('resize closes more options menu', function() {
@@ -34,5 +36,23 @@ suite('toolbar tests', function() {
 
     toolbar.$.toolbar.fire('search-changed', 'a ');  // Same term plus a space.
     assertFalse(toolbar.spinnerActive);
+  });
+
+  test('clear all shown/hidden', () => {
+    const clearAll = toolbar.$$('#moreActionsMenu button');
+    assertTrue(clearAll.hidden);
+    toolbar.hasClearableDownloads = true;
+    assertFalse(clearAll.hidden);
+    toolbar.$.toolbar.getSearchField().setValue('test');
+    assertTrue(clearAll.hidden);
+  });
+
+  test('toast is shown when clear all button clicked', () => {
+    const toastManager = cr.toastManager.getInstance();
+    assertFalse(toastManager.isToastOpen);
+    toolbar.hasClearableDownloads = true;
+    toolbar.$$('#moreActionsMenu button').click();
+    assertTrue(toastManager.isToastOpen);
+    assertFalse(toastManager.isUndoButtonHidden);
   });
 });

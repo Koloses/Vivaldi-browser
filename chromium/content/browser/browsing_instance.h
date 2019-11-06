@@ -90,11 +90,11 @@ class CONTENT_EXPORT BrowsingInstance final
   void RenderProcessHostDestroyed(RenderProcessHost* host) final;
 
   // Get the browser context to which this BrowsingInstance belongs.
-  BrowserContext* browser_context() const { return browser_context_; }
+  BrowserContext* GetBrowserContext() const;
 
-  //  Get the IsolationContext associated with this BrowsingInstance.  This can
-  //  be used to track this BrowsingInstance in other areas of the code, along
-  //  with any other state needed to make isolation decisions.
+  // Get the IsolationContext associated with this BrowsingInstance.  This can
+  // be used to track this BrowsingInstance in other areas of the code, along
+  // with any other state needed to make isolation decisions.
   const IsolationContext& isolation_context() { return isolation_context_; }
 
   // Returns whether this BrowsingInstance has registered a SiteInstance for
@@ -161,6 +161,27 @@ class CONTENT_EXPORT BrowsingInstance final
 
   bool IsDefaultSiteInstance(const SiteInstanceImpl* site_instance) const;
 
+  // Returns true if |site_url| has been used to get a SiteInstance from this
+  // object and the default SiteInstance was returned. This simply indicates
+  // the site may be directed to the default SiteInstance process, but it does
+  // not indicate that the site has already been committed to that process.
+  // Returns false if no request for |site_url| has resulted in this object
+  // returning the default SiteInstance.
+  bool IsSiteInDefaultSiteInstance(const GURL& site_url) const;
+
+  // Attempts to convert |site_instance| into a default SiteInstance,
+  // if |url| can be placed inside a default SiteInstance, and the default
+  // SiteInstance has not already been set for this object.
+  // Returns true if |site_instance| was successfully converted to a default
+  // SiteInstance. Otherwise, returns false.
+  bool TrySettingDefaultSiteInstance(SiteInstanceImpl* site_instance,
+                                     const GURL& url);
+
+  // Helper function used by other methods in this class to ensure consistent
+  // mapping between |url| and site URL.
+  // Note: This should not be used by code outside this class.
+  GURL GetSiteForURL(const GURL& url) const;
+
   // Map of site to SiteInstance, to ensure we only have one SiteInstance per
   // site.
   typedef std::unordered_map<std::string, SiteInstanceImpl*> SiteInstanceMap;
@@ -168,12 +189,11 @@ class CONTENT_EXPORT BrowsingInstance final
   // The next available browser-global BrowsingInstance ID.
   static int next_browsing_instance_id_;
 
-  // Common browser context to which all SiteInstances in this BrowsingInstance
-  // must belong.
-  BrowserContext* const browser_context_;
-
   // The IsolationContext associated with this BrowsingInstance.  This will not
   // change after the BrowsingInstance is constructed.
+  //
+  // This holds a common BrowserContext to which all SiteInstances in this
+  // BrowsingInstance must belong.
   const IsolationContext isolation_context_;
 
   // Map of site to SiteInstance, to ensure we only have one SiteInstance per
@@ -199,8 +219,13 @@ class CONTENT_EXPORT BrowsingInstance final
   // |site_instance_map_| and it does not require a dedicated process.
   // This field and |default_process_| are mutually exclusive and this field
   // should only be set if kProcessSharingWithStrictSiteInstances is not
-  // enabled.
-  scoped_refptr<SiteInstanceImpl> default_site_instance_;
+  // enabled. This is a raw pointer to avoid a reference cycle between the
+  // BrowsingInstance and the SiteInstanceImpl.
+  SiteInstanceImpl* default_site_instance_;
+
+  // Keeps track of the site URLs that this object mapped to the
+  // |default_site_instance_|.
+  std::set<GURL> site_url_set_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingInstance);
 };

@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/paint/background_image_geometry.h"
 #include "third_party/blink/renderer/core/paint/box_border_painter.h"
+#include "third_party/blink/renderer/core/paint/image_element_timing.h"
 #include "third_party/blink/renderer/core/paint/nine_piece_image_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
@@ -18,17 +19,19 @@
 #include "third_party/blink/renderer/core/style/border_edge.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style/shadow_list.h"
+#include "third_party/blink/renderer/core/style/style_fetched_image.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/graphics/scoped_interpolation_quality.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
 void BoxPainterBase::PaintFillLayers(const PaintInfo& paint_info,
                                      const Color& c,
                                      const FillLayer& fill_layer,
-                                     const LayoutRect& rect,
+                                     const PhysicalRect& rect,
                                      BackgroundImageGeometry& geometry,
                                      BackgroundBleedAvoidance bleed) {
   FillLayerOcclusionOutputList reversed_paint_list;
@@ -52,7 +55,7 @@ void BoxPainterBase::PaintFillLayers(const PaintInfo& paint_info,
 }
 
 void BoxPainterBase::PaintNormalBoxShadow(const PaintInfo& info,
-                                          const LayoutRect& paint_rect,
+                                          const PhysicalRect& paint_rect,
                                           const ComputedStyle& style,
                                           bool include_logical_left_edge,
                                           bool include_logical_right_edge,
@@ -62,7 +65,8 @@ void BoxPainterBase::PaintNormalBoxShadow(const PaintInfo& info,
   GraphicsContext& context = info.context;
 
   FloatRoundedRect border = style.GetRoundedBorderFor(
-      paint_rect, include_logical_left_edge, include_logical_right_edge);
+      paint_rect.ToLayoutRect(), include_logical_left_edge,
+      include_logical_right_edge);
 
   bool has_border_radius = style.HasBorderRadius();
   bool has_opaque_background =
@@ -153,25 +157,27 @@ void BoxPainterBase::PaintNormalBoxShadow(const PaintInfo& info,
 
 void BoxPainterBase::PaintInsetBoxShadowWithBorderRect(
     const PaintInfo& info,
-    const LayoutRect& border_rect,
+    const PhysicalRect& border_rect,
     const ComputedStyle& style,
     bool include_logical_left_edge,
     bool include_logical_right_edge) {
   if (!style.BoxShadow())
     return;
-  auto bounds = style.GetRoundedInnerBorderFor(
-      border_rect, include_logical_left_edge, include_logical_right_edge);
+  auto bounds = style.GetRoundedInnerBorderFor(border_rect.ToLayoutRect(),
+                                               include_logical_left_edge,
+                                               include_logical_right_edge);
   PaintInsetBoxShadow(info, bounds, style, include_logical_left_edge,
                       include_logical_right_edge);
 }
 
 void BoxPainterBase::PaintInsetBoxShadowWithInnerRect(
     const PaintInfo& info,
-    const LayoutRect& inner_rect,
+    const PhysicalRect& inner_rect,
     const ComputedStyle& style) {
   if (!style.BoxShadow())
     return;
-  auto bounds = style.GetRoundedInnerBorderFor(inner_rect, LayoutRectOutsets());
+  auto bounds = style.GetRoundedInnerBorderFor(inner_rect.ToLayoutRect(),
+                                               LayoutRectOutsets());
   PaintInsetBoxShadow(info, bounds, style);
 }
 
@@ -420,7 +426,7 @@ void DrawTiledBackground(GraphicsContext& context,
 inline bool PaintFastBottomLayer(Node* node,
                                  const PaintInfo& paint_info,
                                  const BoxPainterBase::FillLayerInfo& info,
-                                 const LayoutRect& rect,
+                                 const PhysicalRect& rect,
                                  const FloatRoundedRect& border_rect,
                                  BackgroundImageGeometry& geometry,
                                  Image* image,
@@ -468,12 +474,12 @@ inline bool PaintFastBottomLayer(Node* node,
       // Phase calculation uses the actual painted location, given by the
       // border-snapped destination rect.
       image_tile = ComputePhaseForBackground(
-          FloatPoint(geometry.SnappedDestRect().Location()),
+          FloatPoint(geometry.SnappedDestRect().offset),
           FloatSize(geometry.TileSize()), geometry.Phase(),
           FloatSize(geometry.SpaceSize()));
 
       // Force the image tile to LayoutUnit precision, which is the precision
-      // it was calcuated in. This avoids bleeding due to values very close to
+      // it was calculated in. This avoids bleeding due to values very close to
       // integers.
       // The test images/sprite-no-bleed.html fails on two of the sub-cases
       // due to this rounding still not being enough to make the Contains check
@@ -518,9 +524,9 @@ inline bool PaintFastBottomLayer(Node* node,
   // this is a generated image sized according to the tile size (which is a
   // snapped value), use the snapped dest rect instead.
   FloatRect dest_rect_for_subset(
-      FloatPoint(geometry.SnappedDestRect().Location()),
-      !has_intrinsic_size ? FloatSize(geometry.SnappedDestRect().Size())
-                          : FloatSize(geometry.UnsnappedDestRect().Size()));
+      FloatPoint(geometry.SnappedDestRect().offset),
+      !has_intrinsic_size ? FloatSize(geometry.SnappedDestRect().size)
+                          : FloatSize(geometry.UnsnappedDestRect().size));
   // Content providers almost always choose source pixels at integer locations,
   // so snap to integers. This is particuarly important for sprite maps.
   // Calculation up to this point, in LayoutUnits, can lead to small variations
@@ -547,10 +553,19 @@ inline bool PaintFastBottomLayer(Node* node,
   if (RuntimeEnabledFeatures::FirstContentfulPaintPlusPlusEnabled()) {
     if (info.image && info.image->IsImageResource()) {
       PaintTimingDetector::NotifyBackgroundImagePaint(
-          node, image,
+          node, image, To<StyleFetchedImage>(info.image.Get()),
           paint_info.context.GetPaintController()
               .CurrentPaintChunkProperties());
     }
+  }
+  if (node &&
+      RuntimeEnabledFeatures::ElementTimingEnabled(&node->GetDocument()) &&
+      info.image && info.image->IsImageResource()) {
+    LocalDOMWindow* window = node->GetDocument().domWindow();
+    DCHECK(window);
+    ImageElementTiming::From(*window).NotifyBackgroundImagePainted(
+        node, To<StyleFetchedImage>(info.image.Get()),
+        context.GetPaintController().CurrentPaintChunkProperties());
   }
   return true;
 }
@@ -559,7 +574,7 @@ inline bool PaintFastBottomLayer(Node* node,
 // border styles, 1/6 border-width for double borders.
 FloatRoundedRect BackgroundRoundedRectAdjustedForBleedAvoidance(
     const ComputedStyle& style,
-    const LayoutRect& border_rect,
+    const PhysicalRect& border_rect,
     bool object_has_multiple_boxes,
     bool include_logical_left_edge,
     bool include_logical_right_edge,
@@ -599,16 +614,16 @@ FloatRoundedRect RoundedBorderRectForClip(
     const ComputedStyle& style,
     const BoxPainterBase::FillLayerInfo& info,
     const FillLayer& bg_layer,
-    const LayoutRect& rect,
+    const PhysicalRect& rect,
     bool object_has_multiple_boxes,
-    const LayoutSize& flow_box_size,
+    const PhysicalSize& flow_box_size,
     BackgroundBleedAvoidance bleed_avoidance,
     LayoutRectOutsets border_padding_insets) {
   if (!info.is_rounded_fill)
     return FloatRoundedRect();
 
   FloatRoundedRect border = style.GetRoundedBorderFor(
-      rect, info.include_left_edge, info.include_right_edge);
+      rect.ToLayoutRect(), info.include_left_edge, info.include_right_edge);
   if (object_has_multiple_boxes) {
     FloatRoundedRect segment_border = style.GetRoundedBorderFor(
         LayoutRect(LayoutPoint(), LayoutSize(FlooredIntSize(flow_box_size))),
@@ -642,7 +657,7 @@ void PaintFillLayerBackground(GraphicsContext& context,
                               Image* image,
                               SkBlendMode composite_op,
                               const BackgroundImageGeometry& geometry,
-                              LayoutRect scrolled_paint_rect) {
+                              const PhysicalRect& scrolled_paint_rect) {
   // Paint the color first underneath all images, culled if background image
   // occludes it.
   // TODO(trchen): In the !bgLayer.hasRepeatXY() case, we could improve the
@@ -664,16 +679,25 @@ void PaintFillLayerBackground(GraphicsContext& context,
                      node, *info.image, FloatRect(image->Rect()),
                      FloatRect(scrolled_paint_rect)));
     DrawTiledBackground(context, image,
-                        FloatSize(geometry.UnsnappedDestRect().Size()),
+                        FloatSize(geometry.UnsnappedDestRect().size),
                         FloatRect(geometry.SnappedDestRect()), geometry.Phase(),
                         FloatSize(geometry.TileSize()), composite_op,
                         FloatSize(geometry.SpaceSize()));
     if (RuntimeEnabledFeatures::FirstContentfulPaintPlusPlusEnabled()) {
       if (info.image && info.image->IsImageResource()) {
         PaintTimingDetector::NotifyBackgroundImagePaint(
-            node, image,
+            node, image, To<StyleFetchedImage>(info.image.Get()),
             context.GetPaintController().CurrentPaintChunkProperties());
       }
+    }
+    if (node &&
+        RuntimeEnabledFeatures::ElementTimingEnabled(&node->GetDocument()) &&
+        info.image && info.image->IsImageResource()) {
+      LocalDOMWindow* window = node->GetDocument().domWindow();
+      DCHECK(window);
+      ImageElementTiming::From(*window).NotifyBackgroundImagePainted(
+          node, To<StyleFetchedImage>(info.image.Get()),
+          context.GetPaintController().CurrentPaintChunkProperties());
     }
   }
 }
@@ -705,11 +729,11 @@ LayoutRectOutsets BoxPainterBase::AdjustedBorderOutsets(
 void BoxPainterBase::PaintFillLayer(const PaintInfo& paint_info,
                                     const Color& color,
                                     const FillLayer& bg_layer,
-                                    const LayoutRect& rect,
+                                    const PhysicalRect& rect,
                                     BackgroundBleedAvoidance bleed_avoidance,
                                     BackgroundImageGeometry& geometry,
                                     bool object_has_multiple_boxes,
-                                    const LayoutSize flow_box_size) {
+                                    const PhysicalSize& flow_box_size) {
   GraphicsContext& context = paint_info.context;
   if (rect.IsEmpty())
     return;
@@ -789,7 +813,7 @@ void BoxPainterBase::PaintFillLayer(const PaintInfo& paint_info,
         break;
 
       // Clip to the padding or content boxes as necessary.
-      LayoutRect clip_rect = scrolled_paint_rect;
+      PhysicalRect clip_rect = scrolled_paint_rect;
       clip_rect.Contract(AdjustOutsetsForEdgeInclusion(border, info));
       if (bg_layer.Clip() == EFillBox::kContent)
         clip_rect.Contract(AdjustOutsetsForEdgeInclusion(padding, info));
@@ -816,8 +840,8 @@ void BoxPainterBase::PaintFillLayerTextFillBox(
     Image* image,
     SkBlendMode composite_op,
     const BackgroundImageGeometry& geometry,
-    const LayoutRect& rect,
-    const LayoutRect& scrolled_paint_rect,
+    const PhysicalRect& rect,
+    const PhysicalRect& scrolled_paint_rect,
     bool object_has_multiple_boxes) {
   // First figure out how big the mask has to be. It should be no bigger
   // than what we need to actually render, so we should intersect the dirty
@@ -839,7 +863,7 @@ void BoxPainterBase::PaintFillLayerTextFillBox(
   // they should just add their contents to the clip.
   context.BeginLayer(1, SkBlendMode::kDstIn);
 
-  PaintTextClipMask(context, mask_rect, scrolled_paint_rect.Location(),
+  PaintTextClipMask(context, mask_rect, scrolled_paint_rect.offset,
                     object_has_multiple_boxes);
 
   context.EndLayer();  // Text mask layer.
@@ -850,7 +874,7 @@ void BoxPainterBase::PaintBorder(const ImageResourceObserver& obj,
                                  const Document& document,
                                  Node* node,
                                  const PaintInfo& info,
-                                 const LayoutRect& rect,
+                                 const PhysicalRect& rect,
                                  const ComputedStyle& style,
                                  BackgroundBleedAvoidance bleed_avoidance,
                                  bool include_logical_left_edge,
@@ -868,7 +892,7 @@ void BoxPainterBase::PaintBorder(const ImageResourceObserver& obj,
 }
 
 void BoxPainterBase::PaintMaskImages(const PaintInfo& paint_info,
-                                     const LayoutRect& paint_rect,
+                                     const PhysicalRect& paint_rect,
                                      const ImageResourceObserver& obj,
                                      BackgroundImageGeometry& geometry,
                                      bool include_logical_left_edge,

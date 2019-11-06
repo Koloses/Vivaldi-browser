@@ -160,7 +160,7 @@ cr.define('certificate_manager', function() {
       id: 'dummySubnodeId',
       name: 'dummySubnodeName',
       policy: false,
-      readonly: false,
+      canBeDeleted: true,
       untrusted: false,
       urlLocked: false,
     };
@@ -302,8 +302,7 @@ cr.define('certificate_manager', function() {
     test('DeleteSuccess', function() {
       assertTrue(dialog.$.dialog.open);
       // Check that the dialog title includes the certificate name.
-      const titleEl =
-          Polymer.dom(dialog.$.dialog).querySelector('[slot=title]');
+      const titleEl = dialog.$.dialog.querySelector('[slot=title]');
       assertTrue(titleEl.textContent.includes(model.name));
 
       // Simulate clicking 'OK'.
@@ -359,7 +358,7 @@ cr.define('certificate_manager', function() {
 
     test('EncryptSuccess', function() {
       const passwordInputElements =
-          Polymer.dom(dialog.$.dialog).querySelectorAll('cr-input');
+          dialog.$.dialog.querySelectorAll('cr-input');
       const passwordInputElement = passwordInputElements[0];
       const confirmPasswordInputElement = passwordInputElements[1];
 
@@ -394,7 +393,7 @@ cr.define('certificate_manager', function() {
       browserProxy.forceCertificatesError();
 
       const passwordInputElements =
-          Polymer.dom(dialog.$.dialog).querySelectorAll('cr-input');
+          dialog.$.dialog.querySelectorAll('cr-input');
       const passwordInputElement = passwordInputElements[0];
       passwordInputElement.value = 'foopassword';
       const confirmPasswordInputElement = passwordInputElements[1];
@@ -434,8 +433,7 @@ cr.define('certificate_manager', function() {
     });
 
     test('DecryptSuccess', function() {
-      const passwordInputElement =
-          Polymer.dom(dialog.$.dialog).querySelector('cr-input');
+      const passwordInputElement = dialog.$.dialog.querySelector('cr-input');
       assertTrue(dialog.$.dialog.open);
 
       // Test that the 'OK' button is enabled even when the password field is
@@ -459,8 +457,7 @@ cr.define('certificate_manager', function() {
     test('DecryptError', function() {
       browserProxy.forceCertificatesError();
       // Simulate entering some password.
-      const passwordInputElement =
-          Polymer.dom(dialog.$.dialog).querySelector('cr-input');
+      const passwordInputElement = dialog.$.dialog.querySelector('cr-input');
       passwordInputElement.value = 'foopassword';
       triggerInputEvent(passwordInputElement);
 
@@ -549,15 +546,9 @@ cr.define('certificate_manager', function() {
       const deleteButton = subentry.shadowRoot.querySelector('#delete');
       assertTrue(!!deleteButton);
 
-      // Should be disabled when 'model.readonly' is true.
+      // Should be disabled when 'model.canBeDeleted' is false.
       let model = createSampleCertificateSubnode();
-      model.readonly = true;
-      subentry.model = model;
-      assertTrue(deleteButton.hidden);
-
-      // Should be disabled when 'model.policy' is true.
-      model = createSampleCertificateSubnode();
-      model.policy = true;
+      model.canBeDeleted = false;
       subentry.model = model;
       assertTrue(deleteButton.hidden);
 
@@ -651,7 +642,7 @@ cr.define('certificate_manager', function() {
      */
     test('Initialization', function() {
       // Trigger all category tabs to be added to the DOM.
-      const paperTabsElement = page.shadowRoot.querySelector('paper-tabs');
+      const paperTabsElement = page.shadowRoot.querySelector('cr-tabs');
       paperTabsElement.selected = CertificateCategoryIndex.PERSONAL;
       Polymer.dom.flush();
       paperTabsElement.selected = CertificateCategoryIndex.SERVER;
@@ -765,6 +756,43 @@ cr.define('certificate_manager', function() {
             certificateType: CertificateType.CA
           }));
     });
+
+    if (cr.isChromeOS) {
+      // Test that ClientCertificateManagementAllowed policy is applied to the
+      // UI.
+      test('ImportButton_ClientPolicy', function() {
+        const paperTabsElement = page.shadowRoot.querySelector('cr-tabs');
+        paperTabsElement.selected = CertificateCategoryIndex.PERSONAL;
+        Polymer.dom.flush();
+        paperTabsElement.selected = CertificateCategoryIndex.CA;
+        Polymer.dom.flush();
+        const certificateLists =
+            page.shadowRoot.querySelectorAll('certificate-list');
+        // Import buttons are shown in the client and CA certificate tabs.
+        let clientImportButton = certificateLists[0].$$('#import');
+        assertFalse(clientImportButton.hidden);
+        let clientImportAndBindButton =
+            certificateLists[0].$$('#importAndBind');
+        assertFalse(clientImportAndBindButton.hidden);
+        let caImportButton = certificateLists[1].$$('#import');
+        assertFalse(caImportButton.hidden);
+
+        return browserProxy.whenCalled('refreshCertificates').then(function() {
+          cr.webUIListenerCallback(
+              'certificates-model-ready', false /* clientImportAllowed */);
+          // Verify that import buttons are hidden in the client certificate
+          // tab.
+          clientImportButton = certificateLists[0].$$('#import');
+          assertTrue(clientImportButton.hidden);
+          clientImportAndBindButton = certificateLists[0].$$('#importAndBind');
+          assertTrue(clientImportAndBindButton.hidden);
+          // Verify that import button is shown in the CA certificate tab.
+          caImportButton = certificateLists[1].$$('#import');
+          assertFalse(caImportButton.hidden);
+        });
+      });
+    }
+
   });
 
   suite('CertificateListTests', function() {

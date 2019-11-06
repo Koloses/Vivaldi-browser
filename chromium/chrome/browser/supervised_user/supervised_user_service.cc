@@ -4,6 +4,7 @@
 
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 
+#include <set>
 #include <utility>
 
 #include "base/bind.h"
@@ -13,6 +14,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/post_task.h"
@@ -32,34 +34,32 @@
 #include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_site_list.h"
 #include "chrome/browser/supervised_user/supervised_user_whitelist_service.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/policy/core/browser/url_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/sync/driver/sync_service.h"
-#include "components/sync/driver/sync_user_settings.h"
+#include "components/signin/public/identity_manager/accounts_mutator.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "extensions/buildflags/buildflags.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "services/identity/public/cpp/accounts_mutator.h"
-#include "services/identity/public/cpp/identity_manager.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
+#include "chromeos/settings/cros_settings_names.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -89,15 +89,29 @@ const char kBlacklistURL[] =
 const char kBlacklistFilename[] = "su-blacklist.bin";
 
 const char* const kCustodianInfoPrefs[] = {
-  prefs::kSupervisedUserCustodianName,
-  prefs::kSupervisedUserCustodianEmail,
-  prefs::kSupervisedUserCustodianProfileImageURL,
-  prefs::kSupervisedUserCustodianProfileURL,
-  prefs::kSupervisedUserSecondCustodianName,
-  prefs::kSupervisedUserSecondCustodianEmail,
-  prefs::kSupervisedUserSecondCustodianProfileImageURL,
-  prefs::kSupervisedUserSecondCustodianProfileURL,
+    prefs::kSupervisedUserCustodianName,
+    prefs::kSupervisedUserCustodianEmail,
+    prefs::kSupervisedUserCustodianObfuscatedGaiaId,
+    prefs::kSupervisedUserCustodianProfileImageURL,
+    prefs::kSupervisedUserCustodianProfileURL,
+    prefs::kSupervisedUserSecondCustodianName,
+    prefs::kSupervisedUserSecondCustodianEmail,
+    prefs::kSupervisedUserSecondCustodianObfuscatedGaiaId,
+    prefs::kSupervisedUserSecondCustodianProfileImageURL,
+    prefs::kSupervisedUserSecondCustodianProfileURL,
 };
+
+void SetupRestrictedCrosSettingForChildUser(
+    std::map<std::string, base::Value>* restricted_prefs) {
+#if defined(OS_CHROMEOS)
+  (*restricted_prefs)[std::string(chromeos::kAccountsPrefAllowGuest)] =
+      base::Value(false);
+  (*restricted_prefs)[std::string(
+      chromeos::kAccountsPrefShowUserNamesOnSignIn)] = base::Value(false);
+  (*restricted_prefs)[std::string(chromeos::kAccountsPrefAllowNewUser)] =
+      base::Value(false);
+#endif  // OS_CHROMEOS
+}
 
 void CreateURLAccessRequest(const GURL& url,
                             PermissionRequestCreator* creator,
@@ -167,22 +181,30 @@ void SupervisedUserService::Init() {
       base::Bind(&SupervisedUserService::OnSupervisedUserIdChanged,
           base::Unretained(this)));
 
-  syncer::SyncService* sync_service =
-      ProfileSyncServiceFactory::GetForProfile(profile_);
-  // Can be null in tests.
-  if (sync_service)
-    sync_service->AddPreferenceProvider(this);
-
-  std::string client_id = component_updater::SupervisedUserWhitelistInstaller::
-      ClientIdForProfilePath(profile_->GetPath());
-  whitelist_service_.reset(new SupervisedUserWhitelistService(
-      profile_->GetPrefs(),
-      g_browser_process->supervised_user_whitelist_installer(), client_id));
   whitelist_service_->AddSiteListsChangedCallback(
       base::Bind(&SupervisedUserService::OnSiteListsChanged,
                  weak_ptr_factory_.GetWeakPtr()));
 
   SetActive(ProfileIsSupervised());
+  SetupRestrictedCrosSettingForChildUser(&child_user_restricted_cros_settings_);
+}
+
+// TODO(crbug/945934) Move the following 2 methods to
+// SupervisedUserCrosSettingProvider.
+bool SupervisedUserService::IsRestrictedCrosSettingForChildUser(
+    const std::string& pref_name) const {
+  if (!profile_->IsChild())
+    return false;
+  return base::Contains(child_user_restricted_cros_settings_, pref_name);
+}
+
+const base::Value*
+SupervisedUserService::GetRestrictedCrosSettingValueForChildUser(
+    const std::string& pref_name) const {
+  auto value = child_user_restricted_cros_settings_.find(pref_name);
+  if (value == child_user_restricted_cros_settings_.end())
+    return nullptr;
+  return &(value->second);
 }
 
 void SupervisedUserService::SetDelegate(Delegate* delegate) {
@@ -218,14 +240,6 @@ void SupervisedUserService::AddURLAccessRequest(const GURL& url,
       base::BindRepeating(CreateURLAccessRequest,
                           policy::url_util::Normalize(effective_url)),
       std::move(callback), 0);
-}
-
-void SupervisedUserService::ReportURL(const GURL& url,
-                                      SuccessCallback callback) {
-  if (url_reporter_)
-    url_reporter_->ReportUrl(url, std::move(callback));
-  else
-    std::move(callback).Run(false);
 }
 
 void SupervisedUserService::AddExtensionInstallRequest(
@@ -289,6 +303,11 @@ std::string SupervisedUserService::GetCustodianEmailAddress() const {
   return email;
 }
 
+std::string SupervisedUserService::GetCustodianObfuscatedGaiaId() const {
+  return profile_->GetPrefs()->GetString(
+      prefs::kSupervisedUserCustodianObfuscatedGaiaId);
+}
+
 std::string SupervisedUserService::GetCustodianName() const {
   std::string name = profile_->GetPrefs()->GetString(
       prefs::kSupervisedUserCustodianName);
@@ -310,6 +329,11 @@ std::string SupervisedUserService::GetCustodianName() const {
 std::string SupervisedUserService::GetSecondCustodianEmailAddress() const {
   return profile_->GetPrefs()->GetString(
       prefs::kSupervisedUserSecondCustodianEmail);
+}
+
+std::string SupervisedUserService::GetSecondCustodianObfuscatedGaiaId() const {
+  return profile_->GetPrefs()->GetString(
+      prefs::kSupervisedUserSecondCustodianObfuscatedGaiaId);
 }
 
 std::string SupervisedUserService::GetSecondCustodianName() const {
@@ -346,11 +370,6 @@ void SupervisedUserService::AddPermissionRequestCreator(
   permissions_creators_.push_back(std::move(creator));
 }
 
-void SupervisedUserService::SetSafeSearchURLReporter(
-    std::unique_ptr<SafeSearchURLReporter> reporter) {
-  url_reporter_ = std::move(reporter);
-}
-
 SupervisedUserService::SupervisedUserService(Profile* profile)
     : profile_(profile),
       active_(false),
@@ -358,15 +377,22 @@ SupervisedUserService::SupervisedUserService(Profile* profile)
       is_profile_active_(false),
       did_init_(false),
       did_shutdown_(false),
-      blacklist_state_(BlacklistLoadState::NOT_LOADED),
+      blacklist_state_(BlacklistLoadState::NOT_LOADED)
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-      registry_observer_(this),
+      ,
+      registry_observer_(this)
 #endif
-      weak_ptr_factory_(this) {
+{
   url_filter_.AddObserver(this);
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   registry_observer_.Add(extensions::ExtensionRegistry::Get(profile));
 #endif
+
+  std::string client_id = component_updater::SupervisedUserWhitelistInstaller::
+      ClientIdForProfilePath(profile_->GetPath());
+  whitelist_service_ = std::make_unique<SupervisedUserWhitelistService>(
+      profile_->GetPrefs(),
+      g_browser_process->supervised_user_whitelist_installer(), client_id);
 }
 
 void SupervisedUserService::SetActive(bool active) {
@@ -378,7 +404,7 @@ void SupervisedUserService::SetActive(bool active) {
     if (active_) {
 #if !defined(OS_ANDROID)
       IdentityManagerFactory::GetForProfile(profile_)
-          ->LegacyLoadCredentialsForSupervisedUser(
+          ->DeprecatedLoadCredentialsForSupervisedUser(
               supervised_users::kSupervisedUserPseudoEmail);
 #else
       NOTREACHED();
@@ -394,10 +420,6 @@ void SupervisedUserService::SetActive(bool active) {
   if (theme_service->UsingDefaultTheme() || theme_service->UsingSystemTheme())
     theme_service->UseDefaultTheme();
 #endif
-
-  syncer::SyncService* sync_service =
-      ProfileSyncServiceFactory::GetForProfile(profile_);
-  sync_service->GetUserSettings()->SetEncryptEverythingAllowed(!active_);
 
   GetSettingsService()->SetActive(active_);
 
@@ -454,7 +476,6 @@ void SupervisedUserService::SetActive(bool active) {
 #endif
   } else {
     permissions_creators_.clear();
-    url_reporter_.reset();
 
     pref_change_registrar_.Remove(
         prefs::kDefaultSupervisedUserFilteringBehavior);
@@ -489,7 +510,8 @@ void SupervisedUserService::OnCustodianInfoChanged() {
 }
 
 SupervisedUserSettingsService* SupervisedUserService::GetSettingsService() {
-  return SupervisedUserSettingsServiceFactory::GetForProfile(profile_);
+  return SupervisedUserSettingsServiceFactory::GetForKey(
+      profile_->GetProfileKey());
 }
 
 size_t SupervisedUserService::FindEnabledPermissionRequestCreator(
@@ -565,12 +587,14 @@ void SupervisedUserService::OnSafeSitesSettingChanged() {
   bool use_online_check =
       supervised_users::IsSafeSitesOnlineCheckEnabled(profile_);
   if (use_online_check != url_filter_.HasAsyncURLChecker()) {
-    if (use_online_check)
+    if (use_online_check) {
       url_filter_.InitAsyncURLChecker(
           content::BrowserContext::GetDefaultStoragePartition(profile_)
-              ->GetURLLoaderFactoryForBrowserProcess());
-    else
+              ->GetURLLoaderFactoryForBrowserProcess(),
+          IdentityManagerFactory::GetForProfile(profile_));
+    } else {
       url_filter_.ClearAsyncURLChecker();
+    }
   }
 }
 
@@ -720,12 +744,6 @@ void SupervisedUserService::Shutdown() {
     base::RecordAction(UserMetricsAction("ManagedUsers_QuitBrowser"));
   }
   SetActive(false);
-
-  syncer::SyncService* sync_service =
-      ProfileSyncServiceFactory::GetForProfile(profile_);
-  // Can be null in tests.
-  if (sync_service)
-    sync_service->RemovePreferenceProvider(this);
 }
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -984,17 +1002,16 @@ void SupervisedUserService::SetExtensionsActive() {
 }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
-syncer::ModelTypeSet SupervisedUserService::GetForcedDataTypes() const {
+syncer::UserSelectableTypeSet SupervisedUserService::GetForcedTypes() const {
   if (!ProfileIsSupervised())
-    return syncer::ModelTypeSet();
+    return syncer::UserSelectableTypeSet();
 
-  syncer::ModelTypeSet result;
-  result.Put(syncer::EXTENSIONS);
-  result.Put(syncer::EXTENSION_SETTINGS);
-  result.Put(syncer::APPS);
-  result.Put(syncer::APP_SETTINGS);
-  result.Put(syncer::APP_LIST);
-  return result;
+  return {syncer::UserSelectableType::kExtensions,
+          syncer::UserSelectableType::kApps};
+}
+
+bool SupervisedUserService::IsEncryptEverythingAllowed() const {
+  return !active_;
 }
 
 #if !defined(OS_ANDROID)

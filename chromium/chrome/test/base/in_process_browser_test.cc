@@ -4,6 +4,8 @@
 
 #include "chrome/test/base/in_process_browser_test.h"
 
+#include <utility>
+
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -49,11 +51,13 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/profiler/main_thread_stack_sampling_profiler.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/test/base/chrome_test_suite.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "components/google/core/common/google_util.h"
 #include "components/os_crypt/os_crypt_mocker.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -66,10 +70,8 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "extensions/buildflags/buildflags.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "ui/display/display_switches.h"
 
 #if defined(OS_MACOSX)
-#include "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "chrome/test/base/scoped_bundle_swizzler_mac.h"
 #endif
@@ -89,16 +91,15 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "ash/test/ui_controls_factory_ash.h"
+#include "ash/public/cpp/test/shell_test_api.h"
+#include "base/system/sys_info.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
-#include "chrome/test/base/default_ash_event_generator_delegate.h"
+#include "chromeos/constants/chromeos_switches.h"
+#include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/services/device_sync/device_sync_impl.h"
 #include "chromeos/services/device_sync/fake_device_sync.h"
-#include "ui/aura/test/mus/change_completion_waiter.h"
-#include "ui/aura/test/ui_controls_factory_aura.h"
-#include "ui/aura/window.h"
-#include "ui/base/test/ui_controls.h"
-#include "ui/base/ui_base_features.h"
+#include "components/user_manager/user_names.h"
+#include "ui/display/display_switches.h"
 #include "ui/events/test/event_generator.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -106,18 +107,12 @@
 #include "ui/views/test/test_desktop_screen_x11.h"
 #endif
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "extensions/browser/extension_api_frame_id_map.h"
-#endif
-
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/test/views/accessibility_checker.h"
+#include "ui/views/views_delegate.h"
 #endif
 
 namespace {
-
-// Passed as value of kTestType.
-const char kBrowserTestType[] = "browser";
 
 #if defined(OS_CHROMEOS)
 class FakeDeviceSyncImplFactory
@@ -128,11 +123,13 @@ class FakeDeviceSyncImplFactory
 
   // chromeos::device_sync::DeviceSyncImpl::Factory:
   std::unique_ptr<chromeos::device_sync::DeviceSyncBase> BuildInstance(
-      identity::IdentityManager* identity_manager,
+      signin::IdentityManager* identity_manager,
       gcm::GCMDriver* gcm_driver,
       service_manager::Connector* connector,
       const chromeos::device_sync::GcmDeviceInfoProvider*
           gcm_device_info_provider,
+      chromeos::device_sync::ClientAppMetadataProvider*
+          client_app_metadata_provider,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       std::unique_ptr<base::OneShotTimer> timer) override {
     return std::make_unique<chromeos::device_sync::FakeDeviceSync>();
@@ -151,34 +148,23 @@ FakeDeviceSyncImplFactory* GetFakeDeviceSyncImplFactory() {
 InProcessBrowserTest::SetUpBrowserFunction*
     InProcessBrowserTest::global_browser_set_up_function_ = nullptr;
 
-InProcessBrowserTest::InProcessBrowserTest()
-    : browser_(NULL),
-      exit_when_last_browser_closes_(true),
-      open_about_blank_on_browser_launch_(true)
-#if defined(OS_MACOSX)
-      ,
-      autorelease_pool_(NULL)
-#endif  // OS_MACOSX
-{
-#if defined(OS_MACOSX)
-  base::mac::SetOverrideAmIBundled(true);
+InProcessBrowserTest::InProcessBrowserTest() {
+  Initialize();
+#if defined(TOOLKIT_VIEWS)
+  views_delegate_ = std::make_unique<AccessibilityChecker>();
+#endif
+}
 
-  base::FilePath file_exe;
-  CHECK(base::PathService::Get(base::FILE_EXE, &file_exe));
+#if defined(TOOLKIT_VIEWS)
+InProcessBrowserTest::InProcessBrowserTest(
+    std::unique_ptr<views::ViewsDelegate> views_delegate) {
+  Initialize();
+  views_delegate_ = std::move(views_delegate);
+}
+#endif
 
-  // Override the path to the running executable to make it look like it is
-  // the browser running as the bundled application.
-  base::FilePath chrome_path =
-      file_exe.DirName().Append(chrome::kBrowserProcessExecutablePath);
-  CHECK(base::PathService::Override(base::FILE_EXE, chrome_path));
-
-  // Then override the path to the child process binaries to point back at
-  // the current test executable, otherwise the FILE_EXE overridden above would
-  // be used to launch children.
-  CHECK(base::PathService::Override(content::CHILD_PROCESS_EXE, file_exe));
-#endif  // defined(OS_MACOSX)
-
-  CreateTestServer(base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+void InProcessBrowserTest::Initialize() {
+  CreateTestServer(GetChromeTestDataDir());
   base::FilePath src_dir;
   CHECK(base::PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
 
@@ -186,19 +172,10 @@ InProcessBrowserTest::InProcessBrowserTest()
   // ContentMain. However that is after tests' constructors or SetUp methods,
   // which sometimes need it. So just override it.
   CHECK(base::PathService::Override(chrome::DIR_TEST_DATA,
-                                    src_dir.AppendASCII("chrome/test/data")));
+                                    src_dir.Append(GetChromeTestDataDir())));
 
 #if defined(OS_MACOSX)
-  bundle_swizzler_.reset(new ScopedBundleSwizzlerMac);
-#endif
-
-#if defined(OS_CHROMEOS)
-  ui::test::EventGeneratorDelegate::SetFactoryFunction(
-      base::BindRepeating(&CreateAshEventGeneratorDelegate));
-#endif
-
-#if defined(TOOLKIT_VIEWS)
-  accessibility_checker_ = std::make_unique<AccessibilityChecker>();
+  bundle_swizzler_ = std::make_unique<ScopedBundleSwizzlerMac>();
 #endif
 }
 
@@ -208,13 +185,17 @@ void InProcessBrowserTest::SetUp() {
   // Browser tests will create their own g_browser_process later.
   DCHECK(!g_browser_process);
 
+  // Initialize sampling profiler in browser tests. This mimics the behavior
+  // in standalone Chrome, where this is done in chrome/app/chrome_main.cc,
+  // which does not get called by browser tests.
+  sampling_profiler_ = std::make_unique<MainThreadStackSamplingProfiler>();
+
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   // Auto-reload breaks many browser tests, which assume error pages won't be
   // reloaded out from under them. Tests that expect or desire this behavior can
-  // append switches::kEnableOfflineAutoReload, which will override the disable
-  // here.
-  command_line->AppendSwitch(switches::kDisableOfflineAutoReload);
+  // append switches::kEnableAutoReload, which will override the disable here.
+  command_line->AppendSwitch(switches::kDisableAutoReload);
 
   // Allow subclasses to change the command line before running any tests.
   SetUpCommandLine(command_line);
@@ -222,7 +203,7 @@ void InProcessBrowserTest::SetUp() {
   SetUpDefaultCommandLine(command_line);
 
   // Create a temporary user data directory if required.
-  ASSERT_TRUE(CreateUserDataDirectory())
+  ASSERT_TRUE(test_launcher_utils::CreateUserDataDir(&temp_user_data_dir_))
       << "Could not create user data directory.";
 
   // Allow subclasses the opportunity to make changes to the default user data
@@ -231,16 +212,36 @@ void InProcessBrowserTest::SetUp() {
       << "Could not set up user data directory.";
 
 #if defined(OS_CHROMEOS)
-  // Make sure that the log directory exists.
-  base::FilePath log_dir = logging::GetSessionLogDir(*command_line);
-  base::CreateDirectory(log_dir);
+  // No need to redirect log for test.
+  command_line->AppendSwitch(switches::kDisableLoggingRedirect);
+
   // Disable IME extension loading to avoid many browser tests failures.
   chromeos::input_method::DisableExtensionLoading();
-  if (!command_line->HasSwitch(switches::kHostWindowBounds)) {
+
+  if (!command_line->HasSwitch(switches::kHostWindowBounds) &&
+      !base::SysInfo::IsRunningOnChromeOS()) {
     // Adjusting window location & size so that the ash desktop window fits
-    // inside the Xvfb'x default resolution.
+    // inside the Xvfb's default resolution. Only do that when not running
+    // on device. Otherwise, device display is not properly configured.
     command_line->AppendSwitchASCII(switches::kHostWindowBounds,
                                     "0+0-1280x800");
+  }
+
+  // Default to run in a signed in session of stub user if tests do not run
+  // in the login screen (--login-manager), or logged in user session
+  // (--login-user), or the guest session (--bwsi). This is essentially
+  // the same as in ChromeBrowserMainPartsChromeos::PreEarlyInitialization
+  // but it will be done on device and only for tests.
+  if (!command_line->HasSwitch(chromeos::switches::kLoginManager) &&
+      !command_line->HasSwitch(chromeos::switches::kLoginUser) &&
+      !command_line->HasSwitch(chromeos::switches::kGuestSession)) {
+    command_line->AppendSwitchASCII(
+        chromeos::switches::kLoginUser,
+        cryptohome::Identification(user_manager::StubAccountId()).id());
+    if (!command_line->HasSwitch(chromeos::switches::kLoginProfile)) {
+      command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile,
+                                      chrome::kTestUserProfileDir);
+    }
   }
 #endif
 
@@ -269,6 +270,10 @@ void InProcessBrowserTest::SetUp() {
   // access to all files here since browser_tests and interactive_ui_tests
   // rely on the ability to open any files via file: scheme.
   ChromeNetworkDelegate::EnableAccessToAllFilesForTesting(true);
+
+  // Using a screenshot for clamshell to tablet mode transitions makes the flow
+  // async which we want to disable for most tests.
+  ash::ShellTestApi::SetTabletControllerUseScreenshotForTest(false);
 #endif  // defined(OS_CHROMEOS)
 
   // Use hardcoded quota settings to have a consistent testing environment.
@@ -289,39 +294,13 @@ void InProcessBrowserTest::SetUp() {
 
 void InProcessBrowserTest::SetUpDefaultCommandLine(
     base::CommandLine* command_line) {
-  // Propagate commandline settings from test_launcher_utils.
   test_launcher_utils::PrepareBrowserCommandLineForTests(command_line);
-
-  // This is a Browser test.
-  command_line->AppendSwitchASCII(switches::kTestType, kBrowserTestType);
-
-  // Use an sRGB color profile to ensure that the machine's color profile does
-  // not affect the results.
-  command_line->AppendSwitchASCII(switches::kForceDisplayColorProfile, "srgb");
+  test_launcher_utils::PrepareBrowserCommandLineForBrowserTests(
+      command_line, open_about_blank_on_browser_launch_);
 
   // TODO(pkotwicz): Investigate if we can remove this switch.
   if (exit_when_last_browser_closes_)
     command_line->AppendSwitch(switches::kDisableZeroBrowsersOpenForTests);
-
-  if (open_about_blank_on_browser_launch_ && command_line->GetArgs().empty())
-    command_line->AppendArg(url::kAboutBlankURL);
-}
-
-bool InProcessBrowserTest::CreateUserDataDirectory() {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  base::FilePath user_data_dir =
-      command_line->GetSwitchValuePath(switches::kUserDataDir);
-  if (user_data_dir.empty()) {
-    if (temp_user_data_dir_.CreateUniqueTempDir() &&
-        temp_user_data_dir_.IsValid()) {
-      user_data_dir = temp_user_data_dir_.GetPath();
-    } else {
-      LOG(ERROR) << "Could not create temporary user data directory \""
-                 << temp_user_data_dir_.GetPath().value() << "\".";
-      return false;
-    }
-  }
-  return test_launcher_utils::OverrideUserDataDir(user_data_dir);
 }
 
 void InProcessBrowserTest::TearDown() {
@@ -334,14 +313,6 @@ void InProcessBrowserTest::TearDown() {
   OSCryptMocker::TearDown();
   ChromeContentBrowserClient::SetDefaultQuotaSettingsForTesting(nullptr);
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // By now, all the WebContents should be destroyed, Ensure that we are not
-  // leaking memory in ExtensionAPIFrameIdMap. crbug.com/817205.
-  EXPECT_EQ(
-      0u,
-      extensions::ExtensionApiFrameIdMap::Get()->GetFrameDataCountForTesting());
-#endif
-
 #if defined(OS_CHROMEOS)
   chromeos::device_sync::DeviceSyncImpl::Factory::SetInstanceForTesting(
       nullptr);
@@ -349,14 +320,8 @@ void InProcessBrowserTest::TearDown() {
 }
 
 void InProcessBrowserTest::CloseBrowserSynchronously(Browser* browser) {
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_BROWSER_CLOSED,
-      content::Source<Browser>(browser));
   CloseBrowserAsynchronously(browser);
-  observer.Wait();
-#if defined(OS_CHROMEOS)
-  aura::test::WaitForAllChangesToComplete();
-#endif
+  ui_test_utils::WaitForBrowserToClose(browser);
 }
 
 void InProcessBrowserTest::CloseBrowserAsynchronously(Browser* browser) {
@@ -378,7 +343,7 @@ void InProcessBrowserTest::CloseAllBrowsers() {
 }
 
 void InProcessBrowserTest::RunUntilBrowserProcessQuits() {
-  std::move(run_loop_)->Run();
+  std::exchange(run_loop_, nullptr)->Run();
 }
 
 // TODO(alexmos): This function should expose success of the underlying
@@ -403,10 +368,9 @@ void InProcessBrowserTest::AddTabAtIndexToBrowser(
   }
 }
 
-void InProcessBrowserTest::AddTabAtIndex(
-    int index,
-    const GURL& url,
-    ui::PageTransition transition) {
+void InProcessBrowserTest::AddTabAtIndex(int index,
+                                         const GURL& url,
+                                         ui::PageTransition transition) {
   AddTabAtIndexToBrowser(browser(), index, url, transition, true);
 }
 
@@ -467,9 +431,8 @@ Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
   return browser;
 }
 
-Browser* InProcessBrowserTest::CreateBrowserForApp(
-    const std::string& app_name,
-    Profile* profile) {
+Browser* InProcessBrowserTest::CreateBrowserForApp(const std::string& app_name,
+                                                   Profile* profile) {
   Browser* browser = new Browser(Browser::CreateParams::CreateForApp(
       app_name, false /* trusted_source */, gfx::Rect(), profile, true));
   AddBlankTabAndShow(browser);
@@ -481,8 +444,7 @@ void InProcessBrowserTest::AddBlankTabAndShow(Browser* browser) {
   content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
-  chrome::AddSelectedTabWithURL(browser,
-                                GURL(url::kAboutBlankURL),
+  chrome::AddSelectedTabWithURL(browser, GURL(url::kAboutBlankURL),
                                 ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
   observer.Wait();
 
@@ -512,6 +474,10 @@ base::CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
 }
 #endif
 
+base::FilePath InProcessBrowserTest::GetChromeTestDataDir() const {
+  return base::FilePath(FILE_PATH_LITERAL("chrome/test/data"));
+}
+
 void InProcessBrowserTest::PreRunTestOnMainThread() {
   AfterStartupTaskUtils::SetBrowserStartupIsCompleteForTesting();
 
@@ -534,21 +500,6 @@ void InProcessBrowserTest::PreRunTestOnMainThread() {
     content::WaitForLoadStop(tab);
     SetInitialWebContents(tab);
   }
-
-#if defined(OS_CHROMEOS)
-  // OobeTest and LoginCursorTest do not have the browser window but wants to
-  // interact with its UI through UIControls -- and those UI are actually for
-  // Ash (login / lock screen / oobe). Thus AshUIControls should be created for
-  // such test.
-  aura::WindowTreeHost* host = nullptr;
-  if (features::IsUsingWindowService() && browser_)
-    host = browser_->window()->GetNativeWindow()->GetHost();
-
-  if (host)
-    ui_controls::InstallUIControlsAura(aura::test::CreateUIControlsAura(host));
-  else
-    ui_controls::InstallUIControlsAura(ash::test::CreateAshUIControls());
-#endif
 
 #if !defined(OS_ANDROID)
   // Do not use the real StorageMonitor for tests, which introduces another
@@ -586,8 +537,8 @@ void InProcessBrowserTest::PostRunTestOnMainThread() {
 
   // Sometimes tests leave Quit tasks in the MessageLoop (for shame), so let's
   // run all pending messages here to avoid preempting the QuitBrowsers tasks.
-  // TODO(jbates) Once crbug.com/134753 is fixed, this can be removed because it
-  // will not be possible to post Quit tasks.
+  // TODO(https://crbug.com/922118): Remove this once it is no longer possible
+  // to post QuitCurrent* tasks.
   content::RunAllPendingInMessageLoop();
 
   QuitBrowsers();

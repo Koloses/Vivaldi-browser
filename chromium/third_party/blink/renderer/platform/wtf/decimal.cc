@@ -34,7 +34,7 @@
 #include <cfloat>
 
 #include "base/macros.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -127,6 +127,8 @@ Decimal SpecialValueHandler::Value() const {
 
 // This class is used for 128 bit unsigned integer arithmetic.
 class UInt128 {
+  STACK_ALLOCATED();
+
  public:
   UInt128(uint64_t low, uint64_t high) : high_(high), low_(low) {}
 
@@ -997,12 +999,11 @@ Decimal Decimal::Zero(Sign sign) {
 
 std::ostream& operator<<(std::ostream& ostream, const Decimal& decimal) {
   Decimal::EncodedData data = decimal.Value();
-  return ostream << "encode("
-                 << String::Number(data.Coefficient()).Ascii().data() << ", "
-                 << String::Number(data.Exponent()).Ascii().data() << ", "
+  return ostream << "encode(" << String::Number(data.Coefficient()).Ascii()
+                 << ", " << String::Number(data.Exponent()).Ascii() << ", "
                  << (data.GetSign() == Decimal::kNegative ? "Negative"
                                                           : "Positive")
-                 << ")=" << decimal.ToString().Ascii().data();
+                 << ")=" << decimal.ToString().Ascii();
 }
 
 }  // namespace blink

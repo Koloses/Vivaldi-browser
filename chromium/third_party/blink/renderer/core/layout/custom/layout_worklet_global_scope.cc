@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/main_thread_debugger.h"
@@ -32,9 +33,7 @@ LayoutWorkletGlobalScope* LayoutWorkletGlobalScope::Create(
   auto* global_scope = MakeGarbageCollected<LayoutWorkletGlobalScope>(
       frame, std::move(creation_params), reporting_proxy,
       pending_layout_registry);
-  // TODO(bashi): Handle a case where the script controller fails to initialize.
-  global_scope->ScriptController()->InitializeContext(global_scope->Name(),
-                                                      NullURL());
+  global_scope->ScriptController()->Initialize(NullURL());
   MainThreadDebugger::Instance()->ContextCreated(
       global_scope->ScriptController()->GetScriptState(),
       global_scope->GetFrame(), global_scope->DocumentSecurityOrigin());
@@ -46,7 +45,13 @@ LayoutWorkletGlobalScope::LayoutWorkletGlobalScope(
     std::unique_ptr<GlobalScopeCreationParams> creation_params,
     WorkerReportingProxy& reporting_proxy,
     PendingLayoutRegistry* pending_layout_registry)
-    : WorkletGlobalScope(std::move(creation_params), reporting_proxy, frame),
+    : WorkletGlobalScope(std::move(creation_params),
+                         reporting_proxy,
+                         frame,
+                         // Enable a separate microtask queue for LayoutWorklet.
+                         // TODO(yutak): Set agent for all worklets and workers,
+                         // not just LayoutWorklet.
+                         Agent::CreateForWorkerOrWorklet(ToIsolate(frame))),
       pending_layout_registry_(pending_layout_registry) {}
 
 LayoutWorkletGlobalScope::~LayoutWorkletGlobalScope() = default;
@@ -72,6 +77,12 @@ void LayoutWorkletGlobalScope::registerLayout(
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
         "A class with name:'" + name + "' is already registered.");
+    return;
+  }
+
+  if (!layout_ctor->IsConstructor()) {
+    exception_state.ThrowTypeError(
+        "The provided callback is not a constructor.");
     return;
   }
 

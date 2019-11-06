@@ -45,10 +45,6 @@ jumbo_component("services") {
     "mojo_decryptor_service.h",
     "mojo_demuxer_stream_adapter.cc",
     "mojo_demuxer_stream_adapter.h",
-    "mojo_jpeg_decode_accelerator_service.cc",
-    "mojo_jpeg_decode_accelerator_service.h",
-    "mojo_jpeg_encode_accelerator_service.cc",
-    "mojo_jpeg_encode_accelerator_service.h",
     "mojo_media_client.cc",
     "mojo_media_client.h",
     "mojo_media_log.cc",
@@ -95,7 +91,6 @@ jumbo_component("services") {
     "//gpu/ipc/service",
     "//media",
     "//media:shared_memory_support",
-    "//media/cdm:cdm_manager",
     "//media/gpu",
     "//media/gpu:buildflags",
     "//media/gpu/ipc/service",
@@ -167,6 +162,7 @@ source_set("media_manifest") {
   ]
   deps = [
     "//base",
+    "//media/mojo:buildflags",
     "//media/mojo/interfaces",
     "//media/mojo/interfaces:constants",
     "//services/service_manager/public/cpp",
@@ -188,7 +184,6 @@ source_set("unit_tests") {
     "mojo_audio_input_stream_unittest.cc",
     "mojo_audio_output_stream_provider_unittest.cc",
     "mojo_audio_output_stream_unittest.cc",
-    "mojo_jpeg_decode_accelerator_service_unittest.cc",
     "mojo_video_encode_accelerator_service_unittest.cc",
     "test_helpers.cc",
     "test_helpers.h",
@@ -220,6 +215,12 @@ source_set("unit_tests") {
     ]
 
     deps += [ "//media/cdm:cdm_api" ]
+  }
+
+  if (is_chromeos) {
+    deps += [
+      "//components/chromeos_camera:mjpeg_decode_accelerator_service_unittest",
+    ]
   }
 }
 

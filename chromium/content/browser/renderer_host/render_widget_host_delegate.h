@@ -41,6 +41,7 @@ class Sample;
 namespace content {
 
 class BrowserAccessibilityManager;
+class RenderFrameHostImpl;
 class RenderWidgetHostImpl;
 class RenderWidgetHostInputEventRouter;
 class RenderViewHostDelegateView;
@@ -193,6 +194,12 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // warning shown to the user.
   virtual void RendererResponsive(RenderWidgetHostImpl* render_widget_host) {}
 
+  // Notification that a cross-process subframe on this page has crashed, and a
+  // sad frame is shown if the subframe was visible.  |frame_visibility|
+  // specifies whether the subframe is visible, scrolled out of view, or hidden
+  // (e.g., with "display: none").
+  virtual void SubframeCrashed(blink::mojom::FrameVisibility visibility) {}
+
   // Requests to lock the mouse. Once the request is approved or rejected,
   // GotResponseToLockMouseRequest() will be called on the requesting render
   // widget host. |privileged| means that the request is always granted, used
@@ -322,6 +329,14 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // Returns an object that will override handling of Text Input and Mouse
   // Lock events from the renderer.
   virtual InputEventShim* GetInputEventShim() const;
+
+  // Notifies all renderers in a page about changes to the size of the visible
+  // viewport.
+  virtual void NotifyVisibleViewportSizeChanged(
+      const gfx::Size& visible_viewport_size) {}
+
+  // Returns the focused frame across all delegates, or nullptr if none.
+  virtual RenderFrameHostImpl* GetFocusedFrameFromFocusedDelegate();
 
  protected:
   virtual ~RenderWidgetHostDelegate() {}

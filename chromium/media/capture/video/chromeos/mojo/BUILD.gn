@@ -15,7 +15,11 @@ mojom("cros_camera") {
   ]
 
   deps = [
+    "//components/chromeos_camera/common",
     "//media/capture/mojom:image_capture",
     "//media/mojo/interfaces",
   ]
+
+  # TODO(https://crbug.com/968369): Change to use new names.
+  use_old_js_lite_bindings_names = true
 }

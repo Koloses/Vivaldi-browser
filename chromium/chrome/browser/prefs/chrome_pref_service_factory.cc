@@ -49,7 +49,7 @@
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/search_engines/default_search_manager.h"
 #include "components/search_engines/search_engines_pref_names.h"
-#include "components/signin/core/browser/signin_pref_names.h"
+#include "components/signin/public/base/signin_pref_names.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/pref_names.h"
 #include "components/sync_preferences/pref_model_associator.h"
@@ -318,9 +318,6 @@ std::unique_ptr<ProfilePrefStoreManager> CreateProfilePrefStoreManager(
   // As part of improving pref metrics on other platforms we may want to find
   // ways to defer preference loading until the device ID can be used.
   rlz_lib::GetMachineId(&legacy_device_id);
-
-  UMA_HISTOGRAM_BOOLEAN("Settings.LegacyMachineIdGenerationSuccess",
-                        !legacy_device_id.empty());
 #endif
   std::string seed;
   CHECK(ui::ResourceBundle::HasSharedInstance());
@@ -430,6 +427,7 @@ std::unique_ptr<sync_preferences::PrefServiceSyncable> CreateProfilePrefs(
     SupervisedUserSettingsService* supervised_user_settings,
     scoped_refptr<PrefStore> extension_prefs,
     scoped_refptr<user_prefs::PrefRegistrySyncable> pref_registry,
+    policy::BrowserPolicyConnector* connector,
     bool async,
     scoped_refptr<base::SequencedTaskRunner> io_task_runner,
     std::unique_ptr<PrefValueStore::Delegate> delegate) {
@@ -449,8 +447,7 @@ std::unique_ptr<sync_preferences::PrefServiceSyncable> CreateProfilePrefs(
               std::move(validation_delegate));
   PrepareFactory(&factory, profile_path, policy_service,
                  supervised_user_settings, std::move(user_pref_store),
-                 std::move(extension_prefs), async,
-                 g_browser_process->browser_policy_connector());
+                 std::move(extension_prefs), async, connector);
   return factory.CreateSyncable(std::move(pref_registry), std::move(delegate));
 }
 

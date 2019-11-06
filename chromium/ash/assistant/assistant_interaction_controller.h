@@ -70,7 +70,8 @@ class AssistantInteractionController
   void OnCommittedQueryChanged(const AssistantQuery& assistant_query) override;
 
   // AssistantUiModelObserver:
-  void OnUiModeChanged(AssistantUiMode ui_mode) override;
+  void OnUiModeChanged(AssistantUiMode ui_mode,
+                       bool due_to_interaction) override;
   void OnUiVisibilityChanged(
       AssistantVisibility new_visibility,
       AssistantVisibility old_visibility,
@@ -90,7 +91,7 @@ class AssistantInteractionController
   void OnSuggestionsResponse(
       std::vector<AssistantSuggestionPtr> response) override;
   void OnTextResponse(const std::string& response) override;
-  void OnOpenUrlResponse(const GURL& url) override;
+  void OnOpenUrlResponse(const GURL& url, bool in_background) override;
   void OnSpeechRecognitionStarted() override;
   void OnSpeechRecognitionIntermediateResult(
       const std::string& high_confidence_text,
@@ -99,6 +100,7 @@ class AssistantInteractionController
   void OnSpeechRecognitionFinalResult(const std::string& final_result) override;
   void OnSpeechLevelUpdated(float speech_level) override;
   void OnTtsStarted(bool due_to_error) override;
+  void OnWaitStarted() override;
 
   // AssistantViewDelegateObserver:
   void OnDialogPlateButtonPressed(AssistantButtonId id) override;
@@ -122,7 +124,6 @@ class AssistantInteractionController
   void StartVoiceInteraction();
   void StopActiveInteraction(bool cancel_conversation);
 
-  void OpenUrl(const GURL& url);
 
   AssistantController* const assistant_controller_;  // Owned by Shell.
 

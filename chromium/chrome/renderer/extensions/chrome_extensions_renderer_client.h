@@ -64,6 +64,10 @@ class ChromeExtensionsRendererClient
   void OnExtensionUnloaded(
       const extensions::ExtensionId& extension_id) override;
 
+  bool ExtensionAPIEnabledForServiceWorkerScript(
+      const GURL& scope,
+      const GURL& script_url) const override;
+
   // See ChromeContentRendererClient methods with the same names.
   void RenderThreadStarted();
   void RenderFrameCreated(content::RenderFrame* render_frame,
@@ -93,6 +97,8 @@ class ChromeExtensionsRendererClient
       const content::WebPluginInfo& info,
       const std::string& mime_type,
       const GURL& original_url);
+  static void DidBlockMimeHandlerViewForDisallowedPlugin(
+      const blink::WebElement& plugin_element);
   static bool MaybeCreateMimeHandlerView(
       const blink::WebElement& plugin_element,
       const GURL& resource_url,

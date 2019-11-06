@@ -44,9 +44,6 @@
 using InstantProcessNavigationTest = ChromeRenderViewTest;
 using ChromeContentRendererClientSearchBoxTest = ChromeRenderViewTest;
 
-const base::FilePath::CharType kDocRoot[] =
-    FILE_PATH_LITERAL("chrome/test/data");
-
 const char kHtmlWithIframe[] ="<iframe srcdoc=\"Nothing here\"></iframe>";
 
 // Tests that renderer-initiated navigations from an Instant render process get
@@ -90,7 +87,8 @@ TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
   // Load a page that contains an iframe.
   LoadHTML(kHtmlWithIframe);
 
-  ChromeContentRendererClient client;
+  ChromeContentRendererClient* client =
+      static_cast<ChromeContentRendererClient*>(content_renderer_client_.get());
 
   // Create a thumbnail URL containing the correct render view ID and an
   // arbitrary instant restricted ID.
@@ -101,9 +99,9 @@ TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
   GURL result;
   bool attach_same_site_cookies;
   // Make sure the SearchBox rewrites a thumbnail request from the main frame.
-  client.WillSendRequest(GetMainFrame(), ui::PAGE_TRANSITION_LINK,
-                         blink::WebURL(thumbnail_url), nullptr, &result,
-                         &attach_same_site_cookies);
+  client->WillSendRequest(GetMainFrame(), ui::PAGE_TRANSITION_LINK,
+                          blink::WebURL(thumbnail_url), nullptr, &result,
+                          &attach_same_site_cookies);
   EXPECT_NE(result, thumbnail_url);
 
   // Make sure the SearchBox rewrites a thumbnail request from the iframe.
@@ -112,9 +110,9 @@ TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
   ASSERT_TRUE(child_frame->IsWebLocalFrame());
   blink::WebLocalFrame* local_child =
       static_cast<blink::WebLocalFrame*>(child_frame);
-  client.WillSendRequest(local_child, ui::PAGE_TRANSITION_LINK,
-                         blink::WebURL(thumbnail_url), nullptr, &result,
-                         &attach_same_site_cookies);
+  client->WillSendRequest(local_child, ui::PAGE_TRANSITION_LINK,
+                          blink::WebURL(thumbnail_url), nullptr, &result,
+                          &attach_same_site_cookies);
   EXPECT_NE(result, thumbnail_url);
 }
 
@@ -181,7 +179,7 @@ class ChromeContentRendererClientBrowserTest :
   void SetUpOnMainThread() override {
     host_resolver()->AddRule("*", "127.0.0.1");
 
-    https_server_->ServeFilesFromSourceDirectory(base::FilePath(kDocRoot));
+    https_server_->ServeFilesFromSourceDirectory(GetChromeTestDataDir());
     https_server_->RegisterRequestMonitor(base::Bind(
         &ChromeContentRendererClientBrowserTest::MonitorRequestHandler,
         base::Unretained(this)));

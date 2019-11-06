@@ -28,10 +28,11 @@ namespace content {
 
 AXImageAnnotator::AXImageAnnotator(
     RenderAccessibilityImpl* const render_accessibility,
+    const std::string& preferred_language,
     image_annotation::mojom::AnnotatorPtr annotator_ptr)
     : render_accessibility_(render_accessibility),
-      annotator_ptr_(std::move(annotator_ptr)),
-      weak_factory_(this) {
+      preferred_language_(preferred_language),
+      annotator_ptr_(std::move(annotator_ptr)) {
   DCHECK(render_accessibility_);
 }
 
@@ -68,12 +69,12 @@ bool AXImageAnnotator::HasAnnotationInCache(blink::WebAXObject& image) const {
 
 bool AXImageAnnotator::HasImageInCache(const blink::WebAXObject& image) const {
   DCHECK(!image.IsDetached());
-  return base::ContainsKey(image_annotations_, image.AxID());
+  return base::Contains(image_annotations_, image.AxID());
 }
 
 void AXImageAnnotator::OnImageAdded(blink::WebAXObject& image) {
   DCHECK(!image.IsDetached());
-  DCHECK(!base::ContainsKey(image_annotations_, image.AxID()));
+  DCHECK(!base::Contains(image_annotations_, image.AxID()));
   const std::string image_id = GenerateImageSourceId(image);
   if (image_id.empty())
     return;
@@ -82,16 +83,16 @@ void AXImageAnnotator::OnImageAdded(blink::WebAXObject& image) {
   ImageInfo& image_info = image_annotations_.at(image.AxID());
   // Fetch image annotation.
   annotator_ptr_->AnnotateImage(
-      image_id, image_info.GetImageProcessor(),
+      image_id, preferred_language_, image_info.GetImageProcessor(),
       base::BindOnce(&AXImageAnnotator::OnImageAnnotated,
                      weak_factory_.GetWeakPtr(), image));
-  VLOG(1) << "Requesting annotation for " << image_id << " from page "
-          << GetDocumentUrl();
+  VLOG(1) << "Requesting annotation for " << image_id << " with language '"
+          << preferred_language_ << "' from page " << GetDocumentUrl();
 }
 
 void AXImageAnnotator::OnImageUpdated(blink::WebAXObject& image) {
   DCHECK(!image.IsDetached());
-  DCHECK(base::ContainsKey(image_annotations_, image.AxID()));
+  DCHECK(base::Contains(image_annotations_, image.AxID()));
   const std::string image_id = GenerateImageSourceId(image);
   if (image_id.empty())
     return;
@@ -99,7 +100,7 @@ void AXImageAnnotator::OnImageUpdated(blink::WebAXObject& image) {
   ImageInfo& image_info = image_annotations_.at(image.AxID());
   // Update annotation.
   annotator_ptr_->AnnotateImage(
-      image_id, image_info.GetImageProcessor(),
+      image_id, preferred_language_, image_info.GetImageProcessor(),
       base::BindOnce(&AXImageAnnotator::OnImageAnnotated,
                      weak_factory_.GetWeakPtr(), image));
 }
@@ -176,7 +177,7 @@ void AXImageAnnotator::MarkDirty(const blink::WebAXObject& image) const {
   blink::WebAXObject parent = image.ParentObject();
   for (int ancestor_count = 0; !parent.IsDetached() && ancestor_count < 2;
        parent = parent.ParentObject()) {
-    if (!parent.AccessibilityIsIgnored()) {
+    if (parent.AccessibilityIsIncludedInTree()) {
       ++ancestor_count;
       if (parent.Role() == ax::mojom::Role::kLink ||
           parent.Role() == ax::mojom::Role::kRootWebArea) {
@@ -204,10 +205,12 @@ AXImageAnnotator::ImageInfo::GetImageProcessor() {
 bool AXImageAnnotator::ImageInfo::HasAnnotation() const {
   switch (status_) {
     case ax::mojom::ImageAnnotationStatus::kNone:
+    case ax::mojom::ImageAnnotationStatus::kWillNotAnnotateDueToScheme:
     case ax::mojom::ImageAnnotationStatus::kIneligibleForAnnotation:
     // The user hasn't requested an annotation yet, or a previously pending
     // annotation request had been cancelled.
     case ax::mojom::ImageAnnotationStatus::kEligibleForAnnotation:
+    case ax::mojom::ImageAnnotationStatus::kSilentlyEligibleForAnnotation:
     case ax::mojom::ImageAnnotationStatus::kAnnotationPending:
       return false;
     case ax::mojom::ImageAnnotationStatus::kAnnotationSucceeded:
@@ -238,7 +241,7 @@ SkBitmap AXImageAnnotator::GetImageData(const blink::WebAXObject& image) {
 void AXImageAnnotator::OnImageAnnotated(
     const blink::WebAXObject& image,
     image_annotation::mojom::AnnotateImageResultPtr result) {
-  if (!base::ContainsKey(image_annotations_, image.AxID()))
+  if (!base::Contains(image_annotations_, image.AxID()))
     return;
 
   if (image.IsDetached()) {
@@ -252,9 +255,14 @@ void AXImageAnnotator::OnImageAnnotated(
     DLOG(WARNING) << "Image annotation error.";
     switch (result->get_error_code()) {
       case image_annotation::mojom::AnnotateImageError::kCanceled:
+        // By marking the image as having an annotation status of
+        // kSilentlyEligibleForAnnotation and not one of
+        // kEligibleForAnnotation:, the user will not be asked to visit the
+        // context menu to turn on automatic image labels, because there is no
+        // way to repeat the operation from that menu yet.
         image_annotations_.at(image.AxID())
-            .set_status(
-                ax::mojom::ImageAnnotationStatus::kEligibleForAnnotation);
+            .set_status(ax::mojom::ImageAnnotationStatus::
+                            kSilentlyEligibleForAnnotation);
         break;
       case image_annotation::mojom::AnnotateImageError::kFailure:
         image_annotations_.at(image.AxID())

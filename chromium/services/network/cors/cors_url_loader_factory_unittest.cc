@@ -18,8 +18,8 @@
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
-#include "services/network/resource_scheduler.h"
-#include "services/network/resource_scheduler_client.h"
+#include "services/network/resource_scheduler/resource_scheduler.h"
+#include "services/network/resource_scheduler/resource_scheduler_client.h"
 #include "services/network/test/test_url_loader_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -118,11 +118,9 @@ class CorsURLLoaderFactoryTest : public testing::Test {
 TEST_F(CorsURLLoaderFactoryTest, DestructionOrder) {
   ResourceRequest request;
   GURL url("http://localhost");
-  request.fetch_request_mode = mojom::FetchRequestMode::kNoCors;
-  request.fetch_credentials_mode = mojom::FetchCredentialsMode::kOmit;
-  request.load_flags |= net::LOAD_DO_NOT_SAVE_COOKIES;
-  request.load_flags |= net::LOAD_DO_NOT_SEND_COOKIES;
-  request.load_flags |= net::LOAD_DO_NOT_SEND_AUTH_DATA;
+  request.mode = mojom::RequestMode::kNoCors;
+  request.credentials_mode = mojom::CredentialsMode::kOmit;
+  request.allow_credentials = false;
   request.method = net::HttpRequestHeaders::kGetMethod;
   request.url = url;
   request.request_initiator = url::Origin::Create(url);

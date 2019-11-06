@@ -21,7 +21,8 @@
 #include "content/browser/bluetooth/bluetooth_allowed_devices_map.h"
 #include "content/browser/broadcast_channel/broadcast_channel_provider.h"
 #include "content/browser/cache_storage/cache_storage_context_impl.h"
-#include "content/browser/devtools/devtools_background_services_context.h"
+#include "content/browser/content_index/content_index_context_impl.h"
+#include "content/browser/devtools/devtools_background_services_context_impl.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/idle/idle_manager.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
@@ -52,6 +53,8 @@ class CookieStoreContext;
 class BlobRegistryWrapper;
 class PrefetchURLLoaderService;
 class GeneratedCodeCacheContext;
+class NativeFileSystemEntryFactory;
+class NativeFileSystemManagerImpl;
 
 class CONTENT_EXPORT StoragePartitionImpl
     : public StoragePartition,
@@ -82,6 +85,9 @@ class CONTENT_EXPORT StoragePartitionImpl
       storage::QuotaManager* quota_manager);
   void OverrideSpecialStoragePolicyForTesting(
       storage::SpecialStoragePolicy* special_storage_policy);
+  void ShutdownBackgroundSyncContextForTesting();
+  void OverrideBackgroundSyncContextForTesting(
+      BackgroundSyncContextImpl* background_sync_context);
 
   // StoragePartition interface.
   base::FilePath GetPath() override;
@@ -90,9 +96,18 @@ class CONTENT_EXPORT StoragePartitionImpl
   network::mojom::NetworkContext* GetNetworkContext() override;
   scoped_refptr<network::SharedURLLoaderFactory>
   GetURLLoaderFactoryForBrowserProcess() override;
+  scoped_refptr<network::SharedURLLoaderFactory>
+  GetURLLoaderFactoryForBrowserProcessWithCORBEnabled() override;
   std::unique_ptr<network::SharedURLLoaderFactoryInfo>
   GetURLLoaderFactoryForBrowserProcessIOThread() override;
   network::mojom::CookieManager* GetCookieManagerForBrowserProcess() override;
+  void CreateRestrictedCookieManager(
+      network::mojom::RestrictedCookieManagerRole role,
+      const url::Origin& origin,
+      bool is_service_worker,
+      int process_id,
+      int routing_id,
+      network::mojom::RestrictedCookieManagerRequest request) override;
   storage::QuotaManager* GetQuotaManager() override;
   ChromeAppCacheService* GetAppCacheService() override;
   BackgroundSyncContextImpl* GetBackgroundSyncContext() override;
@@ -102,10 +117,14 @@ class CONTENT_EXPORT StoragePartitionImpl
   IdleManager* GetIdleManager();
   LockManager* GetLockManager();  // override; TODO: Add to interface
   IndexedDBContextImpl* GetIndexedDBContext() override;
+  NativeFileSystemEntryFactory* GetNativeFileSystemEntryFactory() override;
   CacheStorageContextImpl* GetCacheStorageContext() override;
   ServiceWorkerContextWrapper* GetServiceWorkerContext() override;
   SharedWorkerServiceImpl* GetSharedWorkerService() override;
   GeneratedCodeCacheContext* GetGeneratedCodeCacheContext() override;
+  DevToolsBackgroundServicesContextImpl* GetDevToolsBackgroundServicesContext()
+      override;
+  ContentIndexContextImpl* GetContentIndexContext() override;
 #if !defined(OS_ANDROID)
   HostZoomMap* GetHostZoomMap() override;
   HostZoomLevelContext* GetHostZoomLevelContext() override;
@@ -144,7 +163,6 @@ class CONTENT_EXPORT StoragePartitionImpl
   void ClearBluetoothAllowedDevicesMapForTesting() override;
   void FlushNetworkInterfaceForTesting() override;
   void WaitForDeletionTasksForTesting() override;
-
   BackgroundFetchContext* GetBackgroundFetchContext();
   PaymentAppContextImpl* GetPaymentAppContext();
   BroadcastChannelProvider* GetBroadcastChannelProvider();
@@ -152,7 +170,7 @@ class CONTENT_EXPORT StoragePartitionImpl
   BlobRegistryWrapper* GetBlobRegistry();
   PrefetchURLLoaderService* GetPrefetchURLLoaderService();
   CookieStoreContext* GetCookieStoreContext();
-  DevToolsBackgroundServicesContext* GetDevToolsBackgroundServicesContext();
+  NativeFileSystemManagerImpl* GetNativeFileSystemManager();
 
   // blink::mojom::StoragePartitionService interface.
   void OpenLocalStorage(const url::Origin& origin,
@@ -168,6 +186,26 @@ class CONTENT_EXPORT StoragePartitionImpl
   void OnCanSendDomainReliabilityUpload(
       const GURL& origin,
       OnCanSendDomainReliabilityUploadCallback callback) override;
+  void OnClearSiteData(uint32_t process_id,
+                       int32_t routing_id,
+                       const GURL& url,
+                       const std::string& header_value,
+                       int load_flags,
+                       OnClearSiteDataCallback callback) override;
+  void OnCookiesChanged(
+      bool is_service_worker,
+      int32_t process_id,
+      int32_t routing_id,
+      const GURL& url,
+      const GURL& site_for_cookies,
+      const std::vector<net::CookieWithStatus>& cookie_list) override;
+  void OnCookiesRead(
+      bool is_service_worker,
+      int32_t process_id,
+      int32_t routing_id,
+      const GURL& url,
+      const GURL& site_for_cookies,
+      const std::vector<net::CookieWithStatus>& cookie_list) override;
 
   scoped_refptr<URLLoaderFactoryGetter> url_loader_factory_getter() {
     return url_loader_factory_getter_;
@@ -201,6 +239,15 @@ class CONTENT_EXPORT StoragePartitionImpl
     return site_for_service_worker_;
   }
 
+  // Use the network context to retrieve the origin policy manager.
+  network::mojom::OriginPolicyManager*
+  GetOriginPolicyManagerForBrowserProcess();
+
+  // Override the origin policy manager for testing use only.
+  void SetOriginPolicyManagerForBrowserProcessForTesting(
+      network::mojom::OriginPolicyManagerPtr test_origin_policy_manager);
+  void ResetOriginPolicyManagerForBrowserProcessForTesting();
+
  private:
   class DataDeletionHelper;
   class QuotaManagedDataDeletionHelper;
@@ -208,9 +255,10 @@ class CONTENT_EXPORT StoragePartitionImpl
   class URLLoaderFactoryForBrowserProcess;
 
   friend class BackgroundSyncManagerTest;
-  friend class BackgroundSyncServiceImplTest;
+  friend class BackgroundSyncServiceImplTestHarness;
   friend class CookieStoreManagerTest;
   friend class PaymentAppContentUnitTestBase;
+  friend class ServiceWorkerRegistrationTest;
   friend class StoragePartitionImplMap;
   friend class URLLoaderFactoryForBrowserProcess;
   FRIEND_TEST_ALL_PREFIXES(StoragePartitionShaderClearTest, ClearShaderCache);
@@ -303,7 +351,7 @@ class CONTENT_EXPORT StoragePartitionImpl
   void InitNetworkContext();
 
   network::mojom::URLLoaderFactory*
-  GetURLLoaderFactoryForBrowserProcessInternal();
+  GetURLLoaderFactoryForBrowserProcessInternal(bool corb_enabled);
 
   // |is_in_memory_| and |relative_partition_path_| are cached from
   // |StoragePartitionImpl::Create()| in order to re-create |NetworkContext|.
@@ -339,8 +387,10 @@ class CONTENT_EXPORT StoragePartitionImpl
   scoped_refptr<PrefetchURLLoaderService> prefetch_url_loader_service_;
   scoped_refptr<CookieStoreContext> cookie_store_context_;
   scoped_refptr<GeneratedCodeCacheContext> generated_code_cache_context_;
-  scoped_refptr<DevToolsBackgroundServicesContext>
+  scoped_refptr<DevToolsBackgroundServicesContextImpl>
       devtools_background_services_context_;
+  scoped_refptr<NativeFileSystemManagerImpl> native_file_system_manager_;
+  scoped_refptr<ContentIndexContextImpl> content_index_context_;
 
   // BindingSet for StoragePartitionService, using the process id as the
   // binding context type. The process id can subsequently be used during
@@ -360,6 +410,8 @@ class CONTENT_EXPORT StoragePartitionImpl
 
   scoped_refptr<URLLoaderFactoryForBrowserProcess>
       shared_url_loader_factory_for_browser_process_;
+  scoped_refptr<URLLoaderFactoryForBrowserProcess>
+      shared_url_loader_factory_for_browser_process_with_corb_;
 
   // URLLoaderFactory/CookieManager for use in the browser process only.
   // See the method comment for
@@ -367,7 +419,12 @@ class CONTENT_EXPORT StoragePartitionImpl
   // more details
   network::mojom::URLLoaderFactoryPtr url_loader_factory_for_browser_process_;
   bool is_test_url_loader_factory_for_browser_process_ = false;
+  network::mojom::URLLoaderFactoryPtr
+      url_loader_factory_for_browser_process_with_corb_;
+  bool is_test_url_loader_factory_for_browser_process_with_corb_ = false;
   network::mojom::CookieManagerPtr cookie_manager_for_browser_process_;
+  network::mojom::OriginPolicyManagerPtr
+      origin_policy_manager_for_browser_process_;
 
   // When the network service is disabled, a NetworkContext is created on the IO
   // thread that wraps access to the URLRequestContext.
@@ -384,12 +441,12 @@ class CONTENT_EXPORT StoragePartitionImpl
   // Track number of running deletion. For test use only.
   int deletion_helpers_running_;
 
-  bool is_vivaldi_;
+  bool is_vivaldi_ = false;
 
   // Called when all deletions are done. For test use only.
   base::OnceClosure on_deletion_helpers_done_callback_;
 
-  base::WeakPtrFactory<StoragePartitionImpl> weak_factory_;
+  base::WeakPtrFactory<StoragePartitionImpl> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(StoragePartitionImpl);
 };

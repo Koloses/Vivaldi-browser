@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/data_pipe_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/network/form_data_encoder.h"
+#include "third_party/blink/renderer/platform/network/wrapped_data_pipe_getter.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_codec.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
@@ -92,7 +93,7 @@ class SimpleFormDataBytesConsumer : public BytesConsumer {
     Vector<char> data;
     form_data_->Flatten(data);
     form_data_ = nullptr;
-    std::unique_ptr<BlobData> blob_data = BlobData::Create();
+    auto blob_data = std::make_unique<BlobData>();
     blob_data->AppendBytes(data.data(), data.size());
     auto length = blob_data->length();
     state_ = PublicState::kClosed;
@@ -399,7 +400,7 @@ class ComplexFormDataBytesConsumer final : public BytesConsumer {
       return;
     }
 
-    std::unique_ptr<BlobData> blob_data = BlobData::Create();
+    auto blob_data = std::make_unique<BlobData>();
     for (const auto& element : form_data_->Elements()) {
       switch (element.type_) {
         case FormDataElement::kData:
@@ -486,7 +487,7 @@ class ComplexFormDataBytesConsumer final : public BytesConsumer {
 
  private:
   scoped_refptr<EncodedFormData> form_data_;
-  TraceWrapperMember<BytesConsumer> blob_bytes_consumer_;
+  Member<BytesConsumer> blob_bytes_consumer_;
 };
 
 }  // namespace

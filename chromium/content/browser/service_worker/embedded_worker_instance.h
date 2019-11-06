@@ -24,6 +24,8 @@
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
@@ -36,6 +38,7 @@
 
 namespace content {
 
+class RenderProcessHost;
 class ServiceWorkerContentSettingsProxyImpl;
 class ServiceWorkerContextCore;
 class ServiceWorkerVersion;
@@ -111,7 +114,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
                                    int column_number,
                                    const GURL& source_url) {}
     virtual void OnReportConsoleMessage(
-        int source_identifier,
+        blink::mojom::ConsoleMessageSource source,
         blink::mojom::ConsoleMessageLevel message_level,
         const base::string16& message,
         int line_number,
@@ -228,7 +231,20 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   // changes such that the decision might change.
   void UpdateForegroundPriority();
 
+  // Pushes updated URL loader factories to the worker -- e.g. when DevTools
+  // network interception is enabled.
+  void UpdateLoaderFactories(
+      std::unique_ptr<blink::URLLoaderFactoryBundleInfo> script_bundle,
+      std::unique_ptr<blink::URLLoaderFactoryBundleInfo> subresource_bundle);
+
   base::WeakPtr<EmbeddedWorkerInstance> AsWeakPtr();
+
+  // The below can only be called on the UI thread. The returned factory may be
+  // later supplied to UpdateLoaderFactories().
+  static std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+  CreateFactoryBundleOnUI(RenderProcessHost* rph,
+                          int routing_id,
+                          const url::Origin& origin);
 
  private:
   typedef base::ObserverList<Listener>::Unchecked ListenerList;
@@ -254,17 +270,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
       bool wait_for_debugger);
 
   // Sends the StartWorker message to the renderer.
-  //
-  // |cache_storage| is an optional optimization so the service worker can
-  // use the Cache Storage API immediately upon startup.
-  //
-  // S13nServiceWorker:
-  // |factory| is used for loading non-installed scripts. It can internally be a
-  // bundle of factories instead of just the direct network factory to support
-  // non-NetworkService schemes like chrome-extension:// URLs.
-  void SendStartWorker(blink::mojom::EmbeddedWorkerStartParamsPtr params,
-                       scoped_refptr<network::SharedURLLoaderFactory> factory,
-                       blink::mojom::CacheStoragePtrInfo cache_storage);
+  void SendStartWorker(blink::mojom::EmbeddedWorkerStartParamsPtr params);
 
   // Implements blink::mojom::EmbeddedWorkerInstanceHost.
   // These functions all run on the IO thread.
@@ -285,7 +291,7 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
                          int line_number,
                          int column_number,
                          const GURL& source_url) override;
-  void OnReportConsoleMessage(int source_identifier,
+  void OnReportConsoleMessage(blink::mojom::ConsoleMessageSource source,
                               blink::mojom::ConsoleMessageLevel message_level,
                               const base::string16& message,
                               int line_number,
@@ -304,6 +310,9 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
   // Called on the IO thread and dispatches task to the UI thread.
   void NotifyForegroundServiceWorkerAdded();
   void NotifyForegroundServiceWorkerRemoved();
+
+  network::mojom::URLLoaderFactoryPtrInfo MakeScriptLoaderFactoryPtrInfo(
+      std::unique_ptr<blink::URLLoaderFactoryBundleInfo> script_bundle);
 
   base::WeakPtr<ServiceWorkerContextCore> context_;
   ServiceWorkerVersion* owner_version_;
@@ -349,7 +358,18 @@ class CONTENT_EXPORT EmbeddedWorkerInstance
       ServiceWorkerMetrics::StartSituation::UNKNOWN;
 
   std::unique_ptr<ServiceWorkerContentSettingsProxyImpl> content_settings_;
-  base::WeakPtrFactory<EmbeddedWorkerInstance> weak_factory_;
+
+  mojo::StrongBindingPtr<network::mojom::URLLoaderFactory>
+      script_loader_factory_;
+
+  const scoped_refptr<base::SequencedTaskRunner> ui_task_runner_;
+
+  // Remote interface to talk to a running service worker. Used to update
+  // subresource loader factories in the service worker.
+  mojo::Remote<blink::mojom::ServiceWorkerSubresourceLoaderUpdater>
+      subresource_loader_updater_;
+
+  base::WeakPtrFactory<EmbeddedWorkerInstance> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(EmbeddedWorkerInstance);
 };

@@ -25,7 +25,7 @@ import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabAttributeKeys;
 import org.chromium.chrome.browser.tab.TabAttributes;
-import org.chromium.chrome.browser.tab.TabBrowserControlsOffsetHelper;
+import org.chromium.chrome.browser.tab.TabBrowserControlsState;
 import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.BrowserControlsState;
@@ -42,8 +42,7 @@ import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
  * The presenter that displays a single tab modal dialog.
  */
 public class TabModalPresenter
-        extends ModalDialogManager.Presenter implements TabBrowserControlsOffsetHelper.Observer,
-                                                        ChromeFullscreenManager.FullscreenListener {
+        extends ModalDialogManager.Presenter implements ChromeFullscreenManager.FullscreenListener {
     private static final int ENTER_EXIT_ANIMATION_DURATION_MS = 200;
 
     /** The activity displaying the dialogs. */
@@ -120,8 +119,7 @@ public class TabModalPresenter
     }
 
     public void destroy() {
-        if (mChromeFullscreenManager != null) mChromeFullscreenManager.removeListener(this);
-
+        mChromeFullscreenManager.removeListener(this);
     }
 
     // ModalDialogManager.Presenter implementation.
@@ -139,7 +137,7 @@ public class TabModalPresenter
 
         setBrowserControlsAccess(true);
         // Don't show the dialog container before browser controls are guaranteed fully visible.
-        if (getControlsOffsetHelper().areBrowserControlsFullyVisible()) {
+        if (mChromeFullscreenManager.areBrowserControlsFullyVisible()) {
             runEnterAnimation(mDialogView);
         } else {
             mRunEnterAnimationOnCallback = true;
@@ -167,25 +165,20 @@ public class TabModalPresenter
         mDialogView = null;
     }
 
-    // TabBrowserControlsOffsetHelper.Observer implementation.
-
-    @Override
-    public void onBrowserControlsFullyVisible(Tab tab) {
-        if (getDialogModel() == null) return;
-        assert mActiveTab == tab;
-        if (mRunEnterAnimationOnCallback) {
-            mRunEnterAnimationOnCallback = false;
-            runEnterAnimation(mDialogView);
-        }
-    }
-
     // ChromeFullscreenManager.FullscreenListener implementation.
 
     @Override
     public void onContentOffsetChanged(int offset) {}
 
     @Override
-    public void onControlsOffsetChanged(int topOffset, int bottomOffset, boolean needsAnimate) {}
+    public void onControlsOffsetChanged(int topOffset, int bottomOffset, boolean needsAnimate) {
+        if (getDialogModel() == null || !mRunEnterAnimationOnCallback
+                || !mChromeFullscreenManager.areBrowserControlsFullyVisible()) {
+            return;
+        }
+        mRunEnterAnimationOnCallback = false;
+        runEnterAnimation(mDialogView);
+    }
 
     @Override
     public void onToggleOverlayVideoMode(boolean enabled) {}
@@ -194,10 +187,6 @@ public class TabModalPresenter
     public void onBottomControlsHeightChanged(int bottomControlsHeight) {
         mBottomControlsHeight = bottomControlsHeight;
         mShouldUpdateContainerLayoutParams = true;
-    }
-
-    private TabBrowserControlsOffsetHelper getControlsOffsetHelper() {
-        return TabBrowserControlsOffsetHelper.from(mActiveTab);
     }
 
     /**
@@ -236,6 +225,10 @@ public class TabModalPresenter
 
         mDialogContainer = (ViewGroup) dialogContainerStub.inflate();
         mDialogContainer.setVisibility(View.GONE);
+
+        // Make sure clicks are not consumed by content beneath the container view.
+        mDialogContainer.setClickable(true);
+
         mContainerParent = (ViewGroup) mDialogContainer.getParent();
         // The default sibling view is the next view of the dialog container stub in main.xml and
         // should not be removed from its parent.
@@ -284,14 +277,13 @@ public class TabModalPresenter
      * @param restricted Whether the browser controls access should be restricted.
      */
     private void setBrowserControlsAccess(boolean restricted) {
-        View menuButton = mChromeActivity.getToolbarManager().getMenuButton();
+        View menuButton = mChromeActivity.getToolbarManager().getMenuButtonView();
 
         if (restricted) {
             mActiveTab = mChromeActivity.getActivityTab();
             assert mActiveTab
                     != null : "Tab modal dialogs should be shown on top of an active tab.";
 
-            getControlsOffsetHelper().addObserver(this);
             // Hide contextual search panel so that bottom toolbar will not be
             // obscured and back press is not overridden.
             ContextualSearchManager contextualSearchManager =
@@ -312,8 +304,10 @@ public class TabModalPresenter
                 mDidClearTextControls = true;
             }
 
+            // TODO(https://crbug.com/956260): Provide AppMenuHandler rather than pulling off
+            // ToolbarManager.
             // Hide app menu in case it is opened.
-            mChromeActivity.getAppMenuHandler().hideAppMenu();
+            mChromeActivity.getToolbarManager().getAppMenuHandler().hideAppMenu();
 
             // Force toolbar to show and disable overflow menu.
             onTabModalDialogStateChanged(true);
@@ -322,7 +316,6 @@ public class TabModalPresenter
 
             menuButton.setEnabled(false);
         } else {
-            getControlsOffsetHelper().removeObserver(this);
             // Show the action bar back if it was dismissed when the dialogs were showing.
             if (mDidClearTextControls) {
                 mDidClearTextControls = false;
@@ -346,13 +339,15 @@ public class TabModalPresenter
     private void onTabModalDialogStateChanged(boolean isShowing) {
         TabAttributes.from(mActiveTab).set(TabAttributeKeys.MODAL_DIALOG_SHOWING, isShowing);
 
+        // Make sure to exit fullscreen mode before showing the tab modal dialog view.
+        if (isShowing) mActiveTab.exitFullscreenMode();
+
         // Also need to update browser control state after dismissal to refresh the constraints.
-        TabBrowserControlsOffsetHelper offsetHelper = getControlsOffsetHelper();
         if (isShowing && mActiveTab.areRendererInputEventsIgnored()) {
-            offsetHelper.showAndroidControls(true);
+            mChromeFullscreenManager.showAndroidControls(true);
         } else {
-            mActiveTab.updateBrowserControlsState(
-                    BrowserControlsState.SHOWN, !offsetHelper.isControlsOffsetOverridden());
+            TabBrowserControlsState.update(mActiveTab, BrowserControlsState.SHOWN,
+                    !mChromeFullscreenManager.offsetOverridden());
         }
     }
 

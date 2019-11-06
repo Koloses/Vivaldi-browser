@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.preferences;
 
-import android.content.Context;
 import android.content.SharedPreferences;
 import android.support.annotation.Nullable;
 import android.util.Log;
@@ -14,10 +13,11 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.ContentSettingsType;
+import org.chromium.chrome.browser.browsing_data.TimePeriod;
 import org.chromium.chrome.browser.download.DownloadPromptStatus;
 import org.chromium.chrome.browser.preferences.languages.LanguageItem;
 import org.chromium.chrome.browser.preferences.website.ContentSettingException;
-import org.chromium.chrome.browser.search_engines.TemplateUrlService;
+import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -97,8 +97,10 @@ public class PrefServiceBridge {
         if (sInstance == null) {
             sInstance = new PrefServiceBridge();
 
+            // TODO(wnwen): Check while refactoring TemplateUrlService whether this belongs here.
+            // This is necessary as far as ensuring that TemplateUrlService is loaded at some point.
             // Put initialization here to make instantiation in unit tests easier.
-            TemplateUrlService.getInstance().load();
+            TemplateUrlServiceFactory.get().load();
         }
         return sInstance;
     }
@@ -129,7 +131,7 @@ public class PrefServiceBridge {
     /**
      * Migrates (synchronously) the preferences to the most recent version.
      */
-    public void migratePreferences(Context context) {
+    public void migratePreferences() {
         SharedPreferences preferences = ContextUtils.getAppSharedPreferences();
         int currentVersion = preferences.getInt(MIGRATION_PREF_KEY, 0);
         if (currentVersion == MIGRATION_CURRENT_VERSION) return;
@@ -357,13 +359,6 @@ public class PrefServiceBridge {
     }
 
     /**
-     * Resets translate defaults if needed
-     */
-    public void resetTranslateDefaults() {
-        nativeResetTranslateDefaults();
-    }
-
-    /**
      * @return the last account id associated with sync.
      */
     public String getSyncLastAccountId() {
@@ -588,10 +583,9 @@ public class PrefServiceBridge {
      * Gets the time period for which browsing data will be deleted.
      * @param clearBrowsingDataTab Indicates if this is a timeperiod on the default, basic or
      *      advanced tab to apply the right preference.
-     * @return The currently selected browsing data deletion time period (from the shared enum
-     *      {@link org.chromium.chrome.browser.browsing_data.TimePeriod}).
+     * @return The currently selected browsing data deletion time period.
      */
-    public int getBrowsingDataDeletionTimePeriod(int clearBrowsingDataTab) {
+    public @TimePeriod int getBrowsingDataDeletionTimePeriod(int clearBrowsingDataTab) {
         return nativeGetBrowsingDataDeletionTimePeriod(clearBrowsingDataTab);
     }
 
@@ -599,10 +593,10 @@ public class PrefServiceBridge {
      * Sets the time period for which browsing data will be deleted.
      * @param clearBrowsingDataTab Indicates if this is a timeperiod on the default, basic or
      *      advanced tab to apply the right preference.
-     * @param timePeriod The selected browsing data deletion time period (from the shared enum
-     *      {@link org.chromium.chrome.browser.browsing_data.TimePeriod}).
+     * @param timePeriod The selected browsing data deletion time period.
      */
-    public void setBrowsingDataDeletionTimePeriod(int clearBrowsingDataTab, int timePeriod) {
+    public void setBrowsingDataDeletionTimePeriod(
+            int clearBrowsingDataTab, @TimePeriod int timePeriod) {
         nativeSetBrowsingDataDeletionTimePeriod(clearBrowsingDataTab, timePeriod);
     }
 
@@ -673,6 +667,7 @@ public class PrefServiceBridge {
 
         switch (contentSettingsType) {
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_ADS:
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_BLUETOOTH_SCANNING:
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT:
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS:
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_USB_GUARD:
@@ -728,6 +723,7 @@ public class PrefServiceBridge {
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS:
             // Returns true if websites are allowed to request permission to access USB devices.
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_USB_GUARD:
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_BLUETOOTH_SCANNING:
                 return isContentSettingEnabled(contentSettingsType);
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
                 return nativeGetAutomaticDownloadsEnabled();
@@ -1105,7 +1101,6 @@ public class PrefServiceBridge {
     private native boolean nativeGetSoundEnabled();
     private native boolean nativeGetSupervisedUserSafeSitesEnabled();
     private native void nativeSetTranslateEnabled(boolean enabled);
-    private native void nativeResetTranslateDefaults();
     private native void nativeMigrateJavascriptPreference();
     private native boolean nativeGetBrowsingDataDeletionPreference(
             int dataType, int clearBrowsingDataTab);

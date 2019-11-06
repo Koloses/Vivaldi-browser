@@ -254,10 +254,10 @@ class MockSocketFactory : public ClientSocketFactory {
     return nullptr;
   }
   std::unique_ptr<SSLClientSocket> CreateSSLClientSocket(
+      SSLClientContext* context,
       std::unique_ptr<StreamSocket> stream_socket,
       const HostPortPair& host_and_port,
-      const SSLConfig& ssl_config,
-      const SSLClientSocketContext& context) override {
+      const SSLConfig& ssl_config) override {
     ADD_FAILURE() << "Called CreateSSLClientSocket()";
     return nullptr;
   }
@@ -271,7 +271,6 @@ class MockSocketFactory : public ClientSocketFactory {
       bool using_spdy,
       NextProto negotiated_protocol,
       ProxyDelegate* proxy_delegate,
-      bool is_https_proxy,
       const NetworkTrafficAnnotationTag& traffic_annotation) override {
     ADD_FAILURE() << "Called CreateProxyClientSocket()";
     return nullptr;

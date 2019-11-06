@@ -4,8 +4,10 @@
 
 package org.chromium.webapk.shell_apk;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
@@ -20,6 +22,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.TypedValue;
+import android.view.Display;
+import android.view.Surface;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -27,6 +31,7 @@ import android.widget.TextView;
 
 import org.chromium.webapk.lib.common.WebApkMetaDataKeys;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -272,5 +277,81 @@ public class WebApkUtils {
                 .setAction(Intent.ACTION_VIEW)
                 .addCategory(Intent.CATEGORY_BROWSABLE)
                 .setData(Uri.parse("http://"));
+    }
+
+    public static void finishAndRemoveTask(Activity activity) {
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.LOLLIPOP) {
+            activity.finishAndRemoveTask();
+        } else {
+            activity.finish();
+        }
+    }
+
+    public static String getNotificationChannelName(Context context) {
+        return context.getString(R.string.notification_channel_name);
+    }
+
+    public static int getNotificationSmallIconId() {
+        return R.drawable.notification_badge;
+    }
+
+    /** Computes the screen lock orientation from the passed-in metadata and the display size.  */
+    public static int computeScreenLockOrientationFromMetaData(Context context, Bundle metadata) {
+        String orientation = metadata.getString(WebApkMetaDataKeys.ORIENTATION);
+        if (orientation == null) {
+            return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+        } else if (orientation.equals("portrait-primary")) {
+            return ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+        } else if (orientation.equals("portrait-secondary")) {
+            return ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT;
+        } else if (orientation.equals("landscape-primary")) {
+            return ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+        } else if (orientation.equals("landscape-secondary")) {
+            return ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE;
+        } else if (orientation.equals("portrait")) {
+            return ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT;
+        } else if (orientation.equals("landscape")) {
+            return ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE;
+        } else if (orientation.equals("any")) {
+            return ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR;
+        } else if (orientation.equals("natural")) {
+            WindowManager windowManager =
+                    (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+            Display display = windowManager.getDefaultDisplay();
+            int rotation = display.getRotation();
+            if (rotation == Surface.ROTATION_0 || rotation == Surface.ROTATION_180) {
+                if (display.getHeight() >= display.getWidth()) {
+                    return ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+                }
+                return ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+            } else {
+                if (display.getHeight() < display.getWidth()) {
+                    return ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+                }
+                return ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+            }
+        } else {
+            return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+        }
+    }
+
+    /** Grants the host browser permission to the shared files if any. */
+    public static void grantUriPermissionToHostBrowserIfShare(
+            Context context, HostBrowserLauncherParams params) {
+        if (params.getSelectedShareTargetActivityClassName() == null) return;
+
+        Intent originalIntent = params.getOriginalIntent();
+        ArrayList<Uri> uris = originalIntent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+        if (uris == null) {
+            uris = new ArrayList<>();
+            Uri uri = originalIntent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (uri != null) {
+                uris.add(uri);
+            }
+        }
+        for (Uri uri : uris) {
+            context.grantUriPermission(
+                    params.getHostBrowserPackageName(), uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        }
     }
 }

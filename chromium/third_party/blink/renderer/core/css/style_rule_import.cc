@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/loader/resource/css_style_sheet_resource.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
@@ -32,19 +33,16 @@
 
 namespace blink {
 
-StyleRuleImport* StyleRuleImport::Create(const String& href,
-                                         scoped_refptr<MediaQuerySet> media) {
-  return MakeGarbageCollected<StyleRuleImport>(href, media);
-}
-
 StyleRuleImport::StyleRuleImport(const String& href,
-                                 scoped_refptr<MediaQuerySet> media)
+                                 scoped_refptr<MediaQuerySet> media,
+                                 OriginClean origin_clean)
     : StyleRuleBase(kImport),
       parent_style_sheet_(nullptr),
       style_sheet_client_(MakeGarbageCollected<ImportedStyleSheetClient>(this)),
       str_href_(href),
       media_queries_(media),
-      loading_(false) {
+      loading_(false),
+      origin_clean_(origin_clean) {
   if (!media_queries_)
     media_queries_ = MediaQuerySet::Create(String());
 }
@@ -78,14 +76,14 @@ void StyleRuleImport::NotifyFinished(Resource* resource) {
     document = parent_style_sheet_->SingleOwnerDocument();
     context = parent_style_sheet_->ParserContext();
   }
-  context = CSSParserContext::Create(
+  context = MakeGarbageCollected<CSSParserContext>(
       context, cached_style_sheet->GetResponse().ResponseUrl(),
       cached_style_sheet->GetResponse().IsCorsSameOrigin(),
       cached_style_sheet->GetReferrerPolicy(), cached_style_sheet->Encoding(),
       document);
 
-  style_sheet_ =
-      StyleSheetContents::Create(this, cached_style_sheet->Url(), context);
+  style_sheet_ = MakeGarbageCollected<StyleSheetContents>(
+      context, cached_style_sheet->Url(), this);
 
   style_sheet_->ParseAuthorStyleSheet(
       cached_style_sheet, document ? document->GetSecurityOrigin() : nullptr);
@@ -137,6 +135,7 @@ void StyleRuleImport::RequestStyleSheet() {
   options.initiator_info.name = fetch_initiator_type_names::kCSS;
   FetchParameters params(ResourceRequest(abs_url), options);
   params.SetCharset(parent_style_sheet_->Charset());
+  params.SetFromOriginDirtyStyleSheet(origin_clean_ != OriginClean::kTrue);
   loading_ = true;
   DCHECK(!style_sheet_client_->GetResource());
   CSSStyleSheetResource::Fetch(params, fetcher, style_sheet_client_);

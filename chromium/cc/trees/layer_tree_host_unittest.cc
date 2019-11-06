@@ -47,6 +47,7 @@
 #include "cc/test/push_properties_counting_layer_impl.h"
 #include "cc/test/render_pass_test_utils.h"
 #include "cc/test/skia_common.h"
+#include "cc/test/test_layer_tree_frame_sink.h"
 #include "cc/trees/clip_node.h"
 #include "cc/trees/effect_node.h"
 #include "cc/trees/frame_rate_counter.h"
@@ -69,7 +70,6 @@
 #include "components/viz/test/begin_frame_args_test.h"
 #include "components/viz/test/fake_output_surface.h"
 #include "components/viz/test/test_gles2_interface.h"
-#include "components/viz/test/test_layer_tree_frame_sink.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/khronos/GLES2/gl2.h"
@@ -147,8 +147,8 @@ class LayerTreeHostTestFrameOrdering : public LayerTreeHostTest {
   enum MainOrder : int {
     MAIN_START = 1,
     MAIN_LAYOUT,
-    MAIN_DID_BEGIN_FRAME,
     MAIN_COMMIT_COMPLETE,
+    MAIN_DID_BEGIN_FRAME,
     MAIN_END,
   };
 
@@ -351,7 +351,8 @@ class LayerTreeHostTestReadyToActivateNonEmpty
 
 // No single thread test because the commit goes directly to the active tree in
 // single thread mode, so notify ready to activate is skipped.
-MULTI_THREAD_TEST_F(LayerTreeHostTestReadyToActivateNonEmpty);
+// Flaky: https://crbug.com/947673
+// MULTI_THREAD_TEST_F(LayerTreeHostTestReadyToActivateNonEmpty);
 
 // Test if the LTHI receives ReadyToDraw notifications from the TileManager when
 // no raster tasks get scheduled.
@@ -500,7 +501,7 @@ SINGLE_THREAD_TEST_F(LayerTreeHostTestReadyToDrawVisibility);
 
 class LayerTreeHostContextCacheTest : public LayerTreeHostTest {
  public:
-  std::unique_ptr<viz::TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
+  std::unique_ptr<TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
@@ -1174,6 +1175,9 @@ class LayerTreeHostTestLayerListSurfaceDamage : public LayerTreeHostTest {
     child_c_->SetForceRenderSurfaceForTesting(true);
     child_c_->SetIsDrawable(true);
 
+    // TODO(pdr): Do not use the property tree builder for testing in layer list
+    // mode. This will require rewriting this test to manually build property
+    // trees.
     layer_tree_host()->BuildPropertyTreesForTesting();
 
     LayerTreeHostTest::SetupTree();
@@ -1577,7 +1581,8 @@ class LayerTreeHostTestPrepareTilesWithoutDraw : public LayerTreeHostTest {
 
 // This behavior is specific to Android WebView, which only uses
 // multi-threaded compositor.
-MULTI_THREAD_TEST_F(LayerTreeHostTestPrepareTilesWithoutDraw);
+// Flaky: https://crbug.com/947673
+// MULTI_THREAD_TEST_F(LayerTreeHostTestPrepareTilesWithoutDraw);
 
 // Verify CanDraw() is false until first commit.
 class LayerTreeHostTestCantDrawBeforeCommit : public LayerTreeHostTest {
@@ -2463,10 +2468,6 @@ MULTI_THREAD_TEST_F(LayerTreeHostTestGpuRasterDeviceSizeChanged);
 
 class LayerTreeHostTestNoExtraCommitFromInvalidate : public LayerTreeHostTest {
  public:
-  void InitializeSettings(LayerTreeSettings* settings) override {
-    settings->layer_transforms_should_scale_layer_contents = true;
-  }
-
   void SetupTree() override {
     root_layer_ = Layer::Create();
     root_layer_->SetBounds(gfx::Size(10, 20));
@@ -2514,10 +2515,6 @@ SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestNoExtraCommitFromInvalidate);
 class LayerTreeHostTestNoExtraCommitFromScrollbarInvalidate
     : public LayerTreeHostTest {
  public:
-  void InitializeSettings(LayerTreeSettings* settings) override {
-    settings->layer_transforms_should_scale_layer_contents = true;
-  }
-
   void SetupTree() override {
     root_layer_ = Layer::Create();
     root_layer_->SetBounds(gfx::Size(10, 20));
@@ -2573,10 +2570,6 @@ SINGLE_AND_MULTI_THREAD_TEST_F(
 
 class LayerTreeHostTestDeviceScaleFactorChange : public LayerTreeHostTest {
  public:
-  void InitializeSettings(LayerTreeSettings* settings) override {
-    settings->layer_transforms_should_scale_layer_contents = true;
-  }
-
   void SetupTree() override {
     root_layer_ = Layer::Create();
     root_layer_->SetBounds(gfx::Size(10, 20));
@@ -4001,25 +3994,25 @@ class LayerTreeHostTestLCDChange : public LayerTreeHostTest {
         // The first draw.
         EXPECT_EQ(1, num_tiles_rastered_);
         EXPECT_TRUE(can_use_lcd_text);
-        EXPECT_TRUE(root_layer->RasterSourceUsesLCDTextForTesting());
+        EXPECT_TRUE(root_layer->can_use_lcd_text());
         break;
       case 1:
         // Nothing changed on the layer.
         EXPECT_EQ(1, num_tiles_rastered_);
         EXPECT_TRUE(can_use_lcd_text);
-        EXPECT_TRUE(root_layer->RasterSourceUsesLCDTextForTesting());
+        EXPECT_TRUE(root_layer->can_use_lcd_text());
         break;
       case 2:
         // LCD text was disabled; it should be re-rastered with LCD text off.
         EXPECT_EQ(2, num_tiles_rastered_);
         EXPECT_FALSE(can_use_lcd_text);
-        EXPECT_FALSE(root_layer->RasterSourceUsesLCDTextForTesting());
+        EXPECT_FALSE(root_layer->can_use_lcd_text());
         break;
       case 3:
         // LCD text was enabled, but it's sticky and stays off.
         EXPECT_EQ(2, num_tiles_rastered_);
         EXPECT_TRUE(can_use_lcd_text);
-        EXPECT_FALSE(root_layer->RasterSourceUsesLCDTextForTesting());
+        EXPECT_FALSE(root_layer->can_use_lcd_text());
         break;
     }
   }
@@ -4101,7 +4094,7 @@ class LayerTreeHostTestAbortedCommitDoesntStall : public LayerTreeHostTest {
   int commit_complete_count_;
 };
 
-class OnDrawLayerTreeFrameSink : public viz::TestLayerTreeFrameSink {
+class OnDrawLayerTreeFrameSink : public TestLayerTreeFrameSink {
  public:
   OnDrawLayerTreeFrameSink(
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
@@ -4143,7 +4136,7 @@ class LayerTreeHostTestAbortedCommitDoesntStallSynchronousCompositor
     settings->using_synchronous_renderer_compositor = true;
   }
 
-  std::unique_ptr<viz::TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
+  std::unique_ptr<TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
@@ -4401,37 +4394,36 @@ class LayerTreeHostTestLayersPushProperties : public LayerTreeHostTest {
 
     // The scrollbar layer always needs to be pushed.
     if (root_->layer_tree_host()) {
-      EXPECT_FALSE(base::ContainsKey(
+      EXPECT_FALSE(base::Contains(
           root_->layer_tree_host()->LayersThatShouldPushProperties(),
           root_.get()));
     }
     if (child2_->layer_tree_host()) {
-      EXPECT_FALSE(base::ContainsKey(
+      EXPECT_FALSE(base::Contains(
           child2_->layer_tree_host()->LayersThatShouldPushProperties(),
           child2_.get()));
     }
     if (leaf_always_pushing_layer_->layer_tree_host()) {
       leaf_always_pushing_layer_->SetNeedsPushProperties();
-      EXPECT_TRUE(
-          base::ContainsKey(leaf_always_pushing_layer_->layer_tree_host()
-                                ->LayersThatShouldPushProperties(),
-                            leaf_always_pushing_layer_.get()));
+      EXPECT_TRUE(base::Contains(leaf_always_pushing_layer_->layer_tree_host()
+                                     ->LayersThatShouldPushProperties(),
+                                 leaf_always_pushing_layer_.get()));
     }
 
     // child_ and grandchild_ don't persist their need to push properties.
     if (child_->layer_tree_host()) {
-      EXPECT_FALSE(base::ContainsKey(
+      EXPECT_FALSE(base::Contains(
           child_->layer_tree_host()->LayersThatShouldPushProperties(),
           child_.get()));
     }
     if (grandchild_->layer_tree_host()) {
-      EXPECT_FALSE(base::ContainsKey(
+      EXPECT_FALSE(base::Contains(
           grandchild_->layer_tree_host()->LayersThatShouldPushProperties(),
           grandchild_.get()));
     }
 
     if (other_root_->layer_tree_host()) {
-      EXPECT_FALSE(base::ContainsKey(
+      EXPECT_FALSE(base::Contains(
           other_root_->layer_tree_host()->LayersThatShouldPushProperties(),
           other_root_.get()));
     }
@@ -4784,9 +4776,9 @@ class LayerTreeHostTestPropertyChangesDuringUpdateArePushed
 
         scrollbar_layer_->SetBounds(gfx::Size(30, 30));
 
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            scrollbar_layer_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           scrollbar_layer_.get()));
         layer_tree_host()->SetNeedsCommit();
 
         scrollbar_layer_->reset_push_properties_count();
@@ -4830,9 +4822,9 @@ class LayerTreeHostTestSetDrawableCausesCommit : public LayerTreeHostTest {
         // avoid causing a second commit to be scheduled. If a property change
         // is made during this, however, it needs to be pushed in the upcoming
         // commit.
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
         EXPECT_EQ(0, root_->NumDescendantsThatDrawContent());
         root_->reset_push_properties_count();
@@ -4841,18 +4833,18 @@ class LayerTreeHostTestSetDrawableCausesCommit : public LayerTreeHostTest {
         EXPECT_EQ(1, root_->NumDescendantsThatDrawContent());
         EXPECT_EQ(0u, root_->push_properties_count());
         EXPECT_EQ(0u, child_->push_properties_count());
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
         break;
       }
       case 2:
         EXPECT_EQ(1u, root_->push_properties_count());
         EXPECT_EQ(1u, child_->push_properties_count());
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
         EndTest();
         break;
@@ -4920,19 +4912,19 @@ class LayerTreeHostTestPushPropertiesAddingToTreeRequiresPush
       case 0:
         // All layers will need push properties as we set their layer tree host
         layer_tree_host()->SetRootLayer(root_);
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
         break;
       case 1:
         EndTest();
@@ -4953,81 +4945,81 @@ class LayerTreeHostTestPushPropertiesRemovingChildStopsRecursion
         layer_tree_host()->SetRootLayer(root_);
         break;
       case 1:
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         grandchild1_->RemoveFromParent();
         grandchild1_->SetPosition(gfx::PointF(1.f, 1.f));
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         child_->AddChild(grandchild1_);
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         grandchild2_->SetPosition(gfx::PointF(1.f, 1.f));
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         // grandchild2_ will still need a push properties.
         grandchild1_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
 
         // grandchild3_ does not need a push properties, so recursing should
         // no longer be needed.
         grandchild2_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
         EndTest();
         break;
@@ -5052,35 +5044,35 @@ class LayerTreeHostTestPushPropertiesRemovingChildStopsRecursionWithPersistence
         layer_tree_host()->SetRootLayer(root_);
         break;
       case 1:
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         // grandchild2_ will still need a push properties.
         grandchild1_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
 
         // grandchild3_ does not need a push properties, so recursing should
         // no longer be needed.
         grandchild2_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
         EndTest();
         break;
@@ -5101,19 +5093,19 @@ class LayerTreeHostTestPushPropertiesSetPropertiesWhileOutsideTree
         layer_tree_host()->SetRootLayer(root_);
         break;
       case 1:
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         // Change grandchildren while their parent is not in the tree.
         child_->RemoveFromParent();
@@ -5121,39 +5113,39 @@ class LayerTreeHostTestPushPropertiesSetPropertiesWhileOutsideTree
         grandchild2_->SetPosition(gfx::PointF(1.f, 1.f));
         root_->AddChild(child_);
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         grandchild1_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
 
         grandchild2_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
 
         grandchild3_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
 
         EndTest();
@@ -5175,55 +5167,55 @@ class LayerTreeHostTestPushPropertiesSetPropertyInParentThenChild
         layer_tree_host()->SetRootLayer(root_);
         break;
       case 1:
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         child_->SetPosition(gfx::PointF(1.f, 1.f));
         grandchild1_->SetPosition(gfx::PointF(1.f, 1.f));
         grandchild2_->SetPosition(gfx::PointF(1.f, 1.f));
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         grandchild1_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
 
         grandchild2_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
 
         child_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
 
         EndTest();
@@ -5245,55 +5237,55 @@ class LayerTreeHostTestPushPropertiesSetPropertyInChildThenParent
         layer_tree_host()->SetRootLayer(root_);
         break;
       case 1:
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         grandchild1_->SetPosition(gfx::PointF(1.f, 1.f));
         grandchild2_->SetPosition(gfx::PointF(1.f, 1.f));
         child_->SetPosition(gfx::PointF(1.f, 1.f));
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild1_.get()));
-        EXPECT_TRUE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild2_.get()));
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            grandchild3_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild1_.get()));
+        EXPECT_TRUE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild2_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           grandchild3_.get()));
 
         grandchild1_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
 
         grandchild2_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
-        EXPECT_TRUE(base::ContainsKey(
+        EXPECT_TRUE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), child_.get()));
 
         child_->RemoveFromParent();
 
-        EXPECT_FALSE(base::ContainsKey(
+        EXPECT_FALSE(base::Contains(
             layer_tree_host()->LayersThatShouldPushProperties(), root_.get()));
 
         EndTest();
@@ -5455,9 +5447,9 @@ class LayerTreeHostTestPushHiddenLayer : public LayerTreeHostTest {
     switch (layer_tree_host()->SourceFrameNumber()) {
       case 1:
         // The layer type used does not need to push properties every frame.
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            child_layer_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           child_layer_.get()));
 
         // Change the bounds of the child layer, but make it skipped
         // by CalculateDrawProperties.
@@ -5466,9 +5458,9 @@ class LayerTreeHostTestPushHiddenLayer : public LayerTreeHostTest {
         break;
       case 2:
         // The bounds of the child layer were pushed to the impl side.
-        EXPECT_FALSE(base::ContainsKey(
-            layer_tree_host()->LayersThatShouldPushProperties(),
-            child_layer_.get()));
+        EXPECT_FALSE(
+            base::Contains(layer_tree_host()->LayersThatShouldPushProperties(),
+                           child_layer_.get()));
 
         EndTest();
         break;
@@ -5658,20 +5650,22 @@ class TestSwapPromise : public SwapPromise {
     base::AutoLock lock(result_->lock);
     EXPECT_FALSE(result_->did_activate_called);
     EXPECT_FALSE(result_->did_swap_called);
-    EXPECT_FALSE(result_->did_not_swap_called);
+    EXPECT_TRUE(!result_->did_not_swap_called ||
+                action_ == SwapPromise::DidNotSwapAction::KEEP_ACTIVE);
     result_->did_activate_called = true;
   }
 
   void WillSwap(viz::CompositorFrameMetadata* metadata) override {
     base::AutoLock lock(result_->lock);
     EXPECT_FALSE(result_->did_swap_called);
-    EXPECT_FALSE(result_->did_not_swap_called);
+    EXPECT_TRUE(!result_->did_not_swap_called ||
+                action_ == SwapPromise::DidNotSwapAction::KEEP_ACTIVE);
     result_->did_swap_called = true;
   }
 
   void DidSwap() override {}
 
-  void DidNotSwap(DidNotSwapReason reason) override {
+  DidNotSwapAction DidNotSwap(DidNotSwapReason reason) override {
     base::AutoLock lock(result_->lock);
     EXPECT_FALSE(result_->did_swap_called);
     EXPECT_FALSE(result_->did_not_swap_called);
@@ -5679,13 +5673,17 @@ class TestSwapPromise : public SwapPromise {
                  reason != DidNotSwapReason::SWAP_FAILS);
     result_->did_not_swap_called = true;
     result_->reason = reason;
+    return action_;
   }
+
+  void set_action(DidNotSwapAction action) { action_ = action; }
 
   int64_t TraceId() const override { return 0; }
 
  private:
   // Not owned.
   TestSwapPromiseResult* result_;
+  DidNotSwapAction action_ = DidNotSwapAction::BREAK_PROMISE;
 };
 
 class PinnedLayerTreeSwapPromise : public LayerTreeHostTest {
@@ -6038,7 +6036,7 @@ class LayerTreeHostTestKeepSwapPromiseMFBA : public LayerTreeHostTest {
 
 MULTI_THREAD_TEST_F(LayerTreeHostTestKeepSwapPromiseMFBA);
 
-class LayerTreeHostTestBreakSwapPromiseForVisibility
+class LayerTreeHostTestDeferSwapPromiseForVisibility
     : public LayerTreeHostTest {
  protected:
   void BeginTest() override { PostSetNeedsCommitToMainThread(); }
@@ -6047,6 +6045,7 @@ class LayerTreeHostTestBreakSwapPromiseForVisibility
     layer_tree_host()->SetVisible(false);
     auto swap_promise =
         std::make_unique<TestSwapPromise>(&swap_promise_result_);
+    swap_promise->set_action(SwapPromise::DidNotSwapAction::KEEP_ACTIVE);
     layer_tree_host()->GetSwapPromiseManager()->QueueSwapPromise(
         std::move(swap_promise));
   }
@@ -6057,7 +6056,7 @@ class LayerTreeHostTestBreakSwapPromiseForVisibility
       sent_queue_request_ = true;
       MainThreadTaskRunner()->PostTask(
           FROM_HERE,
-          base::BindOnce(&LayerTreeHostTestBreakSwapPromiseForVisibility::
+          base::BindOnce(&LayerTreeHostTestDeferSwapPromiseForVisibility::
                              SetVisibleFalseAndQueueSwapPromise,
                          base::Unretained(this)));
     }
@@ -6065,25 +6064,42 @@ class LayerTreeHostTestBreakSwapPromiseForVisibility
 
   void BeginMainFrameAbortedOnThread(LayerTreeHostImpl* host_impl,
                                      CommitEarlyOutReason reason) override {
-    EndTest();
+    MainThreadTaskRunner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&LayerTreeHostTestDeferSwapPromiseForVisibility::
+                           CheckSwapPromiseNotCalled,
+                       base::Unretained(this)));
   }
 
-  void AfterTest() override {
+  void CheckSwapPromiseNotCalled() {
     {
       base::AutoLock lock(swap_promise_result_.lock);
       EXPECT_FALSE(swap_promise_result_.did_activate_called);
       EXPECT_FALSE(swap_promise_result_.did_swap_called);
       EXPECT_TRUE(swap_promise_result_.did_not_swap_called);
       EXPECT_EQ(SwapPromise::COMMIT_FAILS, swap_promise_result_.reason);
+      EXPECT_FALSE(swap_promise_result_.dtor_called);
+    }
+    layer_tree_host()->SetVisible(true);
+  }
+
+  void DidCommitAndDrawFrame() override {
+    {
+      base::AutoLock lock(swap_promise_result_.lock);
+      EXPECT_TRUE(swap_promise_result_.did_activate_called);
+      EXPECT_TRUE(swap_promise_result_.did_swap_called);
       EXPECT_TRUE(swap_promise_result_.dtor_called);
     }
+    EndTest();
   }
+
+  void AfterTest() override {}
 
   TestSwapPromiseResult swap_promise_result_;
   bool sent_queue_request_ = false;
 };
 
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestBreakSwapPromiseForVisibility);
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestDeferSwapPromiseForVisibility);
 
 class SimpleSwapPromiseMonitor : public SwapPromiseMonitor {
  public:
@@ -6381,7 +6397,7 @@ MULTI_THREAD_TEST_F(LayerTreeHostTestEmptyLayerGpuRasterization);
 
 class LayerTreeHostWithGpuRasterizationTest : public LayerTreeHostTest {
  protected:
-  std::unique_ptr<viz::TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
+  std::unique_ptr<TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> ignored_compositor_context_provider,
@@ -6910,7 +6926,7 @@ class LayerTreeHostTestSynchronousCompositeSwapPromise
     settings->use_zero_copy = true;
   }
 
-  std::unique_ptr<viz::TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
+  std::unique_ptr<TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
@@ -6920,7 +6936,7 @@ class LayerTreeHostTestSynchronousCompositeSwapPromise
     bool synchronous_composite =
         !HasImplThread() &&
         !layer_tree_host()->GetSettings().single_thread_proxy_scheduler;
-    return std::make_unique<viz::TestLayerTreeFrameSink>(
+    return std::make_unique<TestLayerTreeFrameSink>(
         compositor_context_provider, std::move(worker_context_provider),
         gpu_memory_buffer_manager(), renderer_settings, ImplThreadTaskRunner(),
         synchronous_composite, disable_display_vsync, refresh_rate);
@@ -7092,7 +7108,7 @@ class LayerTreeHostTestCrispUpAfterPinchEnds : public LayerTreeHostTest {
     viz::RenderPass* root_pass = frame_data->render_passes.back().get();
     for (auto* draw_quad : root_pass->quad_list) {
       // Checkerboards mean an incomplete frame.
-      if (draw_quad->material != viz::DrawQuad::TILED_CONTENT)
+      if (draw_quad->material != viz::DrawQuad::Material::kTiledContent)
         return 0.f;
       const viz::TileDrawQuad* quad =
           viz::TileDrawQuad::MaterialCast(draw_quad);
@@ -7778,7 +7794,7 @@ class LayerTreeTestPageScaleFlags : public LayerTreeTest {
               layer->IsAffectedByPageScale()
                   ? this->affected_by_page_scale_
                   : this->not_affected_by_page_scale_;
-          EXPECT_TRUE(base::ContainsValue(list, layer->id()));
+          EXPECT_TRUE(base::Contains(list, layer->id()));
         });
 
     EndTest();
@@ -8150,7 +8166,7 @@ SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestSubmitFrameMetadata);
 
 class LayerTreeHostTestSubmitFrameResources : public LayerTreeHostTest {
  protected:
-  std::unique_ptr<viz::TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
+  std::unique_ptr<TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
@@ -8219,33 +8235,6 @@ class LayerTreeHostTestSubmitFrameResources : public LayerTreeHostTest {
 
 SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestSubmitFrameResources);
 
-// Ensure that content_source_id is propagated to the frame's metadata.
-class LayerTreeHostTestContentSourceId : public LayerTreeHostTest {
- protected:
-  void BeginTest() override {
-    layer_tree_host()->SetContentSourceId(5);
-    PostSetNeedsCommitToMainThread();
-  }
-
-  DrawResult PrepareToDrawOnThread(LayerTreeHostImpl* host_impl,
-                                   LayerTreeHostImpl::FrameData* frame_data,
-                                   DrawResult draw_result) override {
-    EXPECT_EQ(DRAW_SUCCESS, draw_result);
-    EXPECT_EQ(5U, host_impl->active_tree()->content_source_id());
-    return draw_result;
-  }
-
-  void DisplayReceivedCompositorFrameOnThread(
-      const viz::CompositorFrame& frame) override {
-    EXPECT_EQ(5U, frame.metadata.content_source_id);
-    EndTest();
-  }
-
-  void AfterTest() override {}
-};
-
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestContentSourceId);
-
 class LayerTreeHostTestBeginFrameAcks : public LayerTreeHostTest {
  protected:
   void BeginTest() override { PostSetNeedsCommitToMainThread(); }
@@ -8312,7 +8301,8 @@ class LayerTreeHostTestQueueImageDecode : public LayerTreeHostTest {
 
     image_ = DrawImage(CreateDiscardablePaintImage(gfx::Size(400, 400)),
                        SkIRect::MakeWH(400, 400), kNone_SkFilterQuality,
-                       SkMatrix::I(), PaintImage::kDefaultFrameIndex);
+                       SkMatrix::I(), PaintImage::kDefaultFrameIndex,
+                       gfx::ColorSpace());
     auto callback = base::BindRepeating(
         &LayerTreeHostTestQueueImageDecode::ImageDecodeFinished,
         base::Unretained(this));
@@ -8401,6 +8391,9 @@ class LayerTreeHostTestHudLayerWithLayerLists : public LayerTreeHostTest {
     LayerTreeHostTest::SetupTree();
 
     // Build the property trees for the root layer.
+    // TODO(pdr): Do not use the property tree builder for testing in layer list
+    // mode. This will require rewriting this test to manually build property
+    // trees.
     layer_tree_host()->BuildPropertyTreesForTesting();
 
     // The HUD layer should not have been setup by the property tree building.
@@ -8596,9 +8589,8 @@ class LayerTreeHostTestImageAnimationDrawImageShader
     : public LayerTreeHostTestImageAnimation {
   void AddImageOp(const PaintImage& image) override {
     PaintFlags flags;
-    flags.setShader(
-        PaintShader::MakeImage(image, SkShader::TileMode::kRepeat_TileMode,
-                               SkShader::TileMode::kRepeat_TileMode, nullptr));
+    flags.setShader(PaintShader::MakeImage(image, SkTileMode::kRepeat,
+                                           SkTileMode::kRepeat, nullptr));
     content_layer_client_.add_draw_rect(gfx::Rect(500, 500), flags);
   }
 };
@@ -8612,8 +8604,8 @@ class LayerTreeHostTestImageAnimationDrawRecordShader
     record->push<DrawImageOp>(image, 0.f, 0.f, nullptr);
     PaintFlags flags;
     flags.setShader(PaintShader::MakePaintRecord(
-        record, SkRect::MakeWH(500, 500), SkShader::TileMode::kClamp_TileMode,
-        SkShader::TileMode::kClamp_TileMode, nullptr));
+        record, SkRect::MakeWH(500, 500), SkTileMode::kClamp,
+        SkTileMode::kClamp, nullptr));
     content_layer_client_.add_draw_rect(gfx::Rect(500, 500), flags);
   }
 };
@@ -8651,7 +8643,7 @@ class LayerTreeHostTestImageAnimationSynchronousSchedulingSoftwareDraw
   void InitializeSettings(LayerTreeSettings* settings) override {
     LayerTreeHostTestImageAnimationSynchronousScheduling::InitializeSettings(
         settings);
-    use_software_renderer_ = true;
+    renderer_type_ = RENDERER_SOFTWARE;
   }
 
   void AfterTest() override {
@@ -8727,11 +8719,11 @@ MULTI_THREAD_TEST_F(LayerTreeHostTestImageDecodingHints);
 
 class LayerTreeHostTestCheckerboardUkm : public LayerTreeHostTest {
  public:
-  LayerTreeHostTestCheckerboardUkm() : url_(GURL("https://example.com")) {}
-
+  LayerTreeHostTestCheckerboardUkm() : url_(GURL("https://example.com")),
+                                       ukm_source_id_(123) {}
   void BeginTest() override {
     PostSetNeedsCommitToMainThread();
-    layer_tree_host()->SetURLForUkm(url_);
+    layer_tree_host()->SetSourceURL(ukm_source_id_, url_);
   }
 
   void SetupTree() override {
@@ -8767,6 +8759,9 @@ class LayerTreeHostTestCheckerboardUkm : public LayerTreeHostTest {
 
     auto* recorder = static_cast<ukm::TestUkmRecorder*>(
         impl->ukm_manager()->recorder_for_testing());
+    // Tie the source id to the URL. In production, this is already done in
+    // Document, and the source id is passed down to cc.
+    recorder->UpdateSourceURL(ukm_source_id_, url_);
 
     const auto& entries = recorder->GetEntriesByName(kUserInteraction);
     EXPECT_EQ(1u, entries.size());
@@ -8784,6 +8779,7 @@ class LayerTreeHostTestCheckerboardUkm : public LayerTreeHostTest {
 
  private:
   const GURL url_;
+  const ukm::SourceId ukm_source_id_;
   FakeContentLayerClient content_layer_client_;
 };
 

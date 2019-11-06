@@ -209,6 +209,15 @@ function updateServiceLog(log) {
 }
 
 /**
+ * Updates the service log section.
+ * @param {Array} log Log lines.
+ */
+function updateOtherServiceLogsUrl(url) {
+  var link = $('other-logs');
+  link.setAttribute('href', url);
+}
+
+/**
  * Creates an element named |elementName| containing the content |text|.
  * @param {string} elementName Name of the new element to be created.
  * @param {string} text Text to be contained in the new element.
@@ -284,6 +293,10 @@ function setSectionEnabled(section, enable) {
   }
 }
 
+function onZipDone(success) {
+  $('button-export-logs').removeAttribute('disabled');
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   chrome.send('pageLoaded');
 
@@ -306,6 +319,11 @@ document.addEventListener('DOMContentLoaded', function() {
     var button = $('button-show-file-entries');
     button.parentNode.removeChild(button);
     chrome.send('listFileEntries');
+  });
+
+  $('button-export-logs').addEventListener('click', function() {
+    $('button-export-logs').setAttribute('disabled', 'true');
+    chrome.send('zipLogs');
   });
 
   window.setInterval(function() {

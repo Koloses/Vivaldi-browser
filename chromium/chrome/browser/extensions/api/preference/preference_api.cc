@@ -84,7 +84,7 @@ const char kConversionErrorMessage[] =
     "properly.";
 
 const PrefMappingEntry kPrefMapping[] = {
-    {"spdy_proxy.enabled", prefs::kDataSaverEnabled,
+    {"spdy_proxy.enabled", data_reduction_proxy::prefs::kDataSaverEnabled,
      APIPermission::kDataReductionProxy, APIPermission::kDataReductionProxy},
     {"data_reduction.daily_original_length",
      data_reduction_proxy::prefs::kDailyHttpOriginalContentLength,
@@ -159,6 +159,9 @@ const PrefMappingEntry kPrefMapping[] = {
      APIPermission::kAccessibilityFeaturesRead,
      APIPermission::kAccessibilityFeaturesModify},
     {"screenMagnifier", ash::prefs::kAccessibilityScreenMagnifierEnabled,
+     APIPermission::kAccessibilityFeaturesRead,
+     APIPermission::kAccessibilityFeaturesModify},
+    {"selectToSpeak", ash::prefs::kAccessibilitySelectToSpeakEnabled,
      APIPermission::kAccessibilityFeaturesRead,
      APIPermission::kAccessibilityFeaturesModify},
     {"spokenFeedback", ash::prefs::kAccessibilitySpokenFeedbackEnabled,
@@ -308,7 +311,7 @@ class PrefMapping {
   void RegisterPrefTransformer(
       const std::string& browser_pref,
       std::unique_ptr<PrefTransformerInterface> transformer) {
-    DCHECK(!base::ContainsKey(transformers_, browser_pref))
+    DCHECK(!base::Contains(transformers_, browser_pref))
         << "Trying to register pref transformer for " << browser_pref
         << " twice";
     transformers_[browser_pref] = std::move(transformer);

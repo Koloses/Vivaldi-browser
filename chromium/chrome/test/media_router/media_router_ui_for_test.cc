@@ -150,7 +150,7 @@ CastDialogView::SourceType MediaRouterUiForTest::GetChosenSourceType() const {
 
 void MediaRouterUiForTest::StartCasting(const std::string& sink_name) {
   CastDialogSinkButton* sink_button = GetSinkButton(sink_name);
-  CHECK(sink_button->enabled());
+  CHECK(sink_button->GetEnabled());
   sink_button->OnMousePressed(CreateMousePressedEvent());
   sink_button->OnMouseReleased(CreateMouseReleasedEvent());
   base::RunLoop().RunUntilIdle();
@@ -158,8 +158,8 @@ void MediaRouterUiForTest::StartCasting(const std::string& sink_name) {
 
 void MediaRouterUiForTest::StopCasting(const std::string& sink_name) {
   CastDialogSinkButton* sink_button = GetSinkButton(sink_name);
-  sink_button->icon_view()->OnMousePressed(CreateMousePressedEvent());
-  sink_button->icon_view()->OnMouseReleased(CreateMouseReleasedEvent());
+  sink_button->OnMousePressed(CreateMousePressedEvent());
+  sink_button->OnMouseReleased(CreateMouseReleasedEvent());
   base::RunLoop().RunUntilIdle();
 }
 
@@ -169,8 +169,8 @@ void MediaRouterUiForTest::StopCasting() {
   for (CastDialogSinkButton* sink_button :
        dialog_view->sink_buttons_for_test()) {
     if (sink_button->sink().state == UIMediaSinkState::CONNECTED) {
-      sink_button->icon_view()->OnMousePressed(CreateMousePressedEvent());
-      sink_button->icon_view()->OnMouseReleased(CreateMouseReleasedEvent());
+      sink_button->OnMousePressed(CreateMousePressedEvent());
+      sink_button->OnMouseReleased(CreateMouseReleasedEvent());
       base::RunLoop().RunUntilIdle();
       return;
     }
@@ -263,10 +263,9 @@ void MediaRouterUiForTest::SetLocalFileSelectionIssue(const IssueInfo& issue) {
 
 MediaRouterUiForTest::MediaRouterUiForTest(content::WebContents* web_contents)
     : web_contents_(web_contents),
-      dialog_controller_(
-          MediaRouterDialogControllerViews::GetOrCreateForWebContents(
-              web_contents)),
-      weak_factory_(this) {
+      dialog_controller_(static_cast<MediaRouterDialogControllerViews*>(
+          MediaRouterDialogController::GetOrCreateForWebContents(
+              web_contents))) {
   dialog_controller_->SetDialogCreationCallbackForTesting(base::BindRepeating(
       &MediaRouterUiForTest::OnDialogCreated, weak_factory_.GetWeakPtr()));
 }
@@ -290,7 +289,7 @@ void MediaRouterUiForTest::OnDialogModelUpdated(CastDialogView* dialog_view) {
                                     base::UTF8ToUTF16(*watch_sink_name_) &&
                                 sink_button->sink().state ==
                                     UIMediaSinkState::AVAILABLE &&
-                                sink_button->enabled();
+                                sink_button->GetEnabled();
                        case WatchType::kAnyIssue:
                          return sink_button->sink().issue.has_value();
                        case WatchType::kAnyRoute:

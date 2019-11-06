@@ -11,10 +11,9 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/callback_helpers.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/cpp/bindings/message.h"
@@ -34,7 +33,7 @@ class MessageAccumulator : public MessageReceiver {
   bool Accept(Message* message) override {
     queue_.Push(message);
     if (!closure_.is_null())
-      base::ResetAndReturn(&closure_).Run();
+      std::move(closure_).Run();
     return true;
   }
 
@@ -110,7 +109,7 @@ class ConnectorTest : public testing::Test {
   ScopedMessagePipeHandle handle1_;
 
  private:
-  base::MessageLoop loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 };
 
 TEST_F(ConnectorTest, Basic) {
@@ -544,9 +543,9 @@ TEST_F(ConnectorTest, DestroyOnDifferentThreadAfterClose) {
   base::RunLoop run_loop;
   another_thread.task_runner()->PostTaskAndReply(
       FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           [](std::unique_ptr<Connector> connector) { connector.reset(); },
-          base::Passed(std::move(connector))),
+          std::move(connector)),
       run_loop.QuitClosure());
 
   run_loop.Run();

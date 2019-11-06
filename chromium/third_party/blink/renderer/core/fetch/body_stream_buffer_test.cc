@@ -15,13 +15,14 @@
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/streams/readable_stream.h"
-#include "third_party/blink/renderer/core/streams/readable_stream_default_controller_wrapper.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_default_controller_interface.h"
 #include "third_party/blink/renderer/core/streams/test_underlying_source.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/blob/blob_url.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
 #include "third_party/blink/renderer/platform/loader/testing/replaying_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
@@ -67,8 +68,7 @@ class BodyStreamBufferTest : public testing::Test {
       ADD_FAILURE() << ToCoreString(block.Exception()
                                         ->ToString(script_state->GetContext())
                                         .ToLocalChecked())
-                           .Utf8()
-                           .data();
+                           .Utf8();
       block.ReThrow();
     }
     return r;
@@ -95,8 +95,8 @@ TEST_F(BodyStreamBufferTest, Tee) {
   V8TestingScope scope;
   NonThrowableExceptionState exception_state;
   Checkpoint checkpoint;
-  MockFetchDataLoaderClient* client1 = MockFetchDataLoaderClient::Create();
-  MockFetchDataLoaderClient* client2 = MockFetchDataLoaderClient::Create();
+  auto* client1 = MakeGarbageCollected<MockFetchDataLoaderClient>();
+  auto* client2 = MakeGarbageCollected<MockFetchDataLoaderClient>();
 
   InSequence s;
   EXPECT_CALL(checkpoint, Call(0));
@@ -161,8 +161,8 @@ TEST_F(BodyStreamBufferTest, TeeFromHandleMadeFromStream) {
   underlying_source->Close();
 
   Checkpoint checkpoint;
-  MockFetchDataLoaderClient* client1 = MockFetchDataLoaderClient::Create();
-  MockFetchDataLoaderClient* client2 = MockFetchDataLoaderClient::Create();
+  auto* client1 = MakeGarbageCollected<MockFetchDataLoaderClient>();
+  auto* client2 = MakeGarbageCollected<MockFetchDataLoaderClient>();
 
   InSequence s;
   EXPECT_CALL(checkpoint, Call(1));
@@ -208,7 +208,7 @@ TEST_F(BodyStreamBufferTest, TeeFromHandleMadeFromStream) {
 
 TEST_F(BodyStreamBufferTest, DrainAsBlobDataHandle) {
   V8TestingScope scope;
-  std::unique_ptr<BlobData> data = BlobData::Create();
+  auto data = std::make_unique<BlobData>();
   data->AppendText("hello", false);
   auto size = data->length();
   scoped_refptr<BlobDataHandle> blob_data_handle =
@@ -281,7 +281,7 @@ TEST_F(BodyStreamBufferTest,
 
 TEST_F(BodyStreamBufferTest, DrainAsFormData) {
   V8TestingScope scope;
-  FormData* data = FormData::Create(UTF8Encoding());
+  auto* data = MakeGarbageCollected<FormData>(UTF8Encoding());
   data->append("name1", "value1");
   data->append("name2", "value2");
   scoped_refptr<EncodedFormData> input_form_data =
@@ -350,7 +350,7 @@ TEST_F(BodyStreamBufferTest,
 TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsArrayBuffer) {
   V8TestingScope scope;
   Checkpoint checkpoint;
-  MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::Create();
+  auto* client = MakeGarbageCollected<MockFetchDataLoaderClient>();
   DOMArrayBuffer* array_buffer = nullptr;
 
   InSequence s;
@@ -388,7 +388,7 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsArrayBuffer) {
 TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsBlob) {
   V8TestingScope scope;
   Checkpoint checkpoint;
-  MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::Create();
+  auto* client = MakeGarbageCollected<MockFetchDataLoaderClient>();
   scoped_refptr<BlobDataHandle> blob_data_handle;
 
   InSequence s;
@@ -424,7 +424,7 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsBlob) {
 TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsString) {
   V8TestingScope scope;
   Checkpoint checkpoint;
-  MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::Create();
+  auto* client = MakeGarbageCollected<MockFetchDataLoaderClient>();
 
   InSequence s;
   EXPECT_CALL(checkpoint, Call(1));
@@ -457,7 +457,7 @@ TEST_F(BodyStreamBufferTest, LoadBodyStreamBufferAsString) {
 TEST_F(BodyStreamBufferTest, LoadClosedHandle) {
   V8TestingScope scope;
   Checkpoint checkpoint;
-  MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::Create();
+  auto* client = MakeGarbageCollected<MockFetchDataLoaderClient>();
 
   InSequence s;
   EXPECT_CALL(checkpoint, Call(1));
@@ -486,7 +486,7 @@ TEST_F(BodyStreamBufferTest, LoadClosedHandle) {
 TEST_F(BodyStreamBufferTest, LoadErroredHandle) {
   V8TestingScope scope;
   Checkpoint checkpoint;
-  MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::Create();
+  auto* client = MakeGarbageCollected<MockFetchDataLoaderClient>();
 
   InSequence s;
   EXPECT_CALL(checkpoint, Call(1));
@@ -516,7 +516,7 @@ TEST_F(BodyStreamBufferTest, LoadErroredHandle) {
 TEST_F(BodyStreamBufferTest, LoaderShouldBeKeptAliveByBodyStreamBuffer) {
   V8TestingScope scope;
   Checkpoint checkpoint;
-  MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::Create();
+  auto* client = MakeGarbageCollected<MockFetchDataLoaderClient>();
 
   InSequence s;
   EXPECT_CALL(checkpoint, Call(1));
@@ -533,7 +533,7 @@ TEST_F(BodyStreamBufferTest, LoaderShouldBeKeptAliveByBodyStreamBuffer) {
   buffer->StartLoading(FetchDataLoader::CreateLoaderAsString(), client,
                        ASSERT_NO_EXCEPTION);
 
-  ThreadState::Current()->CollectAllGarbage();
+  ThreadState::Current()->CollectAllGarbageForTesting();
   checkpoint.Call(1);
   test::RunPendingTasks();
   checkpoint.Call(2);
@@ -614,8 +614,8 @@ TEST_F(BodyStreamBufferTest,
   V8TestingScope scope;
   Checkpoint checkpoint;
   MockFetchDataLoader* loader = MockFetchDataLoader::Create();
-  MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::Create();
-  auto* src = BytesConsumerTestUtil::MockBytesConsumer::Create();
+  auto* client = MakeGarbageCollected<MockFetchDataLoaderClient>();
+  auto* src = MakeGarbageCollected<BytesConsumerTestUtil::MockBytesConsumer>();
 
   EXPECT_CALL(*loader, Start(_, _)).Times(0);
 
@@ -649,8 +649,8 @@ TEST_F(BodyStreamBufferTest, AbortAfterStartLoadingCallsDataLoaderClientAbort) {
   V8TestingScope scope;
   Checkpoint checkpoint;
   MockFetchDataLoader* loader = MockFetchDataLoader::Create();
-  MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::Create();
-  auto* src = BytesConsumerTestUtil::MockBytesConsumer::Create();
+  auto* client = MakeGarbageCollected<MockFetchDataLoaderClient>();
+  auto* src = MakeGarbageCollected<BytesConsumerTestUtil::MockBytesConsumer>();
 
   InSequence s;
   EXPECT_CALL(*src, SetClient(_));
@@ -684,8 +684,8 @@ TEST_F(BodyStreamBufferTest,
   V8TestingScope scope;
   Checkpoint checkpoint;
   MockFetchDataLoader* loader = MockFetchDataLoader::Create();
-  MockFetchDataLoaderClient* client = MockFetchDataLoaderClient::Create();
-  auto* src = BytesConsumerTestUtil::MockBytesConsumer::Create();
+  auto* client = MakeGarbageCollected<MockFetchDataLoaderClient>();
+  auto* src = MakeGarbageCollected<BytesConsumerTestUtil::MockBytesConsumer>();
 
   InSequence s;
   EXPECT_CALL(*src, SetClient(_));

@@ -21,46 +21,25 @@ cr.define('header_test', function() {
 
     /** @override */
     setup(function() {
-      // The header cares about color, duplex, and header/footer to determine
-      // whether to show the enterprise managed icon, and pages, copies, and
-      // duplex to compute the number of sheets of paper.
-      const settings = {
-        copies: {
-          value: '1',
-          unavailableValue: '1',
-          valid: true,
-          available: true,
-          setByPolicy: false,
-          key: '',
-        },
-        duplex: {
-          value: false,
-          unavailableValue: false,
-          valid: true,
-          available: true,
-          setByPolicy: false,
-          key: 'isDuplexEnabled',
-        },
-        pages: {
-          value: [1],
-          unavailableValue: [],
-          valid: true,
-          available: true,
-          setByPolicy: false,
-          key: '',
-        },
-      };
-
+      loadTimeData.overrideValues({
+        newPrintPreviewLayoutEnabled: false,
+      });
       PolymerTest.clearBody();
+      const model = document.createElement('print-preview-model');
+      document.body.appendChild(model);
+
       header = document.createElement('print-preview-header');
-      header.settings = settings;
+      header.settings = model.settings;
+      model.set('settings.duplex.available', true);
+      model.set('settings.duplex.value', false);
+
       header.destination = new print_preview.Destination(
           'FooDevice', print_preview.DestinationType.GOOGLE,
           print_preview.DestinationOrigin.COOKIES, 'FooName',
           print_preview.DestinationConnectionStatus.ONLINE);
-      header.errorMessage = '';
-      header.state = print_preview_new.State.READY;
+      header.state = print_preview.State.READY;
       header.managed = false;
+      test_util.fakeDataBind(model, header, 'settings');
       document.body.appendChild(header);
     });
 
@@ -86,6 +65,10 @@ cr.define('header_test', function() {
       assertEquals('Total: 3 pages', summary.textContent);
       header.setSetting('pages', [1]);
       assertEquals('Total: 1 page', summary.textContent);
+      // Verify the chrome://print case of a zero length document does not show
+      // the summary.
+      header.setSetting('pages', []);
+      assertEquals('', summary.textContent);
     });
 
     // Tests that the message is correctly adjusted with a duplex printer.
@@ -122,27 +105,31 @@ cr.define('header_test', function() {
       assertEquals('Total: 1 sheet of paper', summary.textContent);
       assertFalse(printButton.disabled);
 
-      header.set('state', print_preview_new.State.NOT_READY);
+      header.state = print_preview.State.NOT_READY;
       assertEquals('', summary.textContent);
       assertTrue(printButton.disabled);
 
-      header.set('state', print_preview_new.State.PRINTING);
+      header.state = print_preview.State.PRINTING;
       assertEquals(loadTimeData.getString('printing'), summary.textContent);
       assertTrue(printButton.disabled);
       setPdfDestination();
       assertEquals(loadTimeData.getString('saving'), summary.textContent);
 
-      header.set('state', print_preview_new.State.INVALID_TICKET);
+      header.error = print_preview.Error.INVALID_TICKET;
+      header.state = print_preview.State.ERROR;
       assertEquals('', summary.textContent);
       assertTrue(printButton.disabled);
 
-      header.set('state', print_preview_new.State.INVALID_PRINTER);
+      header.state = print_preview.State.READY;
+      header.error = print_preview.Error.INVALID_PRINTER;
+      header.state = print_preview.State.ERROR;
       assertEquals('', summary.textContent);
       assertTrue(printButton.disabled);
 
       const testError = 'Error printing to cloud print';
-      header.set('errorMessage', testError);
-      header.set('state', print_preview_new.State.FATAL_ERROR);
+      header.cloudPrintErrorMessage = testError;
+      header.error = print_preview.Error.CLOUD_PRINT_ERROR;
+      header.state = print_preview.State.FATAL_ERROR;
       assertEquals(testError, summary.textContent);
       assertTrue(printButton.disabled);
     });
@@ -151,13 +138,12 @@ cr.define('header_test', function() {
     // See https://crbug.com/880562.
     test(assert(TestNames.ButtonOrder), function() {
       // Verify that there are only 2 buttons.
-      assertEquals(
-          2, header.shadowRoot.querySelectorAll('paper-button').length);
+      assertEquals(2, header.shadowRoot.querySelectorAll('cr-button').length);
 
-      const firstButton = header.$$('paper-button:first-child');
-      const lastButton = header.$$('paper-button:last-child');
-      const printButton = header.$$('paper-button.action-button');
-      const cancelButton = header.$$('paper-button.cancel-button');
+      const firstButton = header.$$('cr-button:first-child');
+      const lastButton = header.$$('cr-button:last-child');
+      const printButton = header.$$('cr-button.action-button');
+      const cancelButton = header.$$('cr-button.cancel-button');
 
       if (cr.isWindows) {
         // On Windows, the print button is on the left.

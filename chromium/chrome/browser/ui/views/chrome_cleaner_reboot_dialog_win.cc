@@ -6,7 +6,6 @@
 
 #include "base/strings/string16.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_reboot_dialog_controller_win.h"
-#include "chrome/browser/safe_browsing/chrome_cleaner/srt_field_trial_win.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -75,12 +74,7 @@ void ChromeCleanerRebootDialog::Show(Browser* browser) {
 // WidgetDelegate overrides.
 
 ui::ModalType ChromeCleanerRebootDialog::GetModalType() const {
-  safe_browsing::RebootPromptType prompt_type =
-      safe_browsing::GetRebootPromptType();
-  DCHECK_NE(safe_browsing::REBOOT_PROMPT_TYPE_OPEN_SETTINGS_PAGE, prompt_type);
-  return prompt_type == safe_browsing::REBOOT_PROMPT_TYPE_SHOW_MODAL_DIALOG
-             ? ui::MODAL_TYPE_WINDOW
-             : ui::MODAL_TYPE_NONE;
+  return ui::MODAL_TYPE_NONE;
 }
 
 base::string16 ChromeCleanerRebootDialog::GetWindowTitle() const {
@@ -91,7 +85,8 @@ base::string16 ChromeCleanerRebootDialog::GetWindowTitle() const {
 views::View* ChromeCleanerRebootDialog::GetInitiallyFocusedView() {
   // Set focus away from the Restart/OK button to prevent accidental prompt
   // acceptance if the user is typing as the dialog appears.
-  return GetDialogClientView()->cancel_button();
+  const views::DialogClientView* dcv = GetDialogClientView();
+  return dcv ? dcv->cancel_button() : nullptr;
 }
 
 // DialogDelegate overrides.
@@ -119,6 +114,10 @@ bool ChromeCleanerRebootDialog::Cancel() {
 
 bool ChromeCleanerRebootDialog::Close() {
   HandleDialogInteraction(DialogInteractionResult::kClose);
+  return true;
+}
+
+bool ChromeCleanerRebootDialog::IsDialogDraggable() const {
   return true;
 }
 

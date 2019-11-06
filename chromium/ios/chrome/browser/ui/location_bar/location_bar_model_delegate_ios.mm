@@ -17,9 +17,9 @@
 #import "ios/chrome/browser/reading_list/offline_page_tab_helper.h"
 #include "ios/chrome/browser/ssl/ios_security_state_tab_helper.h"
 #include "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/web/public/navigation_item.h"
-#import "ios/web/public/navigation_manager.h"
-#import "ios/web/public/ssl_status.h"
+#import "ios/web/public/navigation/navigation_item.h"
+#import "ios/web/public/navigation/navigation_manager.h"
+#import "ios/web/public/security/ssl_status.h"
 #import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -56,7 +56,12 @@ bool LocationBarModelDelegateIOS::GetURL(GURL* url) const {
   web::NavigationItem* item = GetNavigationItem();
   if (!item)
     return false;
-  *url = ShouldDisplayURL() ? item->GetVirtualURL() : GURL::EmptyGURL();
+  *url = item->GetVirtualURL();
+  // Return |false| for about scheme pages.  This will result in the location
+  // bar showing the default page, "about:blank". See crbug.com/989497 for
+  // details on why.
+  if (url->SchemeIs(url::kAboutScheme))
+    return false;
   return true;
 }
 
@@ -76,17 +81,28 @@ bool LocationBarModelDelegateIOS::ShouldDisplayURL() const {
   return true;
 }
 
-void LocationBarModelDelegateIOS::GetSecurityInfo(
-    security_state::SecurityInfo* result) const {
+security_state::SecurityLevel LocationBarModelDelegateIOS::GetSecurityLevel()
+    const {
   web::WebState* web_state = GetActiveWebState();
   // If there is no active WebState (which can happen during toolbar
   // initialization), assume no security style.
   if (!web_state) {
-    *result = security_state::SecurityInfo();
-    return;
+    return security_state::NONE;
   }
   auto* client = IOSSecurityStateTabHelper::FromWebState(web_state);
-  client->GetSecurityInfo(result);
+  return client->GetSecurityLevel();
+}
+
+std::unique_ptr<security_state::VisibleSecurityState>
+LocationBarModelDelegateIOS::GetVisibleSecurityState() const {
+  web::WebState* web_state = GetActiveWebState();
+  // If there is no active WebState (which can happen during toolbar
+  // initialization), assume no security style.
+  if (!web_state) {
+    return std::make_unique<security_state::VisibleSecurityState>();
+  }
+  auto* client = IOSSecurityStateTabHelper::FromWebState(web_state);
+  return client->GetVisibleSecurityState();
 }
 
 scoped_refptr<net::X509Certificate>
@@ -116,4 +132,26 @@ bool LocationBarModelDelegateIOS::IsOfflinePage() const {
     return false;
   const GURL& url = visibleItem->GetURL();
   return url.SchemeIs(kChromeUIScheme) && url.host() == kChromeUIOfflineHost;
+}
+
+bool LocationBarModelDelegateIOS::IsInstantNTP() const {
+  // This is currently only called by the OmniboxEditModel to determine if the
+  // Google landing page is showing.
+  //
+  // TODO(crbug.com/315563)(lliabraa): This should also check the user's default
+  // search engine because if they're not using Google the Google landing page
+  // is not shown.
+  GURL currentURL;
+  if (!GetURL(&currentURL))
+    return false;
+  return currentURL == kChromeUINewTabURL;
+}
+
+bool LocationBarModelDelegateIOS::IsNewTabPage(const GURL& url) const {
+  return url.spec() == kChromeUINewTabURL;
+}
+
+bool LocationBarModelDelegateIOS::IsHomePage(const GURL& url) const {
+  // iOS does not have a notion of home page.
+  return false;
 }

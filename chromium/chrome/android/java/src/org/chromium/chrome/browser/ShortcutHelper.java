@@ -9,7 +9,6 @@ import android.annotation.TargetApi;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ShortcutInfo;
@@ -25,11 +24,11 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
+import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.Base64;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.CollectionUtil;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.StrictModeContext;
@@ -39,7 +38,9 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.webapps.WebApkInfo;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabThemeColorHelper;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.webapps.WebappActivity;
 import org.chromium.chrome.browser.webapps.WebappAuthenticator;
 import org.chromium.chrome.browser.webapps.WebappDataStorage;
@@ -47,11 +48,11 @@ import org.chromium.chrome.browser.webapps.WebappLauncherActivity;
 import org.chromium.chrome.browser.webapps.WebappRegistry;
 import org.chromium.chrome.browser.widget.RoundedIconGenerator;
 import org.chromium.content_public.common.ScreenOrientationConstants;
+import org.chromium.content_public.common.ScreenOrientationValues;
 import org.chromium.ui.widget.Toast;
 import org.chromium.webapk.lib.client.WebApkValidator;
 
 import java.io.ByteArrayOutputStream;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -76,8 +77,6 @@ public class ShortcutHelper {
     public static final String EXTRA_THEME_COLOR = "org.chromium.chrome.browser.theme_color";
     public static final String EXTRA_BACKGROUND_COLOR =
             "org.chromium.chrome.browser.background_color";
-    public static final String EXTRA_SPLASH_SCREEN_URL =
-            "org.chromium.chrome.browser.webapp_splash_screen_url";
     public static final String EXTRA_IS_ICON_GENERATED =
             "org.chromium.chrome.browser.is_icon_generated";
     public static final String EXTRA_IS_ICON_ADAPTIVE =
@@ -190,22 +189,30 @@ public class ShortcutHelper {
             final String userTitle, final String name, final String shortName, final String iconUrl,
             final Bitmap icon, boolean isIconAdaptive, @WebDisplayMode final int displayMode,
             final int orientation, final int source, final long themeColor,
-            final long backgroundColor, final String splashScreenUrl, final long callbackPointer) {
+            final long backgroundColor, final long callbackPointer,
+            final boolean isShortcutAsWebapp) {
         new AsyncTask<Intent>() {
             @Override
             protected Intent doInBackground() {
                 // Encoding {@link icon} as a string and computing the mac are expensive.
 
+                // Shortcuts as Webapps on O+ launch into a non-exported component for verification.
+                boolean usesMacForVerification =
+                        !isShortcutAsWebapp || Build.VERSION.SDK_INT < Build.VERSION_CODES.O;
+
                 // Encode the icon as a base64 string (Launcher drops Bitmaps in the Intent).
                 String encodedIcon = encodeBitmapAsString(icon);
 
-                String nonEmptyScopeUrl =
-                        TextUtils.isEmpty(scopeUrl) ? getScopeFromUrl(url) : scopeUrl;
-                Intent shortcutIntent = createWebappShortcutIntent(id,
-                        sDelegate.getFullscreenAction(), url, nonEmptyScopeUrl, name, shortName,
-                        encodedIcon, WEBAPP_SHORTCUT_VERSION, displayMode, orientation, themeColor,
-                        backgroundColor, splashScreenUrl, iconUrl.isEmpty(), isIconAdaptive);
-                shortcutIntent.putExtra(EXTRA_MAC, getEncodedMac(url));
+                String action = usesMacForVerification
+                        ? sDelegate.getFullscreenAction()
+                        : WebappLauncherActivity.ACTION_START_SECURE_WEBAPP;
+                Intent shortcutIntent = createWebappShortcutIntent(id, action, url, scopeUrl, name,
+                        shortName, encodedIcon, WEBAPP_SHORTCUT_VERSION, displayMode, orientation,
+                        themeColor, backgroundColor, iconUrl.isEmpty(), isIconAdaptive);
+
+                if (usesMacForVerification) {
+                    shortcutIntent.putExtra(EXTRA_MAC, getEncodedMac(url));
+                }
                 shortcutIntent.putExtra(EXTRA_SOURCE, source);
                 return shortcutIntent;
             }
@@ -216,11 +223,10 @@ public class ShortcutHelper {
                 // Store the webapp data so that it is accessible without the intent. Once this
                 // process is complete, call back to native code to start the splash image
                 // download.
-                WebappRegistry.getInstance().register(
-                        id, storage -> {
-                            storage.updateFromShortcutIntent(resultIntent);
-                            nativeOnWebappDataStored(callbackPointer);
-                        });
+                WebappRegistry.getInstance().register(id, storage -> {
+                    storage.updateFromShortcutIntent(resultIntent);
+                    if (callbackPointer != 0) nativeOnWebappDataStored(callbackPointer);
+                });
                 if (shouldShowToastWhenAddingShortcut()) {
                     showAddedToHomescreenToast(userTitle);
                 }
@@ -234,13 +240,23 @@ public class ShortcutHelper {
      */
     @SuppressWarnings("unused")
     @CalledByNative
-    private static void addShortcut(String id, String url, String userTitle, Bitmap icon,
-            boolean isIconAdaptive, int source) {
-        Context context = ContextUtils.getApplicationContext();
-        final Intent shortcutIntent = createShortcutIntent(url);
+    public static void addShortcut(@Nullable Tab tab, String id, String url, String userTitle,
+            Bitmap icon, boolean isIconAdaptive, int source, String iconUrl) {
+        if (FeatureUtilities.isNoTouchModeEnabled()) {
+            // There are no tabs in NoTouchMode, so we want to give shortcuts a more app-like
+            // experience.
+            long themeColor = (tab == null) ? MANIFEST_COLOR_INVALID_OR_MISSING
+                                            : TabThemeColorHelper.getColor(tab);
+            addWebapp(id, url, getScopeFromUrl(url), userTitle, userTitle, userTitle, iconUrl, icon,
+                    isIconAdaptive, WebDisplayMode.STANDALONE, ScreenOrientationValues.DEFAULT,
+                    source, themeColor, MANIFEST_COLOR_INVALID_OR_MISSING, 0 /* callbackPointer */,
+                    true /* isShortcutAsWebapp */);
+            return;
+        }
+        Intent shortcutIntent = createShortcutIntent(url);
         shortcutIntent.putExtra(EXTRA_ID, id);
         shortcutIntent.putExtra(EXTRA_SOURCE, source);
-        shortcutIntent.setPackage(context.getPackageName());
+        shortcutIntent.setPackage(ContextUtils.getApplicationContext().getPackageName());
         sDelegate.addShortcutToHomescreen(userTitle, icon, isIconAdaptive, shortcutIntent);
         if (shouldShowToastWhenAddingShortcut()) {
             showAddedToHomescreenToast(userTitle);
@@ -253,6 +269,10 @@ public class ShortcutHelper {
         String id = shortcutIntent.getStringExtra(ShortcutHelper.EXTRA_ID);
         Context context = ContextUtils.getApplicationContext();
 
+        if (bitmap == null) {
+            Log.e(TAG, "Failed to find an icon for " + title + ", not adding.");
+            return;
+        }
         Icon icon = isMaskableIcon ? Icon.createWithAdaptiveBitmap(bitmap)
                                    : Icon.createWithBitmap(bitmap);
 
@@ -276,7 +296,12 @@ public class ShortcutHelper {
      */
     private static void showAddedToHomescreenToast(final String title) {
         Context applicationContext = ContextUtils.getApplicationContext();
-        String toastText = applicationContext.getString(R.string.added_to_homescreen, title);
+        String toastText;
+        if (FeatureUtilities.isNoTouchModeEnabled()) {
+            toastText = applicationContext.getString(R.string.added_to_apps, title);
+        } else {
+            toastText = applicationContext.getString(R.string.added_to_homescreen, title);
+        }
         showToast(toastText);
     }
 
@@ -354,7 +379,6 @@ public class ShortcutHelper {
      * @param orientation     Orientation of the web app.
      * @param themeColor      Theme color of the web app.
      * @param backgroundColor Background color of the web app.
-     * @param splashScreenUrl Url of the HTML splash screen.
      * @param isIconGenerated True if the icon is generated by Chromium.
      * @param isIconAdaptive  Whether the shortcut icon is Adaptive.
      * @return Intent for onclick action of the shortcut.
@@ -363,7 +387,7 @@ public class ShortcutHelper {
     public static Intent createWebappShortcutIntent(String id, String action, String url,
             String scope, String name, String shortName, String encodedIcon, int version,
             @WebDisplayMode int displayMode, int orientation, long themeColor, long backgroundColor,
-            String splashScreenUrl, boolean isIconGenerated, boolean isIconAdaptive) {
+            boolean isIconGenerated, boolean isIconAdaptive) {
         // Create an intent as a launcher icon for a full-screen Activity.
         Intent shortcutIntent = new Intent();
         shortcutIntent.setPackage(ContextUtils.getApplicationContext().getPackageName())
@@ -379,7 +403,6 @@ public class ShortcutHelper {
                 .putExtra(EXTRA_ORIENTATION, orientation)
                 .putExtra(EXTRA_THEME_COLOR, themeColor)
                 .putExtra(EXTRA_BACKGROUND_COLOR, backgroundColor)
-                .putExtra(EXTRA_SPLASH_SCREEN_URL, splashScreenUrl)
                 .putExtra(EXTRA_IS_ICON_GENERATED, isIconGenerated)
                 .putExtra(EXTRA_IS_ICON_ADAPTIVE, isIconAdaptive);
         return shortcutIntent;
@@ -394,7 +417,7 @@ public class ShortcutHelper {
      */
     public static Intent createWebappShortcutIntentForTesting(String id, String url) {
         return createWebappShortcutIntent(id, null, url, getScopeFromUrl(url), null, null, null,
-                WEBAPP_SHORTCUT_VERSION, WebDisplayMode.STANDALONE, 0, 0, 0, null, false, false);
+                WEBAPP_SHORTCUT_VERSION, WebDisplayMode.STANDALONE, 0, 0, 0, false, false);
     }
 
     /**
@@ -633,12 +656,11 @@ public class ShortcutHelper {
     }
 
     /**
-     * Generates a scope URL based on the passed in URL. It should be used if the Web Manifest
-     * does not specify a scope URL.
+     * Generates a scope URL based on the passed in URL. Should only be used for legacy
+     * WebAPKs created prior to the usage of the Web App Manifest scope member.
      * @param url The url to convert to a scope.
      * @return The scope.
      */
-    @CalledByNative
     public static String getScopeFromUrl(String url) {
         // Scope URL is generated by:
         // - Removing last component of the URL if it does not end with a slash.
@@ -699,7 +721,7 @@ public class ShortcutHelper {
     }
 
     private static boolean shouldShowToastWhenAddingShortcut() {
-        return !isRequestPinShortcutSupported();
+        return !isRequestPinShortcutSupported() || FeatureUtilities.isNoTouchModeEnabled();
     }
 
     private static boolean isRequestPinShortcutSupported() {
@@ -716,7 +738,7 @@ public class ShortcutHelper {
     private static void checkIfRequestPinShortcutSupported() {
         sShortcutManager =
                 ContextUtils.getApplicationContext().getSystemService(ShortcutManager.class);
-        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
             sIsRequestPinShortcutSupported = sShortcutManager.isRequestPinShortcutSupported();
         }
     }
@@ -737,85 +759,13 @@ public class ShortcutHelper {
         return null;
     }
 
-    /**
-     * Calls the native |callbackPointer| with lists of information on all installed WebAPKs.
-     *
-     * @param callbackPointer Callback to call with the information on the WebAPKs found.
-     */
     @CalledByNative
-    public static void retrieveWebApks(long callbackPointer) {
-        List<String> names = new ArrayList<>();
-        List<String> shortNames = new ArrayList<>();
-        List<String> packageNames = new ArrayList<>();
-        List<Integer> shellApkVersions = new ArrayList<>();
-        List<Integer> versionCodes = new ArrayList<>();
-        List<String> uris = new ArrayList<>();
-        List<String> scopes = new ArrayList<>();
-        List<String> manifestUrls = new ArrayList<>();
-        List<String> manifestStartUrls = new ArrayList<>();
-        List<Integer> displayModes = new ArrayList<>();
-        List<Integer> orientations = new ArrayList<>();
-        List<Long> themeColors = new ArrayList<>();
-        List<Long> backgroundColors = new ArrayList<>();
-        List<Long> lastUpdateCheckTimesMs = new ArrayList<>();
-        List<Boolean> relaxUpdates = new ArrayList<>();
-
-        Context context = ContextUtils.getApplicationContext();
-        PackageManager packageManager = context.getPackageManager();
-        for (PackageInfo packageInfo : packageManager.getInstalledPackages(0)) {
-            if (WebApkValidator.isValidWebApk(context, packageInfo.packageName)) {
-                // Pass non-null URL parameter so that {@link WebApkInfo#create()}
-                // return value is non-null
-                WebApkInfo webApkInfo = WebApkInfo.create(packageInfo.packageName, "",
-                        ShortcutSource.UNKNOWN, false /* forceNavigation */,
-                        false /* useTransparentSplash */, null /* shareData */);
-                if (webApkInfo != null) {
-                    names.add(webApkInfo.name());
-                    shortNames.add(webApkInfo.shortName());
-                    packageNames.add(webApkInfo.webApkPackageName());
-                    shellApkVersions.add(webApkInfo.shellApkVersion());
-                    versionCodes.add(packageInfo.versionCode);
-                    uris.add(webApkInfo.uri().toString());
-                    scopes.add(webApkInfo.scopeUri().toString());
-                    manifestUrls.add(webApkInfo.manifestUrl());
-                    manifestStartUrls.add(webApkInfo.manifestStartUrl());
-                    displayModes.add(webApkInfo.displayMode());
-                    orientations.add(webApkInfo.orientation());
-                    themeColors.add(webApkInfo.themeColor());
-                    backgroundColors.add(webApkInfo.backgroundColor());
-
-                    WebappDataStorage storage =
-                            WebappRegistry.getInstance().getWebappDataStorage(webApkInfo.id());
-                    long lastUpdateCheckTimeMsForStorage = 0;
-                    boolean relaxUpdatesForStorage = false;
-                    if (storage != null) {
-                        lastUpdateCheckTimeMsForStorage =
-                                storage.getLastCheckForWebManifestUpdateTimeMs();
-                        relaxUpdatesForStorage = storage.shouldRelaxUpdates();
-                    }
-                    lastUpdateCheckTimesMs.add(lastUpdateCheckTimeMsForStorage);
-                    relaxUpdates.add(relaxUpdatesForStorage);
-                }
-            }
+    public static void setForceWebApkUpdate(String id) {
+        WebappDataStorage storage = WebappRegistry.getInstance().getWebappDataStorage(id);
+        if (storage != null) {
+            storage.setShouldForceUpdate(true);
         }
-        nativeOnWebApksRetrieved(callbackPointer, names.toArray(new String[0]),
-                shortNames.toArray(new String[0]), packageNames.toArray(new String[0]),
-                CollectionUtil.integerListToIntArray(shellApkVersions),
-                CollectionUtil.integerListToIntArray(versionCodes), uris.toArray(new String[0]),
-                scopes.toArray(new String[0]), manifestUrls.toArray(new String[0]),
-                manifestStartUrls.toArray(new String[0]),
-                CollectionUtil.integerListToIntArray(displayModes),
-                CollectionUtil.integerListToIntArray(orientations),
-                CollectionUtil.longListToLongArray(themeColors),
-                CollectionUtil.longListToLongArray(backgroundColors),
-                CollectionUtil.longListToLongArray(lastUpdateCheckTimesMs),
-                CollectionUtil.booleanListToBooleanArray(relaxUpdates));
     }
 
     private static native void nativeOnWebappDataStored(long callbackPointer);
-    private static native void nativeOnWebApksRetrieved(long callbackPointer, String[] names,
-            String[] shortNames, String[] packageName, int[] shellApkVersions, int[] versionCodes,
-            String[] uris, String[] scopes, String[] manifestUrls, String[] manifestStartUrls,
-            int[] displayModes, int[] orientations, long[] themeColors, long[] backgroundColors,
-            long[] lastUpdateCheckTimesMs, boolean[] relaxUpdates);
 }

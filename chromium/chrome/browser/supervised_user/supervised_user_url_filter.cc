@@ -23,7 +23,10 @@
 #include "base/task/post_task.h"
 #include "base/task_runner_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/supervised_user/experimental/supervised_user_blacklist.h"
+#include "chrome/browser/supervised_user/kids_management_url_checker_client.h"
+#include "chrome/common/chrome_features.h"
 #include "components/policy/core/browser/url_blacklist_manager.h"
 #include "components/policy/core/browser/url_util.h"
 #include "components/safe_search_api/safe_search/safe_search_url_checker_client.h"
@@ -100,6 +103,10 @@ const char* const kCrxDownloadUrls[] = {
 // Whitelisted origins:
 const char kFamiliesSecureUrl[] = "https://families.google.com/";
 const char kFamiliesUrl[] = "http://families.google.com/";
+
+// Play Store terms of service path:
+const char kPlayStoreHost[] = "play.google.com";
+const char kPlayTermsPath[] = "/about/play-terms";
 
 // This class encapsulates all the state that is required during construction of
 // a new SupervisedUserURLFilter::Contents.
@@ -213,8 +220,7 @@ SupervisedUserURLFilter::SupervisedUserURLFilter()
       blacklist_(nullptr),
       blocking_task_runner_(base::CreateTaskRunnerWithTraits(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
-      weak_ptr_factory_(this) {}
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})) {}
 
 SupervisedUserURLFilter::~SupervisedUserURLFilter() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -332,8 +338,18 @@ SupervisedUserURLFilter::GetFilteringBehaviorForURL(
   static const base::NoDestructor<base::flat_set<GURL>> kWhitelistedOrigins(
       base::flat_set<GURL>({GURL(kFamiliesUrl).GetOrigin(),
                             GURL(kFamiliesSecureUrl).GetOrigin()}));
-  if (base::ContainsKey(*kWhitelistedOrigins, effective_url.GetOrigin()))
+  if (base::Contains(*kWhitelistedOrigins, effective_url.GetOrigin()))
     return ALLOW;
+
+  // Check Play Store terms of service.
+  // path_piece is checked separetly from the host to match international pages
+  // like https://play.google.com/intl/pt-BR_pt/about/play-terms/.
+  if (effective_url.SchemeIs(url::kHttpsScheme) &&
+      effective_url.host_piece() == kPlayStoreHost &&
+      effective_url.path_piece().find(kPlayTermsPath) !=
+          base::StringPiece::npos) {
+    return ALLOW;
+  }
 
   // Check manual blacklists and whitelists.
   FilteringBehavior manual_result =
@@ -518,9 +534,27 @@ void SupervisedUserURLFilter::SetManualURLs(std::map<GURL, bool> url_map) {
 }
 
 void SupervisedUserURLFilter::InitAsyncURLChecker(
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
-  net::NetworkTrafficAnnotationTag traffic_annotation =
-      net::DefineNetworkTrafficAnnotation("supervised_user_url_filter", R"(
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    signin::IdentityManager* identity_manager) {
+  std::string country;
+  variations::VariationsService* variations_service =
+      g_browser_process->variations_service();
+  if (variations_service) {
+    country = variations_service->GetStoredPermanentCountry();
+    if (country.empty())
+      country = variations_service->GetLatestCountry();
+  }
+
+  std::unique_ptr<safe_search_api::URLCheckerClient> url_checker_client;
+
+  if ((base::FeatureList::IsEnabled(
+          features::kKidsManagementUrlClassification))) {
+    url_checker_client = std::make_unique<KidsManagementURLCheckerClient>(
+        std::move(url_loader_factory), country, identity_manager);
+  } else {
+    // TODO(crbug.com/940454): remove safe_search_checker
+    net::NetworkTrafficAnnotationTag traffic_annotation =
+        net::DefineNetworkTrafficAnnotation("supervised_user_url_filter", R"(
         semantics {
           sender: "Supervised Users"
           description:
@@ -540,20 +574,13 @@ void SupervisedUserURLFilter::InitAsyncURLChecker(
             "family dashboard."
           policy_exception_justification: "Not implemented."
         })");
-
-  // Prefer using the permanent stored country, which may be unavailable during
-  // the first run. In that case, try to use the latest country instead.
-  std::string country;
-  variations::VariationsService* variations_service =
-      g_browser_process->variations_service();
-  if (variations_service) {
-    country = variations_service->GetStoredPermanentCountry();
-    if (country.empty())
-      country = variations_service->GetLatestCountry();
+    url_checker_client =
+        std::make_unique<safe_search_api::SafeSearchURLCheckerClient>(
+            std::move(url_loader_factory), traffic_annotation, country);
   }
+
   async_url_checker_ = std::make_unique<safe_search_api::URLChecker>(
-      std::make_unique<safe_search_api::SafeSearchURLCheckerClient>(
-          std::move(url_loader_factory), traffic_annotation, country));
+      std::move(url_checker_client));
 }
 
 void SupervisedUserURLFilter::ClearAsyncURLChecker() {

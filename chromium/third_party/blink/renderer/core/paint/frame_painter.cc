@@ -67,7 +67,7 @@ void FramePainter::PaintContents(GraphicsContext& context,
   FramePaintTiming frame_paint_timing(context, &GetFrameView().GetFrame());
   TRACE_EVENT1("devtools.timeline,rail", "Paint", "data",
                inspector_paint_event::Data(
-                   layout_view, LayoutRect(cull_rect.Rect()), nullptr));
+                   layout_view, PhysicalRect(cull_rect.Rect()), nullptr));
 
   bool is_top_level_painter = !in_paint_contents_;
   in_paint_contents_ = true;
@@ -110,11 +110,6 @@ void FramePainter::PaintContents(GraphicsContext& context,
 
   layer_painter.Paint(context, cull_rect, updated_global_paint_flags,
                       root_layer_paint_flags);
-
-  if (root_layer->ContainsDirtyOverlayScrollbars()) {
-    layer_painter.PaintOverlayScrollbars(context, cull_rect,
-                                         updated_global_paint_flags);
-  }
 
   // Regions may have changed as a result of the visibility/z-index of element
   // changing.

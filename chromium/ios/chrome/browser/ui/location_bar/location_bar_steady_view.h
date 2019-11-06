@@ -7,6 +7,8 @@
 
 #import <UIKit/UIKit.h>
 
+#import "ios/chrome/browser/ui/infobars/badge/infobar_badge_button.h"
+
 // A color scheme used for the steady view elements.
 @interface LocationBarSteadyViewColorScheme : NSObject
 
@@ -29,26 +31,39 @@
 - (instancetype)initWithFrame:(CGRect)frame NS_UNAVAILABLE;
 - (instancetype)initWithCoder:(NSCoder*)aDecoder NS_UNAVAILABLE;
 
-- (void)setColorScheme:(LocationBarSteadyViewColorScheme*)colorScheme;
-
 // Sets the location image. If |locationImage| is nil, hides the image view.
 - (void)setLocationImage:(UIImage*)locationImage;
 
 // Sets the location label's text.
 - (void)setLocationLabelText:(NSString*)string;
 
+// Sets the location label's text and styles it as if it were placeholder text.
+- (void)setLocationLabelPlaceholderText:(NSString*)string;
+
+// Displays the location InfobarBadgeButton if |display| is YES, hides it if
+// |display| is NO. Will animate change if |animated| is YES.
+- (void)displayBadge:(BOOL)display animated:(BOOL)animated;
+
+// Toggles |enabled| state of the trailing button and updates accessibility
+// appropriately.
+- (void)enableTrailingButton:(BOOL)enabled;
+
 // The tappable button representing the location bar.
 @property(nonatomic, strong) UIButton* locationButton;
 // The label displaying the current location URL.
 @property(nonatomic, strong) UILabel* locationLabel;
-// The button displayed in the leading corner of the view, i.e. infobar badge.
+// The InfobarBadgeButton displayed in the leading corner of the view.
+// Call displayBadge:animated: in this class instead of InfobarBadgeButton's
+// directly.
 // TODO(crbug.com/935804): This button is currently only being used in the
 // Infobar redesign.
-@property(nonatomic, strong) UIButton* leadingButton;
+@property(nonatomic, strong) InfobarBadgeButton* leadingButton;
 // The button displayed in the trailing corner of the view, i.e. share button.
 @property(nonatomic, strong) UIButton* trailingButton;
 // The string that describes the current security level. Used for a11y.
 @property(nonatomic, copy) NSString* securityLevelAccessibilityString;
+// Current in-use color scheme.
+@property(nonatomic, strong) LocationBarSteadyViewColorScheme* colorScheme;
 
 @end
 

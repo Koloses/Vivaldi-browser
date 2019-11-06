@@ -49,7 +49,6 @@ public class AwVariationsSeedFetcher extends JobService {
     private static JobScheduler sMockJobScheduler;
     private static VariationsSeedFetcher sMockDownloader;
 
-    private VariationsSeedHolder mSeedHolder;
     private FetchTask mFetchTask;
 
     private static String getChannelStr() {
@@ -58,7 +57,7 @@ public class AwVariationsSeedFetcher extends JobService {
             case Channel.BETA:   return "beta";
             case Channel.DEV:    return "dev";
             case Channel.CANARY: return "canary";
-            default: return null; // This is the case for stand-alone WebView.
+            default: return null;
         }
     }
 
@@ -76,12 +75,15 @@ public class AwVariationsSeedFetcher extends JobService {
 
     private static JobScheduler getScheduler() {
         if (sMockJobScheduler != null) return sMockJobScheduler;
+
+        // This may be null due to vendor framework bugs. https://crbug.com/968636
         return (JobScheduler) ContextUtils.getApplicationContext().getSystemService(
                 Context.JOB_SCHEDULER_SERVICE);
     }
 
     public static void scheduleIfNeeded() {
         JobScheduler scheduler = getScheduler();
+        if (scheduler == null) return;
 
         // Check if it's already scheduled.
         if (getPendingJob(scheduler, JOB_ID) != null) {
@@ -135,7 +137,8 @@ public class AwVariationsSeedFetcher extends JobService {
                 }
 
                 if (newSeed != null) {
-                    mSeedHolder.updateSeed(newSeed, /*onFinished=*/() -> jobFinished(mParams));
+                    VariationsSeedHolder.getInstance().updateSeed(
+                            newSeed, /*onFinished=*/() -> jobFinished(mParams));
                     shouldFinish = false; // jobFinished will be deferred until updateSeed is done.
                 }
             } catch (IOException e) {
@@ -148,14 +151,6 @@ public class AwVariationsSeedFetcher extends JobService {
 
             return null;
         }
-    }
-
-    @Override
-    @SuppressWarnings("NoContextGetApplicationContext")
-    public void onCreate() {
-        super.onCreate();
-        ServiceInit.init(getApplicationContext());
-        mSeedHolder = VariationsSeedHolder.getInstance();
     }
 
     @Override

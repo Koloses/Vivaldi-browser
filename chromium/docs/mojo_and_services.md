@@ -64,7 +64,7 @@ module example.mojom;
 
 interface PingResponder {
   // Receives a "Ping" and responds with a random integer.
-  Ping() => (int random);
+  Ping() => (int32 random);
 };
 ```
 
@@ -73,7 +73,7 @@ definition here:
 
 ``` python
 # src/example/public/mojom/BUILD.gn
-import "mojo/public/tools/bindings/mojom.gni"
+import("//mojo/public/tools/bindings/mojom.gni")
 mojom("mojom") {
   sources = [ "ping_responder.mojom" ]
 }
@@ -209,7 +209,7 @@ class PingResponderImpl : example::mojom::PingResponder {
 
 And conveniently `RenderFrameHostImpl` implements `DocumentInterfaceBroker`, and
 any calls made on the object returned by
-`RenderFrameImpl::GetDocumentInterfaceBroker()' will be routed directly to the
+`RenderFrameImpl::GetDocumentInterfaceBroker()` will be routed directly to the
 `RenderFrameHostImpl`.  So the only thing left to do is update
 `RenderFrameHostImpl` to implement `GetPingResponder`. If you forget to do this
 the compiler will complain anyway, because generated mojom interface methods are
@@ -327,7 +327,7 @@ interface Divider {
 
 ``` python
 # src/chrome/services/math/public/mojom/BUILD.gn
-import "mojo/public/tools/bindings/mojom.gni"
+import("//mojo/public/tools/bindings/mojom.gni")
 
 mojom("mojom") {
   sources = [
@@ -405,7 +405,7 @@ void MathService::Divide(int32_t dividend,
                          int32_t divisor,
                          DivideCallback callback) {
   // Respond with the quotient!
-  callback.Run(dividend / divisor);
+  std::move(callback).Run(dividend / divisor);
 }
 
 }  // namespace math
@@ -525,7 +525,7 @@ GetChromePackagedServiceManifests() {
 ```
 
 And don't forget to add a GN dependency from
-`//chrome/app:packaged_service_manifests` onto
+[`//chrome/app:chrome_packaged_service_manifests`](https://cs.chromium.org/chromium/src/chrome/app/BUILD.gn?l=564&rcl=a77d5ba9c4621cfe14e7e1cd03bbae16904f269e) onto
 `//chrome/services/math/public/cpp:manifest`!
 
 We're almost done with service setup. The last step is to teach Chromium (and
@@ -568,7 +568,7 @@ For this step we just modify
 by adding a block of code as follows:
 
 ``` cpp
-void ChromeContentUtilityClient::MaybeCreateMainThreadService(
+std::unique_ptr<service_manager::Service> ChromeContentUtilityClient::MaybeCreateMainThreadService(
     const std::string& service_name,
     service_manager::mojom::ServiceRequest request) {
   ...
@@ -617,9 +617,9 @@ an interface request to our service. This is accessible from the main thread of
 the browser process. Somewhere in `src/chrome/browser`, we can write:
 
 ``` cpp
-// This gives us the global content_browser's Connector
-service_manager::Connector* connector =
-    content::ServiceManagerConnection::GetForProcess()->GetConnector();
+// This gives us the system Connector for the browser process, which has access
+// to most service interfaces.
+service_manager::Connector* connector = content::GetSystemConnector();
 
 // Recall from the earlier Mojo section that mojo::MakeRequest creates a new
 // message pipe for our interface. Connector passes the request endpoint to
@@ -634,6 +634,12 @@ connector->BindInterface(math::mojom::kServiceName,
 divider->Divide(
     42, 6, base::BindOnce([](int32_t quotient) { LOG(INFO) << quotient; }));
 ```
+*** aside
+NOTE: To ensure the execution of the response callback, the DividerPtr
+object must be kept alive (see
+[this section](/mojo/public/cpp/bindings/README.md#A-Note-About-Endpoint-Lifetime-and-Callbacks)
+and [this note from an earlier section](#sending-a-message)).
+***
 
 This should successfully spawn a new process to run the `math` service if it's
 not already running, then ask it to do a division, and ultimately log the result

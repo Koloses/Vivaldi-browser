@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/guid.h"
 #include "base/location.h"
 #include "base/logging.h"
@@ -16,9 +17,9 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
-#include "chromeos/dbus/shill_manager_client.h"
-#include "chromeos/dbus/shill_profile_client.h"
-#include "chromeos/dbus/shill_service_client.h"
+#include "chromeos/dbus/shill/shill_manager_client.h"
+#include "chromeos/dbus/shill/shill_profile_client.h"
+#include "chromeos/dbus/shill/shill_service_client.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_device_handler.h"
@@ -72,12 +73,15 @@ void InvokeErrorCallback(const std::string& service_path,
       error_callback, service_path, error_name, error_msg);
 }
 
-void LogErrorWithDict(const base::Location& from_where,
-                      const std::string& error_name,
-                      std::unique_ptr<base::DictionaryValue> error_data) {
+void LogErrorWithDictAndCallCallback(
+    base::OnceClosure callback,
+    const base::Location& from_where,
+    const std::string& error_name,
+    std::unique_ptr<base::DictionaryValue> error_data) {
   device_event_log::AddEntry(from_where.file_name(), from_where.line_number(),
                              device_event_log::LOG_TYPE_NETWORK,
                              device_event_log::LOG_LEVEL_ERROR, error_name);
+  std::move(callback).Run();
 }
 
 const base::DictionaryValue* GetByGUID(const GuidToPolicyMap& policies,
@@ -390,24 +394,6 @@ void ManagedNetworkConfigurationHandlerImpl::SetProperties(
           *profile, guid, &policies->global_network_config, network_policy,
           validated_user_settings.get()));
 
-  // 'Carrier' needs to be handled specially if set.
-  base::DictionaryValue* cellular = nullptr;
-  if (validated_user_settings->GetDictionaryWithoutPathExpansion(
-          ::onc::network_config::kCellular, &cellular)) {
-    std::string carrier;
-    if (cellular->GetStringWithoutPathExpansion(::onc::cellular::kCarrier,
-                                                &carrier)) {
-      network_device_handler_->SetCarrier(
-          state->device_path(), carrier,
-          base::Bind(
-              &ManagedNetworkConfigurationHandlerImpl::SetShillProperties,
-              weak_ptr_factory_.GetWeakPtr(), service_path,
-              base::Passed(&shill_dictionary), callback, error_callback),
-          error_callback);
-      return;
-    }
-  }
-
   SetShillProperties(service_path, std::move(shill_dictionary), callback,
                      error_callback);
 }
@@ -565,7 +551,7 @@ void ManagedNetworkConfigurationHandlerImpl::SetPolicy(
   DCHECK(onc_source != ::onc::ONC_SOURCE_DEVICE_POLICY ||
          userhash.empty());
   Policies* policies = NULL;
-  if (base::ContainsKey(policies_by_user_, userhash)) {
+  if (base::Contains(policies_by_user_, userhash)) {
     policies = policies_by_user_[userhash].get();
   } else {
     policies = new Policies;
@@ -640,7 +626,7 @@ bool ManagedNetworkConfigurationHandlerImpl::ApplyOrQueuePolicies(
     return false;
   }
 
-  if (base::ContainsKey(policy_applicators_, userhash)) {
+  if (base::Contains(policy_applicators_, userhash)) {
     // A previous policy application is still running. Queue the modified
     // policies.
     // Note, even if |modified_policies| is empty, this means that a policy
@@ -695,19 +681,26 @@ void ManagedNetworkConfigurationHandlerImpl::OnProfileRemoved(
 }
 
 void ManagedNetworkConfigurationHandlerImpl::CreateConfigurationFromPolicy(
-    const base::DictionaryValue& shill_properties) {
+    const base::DictionaryValue& shill_properties,
+    base::OnceClosure callback) {
+  base::RepeatingClosure adapted_callback =
+      base::AdaptCallbackForRepeating(std::move(callback));
   network_configuration_handler_->CreateShillConfiguration(
       shill_properties,
-      base::Bind(
+      base::BindRepeating(
           &ManagedNetworkConfigurationHandlerImpl::OnPolicyAppliedToNetwork,
-          weak_ptr_factory_.GetWeakPtr()),
-      base::Bind(&LogErrorWithDict, FROM_HERE));
+          weak_ptr_factory_.GetWeakPtr(), adapted_callback),
+      base::BindRepeating(&LogErrorWithDictAndCallCallback, adapted_callback,
+                          FROM_HERE));
 }
 
 void ManagedNetworkConfigurationHandlerImpl::
     UpdateExistingConfigurationWithPropertiesFromPolicy(
         const base::DictionaryValue& existing_properties,
-        const base::DictionaryValue& new_properties) {
+        const base::DictionaryValue& new_properties,
+        base::OnceClosure callback) {
+  base::RepeatingClosure adapted_callback =
+      base::AdaptCallbackForRepeating(std::move(callback));
   base::DictionaryValue shill_properties;
 
   std::string profile;
@@ -734,10 +727,11 @@ void ManagedNetworkConfigurationHandlerImpl::
 
   network_configuration_handler_->CreateShillConfiguration(
       shill_properties,
-      base::Bind(
+      base::BindRepeating(
           &ManagedNetworkConfigurationHandlerImpl::OnPolicyAppliedToNetwork,
-          weak_ptr_factory_.GetWeakPtr()),
-      base::Bind(&LogErrorWithDict, FROM_HERE));
+          weak_ptr_factory_.GetWeakPtr(), adapted_callback),
+      base::BindRepeating(&LogErrorWithDictAndCallCallback, adapted_callback,
+                          FROM_HERE));
 }
 
 void ManagedNetworkConfigurationHandlerImpl::OnPoliciesApplied(
@@ -749,7 +743,7 @@ void ManagedNetworkConfigurationHandlerImpl::OnPoliciesApplied(
       FROM_HERE, policy_applicators_[userhash].release());
   policy_applicators_.erase(userhash);
 
-  if (base::ContainsKey(queued_modified_policies_, userhash)) {
+  if (base::Contains(queued_modified_policies_, userhash)) {
     std::set<std::string> modified_policies;
     queued_modified_policies_[userhash].swap(modified_policies);
     // Remove |userhash| from the queue.
@@ -967,12 +961,21 @@ void ManagedNetworkConfigurationHandlerImpl::Init(
 }
 
 void ManagedNetworkConfigurationHandlerImpl::OnPolicyAppliedToNetwork(
+    base::OnceClosure callback,
     const std::string& service_path,
     const std::string& guid) {
-  if (service_path.empty())
-    return;
+  DCHECK(!service_path.empty());
+
+  // When this is called, the policy has been fully applied and is reflected in
+  // NetworkStateHandler, so it is safe to notify obserers.
+  // Notifying observers is the last step of policy application to
+  // |service_path|.
   for (auto& observer : observers_)
     observer.PolicyAppliedToNetwork(service_path);
+
+  // Inform the caller that has requested policy application that it has
+  // finished.
+  std::move(callback).Run();
 }
 
 // Get{Managed}Properties helpers

@@ -99,7 +99,8 @@ class MockRendererClient : public mojom::RendererClient {
                void(base::TimeDelta time,
                     base::TimeDelta max_time,
                     base::TimeTicks capture_time));
-  MOCK_METHOD1(OnBufferingStateChange, void(BufferingState state));
+  MOCK_METHOD2(OnBufferingStateChange,
+               void(BufferingState state, BufferingStateChangeReason reason));
   MOCK_METHOD0(OnEnded, void());
   MOCK_METHOD0(OnError, void());
   MOCK_METHOD1(OnVideoOpacityChange, void(bool opaque));
@@ -120,6 +121,14 @@ ACTION_P(QuitLoop, run_loop) {
   base::PostTask(FROM_HERE, run_loop->QuitClosure());
 }
 
+service_manager::Manifest MakeMediaManifestForExecutable() {
+  service_manager::Manifest manifest = GetMediaManifest();
+  manifest.options.sandbox_type = "none";
+  manifest.options.execution_mode =
+      service_manager::Manifest::ExecutionMode::kStandaloneExecutable;
+  return manifest;
+}
+
 const char kTestServiceName[] = "media_service_unittests";
 
 // Tests MediaService built into a standalone mojo service binary (see
@@ -131,7 +140,7 @@ class MediaServiceTest : public testing::Test {
  public:
   MediaServiceTest()
       : test_service_manager_(
-            {GetMediaManifest(),
+            {MakeMediaManifestForExecutable(),
              service_manager::ManifestBuilder()
                  .WithServiceName(kTestServiceName)
                  .RequireCapability(mojom::kMediaServiceName, "media:media")
@@ -258,8 +267,7 @@ class MediaServiceTest : public testing::Test {
     EXPECT_CALL(*this, OnRendererInitialized(expected_result))
         .WillOnce(QuitLoop(&run_loop));
     renderer_->Initialize(
-        std::move(client_ptr_info), std::move(streams), base::nullopt,
-        base::nullopt,
+        std::move(client_ptr_info), std::move(streams), nullptr,
         base::BindOnce(&MediaServiceTest::OnRendererInitialized,
                        base::Unretained(this)));
     run_loop.Run();

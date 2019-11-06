@@ -16,7 +16,6 @@
 #include "components/invalidation/impl/profile_identity_provider.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/invalidation/impl/ticl_invalidation_service.h"
-#include "components/invalidation/impl/ticl_profile_settings_provider.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_registry.h"
@@ -24,8 +23,8 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/gcm/ios_chrome_gcm_profile_service_factory.h"
 #include "ios/chrome/browser/signin/identity_manager_factory.h"
+#include "ios/web/public/thread/web_task_traits.h"
 #include "ios/web/public/web_client.h"
-#include "ios/web/public/web_task_traits.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -101,8 +100,6 @@ IOSChromeDeprecatedProfileInvalidationProviderFactory::BuildServiceInstanceFor(
   std::unique_ptr<TiclInvalidationService> service(new TiclInvalidationService(
       web::GetWebClient()->GetUserAgent(web::UserAgentType::MOBILE),
       identity_provider.get(),
-      std::make_unique<invalidation::TiclProfileSettingsProvider>(
-          browser_state->GetPrefs()),
       IOSChromeGCMProfileServiceFactory::GetForBrowserState(browser_state)
           ->driver(),
       base::BindRepeating(&RequestProxyResolvingSocketFactory, browser_state),

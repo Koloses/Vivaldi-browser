@@ -44,10 +44,14 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
+using content::BrowserThread;
+using content::RenderFrameHostTester;
+using content::WebContents;
 using ::testing::_;
 using ::testing::DeleteArg;
 using ::testing::DoAll;
 using ::testing::Eq;
+using ::testing::Invoke;
 using ::testing::IsNull;
 using ::testing::Mock;
 using ::testing::NiceMock;
@@ -57,9 +61,6 @@ using ::testing::Return;
 using ::testing::SaveArg;
 using ::testing::SetArgPointee;
 using ::testing::StrictMock;
-using content::BrowserThread;
-using content::RenderFrameHostTester;
-using content::WebContents;
 
 namespace {
 
@@ -103,18 +104,6 @@ MATCHER(CallbackIsNull, "") {
 ACTION(QuitUIMessageLoop) {
   EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
   base::RunLoop::QuitCurrentWhenIdleDeprecated();
-}
-
-ACTION_P(InvokeDoneCallback, verdict) {
-  std::unique_ptr<ClientPhishingRequest> request(std::get<1>(args));
-  request->CopyFrom(*verdict);
-  std::get<2>(args).Run(true, std::move(request));
-}
-
-ACTION_P(InvokeMalwareCallback, verdict) {
-  std::unique_ptr<ClientMalwareRequest> request(std::get<1>(args));
-  request->CopyFrom(*verdict);
-  std::get<2>(args).Run(true, std::move(request));
 }
 
 class MockClientSideDetectionService : public ClientSideDetectionService {
@@ -189,13 +178,13 @@ class MockBrowserFeatureExtractor : public BrowserFeatureExtractor {
 
   MOCK_METHOD3(ExtractFeatures,
                void(const BrowseInfo*,
-                    ClientPhishingRequest*,
-                    const BrowserFeatureExtractor::DoneCallback&));
+                    std::unique_ptr<ClientPhishingRequest>,
+                    BrowserFeatureExtractor::DoneCallback));
 
   MOCK_METHOD3(ExtractMalwareFeatures,
                void(BrowseInfo*,
-                    ClientMalwareRequest*,
-                    const BrowserFeatureExtractor::MalwareDoneCallback&));
+                    std::unique_ptr<ClientMalwareRequest>,
+                    BrowserFeatureExtractor::MalwareDoneCallback));
 };
 
 }  // namespace
@@ -212,9 +201,18 @@ class FakePhishingDetector : public mojom::PhishingDetector {
   }
 
   // mojom::PhishingDetector
-  void StartPhishingDetection(const GURL& url) override {
+  void StartPhishingDetection(
+      const GURL& url,
+      StartPhishingDetectionCallback callback) override {
     url_ = url;
     phishing_detection_started_ = true;
+
+    // The callback must be run before destruction, so send a minimal
+    // ClientPhishingRequest.
+    ClientPhishingRequest request;
+    request.set_client_score(0.8);
+    std::move(callback).Run(request.SerializeAsString());
+
     return;
   }
 
@@ -275,7 +273,10 @@ class ClientSideDetectionHostTestBase : public ChromeRenderViewHostTestHarness {
     csd_service_.reset(new StrictMock<MockClientSideDetectionService>());
     database_manager_ = new StrictMock<MockSafeBrowsingDatabaseManager>();
     ui_manager_ = new StrictMock<MockSafeBrowsingUIManager>(
-        SafeBrowsingService::CreateSafeBrowsingService());
+        // TODO(crbug/925153): Port consumers of the SafeBrowsingService to
+        // use the interface in components/safe_browsing, and remove this cast.
+        static_cast<safe_browsing::SafeBrowsingService*>(
+            SafeBrowsingService::CreateSafeBrowsingService()));
 
     csd_host_ = ClientSideDetectionHost::Create(web_contents());
     csd_host_->set_client_side_detection_service(csd_service_.get());
@@ -305,7 +306,7 @@ class ClientSideDetectionHostTestBase : public ChromeRenderViewHostTestHarness {
   void DidStopLoading() { csd_host_->DidStopLoading(); }
 
   void UpdateIPUrlMap(const std::string& ip, const std::string& host) {
-    csd_host_->UpdateIPUrlMap(ip, host, "", "", content::RESOURCE_TYPE_OBJECT);
+    csd_host_->UpdateIPUrlMap(ip, host, "", "", content::ResourceType::kObject);
   }
 
   BrowseInfo* GetBrowseInfo() {
@@ -519,7 +520,12 @@ TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneNotPhishing) {
   verdict.set_is_phishing(true);
 
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _))
-      .WillOnce(InvokeDoneCallback(&verdict));
+      .WillOnce(Invoke([&](const BrowseInfo* into,
+                           std::unique_ptr<ClientPhishingRequest> request,
+                           BrowserFeatureExtractor::DoneCallback callback) {
+        request->CopyFrom(verdict);
+        std::move(callback).Run(true, std::move(request));
+      }));
   EXPECT_CALL(*csd_service_,
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _, _))
@@ -551,7 +557,12 @@ TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneDisabled) {
   verdict.set_is_phishing(true);
 
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _))
-      .WillOnce(InvokeDoneCallback(&verdict));
+      .WillOnce(Invoke([&](const BrowseInfo* info,
+                           std::unique_ptr<ClientPhishingRequest> request,
+                           BrowserFeatureExtractor::DoneCallback callback) {
+        request->CopyFrom(verdict);
+        std::move(callback).Run(true, std::move(request));
+      }));
   EXPECT_CALL(*csd_service_,
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _, _))
@@ -584,7 +595,12 @@ TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneShowInterstitial) {
   verdict.set_is_phishing(true);
 
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _))
-      .WillOnce(InvokeDoneCallback(&verdict));
+      .WillOnce(Invoke([&](const BrowseInfo* info,
+                           std::unique_ptr<ClientPhishingRequest> request,
+                           BrowserFeatureExtractor::DoneCallback callback) {
+        request->CopyFrom(verdict);
+        std::move(callback).Run(true, std::move(request));
+      }));
   EXPECT_CALL(*csd_service_,
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _, _))
@@ -635,7 +651,12 @@ TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneMultiplePings) {
   verdict.set_is_phishing(true);
 
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _))
-      .WillOnce(InvokeDoneCallback(&verdict));
+      .WillOnce(Invoke([&](const BrowseInfo* info,
+                           std::unique_ptr<ClientPhishingRequest> request,
+                           BrowserFeatureExtractor::DoneCallback callback) {
+        request->CopyFrom(verdict);
+        std::move(callback).Run(true, std::move(request));
+      }));
   EXPECT_CALL(*csd_service_,
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _, _))
@@ -882,7 +903,12 @@ TEST_F(ClientSideDetectionHostTest,
 
   ClientSideDetectionService::ClientReportMalwareRequestCallback cb;
   EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
-      .WillOnce(InvokeMalwareCallback(&malware_verdict));
+      .WillOnce(Invoke(
+          [&](BrowseInfo* info, std::unique_ptr<ClientMalwareRequest> request,
+              BrowserFeatureExtractor::MalwareDoneCallback callback) {
+            request->CopyFrom(malware_verdict);
+            std::move(callback).Run(true, std::move(request));
+          }));
   EXPECT_CALL(*csd_service_,
               SendClientReportMalwareRequest(
                   Pointee(PartiallyEqualMalwareVerdict(malware_verdict)), _))
@@ -928,7 +954,7 @@ TEST_F(ClientSideDetectionHostTest, UpdateIPUrlMap) {
   for (int i = 0; i < 20; i++) {
     std::string url = base::StringPrintf("http://%d.com/", i);
     expected_urls.push_back(
-        IPUrlInfo(url, "", "", content::RESOURCE_TYPE_OBJECT));
+        IPUrlInfo(url, "", "", content::ResourceType::kObject));
     UpdateIPUrlMap("250.10.10.10", url);
   }
   ASSERT_EQ(1U, browse_info->ips.size());
@@ -948,7 +974,7 @@ TEST_F(ClientSideDetectionHostTest, UpdateIPUrlMap) {
     std::string ip = base::StringPrintf("%d.%d.%d.256", i, i, i);
     expected_urls.clear();
     expected_urls.push_back(
-        IPUrlInfo("test.com/", "", "", content::RESOURCE_TYPE_OBJECT));
+        IPUrlInfo("test.com/", "", "", content::ResourceType::kObject));
     UpdateIPUrlMap(ip, "test.com/");
     ASSERT_EQ(1U, browse_info->ips[ip].size());
     CheckIPUrlEqual(expected_urls,
@@ -967,9 +993,9 @@ TEST_F(ClientSideDetectionHostTest, UpdateIPUrlMap) {
   ASSERT_EQ(2U, browse_info->ips["100.100.100.256"].size());
   expected_urls.clear();
   expected_urls.push_back(
-      IPUrlInfo("test.com/", "", "", content::RESOURCE_TYPE_OBJECT));
+      IPUrlInfo("test.com/", "", "", content::ResourceType::kObject));
   expected_urls.push_back(
-      IPUrlInfo("more.com/", "", "", content::RESOURCE_TYPE_OBJECT));
+      IPUrlInfo("more.com/", "", "", content::ResourceType::kObject));
   CheckIPUrlEqual(expected_urls,
                   browse_info->ips["100.100.100.256"]);
 }
@@ -1268,7 +1294,7 @@ TEST_F(ClientSideDetectionHostTest,
   resource_load_info->url = GURL("http://host1.com");
   resource_load_info->referrer = GURL("http://host2.com");
   resource_load_info->method = "GET";
-  resource_load_info->resource_type = content::RESOURCE_TYPE_SUB_FRAME;
+  resource_load_info->resource_type = content::ResourceType::kSubFrame;
   csd_host_->ResourceLoadComplete(/*render_frame_host=*/nullptr,
                                   content::GlobalRequestID(),
                                   *resource_load_info);

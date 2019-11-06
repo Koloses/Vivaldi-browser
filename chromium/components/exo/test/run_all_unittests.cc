@@ -4,6 +4,7 @@
 
 #include "base/bind.h"
 #include "base/test/launcher/unit_test_launcher.h"
+#include "components/viz/test/test_gpu_service_holder.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/test/ash_test_suite.h"
@@ -26,7 +27,9 @@ int main(int argc, char** argv) {
   mojo::core::Init();
 #endif
 
-  return base::LaunchUnitTestsSerially(
+  viz::TestGpuServiceHolder::DestroyInstanceAfterEachTest();
+
+  return base::LaunchUnitTests(
       argc, argv,
       base::BindOnce(&base::TestSuite::Run, base::Unretained(&test_suite)));
 }

@@ -128,6 +128,13 @@ void WebFrameTestProxy::Initialize(
   new TestRenderFrameObserver(this, view_proxy_for_frame);  // deletes itself.
 }
 
+void WebFrameTestProxy::UpdateAllLifecyclePhasesAndCompositeForTesting() {
+  if (!IsLocalRoot())
+    return;
+  auto* widget = static_cast<WebWidgetTestProxy*>(GetLocalRootRenderWidget());
+  widget->SynchronouslyComposite(/*do_raster=*/true);
+}
+
 // WebLocalFrameClient implementation.
 blink::WebPlugin* WebFrameTestProxy::CreatePlugin(
     const blink::WebPluginParams& params) {
@@ -243,27 +250,23 @@ void WebFrameTestProxy::WillSendRequest(blink::WebURLRequest& request) {
   test_client_->WillSendRequest(request);
 }
 
-void WebFrameTestProxy::DidReceiveResponse(
-    const blink::WebURLResponse& response) {
-  test_client_->DidReceiveResponse(response);
-  RenderFrameImpl::DidReceiveResponse(response);
-}
-
 void WebFrameTestProxy::BeginNavigation(
     std::unique_ptr<blink::WebNavigationInfo> info) {
-  if (test_client_->ShouldContinueNavigation(*info))
+  if (test_client_->ShouldContinueNavigation(info.get()))
     RenderFrameImpl::BeginNavigation(std::move(info));
 }
 
-void WebFrameTestProxy::PostAccessibilityEvent(const blink::WebAXObject& object,
-                                               ax::mojom::Event event) {
-  test_client_->PostAccessibilityEvent(object, event);
+void WebFrameTestProxy::PostAccessibilityEvent(
+    const blink::WebAXObject& object,
+    ax::mojom::Event event,
+    ax::mojom::EventFrom event_from) {
+  test_client_->PostAccessibilityEvent(object, event, event_from);
   // Guard against the case where |this| was deleted as a result of an
   // accessibility listener detaching a frame. If that occurs, the
   // WebAXObject will be detached.
   if (object.IsDetached())
     return;  // |this| is invalid.
-  RenderFrameImpl::PostAccessibilityEvent(object, event);
+  RenderFrameImpl::PostAccessibilityEvent(object, event, event_from);
 }
 
 void WebFrameTestProxy::MarkWebAXObjectDirty(const blink::WebAXObject& object,
@@ -279,9 +282,9 @@ void WebFrameTestProxy::MarkWebAXObjectDirty(const blink::WebAXObject& object,
 
 void WebFrameTestProxy::CheckIfAudioSinkExistsAndIsAuthorized(
     const blink::WebString& sink_id,
-    std::unique_ptr<blink::WebSetSinkIdCallbacks> web_callbacks) {
-  test_client_->CheckIfAudioSinkExistsAndIsAuthorized(sink_id,
-                                                      std::move(web_callbacks));
+    blink::WebSetSinkIdCompleteCallback completion_callback) {
+  test_client_->CheckIfAudioSinkExistsAndIsAuthorized(
+      sink_id, std::move(completion_callback));
 }
 
 void WebFrameTestProxy::DidClearWindowObject() {

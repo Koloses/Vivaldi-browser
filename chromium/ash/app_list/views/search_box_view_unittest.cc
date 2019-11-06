@@ -11,8 +11,10 @@
 #include <utility>
 
 #include "ash/app_list/test/app_list_test_view_delegate.h"
+#include "ash/app_list/views/app_list_main_view.h"
 #include "ash/app_list/views/app_list_view.h"
 #include "ash/app_list/views/contents_view.h"
+#include "ash/app_list/views/search_result_page_view.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_list/vector_icons/vector_icons.h"
 #include "base/macros.h"
@@ -69,18 +71,17 @@ class SearchBoxViewTest : public views::test::WidgetTest,
     views::test::WidgetTest::SetUp();
 
     app_list_view_ = new AppListView(&view_delegate_);
-    AppListView::InitParams params;
-    params.parent = GetContext();
-    app_list_view_->Initialize(params);
+    app_list_view_->InitView(false /*is_tablet_mode*/, GetContext());
 
     widget_ = CreateTopLevelPlatformWidget();
     view_ =
         std::make_unique<SearchBoxView>(this, &view_delegate_, app_list_view());
-    view_->Init();
+    view_->Init(false /*is_tablet_mode*/);
     widget_->SetBounds(gfx::Rect(0, 0, 300, 200));
     counter_view_ = new KeyPressCounterView(app_list_view_);
     widget_->GetContentsView()->AddChildView(view());
     widget_->GetContentsView()->AddChildView(counter_view_);
+    counter_view_->Init(view_delegate_.GetModel());
     view()->set_contents_view(counter_view_);
   }
 
@@ -131,6 +132,30 @@ class SearchBoxViewTest : public views::test::WidgetTest,
     return result;
   }
 
+  // Creates a SearchResult with the given parameters.
+  void CreateSearchResult(ash::SearchResultDisplayType display_type,
+                          double display_score,
+                          const base::string16& title,
+                          const base::string16& details) {
+    CreateSearchResultAt(results()->item_count(), display_type, display_score,
+                         title, details);
+  }
+
+  // Creates a SearchResult with the given parameters at the given index in
+  // the results list.
+  void CreateSearchResultAt(size_t index,
+                            ash::SearchResultDisplayType display_type,
+                            double display_score,
+                            const base::string16& title,
+                            const base::string16& details) {
+    auto search_result = std::make_unique<SearchResult>();
+    search_result->set_display_type(display_type);
+    search_result->set_display_score(display_score);
+    search_result->set_title(title);
+    search_result->set_details(details);
+    results()->AddAt(index, std::move(search_result));
+  }
+
   SearchModel::SearchResults* results() {
     return view_delegate_.GetSearchModel()->results();
   }
@@ -160,13 +185,13 @@ class SearchBoxViewTest : public views::test::WidgetTest,
 
 // Tests that the close button is invisible by default.
 TEST_F(SearchBoxViewTest, CloseButtonInvisibleByDefault) {
-  EXPECT_FALSE(view()->close_button()->visible());
+  EXPECT_FALSE(view()->close_button()->GetVisible());
 }
 
 // Tests that the close button becomes visible after typing in the search box.
 TEST_F(SearchBoxViewTest, CloseButtonVisibleAfterTyping) {
   KeyPress(ui::VKEY_A);
-  EXPECT_TRUE(view()->close_button()->visible());
+  EXPECT_TRUE(view()->close_button()->GetVisible());
 }
 
 // Tests that the close button is still invisible after the search box is
@@ -176,9 +201,9 @@ TEST_F(SearchBoxViewTest, CloseButtonInvisibleAfterSearchBoxActived) {
 
   // UI behavior is different with Zero State enabled.
   if (app_list_features::IsZeroStateSuggestionsEnabled())
-    EXPECT_TRUE(view()->close_button()->visible());
+    EXPECT_TRUE(view()->close_button()->GetVisible());
   else
-    EXPECT_FALSE(view()->close_button()->visible());
+    EXPECT_FALSE(view()->close_button()->GetVisible());
 }
 
 // Tests that the close button becomes invisible after close button is clicked.
@@ -189,7 +214,7 @@ TEST_F(SearchBoxViewTest, CloseButtonInvisibleAfterCloseButtonClicked) {
       ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
                      base::TimeTicks(), ui::EF_LEFT_MOUSE_BUTTON,
                      ui::EF_LEFT_MOUSE_BUTTON));
-  EXPECT_FALSE(view()->close_button()->visible());
+  EXPECT_FALSE(view()->close_button()->GetVisible());
 }
 
 // Tests that the search box becomes empty after close button is clicked.
@@ -224,7 +249,7 @@ TEST_F(SearchBoxViewTest, SearchBoxInactiveSearchBoxGoogle) {
   SetSearchEngineIsGoogle(true);
   SetSearchBoxActive(false, ui::ET_UNKNOWN);
   const gfx::ImageSkia expected_icon =
-      gfx::CreateVectorIcon(kGoogleBlackIcon, search_box::kSearchIconSize,
+      gfx::CreateVectorIcon(kGoogleBlackIcon, search_box::kIconSize,
                             search_box::kDefaultSearchboxColor);
   view()->ModelChanged();
 
@@ -240,7 +265,7 @@ TEST_F(SearchBoxViewTest, SearchBoxActiveSearchEngineGoogle) {
   SetSearchEngineIsGoogle(true);
   SetSearchBoxActive(true, ui::ET_MOUSE_PRESSED);
   const gfx::ImageSkia expected_icon =
-      gfx::CreateVectorIcon(kGoogleColorIcon, search_box::kSearchIconSize,
+      gfx::CreateVectorIcon(kGoogleColorIcon, search_box::kIconSize,
                             search_box::kDefaultSearchboxColor);
   view()->ModelChanged();
 
@@ -255,9 +280,9 @@ TEST_F(SearchBoxViewTest, SearchBoxActiveSearchEngineGoogle) {
 TEST_F(SearchBoxViewTest, SearchBoxInactiveSearchEngineNotGoogle) {
   SetSearchEngineIsGoogle(false);
   SetSearchBoxActive(false, ui::ET_UNKNOWN);
-  const gfx::ImageSkia expected_icon = gfx::CreateVectorIcon(
-      kSearchEngineNotGoogleIcon, search_box::kSearchIconSize,
-      search_box::kDefaultSearchboxColor);
+  const gfx::ImageSkia expected_icon =
+      gfx::CreateVectorIcon(kSearchEngineNotGoogleIcon, search_box::kIconSize,
+                            search_box::kDefaultSearchboxColor);
   view()->ModelChanged();
 
   const gfx::ImageSkia actual_icon =
@@ -271,9 +296,9 @@ TEST_F(SearchBoxViewTest, SearchBoxInactiveSearchEngineNotGoogle) {
 TEST_F(SearchBoxViewTest, SearchBoxActiveSearchEngineNotGoogle) {
   SetSearchEngineIsGoogle(false);
   SetSearchBoxActive(true, ui::ET_UNKNOWN);
-  const gfx::ImageSkia expected_icon = gfx::CreateVectorIcon(
-      kSearchEngineNotGoogleIcon, search_box::kSearchIconSize,
-      search_box::kDefaultSearchboxColor);
+  const gfx::ImageSkia expected_icon =
+      gfx::CreateVectorIcon(kSearchEngineNotGoogleIcon, search_box::kIconSize,
+                            search_box::kDefaultSearchboxColor);
   view()->ModelChanged();
 
   const gfx::ImageSkia actual_icon =
@@ -281,6 +306,111 @@ TEST_F(SearchBoxViewTest, SearchBoxActiveSearchEngineNotGoogle) {
 
   EXPECT_TRUE(gfx::test::AreBitmapsEqual(*expected_icon.bitmap(),
                                          *actual_icon.bitmap()));
+}
+
+// Tests that traversing search results is disabled while results are being
+// updated.
+TEST_F(SearchBoxViewTest, ChangeSelectionWhileResultsAreChanging) {
+  SetSearchBoxActive(true, ui::ET_UNKNOWN);
+  view()->search_box()->SetText(base::ASCIIToUTF16("test"));
+  CreateSearchResult(ash::SearchResultDisplayType::kList, 0.7,
+                     base::ASCIIToUTF16("tester"), base::string16());
+  CreateSearchResult(ash::SearchResultDisplayType::kList, 0.5,
+                     base::ASCIIToUTF16("testing"), base::string16());
+  base::RunLoop().RunUntilIdle();
+
+  SearchResultPageView* const result_page_view =
+      view()->contents_view()->search_results_page_view();
+
+  const SearchResultBaseView* selection =
+      result_page_view->result_selection_controller()->selected_result();
+
+  EXPECT_EQ(result_page_view->first_result_view(), selection);
+  ASSERT_TRUE(selection->result());
+  EXPECT_EQ(base::ASCIIToUTF16("tester"), selection->result()->title());
+
+  // Add a new result - the selection controller is updated asynchronously, so
+  // the result is expected to remain the same until the loop is run.
+  CreateSearchResultAt(0, ash::SearchResultDisplayType::kList, 1.,
+                       base::ASCIIToUTF16("test"), base::string16());
+  EXPECT_EQ(selection,
+            result_page_view->result_selection_controller()->selected_result());
+  EXPECT_EQ(base::ASCIIToUTF16("tester"), selection->result()->title());
+
+  // Try navigating the results - this should fail while result update is in
+  // progress.
+  KeyPress(ui::VKEY_DOWN);
+  EXPECT_EQ(selection,
+            result_page_view->result_selection_controller()->selected_result());
+  EXPECT_EQ(base::ASCIIToUTF16("tester"), selection->result()->title());
+
+  // Finish results update - this should reset the selection.
+  base::RunLoop().RunUntilIdle();
+
+  selection =
+      result_page_view->result_selection_controller()->selected_result();
+  ASSERT_TRUE(selection->result());
+  EXPECT_EQ(base::ASCIIToUTF16("test"), selection->result()->title());
+
+  // Moving down again should change the selected result.
+  KeyPress(ui::VKEY_DOWN);
+
+  selection =
+      result_page_view->result_selection_controller()->selected_result();
+  ASSERT_TRUE(selection->result());
+  EXPECT_EQ(base::ASCIIToUTF16("tester"), selection->result()->title());
+}
+
+// Tests that traversing search results is disabled while the result that would
+// be selected next is being removed from results.
+TEST_F(SearchBoxViewTest, ChangeSelectionWhileResultsAreBeingRemoved) {
+  SetSearchBoxActive(true, ui::ET_UNKNOWN);
+  view()->search_box()->SetText(base::ASCIIToUTF16("test"));
+  CreateSearchResult(ash::SearchResultDisplayType::kList, 0.7,
+                     base::ASCIIToUTF16("tester"), base::string16());
+  CreateSearchResult(ash::SearchResultDisplayType::kList, 0.5,
+                     base::ASCIIToUTF16("testing"), base::string16());
+  base::RunLoop().RunUntilIdle();
+
+  SearchResultPageView* const result_page_view =
+      view()->contents_view()->search_results_page_view();
+
+  const SearchResultBaseView* selection =
+      result_page_view->result_selection_controller()->selected_result();
+
+  EXPECT_EQ(result_page_view->first_result_view(), selection);
+  ASSERT_TRUE(selection->result());
+  EXPECT_EQ(base::ASCIIToUTF16("tester"), selection->result()->title());
+
+  // Remove current results and add a new one - the selection controller is
+  // updated asynchronously, so the result is expected to remain the same until
+  // the loop is run.
+  results()->RemoveAll();
+  CreateSearchResult(ash::SearchResultDisplayType::kList, 1.,
+                     base::ASCIIToUTF16("test"), base::string16());
+  EXPECT_EQ(selection,
+            result_page_view->result_selection_controller()->selected_result());
+  EXPECT_FALSE(selection->result());
+
+  // Try navigating the results - this should fail while result update is in
+  // progress.
+  KeyPress(ui::VKEY_DOWN);
+  EXPECT_EQ(selection,
+            result_page_view->result_selection_controller()->selected_result());
+
+  // Finish results update - this should reset the selection.
+  base::RunLoop().RunUntilIdle();
+
+  selection =
+      result_page_view->result_selection_controller()->selected_result();
+  ASSERT_TRUE(selection->result());
+  EXPECT_EQ(base::ASCIIToUTF16("test"), selection->result()->title());
+
+  // Only one result exists, so it remains selected (as the selection would
+  // cycle).
+  KeyPress(ui::VKEY_DOWN);
+  ASSERT_TRUE(selection->result());
+  EXPECT_EQ(base::ASCIIToUTF16("test"), selection->result()->title());
 }
 
 class SearchBoxViewAssistantButtonTest : public SearchBoxViewTest {
@@ -301,7 +431,7 @@ class SearchBoxViewAssistantButtonTest : public SearchBoxViewTest {
 
 // Tests that the assistant button is visible by default.
 TEST_F(SearchBoxViewAssistantButtonTest, AssistantButtonVisibleByDefault) {
-  EXPECT_TRUE(view()->assistant_button()->visible());
+  EXPECT_TRUE(view()->assistant_button()->GetVisible());
 }
 
 // Tests that the assistant button is visible after the search box is activated.
@@ -311,7 +441,7 @@ TEST_F(SearchBoxViewAssistantButtonTest,
   // TODO(jennyz): Make assistant button show up under zero state.
   if (!app_list_features::IsZeroStateSuggestionsEnabled()) {
     SetSearchBoxActive(true, ui::ET_MOUSE_PRESSED);
-    EXPECT_TRUE(view()->assistant_button()->visible());
+    EXPECT_TRUE(view()->assistant_button()->GetVisible());
   }
 }
 
@@ -320,13 +450,13 @@ TEST_F(SearchBoxViewAssistantButtonTest,
 TEST_F(SearchBoxViewAssistantButtonTest,
        AssistantButtonChangeVisibilityWithTyping) {
   KeyPress(ui::VKEY_A);
-  EXPECT_FALSE(view()->assistant_button()->visible());
+  EXPECT_FALSE(view()->assistant_button()->GetVisible());
 
   // Assistant button is not showing up under zero state for now.
   // TODO(crbug.com/925455): Make assistant button show up under zero state.
   if (!app_list_features::IsZeroStateSuggestionsEnabled()) {
     KeyPress(ui::VKEY_BACK);
-    EXPECT_TRUE(view()->assistant_button()->visible());
+    EXPECT_TRUE(view()->assistant_button()->GetVisible());
   }
 }
 
@@ -342,19 +472,6 @@ class SearchBoxViewAutocompleteTest
     scoped_feature_list_.InitWithFeatures(
         {app_list_features::kEnableAppListSearchAutocomplete}, {});
     SearchBoxViewTest::SetUp();
-  }
-
-  // Creates a SearchResult with the given parameters.
-  void CreateSearchResult(ash::SearchResultDisplayType display_type,
-                          double display_score,
-                          const base::string16& title,
-                          const base::string16& details) {
-    auto search_result = std::make_unique<SearchResult>();
-    search_result->set_display_type(display_type);
-    search_result->set_display_score(display_score);
-    search_result->set_title(title);
-    search_result->set_details(details);
-    results()->Add(std::move(search_result));
   }
 
   // Expect the entire autocomplete suggestion if |should_autocomplete| is true,
@@ -599,12 +716,8 @@ TEST_F(SearchBoxViewAutocompleteTest, SearchBoxAutocompletesAcceptsNextChar) {
 }
 
 // Tests that autocomplete suggestion is accepted and displayed in SearchModel
-// after pressing the tab key, clicking on the search box, or gesture tapping on
-// the search box.
-TEST_F(SearchBoxViewAutocompleteTest,
-       SearchBoxAcceptsAutocompleteForTabClickTap) {
-  TestKeyEvent(ui::KeyEvent(ui::ET_KEY_PRESSED, ui::VKEY_TAB, ui::EF_NONE),
-               true);
+// after clicking or tapping on the search box.
+TEST_F(SearchBoxViewAutocompleteTest, SearchBoxAcceptsAutocompleteForClickTap) {
   TestMouseEvent(ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::Point(),
                                 gfx::Point(), ui::EventTimeForNow(), 0, 0),
                  true);

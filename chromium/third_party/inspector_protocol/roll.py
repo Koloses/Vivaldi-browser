@@ -13,13 +13,13 @@ import shutil
 
 
 FILES_TO_SYNC = [
-    'BUILD.gn',
     'README.md',
     'check_protocol_compatibility.py',
     'code_generator.py',
     'concatenate_protocols.py',
     'convert_protocol_to_json.py',
     'encoding/*',
+    'bindings/*',
     'inspector_protocol.gni',
     'inspector_protocol.gypi',
     'lib/*',

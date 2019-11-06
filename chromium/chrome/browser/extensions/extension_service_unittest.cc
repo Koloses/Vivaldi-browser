@@ -42,6 +42,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/chrome_app_sorting.h"
+#include "chrome/browser/extensions/chrome_extension_cookies.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/crx_installer.h"
@@ -65,15 +66,16 @@
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/extensions/permissions_test_util.h"
 #include "chrome/browser/extensions/permissions_updater.h"
+#include "chrome/browser/extensions/plugin_manager.h"
 #include "chrome/browser/extensions/test_blacklist.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
-#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/global_error/global_error_waiter.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
@@ -114,10 +116,13 @@
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/browser/test_management_policy.h"
 #include "extensions/browser/uninstall_reason.h"
+#include "extensions/browser/updater/extension_downloader_test_helper.h"
+#include "extensions/browser/updater/null_extension_cache.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/extension_resource.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
@@ -4850,7 +4855,8 @@ TEST_F(ExtensionServiceTest, ClearExtensionData) {
 
   // Set a cookie for the extension.
   net::CookieStore* cookie_store =
-      profile()->GetExtensionsCookieStoreGetter().Run();
+      extensions::ChromeExtensionCookies::Get(profile())
+          ->GetCookieStoreForTesting();
   ASSERT_TRUE(cookie_store);
   net::CookieOptions options;
   cookie_store->SetCookieWithOptionsAsync(
@@ -4932,14 +4938,16 @@ TEST_F(ExtensionServiceTest, ClearExtensionData) {
 
 void SetCookieSaveData(bool* result_out,
                        base::OnceClosure callback,
-                       bool result) {
-  *result_out = result;
+                       net::CanonicalCookie::CookieInclusionStatus result) {
+  *result_out =
+      (result == net::CanonicalCookie::CookieInclusionStatus::INCLUDE);
   std::move(callback).Run();
 }
 
 void GetCookiesSaveData(std::vector<net::CanonicalCookie>* result_out,
                         base::OnceClosure callback,
-                        const std::vector<net::CanonicalCookie>& result) {
+                        const std::vector<net::CanonicalCookie>& result,
+                        const net::CookieStatusList& excluded_cookies) {
   *result_out = result;
   std::move(callback).Run();
 }
@@ -4992,7 +5000,7 @@ TEST_F(ExtensionServiceTest, ClearAppData) {
     bool set_result = false;
     base::RunLoop run_loop;
     cookie_manager_ptr->SetCanonicalCookie(
-        *cc.get(), origin1.scheme(), true /* modify_http_only */,
+        *cc.get(), origin1.scheme(), net::CookieOptions(),
         base::BindOnce(&SetCookieSaveData, &set_result,
                        run_loop.QuitClosure()));
     run_loop.Run();
@@ -5698,8 +5706,7 @@ TEST_F(ExtensionServiceTest, DoNotInstallForEnterprise) {
   ASSERT_TRUE(base_path.IsAbsolute());
   MockProviderVisitor visitor(base_path);
   policy::ProfilePolicyConnector* const connector =
-      policy::ProfilePolicyConnectorFactory::GetForBrowserContext(
-          visitor.profile());
+      visitor.profile()->GetProfilePolicyConnector();
   connector->OverrideIsManagedForTesting(true);
   EXPECT_TRUE(connector->IsManaged());
 
@@ -6760,14 +6767,12 @@ TEST_F(ExtensionServiceTest, MultipleExternalInstallBubbleErrors) {
   // the expected number of errors in external_install_manager(). We also verify
   // that only the first BUBBLE_ALERT error is shown.
   for (size_t i = 0; i < data.size(); ++i) {
-    content::WindowedNotificationObserver global_error_observer(
-        chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
-        content::NotificationService::AllSources());
+    test::GlobalErrorWaiter error_waiter(profile());
     provider->UpdateOrAddExtension(data[i].id, data[i].version,
                                    data[i].crx_path);
     WaitForExternalExtensionInstalled();
     // Make sure ExternalInstallError::OnDialogReady() fires.
-    global_error_observer.Wait();
+    error_waiter.Wait();
 
     const size_t expected_error_count = i + 1u;
     std::vector<ExternalInstallError*> errors =
@@ -6809,15 +6814,13 @@ TEST_F(ExtensionServiceTest, MultipleExternalInstallBubbleErrors) {
             data_dir().AppendASCII("update_from_webstore3.pem"),
             webstore_crx_three);
 
-    content::WindowedNotificationObserver global_error_observer(
-        chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
-        content::NotificationService::AllSources());
+    test::GlobalErrorWaiter error_waiter(profile());
     provider->UpdateOrAddExtension(
         updates_from_webstore3, "1",
         temp_dir().GetPath().AppendASCII("webstore3.crx"));
     WaitForExternalExtensionInstalled();
     // Make sure ExternalInstallError::OnDialogReady() fires.
-    global_error_observer.Wait();
+    error_waiter.Wait();
 
     std::vector<ExternalInstallError*> errors =
         service_->external_install_manager()->GetErrorsForTesting();
@@ -6862,14 +6865,12 @@ TEST_F(ExtensionServiceTest, BubbleAlertDoesNotHideAnotherAlertFromMenu) {
           data_dir().AppendASCII("update_from_webstore2.pem"),
           data[1].crx_path);
   {
-    content::WindowedNotificationObserver global_error_observer(
-        chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
-        content::NotificationService::AllSources());
+    test::GlobalErrorWaiter error_waiter(profile());
     provider->UpdateOrAddExtension(data[0].id, data[0].version,
                                    data[0].crx_path);
     WaitForExternalExtensionInstalled();
     // Make sure ExternalInstallError::OnDialogReady() fires.
-    global_error_observer.Wait();
+    error_waiter.Wait();
 
     std::vector<ExternalInstallError*> errors =
         service_->external_install_manager()->GetErrorsForTesting();
@@ -6899,14 +6900,12 @@ TEST_F(ExtensionServiceTest, BubbleAlertDoesNotHideAnotherAlertFromMenu) {
   // BUBBLE_ALERT.
   // Make sure that this bubble alert does not replace the current bubble alert.
   {
-    content::WindowedNotificationObserver global_error_observer(
-        chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
-        content::NotificationService::AllSources());
+    test::GlobalErrorWaiter error_waiter(profile());
     provider->UpdateOrAddExtension(data[1].id, data[1].version,
                                    data[1].crx_path);
     WaitForExternalExtensionInstalled();
     // Make sure ExternalInstallError::OnDialogReady() fires.
-    global_error_observer.Wait();
+    error_waiter.Wait();
 
     std::vector<ExternalInstallError*> errors =
         service_->external_install_manager()->GetErrorsForTesting();
@@ -7398,5 +7397,79 @@ TEST_F(ExtensionServiceTest, UserInstalledExtensionThenRequiredByPolicy) {
   EXPECT_EQ(disable_reason::DISABLE_NONE, prefs->GetDisableReasons(good_crx));
   EXPECT_FALSE(prefs->IsExtensionDisabled(good_crx));
 }
+
+// Regression test for crbug.com/460699. Ensure PluginManager doesn't crash even
+// if OnExtensionUnloaded is invoked twice in succession.
+TEST_F(ExtensionServiceTest, PluginManagerCrash) {
+  InitializeEmptyExtensionService();
+  PluginManager manager(profile());
+
+  // Load an extension using a NaCl module.
+  const Extension* extension =
+      PackAndInstallCRX(data_dir().AppendASCII("native_client"), INSTALL_NEW);
+  service()->DisableExtension(extension->id(),
+                              disable_reason::DISABLE_USER_ACTION);
+
+  // crbug.com/708230: This will cause OnExtensionUnloaded to be called
+  // redundantly for a disabled extension.
+  service()->BlockAllExtensions();
+}
+
+class ExternalExtensionPriorityTest
+    : public ExtensionServiceTest,
+      public testing::WithParamInterface<Manifest::Location> {};
+
+// Policy-forced extensions should be fetched with FOREGROUND priority,
+// otherwise they may be throttled (web store sends “noupdate” response to
+// reduce load), which is OK for updates, but not for a new install. This is
+// a regression test for problems described in https://crbug.com/904600 and
+// https://crbug.com/917700.
+TEST_P(ExternalExtensionPriorityTest, PolicyForegroundFetch) {
+  ExtensionUpdater::ScopedSkipScheduledCheckForTest skip_scheduled_checks;
+  ExtensionServiceInitParams params = CreateDefaultInitParams();
+  params.autoupdate_enabled = true;
+  InitializeExtensionService(params);
+
+  ExtensionDownloaderTestHelper helper;
+  NullExtensionCache extension_cache;
+  service()->updater()->SetExtensionDownloaderForTesting(
+      helper.CreateDownloader());
+  service()->updater()->SetExtensionCacheForTesting(&extension_cache);
+  service()->updater()->Start();
+
+  GURL update_url(extension_urls::kChromeWebstoreUpdateURL);
+  service()->OnExternalExtensionUpdateUrlFound(
+      ExternalInstallInfoUpdateUrl(all_zero /* extension_id */,
+                                   "" /* install_parameter */, update_url,
+                                   GetParam() /* download_location */,
+                                   Extension::NO_FLAGS /* creation_flag */,
+                                   true /* mark_acknowledged */),
+      true /* is_initial_load */);
+
+  MockExternalProvider provider(nullptr, Manifest::EXTERNAL_POLICY_DOWNLOAD);
+  service()->OnExternalProviderReady(&provider);
+
+  content::RunAllTasksUntilIdle();
+
+  EXPECT_EQ(helper.test_url_loader_factory().NumPending(), 1);
+  network::TestURLLoaderFactory::PendingRequest* pending_request =
+      helper.test_url_loader_factory().GetPendingRequest(0);
+  std::string header;
+  EXPECT_TRUE(pending_request->request.headers.GetHeader(
+      "X-Goog-Update-Interactivity", &header));
+  bool is_high_priority = GetParam() == Manifest::EXTERNAL_POLICY_DOWNLOAD ||
+                          GetParam() == Manifest::EXTERNAL_COMPONENT;
+  const char* expected_header = is_high_priority ? "fg" : "bg";
+  EXPECT_EQ(expected_header, header);
+
+  // Destroy updater's downloader as it uses |helper|.
+  service()->updater()->SetExtensionDownloaderForTesting(nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         ExternalExtensionPriorityTest,
+                         testing::Values(Manifest::EXTERNAL_POLICY_DOWNLOAD,
+                                         Manifest::EXTERNAL_COMPONENT,
+                                         Manifest::EXTERNAL_PREF_DOWNLOAD));
 
 }  // namespace extensions

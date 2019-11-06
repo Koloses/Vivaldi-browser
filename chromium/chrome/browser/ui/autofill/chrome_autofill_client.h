@@ -17,13 +17,14 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/autofill/core/browser/autofill_client.h"
-#include "components/autofill/core/browser/ui/card_unmask_prompt_controller_impl.h"
+#include "components/autofill/core/browser/logging/log_manager.h"
+#include "components/autofill/core/browser/ui/payments/card_unmask_prompt_controller_impl.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
 #if !defined(OS_ANDROID)
-#include "chrome/browser/ui/autofill/manage_migration_ui_controller.h"
-#include "components/autofill/core/browser/ui/save_card_bubble_controller.h"
+#include "chrome/browser/ui/autofill/payments/manage_migration_ui_controller.h"
+#include "components/autofill/core/browser/ui/payments/save_card_bubble_controller.h"
 #include "components/zoom/zoom_observer.h"
 #endif  // !defined(OS_ANDROID)
 
@@ -54,10 +55,9 @@ class ChromeAutofillClient
   AutocompleteHistoryManager* GetAutocompleteHistoryManager() override;
   PrefService* GetPrefs() override;
   syncer::SyncService* GetSyncService() override;
-  identity::IdentityManager* GetIdentityManager() override;
+  signin::IdentityManager* GetIdentityManager() override;
   FormDataImporter* GetFormDataImporter() override;
   payments::PaymentsClient* GetPaymentsClient() override;
-  LegacyStrikeDatabase* GetLegacyStrikeDatabase() override;
   StrikeDatabase* GetStrikeDatabase() override;
   ukm::UkmRecorder* GetUkmRecorder() override;
   ukm::SourceId GetUkmSourceId() override;
@@ -101,6 +101,7 @@ class ChromeAutofillClient
       std::unique_ptr<base::DictionaryValue> legal_message,
       SaveCreditCardOptions options,
       UploadSaveCardPromptCallback callback) override;
+  void CreditCardUploadCompleted(bool card_saved) override;
   void ConfirmCreditCardFillAssist(const CreditCard& card,
                                    base::OnceClosure callback) override;
   bool HasCreditCardScanFeature() override;
@@ -110,6 +111,7 @@ class ChromeAutofillClient
       base::i18n::TextDirection text_direction,
       const std::vector<autofill::Suggestion>& suggestions,
       bool autoselect_first_suggestion,
+      PopupType popup_type,
       base::WeakPtr<AutofillPopupDelegate> delegate) override;
   void UpdateAutofillPopupDataListValues(
       const std::vector<base::string16>& values,
@@ -125,6 +127,7 @@ class ChromeAutofillClient
   bool ShouldShowSigninPromo() override;
   bool AreServerCardsSupported() override;
   void ExecuteCommand(int id) override;
+  LogManager* GetLogManager() const override;
 
   // RiskDataLoader:
   void LoadRiskData(
@@ -158,6 +161,7 @@ class ChromeAutofillClient
   std::unique_ptr<FormDataImporter> form_data_importer_;
   base::WeakPtr<AutofillPopupControllerImpl> popup_controller_;
   CardUnmaskPromptControllerImpl unmask_controller_;
+  std::unique_ptr<LogManager> log_manager_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 

@@ -17,10 +17,8 @@
 #include "chrome/common/webui_url_constants.h"
 #include "components/google/core/browser/google_url_tracker.h"
 #include "components/google/core/common/google_util.h"
-#include "components/signin/core/browser/chrome_connected_header_helper.h"
-#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/variations/net/variations_http_headers.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "net/base/load_flags.h"
 #include "net/base/url_util.h"
 #include "net/http/http_status_code.h"
@@ -37,72 +35,82 @@ const char kNewTabSearchSuggestionsApiPath[] = "/async/newtab_suggestions";
 
 const char kSearchSuggestResponsePreamble[] = ")]}'";
 
-base::Optional<SearchSuggestData> JsonToSearchSuggestionData(
-    const base::Value& value) {
+// Parses an update proto from |value|. Will return false if |value|
+// is not of the form:
+// {"update":{"query_suggestions":{"query_suggestions_with_html": "", "script":
+// "", impression_cap_expire_time_ms: "", request_freeze_time_ms: "",
+// max_impressions: ""}}}.
+// Additionally |data| will be base::nullopt if "query_suggestions" keys is not
+// present.
+bool JsonToSearchSuggestionData(const base::Value& value,
+                                base::Optional<SearchSuggestData>& data) {
+  data = base::nullopt;
+
+  bool all_fields_present = true;
+
   const base::DictionaryValue* dict = nullptr;
   if (!value.GetAsDictionary(&dict)) {
     DVLOG(1) << "Parse error: top-level dictionary not found";
-    return base::nullopt;
+    return false;
   }
 
   const base::DictionaryValue* update = nullptr;
   if (!dict->GetDictionary("update", &update)) {
     DVLOG(1) << "Parse error: no update";
-    return base::nullopt;
+    return false;
   }
 
   const base::DictionaryValue* query_suggestions = nullptr;
   if (!update->GetDictionary("query_suggestions", &query_suggestions)) {
     DVLOG(1) << "Parse error: no query_suggestions";
-    return base::nullopt;
+    return false;
   }
 
-  // TODO(crbug.com/919905): Investigate if SafeHtml should be used here.
+  SearchSuggestData result;
+  data = result;
+
   std::string suggestions_html = std::string();
   if (!query_suggestions->GetString("query_suggestions_with_html",
                                     &suggestions_html)) {
     DVLOG(1) << "Parse error: no query_suggestions_with_html";
-    return base::nullopt;
+    all_fields_present = false;
   }
-
-  SearchSuggestData result;
-  result.suggestions_html = suggestions_html;
 
   std::string end_of_body_script = std::string();
   if (!query_suggestions->GetString("script", &end_of_body_script)) {
     DVLOG(1) << "Parse error: no script";
-    return base::nullopt;
+    all_fields_present = false;
   }
-
-  result.end_of_body_script = end_of_body_script;
 
   int impression_cap_expire_time_ms;
   if (!query_suggestions->GetInteger("impression_cap_expire_time_ms",
                                      &impression_cap_expire_time_ms)) {
     DVLOG(1) << "Parse error: no impression_cap_expire_time_ms";
-    return base::nullopt;
+    all_fields_present = false;
   }
-
-  result.impression_cap_expire_time_ms = impression_cap_expire_time_ms;
 
   int request_freeze_time_ms;
   if (!query_suggestions->GetInteger("request_freeze_time_ms",
                                      &request_freeze_time_ms)) {
     DVLOG(1) << "Parse error: no request_freeze_time_ms";
-    return base::nullopt;
+    all_fields_present = false;
   }
-
-  result.request_freeze_time_ms = request_freeze_time_ms;
 
   int max_impressions;
   if (!query_suggestions->GetInteger("max_impressions", &max_impressions)) {
     DVLOG(1) << "Parse error: no max_impressions";
-    return base::nullopt;
+    all_fields_present = false;
   }
 
+  result.suggestions_html = suggestions_html;
+  result.end_of_body_script = end_of_body_script;
+  result.impression_cap_expire_time_ms = impression_cap_expire_time_ms;
+  result.request_freeze_time_ms = request_freeze_time_ms;
   result.max_impressions = max_impressions;
 
-  return result;
+  data = result;
+
+  return all_fields_present;
 }
 
 }  // namespace
@@ -198,8 +206,7 @@ SearchSuggestLoaderImpl::SearchSuggestLoaderImpl(
     const std::string& application_locale)
     : url_loader_factory_(url_loader_factory),
       google_url_tracker_(google_url_tracker),
-      application_locale_(application_locale),
-      weak_ptr_factory_(this) {}
+      application_locale_(application_locale) {}
 
 SearchSuggestLoaderImpl::~SearchSuggestLoaderImpl() = default;
 
@@ -259,17 +266,22 @@ void SearchSuggestLoaderImpl::LoadDone(
   }
 
   data_decoder::SafeJsonParser::Parse(
-      content::ServiceManagerConnection::GetForProcess()->GetConnector(),
-      response,
-      base::BindRepeating(&SearchSuggestLoaderImpl::JsonParsed,
-                          weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&SearchSuggestLoaderImpl::JsonParseFailed,
-                          weak_ptr_factory_.GetWeakPtr()));
+      content::GetSystemConnector(), response,
+      base::BindOnce(&SearchSuggestLoaderImpl::JsonParsed,
+                     weak_ptr_factory_.GetWeakPtr()),
+      base::BindOnce(&SearchSuggestLoaderImpl::JsonParseFailed,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
-void SearchSuggestLoaderImpl::JsonParsed(std::unique_ptr<base::Value> value) {
-  base::Optional<SearchSuggestData> result = JsonToSearchSuggestionData(*value);
-  Respond(result.has_value() ? Status::OK : Status::FATAL_ERROR, result);
+void SearchSuggestLoaderImpl::JsonParsed(base::Value value) {
+  base::Optional<SearchSuggestData> result;
+  if (JsonToSearchSuggestionData(value, result)) {
+    Respond(Status::OK_WITH_SUGGESTIONS, result);
+  } else if (result.has_value()) {
+    Respond(Status::OK_WITHOUT_SUGGESTIONS, result);
+  } else {
+    Respond(Status::FATAL_ERROR, result);
+  }
 }
 
 void SearchSuggestLoaderImpl::JsonParseFailed(const std::string& message) {

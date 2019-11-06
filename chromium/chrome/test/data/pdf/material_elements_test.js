@@ -79,7 +79,8 @@ var tests = [
         Polymer.Base.create('viewer-page-selector', {docLength: 1234});
     document.body.appendChild(selector);
     chrome.test.assertEq('1234', selector.$.pagelength.textContent);
-    chrome.test.assertEq('calc(4ch + 1px)', selector.pageSelector.style.width);
+    chrome.test.assertEq(
+        '4', selector.style.getPropertyValue('--page-length-digits'));
     chrome.test.succeed();
   },
 
@@ -172,7 +173,7 @@ var tests = [
     var zoomToolbar = document.createElement('viewer-zoom-toolbar');
     document.body.appendChild(zoomToolbar);
     var fitButton = zoomToolbar.$['fit-button'];
-    var fab = fitButton.$['button'];
+    var button = fitButton.$$('cr-icon-button');
 
     var fitWidthIcon = 'fullscreen';
     var fitPageIcon = 'fullscreen-exit';
@@ -183,38 +184,38 @@ var tests = [
     // TODO(tsergeant): This assertion attempts to be resilient to iconset
     // changes. A better solution is something like
     // https://github.com/PolymerElements/iron-icon/issues/68.
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     // Tap 1: Fire fit-to-changed(FIT_TO_PAGE), show fit-to-width.
-    MockInteractions.tap(fab);
+    MockInteractions.tap(button);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_PAGE, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitWidthIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitWidthIcon));
 
     // Tap 2: Fire fit-to-changed(FIT_TO_WIDTH), show fit-to-page.
-    MockInteractions.tap(fab);
+    MockInteractions.tap(button);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_WIDTH, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     // Tap 3: Fire fit-to-changed(FIT_TO_PAGE) again.
-    MockInteractions.tap(fab);
+    MockInteractions.tap(button);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_PAGE, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitWidthIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitWidthIcon));
 
     // Do the same as above, but with fitToggleFromHotKey().
     zoomToolbar.fitToggleFromHotKey();
     fitToEventChecker.assertEvent(FittingType.FIT_TO_WIDTH, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
     zoomToolbar.fitToggleFromHotKey();
     fitToEventChecker.assertEvent(FittingType.FIT_TO_PAGE, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitWidthIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitWidthIcon));
     zoomToolbar.fitToggleFromHotKey();
     fitToEventChecker.assertEvent(FittingType.FIT_TO_WIDTH, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     // Tap 4: Fire fit-to-changed(FIT_TO_PAGE) again.
-    MockInteractions.tap(fab);
+    MockInteractions.tap(button);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_PAGE, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitWidthIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitWidthIcon));
 
     chrome.test.succeed();
   },
@@ -223,7 +224,7 @@ var tests = [
     var zoomToolbar = document.createElement('viewer-zoom-toolbar');
     document.body.appendChild(zoomToolbar);
     var fitButton = zoomToolbar.$['fit-button'];
-    var fab = fitButton.$['button'];
+    var button = fitButton.$$('cr-icon-button');
 
     var fitWidthIcon = 'fullscreen';
     var fitPageIcon = 'fullscreen-exit';
@@ -231,32 +232,32 @@ var tests = [
     var fitToEventChecker = new FitToEventChecker(zoomToolbar);
 
     // Initial: Show fit-to-page.
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     // Test forceFit(FIT_TO_PAGE) from initial state.
     zoomToolbar.forceFit(FittingType.FIT_TO_PAGE);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_PAGE, false);
-    chrome.test.assertTrue(fab.icon.endsWith(fitWidthIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitWidthIcon));
 
     // Tap 1: Fire fit-to-changed(FIT_TO_WIDTH).
-    MockInteractions.tap(fab);
+    MockInteractions.tap(button);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_WIDTH, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     // Test forceFit(FIT_TO_PAGE) from fit-to-width mode.
     zoomToolbar.forceFit(FittingType.FIT_TO_PAGE);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_PAGE, false);
-    chrome.test.assertTrue(fab.icon.endsWith(fitWidthIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitWidthIcon));
 
     // Test forceFit(FIT_TO_PAGE) when already in fit-to-page mode.
     zoomToolbar.forceFit(FittingType.FIT_TO_PAGE);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_PAGE, false);
-    chrome.test.assertTrue(fab.icon.endsWith(fitWidthIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitWidthIcon));
 
     // Tap 2: Fire fit-to-changed(FIT_TO_WIDTH).
-    MockInteractions.tap(fab);
+    MockInteractions.tap(button);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_WIDTH, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     chrome.test.succeed();
   },
@@ -265,7 +266,7 @@ var tests = [
     var zoomToolbar = document.createElement('viewer-zoom-toolbar');
     document.body.appendChild(zoomToolbar);
     var fitButton = zoomToolbar.$['fit-button'];
-    var fab = fitButton.$['button'];
+    var button = fitButton.$$('cr-icon-button');
 
     var fitWidthIcon = 'fullscreen';
     var fitPageIcon = 'fullscreen-exit';
@@ -273,37 +274,37 @@ var tests = [
     var fitToEventChecker = new FitToEventChecker(zoomToolbar);
 
     // Initial: Show fit-to-page.
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     // Test forceFit(FIT_TO_WIDTH) from initial state.
     zoomToolbar.forceFit(FittingType.FIT_TO_WIDTH);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_WIDTH, false);
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     // Tap 1: Fire fit-to-changed(FIT_TO_PAGE).
-    MockInteractions.tap(fab);
+    MockInteractions.tap(button);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_PAGE, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitWidthIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitWidthIcon));
 
     // Tap 2: Fire fit-to-changed(FIT_TO_WIDTH).
-    MockInteractions.tap(fab);
+    MockInteractions.tap(button);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_WIDTH, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     // Test forceFit(FIT_TO_WIDTH) from fit-to-width state.
     zoomToolbar.forceFit(FittingType.FIT_TO_WIDTH);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_WIDTH, false);
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     // Tap 3: Fire fit-to-changed(FIT_TO_PAGE).
-    MockInteractions.tap(fab);
+    MockInteractions.tap(button);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_PAGE, true);
-    chrome.test.assertTrue(fab.icon.endsWith(fitWidthIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitWidthIcon));
 
     // Test forceFit(FIT_TO_WIDTH) from fit-to-page state.
     zoomToolbar.forceFit(FittingType.FIT_TO_WIDTH);
     fitToEventChecker.assertEvent(FittingType.FIT_TO_WIDTH, false);
-    chrome.test.assertTrue(fab.icon.endsWith(fitPageIcon));
+    chrome.test.assertTrue(button.ironIcon.endsWith(fitPageIcon));
 
     chrome.test.succeed();
   }

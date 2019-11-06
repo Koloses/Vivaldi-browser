@@ -206,18 +206,6 @@ class CrossOriginReadBlockingExtensionTest : public ExtensionBrowserTest {
                  base::Unretained(this), base::Unretained(parent_frame)));
   }
 
-  void VerifyContentScriptHistogramIsPresent(
-      const base::HistogramTester& histograms,
-      content::ResourceType resource_type) {
-    VerifyContentScriptHistogram(
-        histograms, testing::ElementsAre(base::Bucket(resource_type, 1)));
-  }
-
-  void VerifyContentScriptHistogramIsMissing(
-      const base::HistogramTester& histograms) {
-    VerifyContentScriptHistogram(histograms, testing::IsEmpty());
-  }
-
   std::string PopString(content::DOMMessageQueue* message_queue) {
     std::string json;
     EXPECT_TRUE(message_queue->WaitForMessage(&json));
@@ -255,11 +243,6 @@ class CrossOriginReadBlockingExtensionTest : public ExtensionBrowserTest {
     return content::JsReplace(kXhrScriptTemplate, resource);
   }
 
-  bool IsNetworkServiceEnabled() {
-    return base::FeatureList::IsEnabled(network::features::kNetworkService);
-  }
-
- private:
   // Asks the test |extension_| to inject |content_script| into |web_contents|.
   //
   // This is an implementation of FetchCallback.
@@ -273,6 +256,7 @@ class CrossOriginReadBlockingExtensionTest : public ExtensionBrowserTest {
         browser()->profile(), extension_->id(), background_script);
   }
 
+ private:
   // Executes |regular_script| in |web_contents|.
   //
   // This is an implementation of FetchCallback.
@@ -345,26 +329,6 @@ class CrossOriginReadBlockingExtensionTest : public ExtensionBrowserTest {
     return PopString(&message_queue);
   }
 
-  void VerifyContentScriptHistogram(
-      const base::HistogramTester& histograms,
-      testing::Matcher<std::vector<base::Bucket>> matcher) {
-    // LogInitiatorSchemeBypassingDocumentBlocking is only implemented in the
-    // pre-NetworkService CrossSiteDocumentResourceHandler, because we hope to
-    // gather enough data before NetworkService ships.  Logging in
-    // NetworkService world should be possible but would require an extra IPC
-    // from NetworkService to the Browser process which seems like unnecessary
-    // complexity, given that the metrics gathered won't be needed in the
-    // long-term.
-    if (IsNetworkServiceEnabled())
-      return;
-
-    // Verify that LogInitiatorSchemeBypassingDocumentBlocking returned early
-    // for a request that wasn't from a content script.
-    EXPECT_THAT(histograms.GetAllSamples(
-                    "SiteIsolation.XSD.Browser.Allowed.ContentScript"),
-                matcher);
-  }
-
   TestExtensionDir dir_;
   const Extension* extension_ = nullptr;
 
@@ -417,13 +381,11 @@ class CrossOriginReadBlockingExtensionAllowlistingTest
   }
 
   bool AreContentScriptFetchesExpectedToBeBlocked() {
-    return IsNetworkServiceEnabled() && IsAllowlistFeatureEnabled() &&
-           !IsExtensionAllowlisted();
+    return IsAllowlistFeatureEnabled() && !IsExtensionAllowlisted();
   }
 
   bool IsCorbExpectedToBeTurnedOffAltogether() {
-    return IsNetworkServiceEnabled() &&
-           (IsExtensionAllowlisted() || !IsAllowlistFeatureEnabled());
+    return (IsExtensionAllowlisted() || !IsAllowlistFeatureEnabled());
   }
 
   void VerifyFetchFromContentScriptWasBlocked(
@@ -436,11 +398,6 @@ class CrossOriginReadBlockingExtensionAllowlistingTest
                                  CORBAction::kResponseStarted, 1);
     histograms.ExpectBucketCount("SiteIsolation.XSD.Browser.Action",
                                  CORBAction::kBlockedWithoutSniffing, 1);
-
-    if (!IsNetworkServiceEnabled()) {
-      EXPECT_THAT(histograms.GetAllSamples("SiteIsolation.XSD.Browser.Blocked"),
-                  testing::Not(testing::IsEmpty()));
-    }
   }
 
   void VerifyFetchFromContentScriptWasAllowed(
@@ -464,11 +421,6 @@ class CrossOriginReadBlockingExtensionAllowlistingTest
                                      ? CORBAction::kAllowedAfterSniffing
                                      : CORBAction::kAllowedWithoutSniffing,
                                  1);
-
-    if (!IsNetworkServiceEnabled()) {
-      EXPECT_THAT(histograms.GetAllSamples("SiteIsolation.XSD.Browser.Blocked"),
-                  testing::IsEmpty());
-    }
   }
 
   // Verifies results of fetching a CORB-eligible resource from a content
@@ -489,16 +441,6 @@ class CrossOriginReadBlockingExtensionAllowlistingTest
       // Verify the fetch was allowed.
       EXPECT_EQ(expected_fetch_result, actual_fetch_result);
       VerifyFetchFromContentScriptWasAllowed(histograms);
-
-      // Verify that "SiteIsolation.XSD.Browser.Allowed.ContentScript" UMA
-      // metric was recorded.  This indirectly verifies that
-      // Extensions.CrossOriginFetchFromContentScript2 Rappor metric got
-      // properly recorded (because both the UMA and the Rappor metrics are
-      // logged next to each other by the
-      // LogInitiatorSchemeBypassingDocumentBlocking method in
-      // ChromeContentBrowserClientExtensionsPart).
-      VerifyContentScriptHistogramIsPresent(histograms,
-                                            content::RESOURCE_TYPE_XHR);
     }
   }
 
@@ -655,10 +597,6 @@ IN_PROC_BROWSER_TEST_P(CrossOriginReadBlockingExtensionAllowlistingTest,
                   "text-object.txt: ae52dd09-9746-4b7e-86a6-6ada5e2680c2"));
   VerifyFetchFromContentScriptWasAllowed(histograms,
                                          true /* expecting_sniffing */);
-
-  // Verify that we didn't call LogInitiatorSchemeBypassingDocumentBlocking
-  // for a response that would have been allowed by CORB anyway.
-  VerifyContentScriptHistogramIsMissing(histograms);
 }
 
 // Test that responses are blocked by CORB, but have empty response body are not
@@ -688,10 +626,6 @@ IN_PROC_BROWSER_TEST_P(CrossOriginReadBlockingExtensionAllowlistingTest,
     VerifyFetchFromContentScriptWasBlocked(histograms);
   else
     VerifyFetchFromContentScriptWasAllowed(histograms);
-
-  // Verify that we didn't call LogInitiatorSchemeBypassingDocumentBlocking
-  // for a response that would have been blocked by CORB, but was empty.
-  VerifyContentScriptHistogramIsMissing(histograms);
 }
 
 // Test that LogInitiatorSchemeBypassingDocumentBlocking exits early for
@@ -709,12 +643,6 @@ IN_PROC_BROWSER_TEST_F(CrossOriginReadBlockingExtensionTest,
 
   // Verify that no blocking occurred.
   EXPECT_EQ("nosniff.xml - body\n", fetch_result);
-  EXPECT_THAT(histograms.GetAllSamples("SiteIsolation.XSD.Browser.Blocked"),
-              testing::IsEmpty());
-
-  // Verify that LogInitiatorSchemeBypassingDocumentBlocking returned early
-  // for a request that wasn't from a content script.
-  VerifyContentScriptHistogramIsMissing(histograms);
 }
 
 // Test that requests from a extension page hosted in a foreground tab use
@@ -740,12 +668,6 @@ IN_PROC_BROWSER_TEST_F(CrossOriginReadBlockingExtensionTest,
 
     // Verify that no blocking occurred.
     EXPECT_EQ("nosniff.xml - body\n", fetch_result);
-    EXPECT_THAT(histograms.GetAllSamples("SiteIsolation.XSD.Browser.Blocked"),
-                testing::IsEmpty());
-
-    // Verify that LogInitiatorSchemeBypassingDocumentBlocking returned early
-    // for a request that wasn't from a content script.
-    VerifyContentScriptHistogramIsMissing(histograms);
   }
 
   // Test case #2: Fetch from an about:srcdoc subframe of a
@@ -760,12 +682,6 @@ IN_PROC_BROWSER_TEST_F(CrossOriginReadBlockingExtensionTest,
 
     // Verify that no blocking occurred.
     EXPECT_EQ("nosniff.xml - body\n", fetch_result);
-    EXPECT_THAT(histograms.GetAllSamples("SiteIsolation.XSD.Browser.Blocked"),
-                testing::IsEmpty());
-
-    // Verify that LogInitiatorSchemeBypassingDocumentBlocking returned early
-    // for a request that wasn't from a content script.
-    VerifyContentScriptHistogramIsMissing(histograms);
   }
 }
 
@@ -841,12 +757,6 @@ IN_PROC_BROWSER_TEST_F(CrossOriginReadBlockingExtensionTest,
     // through the service worker).
     EXPECT_EQ("SERVICE WORKER INTERCEPT: >>>nosniff.xml - body\n<<<",
               fetch_result);
-    EXPECT_THAT(histograms.GetAllSamples("SiteIsolation.XSD.Browser.Blocked"),
-                testing::IsEmpty());
-
-    // Verify that LogInitiatorSchemeBypassingDocumentBlocking returned early
-    // for a request that wasn't from a content script.
-    VerifyContentScriptHistogramIsMissing(histograms);
   }
 
   // Test case #2: Network fetch used as a fallback when service worker ignores
@@ -866,12 +776,6 @@ IN_PROC_BROWSER_TEST_F(CrossOriginReadBlockingExtensionTest,
 
     // Verify that no blocking occurred.
     EXPECT_EQ("nosniff.xml - body\n", fetch_result);
-    EXPECT_THAT(histograms.GetAllSamples("SiteIsolation.XSD.Browser.Blocked"),
-                testing::IsEmpty());
-
-    // Verify that LogInitiatorSchemeBypassingDocumentBlocking returned early
-    // for a request that wasn't from a content script.
-    VerifyContentScriptHistogramIsMissing(histograms);
   }
 }
 
@@ -1093,9 +997,10 @@ IN_PROC_BROWSER_TEST_F(CrossOriginReadBlockingExtensionTest,
   content::WebContents* app_contents = nullptr;
   {
     content::WebContentsAddedObserver new_contents_observer;
-    OpenApplication(AppLaunchParams(
-        browser()->profile(), app, LAUNCH_CONTAINER_NONE,
-        WindowOpenDisposition::NEW_WINDOW, extensions::SOURCE_TEST));
+    OpenApplication(AppLaunchParams(browser()->profile(), app->id(),
+                                    LaunchContainer::kLaunchContainerNone,
+                                    WindowOpenDisposition::NEW_WINDOW,
+                                    extensions::AppLaunchSource::kSourceTest));
     app_contents = new_contents_observer.GetWebContents();
   }
   ASSERT_TRUE(content::WaitForLoadStop(app_contents));
@@ -1134,9 +1039,140 @@ IN_PROC_BROWSER_TEST_F(CrossOriginReadBlockingExtensionTest,
 
     // Verify that no CORB blocking occurred.
     EXPECT_EQ("nosniff.xml - body\n", fetch_result);
-    EXPECT_THAT(histograms.GetAllSamples("SiteIsolation.XSD.Browser.Blocked"),
-                testing::IsEmpty());
   }
+}
+
+IN_PROC_BROWSER_TEST_P(CrossOriginReadBlockingExtensionAllowlistingTest,
+                       OriginHeaderInCrossOriginGetRequest) {
+  // Load the test extension.
+  ASSERT_TRUE(InstallExtension());
+
+  // Navigate to a foo.com page.
+  GURL page_url = GetTestPageUrl("foo.com");
+  ui_test_utils::NavigateToURL(browser(), page_url);
+  ASSERT_EQ(page_url,
+            active_web_contents()->GetMainFrame()->GetLastCommittedURL());
+  ASSERT_EQ(url::Origin::Create(page_url),
+            active_web_contents()->GetMainFrame()->GetLastCommittedOrigin());
+
+  // Inject a content script that performs a cross-origin GET XHR to bar.com.
+  GURL cross_site_resource(
+      embedded_test_server()->GetURL("bar.com", "/echoall"));
+  const char* kScriptTemplate = R"(
+      fetch($1, {method: 'GET', mode:'cors'})
+          .then(response => response.text())
+          .then(text => domAutomationController.send(text))
+          .catch(err => domAutomationController.send('ERROR: ' + err));
+  )";
+  content::DOMMessageQueue message_queue;
+  ExecuteContentScript(
+      active_web_contents(),
+      content::JsReplace(kScriptTemplate, cross_site_resource));
+  std::string fetch_result = PopString(&message_queue);
+
+  // Verify if the fetch was blocked + what the Origin header was.
+  if (AreContentScriptFetchesExpectedToBeBlocked()) {
+    // TODO(lukasza): https://crbug.com/953315: No CORB blocking should occur
+    // for the CORS-mode request - the test expectations should be the same,
+    // regardless of AreContentScriptFetchesExpectedToBeBlocked.
+    EXPECT_EQ("", fetch_result);
+  } else if (IsExtensionAllowlisted()) {
+    // Legacy behavior - no Origin: header is present in GET CORS requests from
+    // content scripts based on the extension permissions.
+    EXPECT_THAT(fetch_result, ::testing::Not(::testing::HasSubstr("Origin:")));
+  } else {
+    // TODO(lukasza): https://crbug.com/920638: Non-allowlisted extension
+    // should use the website's origin in the CORS request.
+    // TODO: EXPECT_THAT(fetch_result,
+    //                   ::testing::HasSubstr("Origin: http://foo.com"));
+    EXPECT_THAT(fetch_result, ::testing::Not(::testing::HasSubstr("Origin:")));
+  }
+
+  // Regression test against https://crbug.com/944704.
+  EXPECT_THAT(fetch_result,
+              ::testing::Not(::testing::HasSubstr("Origin: chrome-extension")));
+}
+
+IN_PROC_BROWSER_TEST_P(CrossOriginReadBlockingExtensionAllowlistingTest,
+                       OriginHeaderInCrossOriginPostRequest) {
+  // Load the test extension.
+  ASSERT_TRUE(InstallExtension());
+
+  // Navigate to a foo.com page.
+  GURL page_url = GetTestPageUrl("foo.com");
+  ui_test_utils::NavigateToURL(browser(), page_url);
+  ASSERT_EQ(page_url,
+            active_web_contents()->GetMainFrame()->GetLastCommittedURL());
+  ASSERT_EQ(url::Origin::Create(page_url),
+            active_web_contents()->GetMainFrame()->GetLastCommittedOrigin());
+
+  // Inject a content script that performs a cross-origin POST XHR to bar.com.
+  GURL cross_site_resource(
+      embedded_test_server()->GetURL("bar.com", "/echoall"));
+  const char* kScriptTemplate = R"(
+      fetch($1, {method: 'POST', mode:'cors'})
+          .then(response => response.text())
+          .then(text => domAutomationController.send(text))
+          .catch(err => domAutomationController.send('ERROR: ' + err));
+  )";
+  content::DOMMessageQueue message_queue;
+  ExecuteContentScript(
+      active_web_contents(),
+      content::JsReplace(kScriptTemplate, cross_site_resource));
+  std::string fetch_result = PopString(&message_queue);
+
+  // Verify if the fetch was blocked + what the Origin header was.
+  if (AreContentScriptFetchesExpectedToBeBlocked()) {
+    // TODO(lukasza): https://crbug.com/953315: No CORB blocking should occur
+    // for the CORS-mode request - the test expectations should be the same,
+    // regardless of AreContentScriptFetchesExpectedToBeBlocked.
+    EXPECT_EQ("", fetch_result);
+  } else {
+    EXPECT_THAT(fetch_result, ::testing::HasSubstr("Origin: http://foo.com"));
+  }
+
+  // Regression test against https://crbug.com/944704.
+  EXPECT_THAT(fetch_result,
+              ::testing::Not(::testing::HasSubstr("Origin: chrome-extension")));
+}
+
+IN_PROC_BROWSER_TEST_P(CrossOriginReadBlockingExtensionAllowlistingTest,
+                       OriginHeaderInSameOriginPostRequest) {
+  // Load the test extension.
+  ASSERT_TRUE(InstallExtension());
+
+  // Navigate to a foo.com page.
+  GURL page_url = GetTestPageUrl("foo.com");
+  ui_test_utils::NavigateToURL(browser(), page_url);
+  ASSERT_EQ(page_url,
+            active_web_contents()->GetMainFrame()->GetLastCommittedURL());
+  ASSERT_EQ(url::Origin::Create(page_url),
+            active_web_contents()->GetMainFrame()->GetLastCommittedOrigin());
+
+  // Inject a content script that performs a same-origin POST XHR to foo.com.
+  GURL same_origin_resource(
+      embedded_test_server()->GetURL("foo.com", "/echoall"));
+  const char* kScriptTemplate = R"(
+      fetch($1, {method: 'POST', mode:'cors'})
+          .then(response => response.text())
+          .then(text => domAutomationController.send(text))
+          .catch(err => domAutomationController.send('ERROR: ' + err));
+  )";
+  content::DOMMessageQueue message_queue;
+  ExecuteContentScript(
+      active_web_contents(),
+      content::JsReplace(kScriptTemplate, same_origin_resource));
+  std::string fetch_result = PopString(&message_queue);
+
+  // Verify the Origin header.
+  //
+  // According to the Fetch spec, POST should always set the Origin header (even
+  // for same-origin requests).
+  EXPECT_THAT(fetch_result, ::testing::HasSubstr("Origin: http://foo.com"));
+
+  // Regression test against https://crbug.com/944704.
+  EXPECT_THAT(fetch_result,
+              ::testing::Not(::testing::HasSubstr("Origin: chrome-extension")));
 }
 
 INSTANTIATE_TEST_SUITE_P(AllowlistingDisabled,

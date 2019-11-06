@@ -38,23 +38,17 @@ extern extensions::WebViewGuest* GetActiveWebGuestFromBrowser(Browser* browser);
 
 extern content::WebContents* GetWebContentsFromTabStrip(
     int tab_id,
-    content::BrowserContext* browser_context);
+    content::BrowserContext* browser_context,
+    std::string* error = nullptr);
 
 extern bool IsOutsideAppWindow(int screen_x, int screen_y);
 
 extern bool EncodeBitmap(
-    const SkBitmap& screen_capture,
+    const SkBitmap& bitmap,
     std::vector<unsigned char>* data,
     std::string* mime_type,
     extensions::api::extension_types::ImageFormat image_format,
-    gfx::Size size,
-    double scale,
-    int image_quality,
-    bool resize);
-
-extern SkBitmap SmartCropAndSize(const SkBitmap& capture,
-                                 int target_width,
-                                 int target_height);
+    int image_quality);
 
 extern Browser* FindBrowserForPinnedTabs(Browser* current_browser);
 extern bool MoveTabToWindow(Browser* source_browser,

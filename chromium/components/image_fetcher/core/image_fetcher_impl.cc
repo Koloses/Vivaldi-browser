@@ -102,8 +102,8 @@ void ImageFetcherImpl::OnImageURLFetched(const GURL& image_url,
   request->request_metadata = metadata;
   image_decoder_->DecodeImage(
       image_data, params.frame_size(),
-      base::BindRepeating(&ImageFetcherImpl::OnImageDecoded,
-                          base::Unretained(this), image_url, metadata));
+      base::BindOnce(&ImageFetcherImpl::OnImageDecoded,
+                     weak_ptr_factory_.GetWeakPtr(), image_url, metadata));
 }
 
 void ImageFetcherImpl::OnImageDecoded(const GURL& image_url,

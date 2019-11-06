@@ -42,8 +42,7 @@ gfx::Rect GetAvailableTitleBounds(const views::View* left_view,
 
   const int x = left_view ? left_view->bounds().right() + kTitleIconOffsetX
                           : kTitleNoIconOffsetX;
-  const int title_height =
-      views::NativeWidgetAura::GetWindowTitleFontList().GetHeight();
+  const int title_height = gfx::FontList().GetHeight();
   DCHECK_LE(right_view->height(), header_height);
   // We want to align the center points of the header and title vertically.
   // Note that we can't just do (header_height - title_height) / 2, since this
@@ -62,11 +61,10 @@ gfx::Rect GetAvailableTitleBounds(const views::View* left_view,
 // widget's activation changes. Returns false if the header should switch to
 // new visuals instantaneously.
 bool CanAnimateActivation(views::Widget* widget) {
-  // Do not animate the header if the parent (e.g.
-  // kShellWindowId_DefaultContainer) is already animating. All of the
-  // implementers of FrameHeader animate activation by continuously painting
-  // during the animation. This gives the parent's animation a slower frame
-  // rate.
+  // Do not animate the header if the parent (e.g. the active desk container) is
+  // already animating. All of the implementers of FrameHeader animate
+  // activation by continuously painting during the animation. This gives the
+  // parent's animation a slower frame rate.
   // TODO(sky): Expose a better way to determine this rather than assuming the
   // parent is a toplevel container.
   aura::Window* window = widget->GetNativeWindow();
@@ -193,7 +191,9 @@ void FrameHeader::AnimationProgressed(const gfx::Animation* animation) {
 // FrameHeader, protected:
 
 FrameHeader::FrameHeader(views::Widget* target_widget, views::View* view)
-    : target_widget_(target_widget), view_(view) {
+    : views::AnimationDelegateViews(view),
+      target_widget_(target_widget),
+      view_(view) {
   DCHECK(target_widget);
   DCHECK(view);
 }
@@ -219,10 +219,9 @@ void FrameHeader::PaintTitleBar(gfx::Canvas* canvas) {
   }
 
   if (!text.empty()) {
-    canvas->DrawStringRectWithFlags(
-        text, views::NativeWidgetAura::GetWindowTitleFontList(),
-        GetTitleColor(), view_->GetMirroredRect(GetTitleBounds()),
-        gfx::Canvas::NO_SUBPIXEL_RENDERING);
+    canvas->DrawStringRectWithFlags(text, gfx::FontList(), GetTitleColor(),
+                                    view_->GetMirroredRect(GetTitleBounds()),
+                                    gfx::Canvas::NO_SUBPIXEL_RENDERING);
   }
 }
 
@@ -239,6 +238,9 @@ void FrameHeader::SetCaptionButtonContainer(
       views::CAPTION_BUTTON_ICON_LEFT_SNAPPED, kWindowControlLeftSnappedIcon);
   caption_button_container_->SetButtonImage(
       views::CAPTION_BUTTON_ICON_RIGHT_SNAPPED, kWindowControlRightSnappedIcon);
+
+  // Perform layout to ensure the container height is correct.
+  LayoutHeaderInternal();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

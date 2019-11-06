@@ -30,8 +30,10 @@
 #include "chrome/browser/unified_consent/unified_consent_service_factory.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/browser_sync/profile_sync_service.h"
 #include "components/metrics_services_manager/metrics_services_manager.h"
+#include "components/signin/public/base/signin_buildflags.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_token_status.h"
@@ -50,7 +52,6 @@
 #include "content/public/test/navigation_handle_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
-#include "services/identity/public/cpp/identity_manager.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source.h"
 #include "services/network/test/test_network_quality_tracker.h"
@@ -128,11 +129,11 @@ class MetricsConsentOverride {
 
 class SyncConnectionOkChecker : public SingleClientStatusChangeChecker {
  public:
-  explicit SyncConnectionOkChecker(browser_sync::ProfileSyncService* service)
+  explicit SyncConnectionOkChecker(syncer::ProfileSyncService* service)
       : SingleClientStatusChangeChecker(service) {}
 
   bool IsExitConditionSatisfied() override {
-    return service()->GetSyncTokenStatus().connection_status ==
+    return service()->GetSyncTokenStatusForDebugging().connection_status ==
            syncer::CONNECTION_OK;
   }
 
@@ -158,14 +159,10 @@ class UkmBrowserTestBase : public SyncTest {
             is_unified_consent_enabled
                 ? unified_consent::UnifiedConsentFeatureState::kEnabled
                 : unified_consent::UnifiedConsentFeatureState::kDisabled) {
-  }
-
-  void SetUp() override {
     // Explicitly enable UKM and disable the MetricsReporting (which should
     // not affect UKM).
     scoped_feature_list_.InitWithFeatures({ukm::kUkmFeature},
                                           {internal::kMetricsReportingFeature});
-    SyncTest::SetUp();
   }
 
   bool ukm_enabled() const {
@@ -199,7 +196,7 @@ class UkmBrowserTestBase : public SyncTest {
   }
   bool HasSource(ukm::SourceId source_id) const {
     auto* service = ukm_service();
-    return service && base::ContainsKey(service->sources(), source_id);
+    return service && base::Contains(service->sources(), source_id);
   }
   void RecordDummySource(ukm::SourceId source_id) {
     auto* service = ukm_service();
@@ -222,9 +219,13 @@ class UkmBrowserTestBase : public SyncTest {
   ukm::Report GetUkmReport() {
     EXPECT_TRUE(HasUnsentUkmLogs());
 
-    metrics::PersistedLogs* log_store =
+    metrics::UnsentLogStore* log_store =
         ukm_service()->reporting_service_.ukm_log_store();
-    EXPECT_FALSE(log_store->has_staged_log());
+    if (log_store->has_staged_log()) {
+      // For testing purposes, we are examining the content of a staged log
+      // without ever sending the log, so discard any previously staged log.
+      log_store->DiscardStagedLog();
+    }
     log_store->StageNextLog();
     EXPECT_TRUE(log_store->has_staged_log());
 
@@ -300,7 +301,7 @@ class UkmBrowserTestBase : public SyncTest {
   ukm::UkmService* ukm_service() const {
     return g_browser_process->GetMetricsServicesManager()->GetUkmService();
   }
-  base::test::ScopedFeatureList scoped_feature_list_;
+
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   // ScopedAccountConsistencyDice is required for unified consent to be enabled.
   // Note that it uses forced field trials to enable DICE which disable metrics
@@ -309,6 +310,8 @@ class UkmBrowserTestBase : public SyncTest {
   const std::unique_ptr<ScopedAccountConsistencyDice> scoped_dice_;
 #endif
   const unified_consent::ScopedUnifiedConsent scoped_unified_consent_;
+  base::test::ScopedFeatureList scoped_feature_list_;
+
   DISALLOW_COPY_AND_ASSIGN(UkmBrowserTestBase);
 };
 
@@ -398,7 +401,7 @@ class UkmConsentParamBrowserTest : public UkmBrowserTestBase,
 class UkmEnabledChecker : public SingleClientStatusChangeChecker {
  public:
   UkmEnabledChecker(UkmBrowserTestBase* test,
-                    browser_sync::ProfileSyncService* service,
+                    syncer::ProfileSyncService* service,
                     bool want_enabled)
       : SingleClientStatusChangeChecker(service),
         test_(test),
@@ -690,7 +693,7 @@ IN_PROC_BROWSER_TEST_P(UkmBrowserTest, SingleDisableHistorySyncCheck) {
   uint64_t original_client_id = client_id();
   EXPECT_NE(0U, original_client_id);
 
-  harness->DisableSyncForDatatype(syncer::TYPED_URLS);
+  harness->DisableSyncForType(syncer::UserSelectableType::kHistory);
   if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
     // Disable history sync does not disable UKM when unified consent is
     // enabled.
@@ -698,7 +701,7 @@ IN_PROC_BROWSER_TEST_P(UkmBrowserTest, SingleDisableHistorySyncCheck) {
   } else {
     EXPECT_FALSE(ukm_enabled());
 
-    harness->EnableSyncForDatatype(syncer::TYPED_URLS);
+    harness->EnableSyncForType(syncer::UserSelectableType::kHistory);
     EXPECT_TRUE(ukm_enabled());
     // Client ID should be reset.
     EXPECT_NE(original_client_id, client_id());
@@ -728,7 +731,7 @@ IN_PROC_BROWSER_TEST_P(UkmBrowserTest, MultiDisableHistorySyncCheck) {
   EXPECT_TRUE(ukm_enabled());
   EXPECT_EQ(original_client_id, client_id());
 
-  harness2->DisableSyncForDatatype(syncer::TYPED_URLS);
+  harness2->DisableSyncForType(syncer::UserSelectableType::kHistory);
   if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
     // Disable history sync does not disable UKM when unified consent is
     // enabled.
@@ -740,7 +743,7 @@ IN_PROC_BROWSER_TEST_P(UkmBrowserTest, MultiDisableHistorySyncCheck) {
     EXPECT_NE(0U, original_client_id);
   }
 
-  harness2->EnableSyncForDatatype(syncer::TYPED_URLS);
+  harness2->EnableSyncForType(syncer::UserSelectableType::kHistory);
   EXPECT_TRUE(ukm_enabled());
   EXPECT_EQ(original_client_id, client_id());
 
@@ -765,11 +768,13 @@ IN_PROC_BROWSER_TEST_P(UkmBrowserTest, SingleDisableExtensionsSyncCheck) {
   uint64_t original_client_id = client_id();
   EXPECT_NE(0U, original_client_id);
 
-  ASSERT_TRUE(harness->DisableSyncForDatatype(syncer::EXTENSIONS));
+  ASSERT_TRUE(
+      harness->DisableSyncForType(syncer::UserSelectableType::kExtensions));
   EXPECT_TRUE(ukm_enabled());
   EXPECT_FALSE(ukm_extensions_enabled());
 
-  ASSERT_TRUE(harness->EnableSyncForDatatype(syncer::EXTENSIONS));
+  ASSERT_TRUE(
+      harness->EnableSyncForType(syncer::UserSelectableType::kExtensions));
   EXPECT_TRUE(ukm_enabled());
   EXPECT_TRUE(ukm_extensions_enabled());
   // Client ID should not be reset.
@@ -801,11 +806,11 @@ IN_PROC_BROWSER_TEST_P(UkmBrowserTest, MultiDisableExtensionsSyncCheck) {
   EXPECT_TRUE(ukm_extensions_enabled());
   EXPECT_EQ(original_client_id, client_id());
 
-  harness2->DisableSyncForDatatype(syncer::EXTENSIONS);
+  harness2->DisableSyncForType(syncer::UserSelectableType::kExtensions);
   EXPECT_TRUE(ukm_enabled());
   EXPECT_FALSE(ukm_extensions_enabled());
 
-  harness2->EnableSyncForDatatype(syncer::EXTENSIONS);
+  harness2->EnableSyncForType(syncer::UserSelectableType::kExtensions);
   EXPECT_TRUE(ukm_enabled());
   EXPECT_TRUE(ukm_extensions_enabled());
   EXPECT_EQ(original_client_id, client_id());
@@ -1136,8 +1141,8 @@ IN_PROC_BROWSER_TEST_P(UkmBrowserTestWithSyncTransport, SyncFeatureCheck) {
   ASSERT_FALSE(sync_service->GetActiveDataTypes().Has(syncer::TYPED_URLS));
   ASSERT_FALSE(sync_service->GetActiveDataTypes().Has(
       syncer::HISTORY_DELETE_DIRECTIVES));
-  ASSERT_TRUE(sync_service->GetUserSettings()->GetChosenDataTypes().Has(
-      syncer::TYPED_URLS));
+  ASSERT_TRUE(sync_service->GetUserSettings()->GetSelectedTypes().Has(
+      syncer::UserSelectableType::kHistory));
 
   // If unified consent is disabled, then UKM should now be off, since Sync (the
   // feature) isn't enabled anymore, even though the machinery is still active.
@@ -1187,8 +1192,8 @@ IN_PROC_BROWSER_TEST_P(UkmBrowserTestWithSyncTransport,
   ASSERT_FALSE(sync_service->GetActiveDataTypes().Has(syncer::TYPED_URLS));
   ASSERT_FALSE(sync_service->GetActiveDataTypes().Has(
       syncer::HISTORY_DELETE_DIRECTIVES));
-  ASSERT_TRUE(sync_service->GetUserSettings()->GetChosenDataTypes().Has(
-      syncer::TYPED_URLS));
+  ASSERT_TRUE(sync_service->GetUserSettings()->GetSelectedTypes().Has(
+      syncer::UserSelectableType::kHistory));
 
   EXPECT_FALSE(ukm_enabled());
 }
@@ -1223,5 +1228,105 @@ IN_PROC_BROWSER_TEST_P(UkmConsentParamBrowserTest, GroupPolicyConsentCheck) {
 INSTANTIATE_TEST_SUITE_P(UkmConsentParamBrowserTests,
                          UkmConsentParamBrowserTest,
                          testing::Bool());
+
+// Verify that sources kept alive in-memory will be discarded by UKM service in
+// one reporting cycle after the web contents are destroyed when the tab is
+// closed or when the user navigated away in the same tab.
+IN_PROC_BROWSER_TEST_P(UkmBrowserTest, EvictObsoleteSources) {
+  MetricsConsentOverride metrics_consent(true);
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  std::unique_ptr<ProfileSyncServiceHarness> harness =
+      EnableSyncForProfile(profile);
+  Browser* sync_browser = CreateBrowser(profile);
+
+  // Navigate to a URL in a new tab.
+  AddTabAtIndexToBrowser(sync_browser, 1, GURL("https://www.chromium.org"),
+                         ui::PAGE_TRANSITION_TYPED, true);
+  ukm::SourceId source_id1 = ukm::GetSourceIdForWebContentsDocument(
+      sync_browser->tab_strip_model()->GetWebContentsAt(1));
+  ukm::SourceId source_id2 = ukm::kInvalidSourceId;
+
+  // The UKM report contains this newly-created source.
+  BuildAndStoreUkmLog();
+  ukm::Report report = GetUkmReport();
+  bool has_source_id1 = false;
+  bool has_source_id2 = false;
+  for (const auto& s : report.sources()) {
+    has_source_id1 |= s.id() == source_id1;
+    has_source_id2 |= s.id() == source_id2;
+  }
+  EXPECT_TRUE(has_source_id1);
+  EXPECT_FALSE(has_source_id2);
+
+  // Navigate to a URL in another new tab.
+  AddTabAtIndexToBrowser(sync_browser, 2, GURL("https://www.google.com"),
+                         ui::PAGE_TRANSITION_TYPED, true);
+  source_id2 = ukm::GetSourceIdForWebContentsDocument(
+      sync_browser->tab_strip_model()->GetWebContentsAt(2));
+
+  // The next report should again contain source 1 because the tab is still
+  // alive, and also source 2 associated to the new tab that has just been
+  // opened.
+  BuildAndStoreUkmLog();
+  report = GetUkmReport();
+  has_source_id1 = false;
+  has_source_id2 = false;
+  for (const auto& s : report.sources()) {
+    has_source_id1 |= s.id() == source_id1;
+    has_source_id2 |= s.id() == source_id2;
+  }
+  EXPECT_TRUE(has_source_id1);
+  EXPECT_TRUE(has_source_id2);
+
+  // Close the tab corresponding to source 1, this should mark source 1 as
+  // obsolete. Next report will still contain source 1 because we might have
+  // associated entries before it was closed.
+  sync_browser->tab_strip_model()->CloseWebContentsAt(
+      1, TabStripModel::CloseTypes::CLOSE_NONE);
+
+  BuildAndStoreUkmLog();
+  report = GetUkmReport();
+  has_source_id1 = false;
+  has_source_id2 = false;
+  for (const auto& s : report.sources()) {
+    has_source_id1 |= s.id() == source_id1;
+    has_source_id2 |= s.id() == source_id2;
+  }
+  EXPECT_TRUE(has_source_id1);
+  EXPECT_TRUE(has_source_id2);
+
+  // Navigate to a new URL in the current tab, this will mark source 2 that was
+  // in the current tab as obsolete.
+  ui_test_utils::NavigateToURL(sync_browser, GURL("https://www.wikipedia.org"));
+
+  // The previous report was the last one that could potentially contain entries
+  // for source 1. Source 1 is thus no longer included in future reports. This
+  // report will still contain source 2 because we might have associated entries
+  // since the last report.
+  BuildAndStoreUkmLog();
+  report = GetUkmReport();
+  has_source_id1 = false;
+  has_source_id2 = false;
+  for (const auto& s : report.sources()) {
+    has_source_id1 |= s.id() == source_id1;
+    has_source_id2 |= s.id() == source_id2;
+  }
+  EXPECT_FALSE(has_source_id1);
+  EXPECT_TRUE(has_source_id2);
+
+  // Neither source 1 or source 2 is alive anymore.
+  BuildAndStoreUkmLog();
+  report = GetUkmReport();
+  has_source_id1 = false;
+  has_source_id2 = false;
+  for (const auto& s : report.sources()) {
+    has_source_id1 |= s.id() == source_id1;
+    has_source_id2 |= s.id() == source_id2;
+  }
+  EXPECT_FALSE(has_source_id1);
+  EXPECT_FALSE(has_source_id2);
+
+  CloseBrowserSynchronously(sync_browser);
+}
 
 }  // namespace metrics

@@ -10,7 +10,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/predictors/loading_data_collector.h"
 #include "chrome/browser/predictors/loading_stats_collector.h"
-#include "chrome/browser/predictors/resource_prefetch_common.h"
+#include "chrome/browser/predictors/navigation_id.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -60,8 +60,7 @@ LoadingPredictor::LoadingPredictor(const LoadingPredictorConfig& config,
       loading_data_collector_(std::make_unique<LoadingDataCollector>(
           resource_prefetch_predictor_.get(),
           stats_collector_.get(),
-          config)),
-      weak_factory_(this) {}
+          config)) {}
 
 LoadingPredictor::~LoadingPredictor() {
   DCHECK(shutdown_);

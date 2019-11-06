@@ -20,7 +20,6 @@
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/browser/net/file_downloader.h"
-#include "chrome/browser/supervised_user/experimental/safe_search_url_reporter.h"
 #include "chrome/browser/supervised_user/experimental/supervised_user_blacklist.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #include "chrome/browser/supervised_user/supervised_users.h"
@@ -102,16 +101,20 @@ class SupervisedUserService : public KeyedService,
     return whitelists_;
   }
 
+  // Returns true if the preference value is pre-defined and is controlled by
+  // neither the supervised user nor the supervised user's custodians.
+  bool IsRestrictedCrosSettingForChildUser(const std::string& name) const;
+
+  // Returns the value of the restricted preference.
+  const base::Value* GetRestrictedCrosSettingValueForChildUser(
+      const std::string& name) const;
+
   // Whether the user can request to get access to blocked URLs or to new
   // extensions.
   bool AccessRequestsEnabled();
 
   // Adds an access request for the given URL.
   void AddURLAccessRequest(const GURL& url, SuccessCallback callback);
-
-  // Reports |url| to the SafeSearch API, because the user thinks this is an
-  // inappropriate URL.
-  void ReportURL(const GURL& url, SuccessCallback callback);
 
   // Adds an install request for the given WebStore item (App/Extension).
   void AddExtensionInstallRequest(const std::string& extension_id,
@@ -139,6 +142,9 @@ class SupervisedUserService : public KeyedService,
   // Returns the email address of the custodian.
   std::string GetCustodianEmailAddress() const;
 
+  // Returns the obfuscated GAIA id of the custodian.
+  std::string GetCustodianObfuscatedGaiaId() const;
+
   // Returns the name of the custodian, or the email address if the name is
   // empty.
   std::string GetCustodianName() const;
@@ -147,8 +153,12 @@ class SupervisedUserService : public KeyedService,
   // if there is no second custodian.
   std::string GetSecondCustodianEmailAddress() const;
 
+  // Returns the obfuscated GAIA id of the second custodian or the empty
+  // string if there is no second custodian.
+  std::string GetSecondCustodianObfuscatedGaiaId() const;
+
   // Returns the name of the second custodian, or the email address if the name
-  // is empty, or the empty string is there is no second custodian.
+  // is empty, or the empty string if there is no second custodian.
   std::string GetSecondCustodianName() const;
 
   // Returns a message saying that extensions can only be modified by the
@@ -167,14 +177,12 @@ class SupervisedUserService : public KeyedService,
   void AddPermissionRequestCreator(
       std::unique_ptr<PermissionRequestCreator> creator);
 
-  void SetSafeSearchURLReporter(
-      std::unique_ptr<SafeSearchURLReporter> reporter);
-
   // ProfileKeyedService override:
   void Shutdown() override;
 
   // SyncTypePreferenceProvider implementation:
-  syncer::ModelTypeSet GetForcedDataTypes() const override;
+  syncer::UserSelectableTypeSet GetForcedTypes() const override;
+  bool IsEncryptEverythingAllowed() const override;
 
 #if !defined(OS_ANDROID)
   // BrowserListObserver implementation:
@@ -183,6 +191,15 @@ class SupervisedUserService : public KeyedService,
 
   // SupervisedUserURLFilter::Observer implementation:
   void OnSiteListUpdated() override;
+
+#if !defined(OS_ANDROID)
+  bool signout_required_after_supervision_enabled() {
+    return signout_required_after_supervision_enabled_;
+  }
+  void set_signout_required_after_supervision_enabled() {
+    signout_required_after_supervision_enabled_ = true;
+  }
+#endif  // !defined(OS_ANDROID)
 
  private:
   friend class SupervisedUserServiceExtensionTestBase;
@@ -327,6 +344,9 @@ class SupervisedUserService : public KeyedService,
   // It is only relevant for SU-initiated installs.
   std::map<std::string, base::Version> approved_extensions_map_;
 
+  // Stores the restricted preference values for child users.
+  std::map<std::string, base::Value> child_user_restricted_cros_settings_;
+
   enum class BlacklistLoadState {
     NOT_LOADED,
     LOAD_STARTED,
@@ -343,9 +363,6 @@ class SupervisedUserService : public KeyedService,
   // Used to create permission requests.
   std::vector<std::unique_ptr<PermissionRequestCreator>> permissions_creators_;
 
-  // Used to report inappropriate URLs to SafeSarch API.
-  std::unique_ptr<SafeSearchURLReporter> url_reporter_;
-
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   ScopedObserver<extensions::ExtensionRegistry,
                  extensions::ExtensionRegistryObserver>
@@ -354,7 +371,11 @@ class SupervisedUserService : public KeyedService,
 
   base::ObserverList<SupervisedUserServiceObserver>::Unchecked observer_list_;
 
-  base::WeakPtrFactory<SupervisedUserService> weak_ptr_factory_;
+#if !defined(OS_ANDROID)
+  bool signout_required_after_supervision_enabled_ = false;
+#endif
+
+  base::WeakPtrFactory<SupervisedUserService> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SupervisedUserService);
 };

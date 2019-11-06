@@ -17,35 +17,8 @@ namespace blink {
 
 namespace {
 
-constexpr char kCssFragmentIdentifierPrefix[] = "targetElement=";
-constexpr size_t kCssFragmentIdentifierPrefixLength =
-    base::size(kCssFragmentIdentifierPrefix);
-
-bool ParseCSSFragmentIdentifier(const String& fragment, String* selector) {
-  size_t pos = fragment.Find(kCssFragmentIdentifierPrefix);
-  if (pos == 0) {
-    *selector = fragment.Substring(kCssFragmentIdentifierPrefixLength - 1);
-    return true;
-  }
-
-  return false;
-}
-
-Element* FindCSSFragmentAnchor(const AtomicString& selector,
-                               Document& document) {
-  DummyExceptionStateForTesting exception_state;
-  return document.QuerySelector(selector, exception_state);
-}
-
 Node* FindAnchorFromFragment(const String& fragment, Document& doc) {
-  Element* anchor_node;
-  String selector;
-  if (RuntimeEnabledFeatures::CSSFragmentIdentifiersEnabled() &&
-      ParseCSSFragmentIdentifier(fragment, &selector)) {
-    anchor_node = FindCSSFragmentAnchor(AtomicString(selector), doc);
-  } else {
-    anchor_node = doc.FindAnchor(fragment);
-  }
+  Element* anchor_node = doc.FindAnchor(fragment);
 
   // Implement the rule that "" and "top" both mean top of page as in other
   // browsers.
@@ -89,9 +62,7 @@ ElementFragmentAnchor* ElementFragmentAnchor::TryCreate(const KURL& url,
   }
 
   // Setting to null will clear the current target.
-  Element* target = anchor_node && anchor_node->IsElementNode()
-                        ? ToElement(anchor_node)
-                        : nullptr;
+  auto* target = DynamicTo<Element>(anchor_node);
   doc.SetCSSTarget(target);
 
   if (doc.IsSVGDocument()) {
@@ -131,7 +102,7 @@ bool ElementFragmentAnchor::Invoke() {
 
   Document& doc = *frame_->GetDocument();
 
-  if (!doc.IsRenderingReady() || !frame_->View())
+  if (!doc.HaveRenderBlockingResourcesLoaded() || !frame_->View())
     return true;
 
   Frame* boundary_frame = frame_->FindUnsafeParentScrollPropagationBoundary();
@@ -142,9 +113,10 @@ bool ElementFragmentAnchor::Invoke() {
     boundary_local_frame->View()->SetSafeToPropagateScrollToParent(false);
   }
 
-  Element* element_to_scroll = anchor_node_->IsElementNode()
-                                   ? ToElement(anchor_node_)
-                                   : doc.documentElement();
+  auto* element_to_scroll = DynamicTo<Element>(anchor_node_.Get());
+  if (!element_to_scroll)
+    element_to_scroll = doc.documentElement();
+
   if (element_to_scroll) {
     ScrollIntoViewOptions* options = ScrollIntoViewOptions::Create();
     options->setBlock("start");
@@ -171,7 +143,7 @@ void ElementFragmentAnchor::Installed() {
 
   // If rendering isn't ready yet, we'll focus and scroll as part of the
   // document lifecycle.
-  if (frame_->GetDocument()->IsRenderingReady())
+  if (frame_->GetDocument()->HaveRenderBlockingResourcesLoaded())
     ApplyFocusIfNeeded();
 
   needs_invoke_ = true;
@@ -218,7 +190,10 @@ void ElementFragmentAnchor::ApplyFocusIfNeeded() {
   if (!needs_focus_)
     return;
 
-  if (!frame_->GetDocument()->IsRenderingReady())
+  if (!frame_->GetDocument()->HaveRenderBlockingResourcesLoaded())
+    return;
+
+  if (!anchor_node_)
     return;
 
   // If the anchor accepts keyboard focus and fragment scrolling is allowed,
@@ -226,8 +201,9 @@ void ElementFragmentAnchor::ApplyFocusIfNeeded() {
   // If anchorNode is not focusable or fragment scrolling is not allowed,
   // clear focus, which matches the behavior of other browsers.
   frame_->GetDocument()->UpdateStyleAndLayoutTree();
-  if (anchor_node_->IsElementNode() && ToElement(anchor_node_)->IsFocusable()) {
-    ToElement(anchor_node_)->focus();
+  auto* element = DynamicTo<Element>(anchor_node_.Get());
+  if (element && element->IsFocusable()) {
+    element->focus();
   } else {
     frame_->GetDocument()->SetSequentialFocusNavigationStartingPoint(
         anchor_node_);

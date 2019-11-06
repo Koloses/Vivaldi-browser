@@ -9,10 +9,10 @@ import android.view.View;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.native_page.BasicNativePage;
 import org.chromium.chrome.browser.native_page.NativePageHost;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
+import org.chromium.chrome.browser.util.UrlConstants;
 
 /**
  * A native page holding a {@link BookmarkManager} on _tablet_.
@@ -35,6 +35,7 @@ public class BookmarkPage extends BasicNativePage {
         mManager = new BookmarkManager(
                 activity, false, ((SnackbarManageable) activity).getSnackbarManager());
         mManager.setBasicNativePage(this);
+        mManager.setHistoryNavigationDelegate(host.createHistoryNavigationDelegate());
         mTitle = activity.getString(R.string.bookmarks);
     }
 

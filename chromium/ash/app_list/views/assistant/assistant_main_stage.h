@@ -26,6 +26,10 @@ namespace ui {
 class CallbackLayerAnimationObserver;
 }  // namespace ui
 
+namespace views {
+class Label;
+}  // namespace views
+
 namespace app_list {
 
 // AssistantMainStage is the child of AssistantMainView responsible for
@@ -50,7 +54,7 @@ class APP_LIST_EXPORT AssistantMainStage
   // AssistantInteractionModelObserver:
   void OnCommittedQueryChanged(const ash::AssistantQuery& query) override;
   void OnPendingQueryChanged(const ash::AssistantQuery& query) override;
-  void OnPendingQueryCleared() override;
+  void OnPendingQueryCleared(bool due_to_commit) override;
   void OnResponseChanged(
       const std::shared_ptr<ash::AssistantResponse>& response) override;
 
@@ -63,8 +67,16 @@ class APP_LIST_EXPORT AssistantMainStage
 
  private:
   void InitLayout();
+  views::View* CreateContentLayoutContainer();
+  void InitGreetingLabel();
+  views::View* CreateMainContentLayoutContainer();
+  views::View* CreateDividerLayoutContainer();
+  views::View* CreateFooterLayoutContainer();
 
-  void UpdateFooter();
+  void MaybeHideGreetingLabel();
+
+  // Update footer to |visible| with animations.
+  void UpdateFooter(bool visible);
 
   void OnFooterAnimationStarted(
       const ui::CallbackLayerAnimationObserver& observer);
@@ -78,6 +90,7 @@ class APP_LIST_EXPORT AssistantMainStage
   views::View* horizontal_separator_;
   ash::AssistantQueryView* query_view_;
   ash::UiElementContainerView* ui_element_container_;
+  views::Label* greeting_label_;
   ash::AssistantFooterView* footer_;
 
   std::unique_ptr<ui::CallbackLayerAnimationObserver>

@@ -9,9 +9,6 @@
  * @param {!Array<string>} variationsList The list of variations.
  */
 function returnVariationInfo(variationsList) {
-  $('variations-section').hidden = !variationsList.length;
-  $('variations-list').appendChild(
-      parseHtmlSubset(variationsList.join('<br>'), ['BR']));
 }
 
 /**
@@ -21,8 +18,6 @@ function returnVariationInfo(variationsList) {
  * @param {string} variationsCmd The variations info in command line format.
  */
 function returnVariationCmd(variationsCmd) {
-  $('variations-cmd-section').hidden = !variationsCmd;
-  $('variations-cmd').textContent = variationsCmd;
 }
 
 /**
@@ -83,6 +78,9 @@ function returnCustomizationId(response) {
 /* All the work we do onload. */
 function onLoadWork() {
   chrome.send('requestVersionInfo');
+  if ($('sanitizer').textContent != '') {
+    $('sanitizer-section').hidden = false;
+  }
 }
 
 document.addEventListener('DOMContentLoaded', onLoadWork);

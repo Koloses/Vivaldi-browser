@@ -15,7 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "components/autofill/core/browser/address_normalization_manager.h"
 #include "components/autofill/core/browser/address_normalizer_impl.h"
-#include "components/autofill/core/browser/credit_card.h"
+#include "components/autofill/core/browser/data_model/credit_card.h"
 #include "components/payments/core/journey_logger.h"
 #include "components/payments/core/payment_instrument.h"
 #include "components/payments/core/payment_options_provider.h"
@@ -114,7 +114,6 @@ class PaymentRequest : public PaymentOptionsProvider,
   autofill::PersonalDataManager* GetPersonalDataManager() override;
   const std::string& GetApplicationLocale() const override;
   bool IsIncognito() const override;
-  bool IsSslCertificateValid() override;
   const GURL& GetLastCommittedURL() const override;
   void DoFullCardRequest(
       const autofill::CreditCard& credit_card,
@@ -463,6 +462,8 @@ class PaymentRequest : public PaymentOptionsProvider,
   // Finds all iOS payment instruments for the url payment methods requested by
   // the merchant.
   IOSPaymentInstrumentFinder ios_instrument_finder_;
+
+  base::WeakPtrFactory<PaymentRequest> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PaymentRequest);
 };

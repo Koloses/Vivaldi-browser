@@ -48,13 +48,13 @@ public class BackgroundSyncBackgroundTask extends NativeBackgroundTask {
 
         // Call into native code to fire any ready background sync events, and
         // wait for it to finish doing so.
-        BackgroundSyncBackgroundTaskJni.get().fireBackgroundSyncEvents(
+        BackgroundSyncBackgroundTaskJni.get().fireOneShotBackgroundSyncEvents(
                 () -> { callback.taskFinished(/* needsReschedule= */ false); });
     }
 
     @Override
     protected boolean onStopTaskBeforeNativeLoaded(Context context, TaskParameters taskParameters) {
-        assert taskParameters.getTaskId() == TaskIds.OFFLINE_PAGES_BACKGROUND_JOB_ID;
+        assert taskParameters.getTaskId() == TaskIds.BACKGROUND_SYNC_ONE_SHOT_JOB_ID;
 
         // Native didn't complete loading, but it was supposed to.
         // Presume we need to reschedule.
@@ -63,19 +63,23 @@ public class BackgroundSyncBackgroundTask extends NativeBackgroundTask {
 
     @Override
     protected boolean onStopTaskWithNative(Context context, TaskParameters taskParameters) {
-        assert taskParameters.getTaskId() == TaskIds.OFFLINE_PAGES_BACKGROUND_JOB_ID;
+        assert taskParameters.getTaskId() == TaskIds.BACKGROUND_SYNC_ONE_SHOT_JOB_ID;
 
-        // Don't reschedule again.
-        return false;
+        // The method is called when the task was interrupted due to some reason.
+        // It is not called when the task finishes successfully. Reschedule so
+        // we can attempt it again.
+        return true;
     }
 
     @Override
     public void reschedule(Context context) {
-        BackgroundSyncBackgroundTaskScheduler.getInstance().reschedule();
+        BackgroundSyncBackgroundTaskScheduler.getInstance().reschedule(
+                BackgroundSyncBackgroundTaskScheduler.BackgroundSyncTask
+                        .ONE_SHOT_SYNC_CHROME_WAKE_UP);
     }
 
     @NativeMethods
     interface Natives {
-        void fireBackgroundSyncEvents(Runnable callback);
+        void fireOneShotBackgroundSyncEvents(Runnable callback);
     }
 }

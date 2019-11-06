@@ -22,7 +22,8 @@
     kInfobars,
     kEditCommand,
     kMailPrivate,
-    kZoom,
+    kMenubar,
+    kMenubarMenu,
     kNotes,
     kPrefs,
     kRuntimePrivate,
@@ -37,5 +38,6 @@
     kVivaldiAccount,
     kWebViewPrivate,
     kWindowPrivate,
+    kZoom,
 
 #endif  // EXTENSIONS_PERMISSIONS_VIVALDI_API_PERMISSION_ENUMS_H_

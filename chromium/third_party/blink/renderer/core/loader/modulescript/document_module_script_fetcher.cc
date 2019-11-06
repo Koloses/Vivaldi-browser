@@ -43,7 +43,7 @@ void DocumentModuleScriptFetcher::NotifyFinished(Resource* resource) {
   ModuleScriptCreationParams params(
       script_resource->GetResponse().CurrentRequestUrl(),
       script_resource->SourceText(), script_resource->CacheHandler(),
-      script_resource->GetResourceRequest().GetFetchCredentialsMode());
+      script_resource->GetResourceRequest().GetCredentialsMode());
   client_->NotifyFetchFinished(params, error_messages);
 }
 
@@ -69,8 +69,9 @@ bool DocumentModuleScriptFetcher::FetchIfLayeredAPI(
   if (source_text.IsNull()) {
     HeapVector<Member<ConsoleMessage>> error_messages;
     error_messages.push_back(ConsoleMessage::CreateForRequest(
-        kJSMessageSource, mojom::ConsoleMessageLevel::kError,
-        "Unexpected data error", fetch_params.Url().GetString(), nullptr, 0));
+        mojom::ConsoleMessageSource::kJavaScript,
+        mojom::ConsoleMessageLevel::kError, "Unexpected data error",
+        fetch_params.Url().GetString(), nullptr, 0));
     client_->NotifyFetchFinished(base::nullopt, error_messages);
     return true;
   }
@@ -79,7 +80,7 @@ bool DocumentModuleScriptFetcher::FetchIfLayeredAPI(
   ModuleScriptCreationParams params(
       layered_api_url, ParkableString(source_text.ReleaseImpl()),
       nullptr /* cache_handler */,
-      fetch_params.GetResourceRequest().GetFetchCredentialsMode());
+      fetch_params.GetResourceRequest().GetCredentialsMode());
   client_->NotifyFetchFinished(params, HeapVector<Member<ConsoleMessage>>());
   return true;
 }

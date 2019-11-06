@@ -14,8 +14,8 @@
 #include "chrome/browser/resource_coordinator/tab_manager_features.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/system_connector.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/service_manager_connection.h"
 #include "services/resource_coordinator/public/cpp/resource_coordinator_features.h"
 
 namespace resource_coordinator {
@@ -26,8 +26,7 @@ GetLocalSiteCharacteristicsDataImplForWC(content::WebContents* web_contents) {
   ResourceCoordinatorTabHelper* tab_helper =
       ResourceCoordinatorTabHelper::FromWebContents(web_contents);
   DCHECK(tab_helper);
-  auto* wc_observer =
-      tab_helper->local_site_characteristics_wc_observer_for_testing();
+  auto* wc_observer = tab_helper->local_site_characteristics_wc_observer();
   DCHECK(wc_observer);
 
   auto* writer = static_cast<LocalSiteCharacteristicsDataWriter*>(
@@ -82,7 +81,7 @@ void NoopLocalSiteCharacteristicsDatabase::ReadSiteCharacteristicsFromDB(
 
 void NoopLocalSiteCharacteristicsDatabase::WriteSiteCharacteristicsIntoDB(
     const url::Origin& origin,
-    const SiteCharacteristicsProto& site_characteristic_proto) {}
+    const SiteDataProto& site_characteristic_proto) {}
 
 void NoopLocalSiteCharacteristicsDatabase::RemoveSiteCharacteristicsFromDB(
     const std::vector<url::Origin>& site_origins) {}
@@ -111,20 +110,16 @@ void ChromeTestHarnessWithLocalDB::SetUp() {
   LocalSiteCharacteristicsDataStoreFactory::EnableForTesting();
 
   // TODO(siggi): Can this die now?
-  content::ServiceManagerConnection::SetForProcess(
-      content::ServiceManagerConnection::Create(
-          mojo::MakeRequest(&service_),
-          base::CreateSingleThreadTaskRunnerWithTraits(
-              {content::BrowserThread::IO})));
-
+  service_manager::mojom::ConnectorRequest connector_request;
+  content::SetSystemConnectorForTesting(
+      service_manager::Connector::Create(&connector_request));
   ChromeRenderViewHostTestHarness::SetUp();
 }
 
 void ChromeTestHarnessWithLocalDB::TearDown() {
   performance_manager::PerformanceManager::Destroy(
       std::move(performance_manager_));
-
-  content::ServiceManagerConnection::DestroyForProcess();
+  content::SetSystemConnectorForTesting(nullptr);
   ChromeRenderViewHostTestHarness::TearDown();
 }
 

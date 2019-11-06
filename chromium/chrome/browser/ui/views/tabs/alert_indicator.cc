@@ -7,12 +7,13 @@
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/base/material_design/material_design_controller.h"
-#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/multi_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/views/animation/animation_delegate_views.h"
 
 namespace {
 
@@ -103,6 +104,11 @@ gfx::Image GetTabAlertIndicatorImage(TabAlertState alert_state,
     case TabAlertState::USB_CONNECTED:
       icon = &kTabUsbConnectedIcon;
       break;
+    case TabAlertState::SERIAL_CONNECTED:
+      // TODO(https://crbug.com/917204): This icon is too large to fit properly
+      // as a tab indicator and should be replaced.
+      icon = &vector_icons::kSerialPortIcon;
+      break;
     case TabAlertState::PIP_PLAYING:
       icon = &kPictureInPictureAltIcon;
       break;
@@ -143,14 +149,15 @@ std::unique_ptr<gfx::Animation> CreateTabAlertIndicatorFadeAnimation(
 
 }  // namespace
 
-class AlertIndicator::FadeAnimationDelegate : public gfx::AnimationDelegate {
+class AlertIndicator::FadeAnimationDelegate
+    : public views::AnimationDelegateViews {
  public:
   explicit FadeAnimationDelegate(AlertIndicator* indicator)
-      : indicator_(indicator) {}
+      : AnimationDelegateViews(indicator), indicator_(indicator) {}
   ~FadeAnimationDelegate() override {}
 
  private:
-  // gfx::AnimationDelegate
+  // views::AnimationDelegateViews
   void AnimationProgressed(const gfx::Animation* animation) override {
     indicator_->SchedulePaint();
   }

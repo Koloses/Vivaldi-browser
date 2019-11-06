@@ -81,7 +81,6 @@ LayerTreeHostCommon::CalcDrawPropsImplInputs::CalcDrawPropsImplInputs(
     const gfx::Vector2dF& elastic_overscroll,
     const ElementId elastic_overscroll_element_id,
     int max_texture_size,
-    bool can_adjust_raster_scales,
     RenderSurfaceList* render_surface_list,
     PropertyTrees* property_trees,
     TransformNode* page_scale_transform_node)
@@ -96,7 +95,6 @@ LayerTreeHostCommon::CalcDrawPropsImplInputs::CalcDrawPropsImplInputs(
       elastic_overscroll(elastic_overscroll),
       elastic_overscroll_element_id(elastic_overscroll_element_id),
       max_texture_size(max_texture_size),
-      can_adjust_raster_scales(can_adjust_raster_scales),
       render_surface_list(render_surface_list),
       property_trees(property_trees),
       page_scale_transform_node(page_scale_transform_node) {}
@@ -118,7 +116,6 @@ LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting::
                               gfx::Vector2dF(),
                               ElementId(),
                               std::numeric_limits<int>::max() / 2,
-                              false,
                               render_surface_list,
                               GetPropertyTrees(root_layer),
                               nullptr) {
@@ -177,12 +174,12 @@ bool LayerTreeHostCommon::ScrollbarsUpdateInfo::operator==(
 
 ScrollAndScaleSet::ScrollAndScaleSet()
     : page_scale_delta(1.f),
+      is_pinch_gesture_active(false),
       top_controls_delta(0.f),
       browser_controls_constraint(BrowserControlsState::kBoth),
       browser_controls_constraint_changed(false),
-      has_scrolled_by_wheel(false),
-      has_scrolled_by_touch(false),
-      scroll_gesture_did_end(false) {}
+      scroll_gesture_did_end(false),
+      manipulation_info(kManipulationInfoNone) {}
 
 ScrollAndScaleSet::~ScrollAndScaleSet() = default;
 
@@ -325,23 +322,17 @@ static bool SkipForInvertibility(const LayerImpl* layer,
   bool non_root_copy_request =
       effect_node->closest_ancestor_with_copy_request_id >
       EffectTree::kContentsRootNodeId;
+  gfx::Transform from_target;
   // If there is a copy request, we check the invertibility of the transform
   // between the node corresponding to the layer and the node corresponding to
   // the copy request. Otherwise, we are interested in the invertibility of
   // screen space transform which is already cached on the transform node.
-  if (non_root_copy_request) {
-    // Null check is a temporary fix for crasher: https://crbug.com/939342
-    if (effect_node == nullptr)
-      return false;
-    gfx::Transform from_target;
-    return !property_trees->GetFromTarget(
-        layer->transform_tree_index(),
-        effect_node->closest_ancestor_with_copy_request_id, &from_target);
-  }
-  // Null check is a temporary fix for crasher: https://crbug.com/939342
-  if (transform_node == nullptr)
-    return false;
-  return !transform_node->ancestors_are_invertible;
+  return non_root_copy_request
+             ? !property_trees->GetFromTarget(
+                   layer->transform_tree_index(),
+                   effect_node->closest_ancestor_with_copy_request_id,
+                   &from_target)
+             : !transform_node->ancestors_are_invertible;
 }
 
 static void ComputeInitialRenderSurfaceList(
@@ -494,6 +485,38 @@ static void CalculateRenderSurfaceLayerList(
                                 render_surface_list);
 }
 
+static void RecordRenderSurfaceReasonsForTracing(
+    const PropertyTrees* property_trees,
+    const RenderSurfaceList* render_surface_list) {
+  static const auto* tracing_enabled =
+      TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED("cc");
+  if (!*tracing_enabled ||
+      // Don't output single root render surface.
+      render_surface_list->size() <= 1)
+    return;
+
+  TRACE_EVENT_INSTANT1("cc", "RenderSurfaceReasonCount",
+                       TRACE_EVENT_SCOPE_THREAD, "total",
+                       render_surface_list->size());
+
+  // kTest is the last value which is not included for tracing.
+  constexpr auto kNumReasons = static_cast<size_t>(RenderSurfaceReason::kTest);
+  int reason_counts[kNumReasons] = {0};
+  for (const auto* render_surface : *render_surface_list) {
+    const auto* effect_node =
+        property_trees->effect_tree.Node(render_surface->EffectTreeIndex());
+    reason_counts[static_cast<size_t>(effect_node->render_surface_reason)]++;
+  }
+  for (size_t i = 0; i < kNumReasons; i++) {
+    if (!reason_counts[i])
+      continue;
+    TRACE_EVENT_INSTANT1(
+        "cc", "RenderSurfaceReasonCount", TRACE_EVENT_SCOPE_THREAD,
+        RenderSurfaceReasonToString(static_cast<RenderSurfaceReason>(i)),
+        reason_counts[i]);
+  }
+}
+
 void CalculateDrawPropertiesInternal(
     LayerTreeHostCommon::CalcDrawPropsImplInputs* inputs,
     PropertyTreeOption property_tree_option) {
@@ -514,8 +537,7 @@ void CalculateDrawPropertiesInternal(
           gfx::Rect(inputs->device_viewport_size), inputs->device_transform,
           inputs->property_trees);
       draw_property_utils::UpdatePropertyTreesAndRenderSurfaces(
-          inputs->root_layer, inputs->property_trees,
-          inputs->can_adjust_raster_scales);
+          inputs->root_layer, inputs->property_trees);
 
       // Property trees are normally constructed on the main thread and
       // passed to compositor thread. Source to parent updates on them are not
@@ -582,8 +604,7 @@ void CalculateDrawPropertiesInternal(
           inputs->device_scale_factor, page_scale_factor_for_root,
           inputs->device_transform);
       draw_property_utils::UpdatePropertyTreesAndRenderSurfaces(
-          inputs->root_layer, inputs->property_trees,
-          inputs->can_adjust_raster_scales);
+          inputs->root_layer, inputs->property_trees);
       break;
     }
   }
@@ -609,6 +630,8 @@ void CalculateDrawPropertiesInternal(
         inputs->root_layer->layer_tree_impl(), inputs->property_trees,
         inputs->render_surface_list, inputs->max_texture_size);
   }
+  RecordRenderSurfaceReasonsForTracing(inputs->property_trees,
+                                       inputs->render_surface_list);
 
   // A root layer render_surface should always exist after
   // CalculateDrawProperties.

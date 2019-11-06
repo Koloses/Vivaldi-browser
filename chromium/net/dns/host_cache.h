@@ -18,6 +18,8 @@
 #include "base/gtest_prod_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/numerics/clamped_math.h"
+#include "base/observer_list_types.h"
 #include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -26,12 +28,12 @@
 #include "net/base/address_list.h"
 #include "net/base/expiring_cache.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/dns/dns_util.h"
 #include "net/dns/host_resolver_source.h"
 #include "net/dns/public/dns_query_type.h"
 #include "net/log/net_log_capture_mode.h"
-#include "net/log/net_log_parameters_callback.h"
 
 namespace base {
 class ListValue;
@@ -139,6 +141,10 @@ class NET_EXPORT HostCache {
     Entry& operator=(Entry&& entry);
 
     int error() const { return error_; }
+    bool did_complete() const {
+      return error_ != ERR_NETWORK_CHANGED &&
+             error_ != ERR_HOST_RESOLVER_QUEUE_TOO_LARGE;
+    }
     void set_error(int error) { error_ = error; }
     const base::Optional<AddressList>& addresses() const { return addresses_; }
     void set_addresses(const base::Optional<AddressList>& addresses) {
@@ -174,10 +180,8 @@ class NET_EXPORT HostCache {
     // from |back|. Fields that cannot be merged take precedence from |front|.
     static Entry MergeEntries(Entry front, Entry back);
 
-    // Creates a callback for use with the NetLog that returns a Value
-    // representation of the entry.  The callback must be destroyed before
-    // |this| is.
-    NetLogParametersCallback CreateNetLogCallback() const;
+    // Creates a value representation of the entry for use with NetLog.
+    base::Value NetLogParams() const;
 
     // Creates a copy of |this| with the port of all address and hostname values
     // set to |port| if the current port is 0. Preserves any non-zero ports.
@@ -216,27 +220,26 @@ class NET_EXPORT HostCache {
                       int network_changes,
                       EntryStaleness* out) const;
 
-    std::unique_ptr<base::Value> NetLogCallback(
-        NetLogCaptureMode capture_mode) const;
     base::DictionaryValue GetAsValue(bool include_staleness) const;
 
     // The resolve results for this entry.
-    int error_;
+    int error_ = ERR_FAILED;
     base::Optional<AddressList> addresses_;
     base::Optional<std::vector<std::string>> text_records_;
     base::Optional<std::vector<HostPortPair>> hostnames_;
     // Where results were obtained (e.g. DNS lookup, hosts file, etc).
-    Source source_;
+    Source source_ = SOURCE_UNKNOWN;
     // TTL obtained from the nameserver. Negative if unknown.
-    base::TimeDelta ttl_;
+    base::TimeDelta ttl_ = base::TimeDelta::FromSeconds(-1);
 
     base::TimeTicks expires_;
     // Copied from the cache's network_changes_ when the entry is set; can
     // later be compared to it to see if the entry was received on the current
     // network.
-    int network_changes_;
-    int total_hits_;
-    int stale_hits_;
+    int network_changes_ = -1;
+    // Use clamped math to cap hit counts at INT_MAX.
+    base::ClampedNumeric<int> total_hits_ = 0;
+    base::ClampedNumeric<int> stale_hits_ = 0;
   };
 
   // Interface for interacting with persistent storage, to be provided by the
@@ -246,6 +249,14 @@ class NET_EXPORT HostCache {
     // Calling ScheduleWrite() signals that data has changed and should be
     // written to persistent storage. The write might be delayed.
     virtual void ScheduleWrite() = 0;
+  };
+
+  // Delegate to receive cache invalidation notifications. Get the Invalidator
+  // for a HostCache via HostCache::invalidator() or override for testing via
+  // HostCache::set_invalidator_for_testing().
+  class Invalidator : public base::CheckedObserver {
+   public:
+    virtual void Invalidate() = 0;
   };
 
   using EntryMap = std::map<Key, Entry>;
@@ -294,7 +305,8 @@ class NET_EXPORT HostCache {
                                        HostCache::EntryStaleness* stale_out);
 
   // Marks all entries as stale on account of a network change.
-  void OnNetworkChange();
+  void Invalidate();
+  Invalidator* invalidator() { return invalidator_; }
 
   void set_persistence_delegate(PersistenceDelegate* delegate);
 
@@ -329,6 +341,11 @@ class NET_EXPORT HostCache {
   size_t max_entries() const;
   int network_changes() const { return network_changes_; }
   const EntryMap& entries() const { return entries_; }
+
+  void set_invalidator_for_testing(Invalidator* invalidator) {
+    owned_invalidator_ = nullptr;
+    invalidator_ = invalidator;
+  }
 
   // Creates a default cache.
   static std::unique_ptr<HostCache> CreateDefaultCache();
@@ -380,6 +397,9 @@ class NET_EXPORT HostCache {
   PersistenceDelegate* delegate_;
   // Shared tick clock, overridden for testing.
   const base::TickClock* tick_clock_;
+
+  std::unique_ptr<Invalidator> owned_invalidator_;
+  Invalidator* invalidator_;
 
   THREAD_CHECKER(thread_checker_);
 

@@ -9,14 +9,13 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "cc/layers/picture_image_layer.h"
+#include "chrome/android/chrome_jni_headers/TabListSceneLayer_jni.h"
 #include "chrome/browser/android/compositor/layer/content_layer.h"
 #include "chrome/browser/android/compositor/layer/tab_layer.h"
 #include "chrome/browser/android/compositor/layer_title_cache.h"
 #include "chrome/browser/android/compositor/tab_content_manager.h"
 #include "content/public/browser/android/compositor.h"
-#include "jni/TabListSceneLayer_jni.h"
 #include "ui/android/resources/resource_manager_impl.h"
-#include "ui/gfx/android/java_bitmap.h"
 
 using base::android::JavaParamRef;
 using base::android::JavaRef;
@@ -201,28 +200,29 @@ void TabListSceneLayer::PutTabLayer(
   content_obscures_self_ |= content.Contains(self);
 }
 
-void TabListSceneLayer::PutCreateGroupTextButtonLayer(
+void TabListSceneLayer::PutBackgroundLayer(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jobj,
-    jint text_button_resource_id,
-    jfloat x,
-    jfloat y,
-    jboolean is_visible) {
-  if (!tab_group_layer_) {
-    tab_group_layer_ = cc::UIResourceLayer::Create();
-    tab_group_layer_->SetIsDrawable(true);
-    tab_group_layer_->SetUIResourceId(resource_manager_->GetUIResourceId(
-        ui::ANDROID_RESOURCE_TYPE_DYNAMIC_BITMAP, text_button_resource_id));
-    gfx::Size size = resource_manager_
-                         ->GetResource(ui::ANDROID_RESOURCE_TYPE_DYNAMIC_BITMAP,
-                                       text_button_resource_id)
-                         ->size();
-    tab_group_layer_->SetBounds(size);
-    own_tree_->AddChild(tab_group_layer_);
+    jint resource_id,
+    jfloat alpha) {
+  int ui_resource_id = resource_manager_->GetUIResourceId(
+      ui::ANDROID_RESOURCE_TYPE_DYNAMIC, resource_id);
+  if (ui_resource_id == 0)
+    return;
+
+  if (!background_layer_) {
+    background_layer_ = cc::UIResourceLayer::Create();
+    background_layer_->SetIsDrawable(true);
+    own_tree_->AddChild(background_layer_);
   }
-  DCHECK(tab_group_layer_);
-  tab_group_layer_->SetHideLayerAndSubtree(!is_visible);
-  tab_group_layer_->SetPosition(gfx::PointF(x, y));
+  DCHECK(background_layer_);
+  background_layer_->SetUIResourceId(ui_resource_id);
+  gfx::Size size =
+      resource_manager_
+          ->GetResource(ui::ANDROID_RESOURCE_TYPE_DYNAMIC, resource_id)
+          ->size();
+  background_layer_->SetBounds(size);
+  background_layer_->SetOpacity(alpha);
 }
 
 void TabListSceneLayer::OnDetach() {

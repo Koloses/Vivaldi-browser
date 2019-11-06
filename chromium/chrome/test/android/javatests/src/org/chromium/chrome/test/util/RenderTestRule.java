@@ -23,6 +23,7 @@ import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.ui.UiUtils;
 
 import java.io.File;
@@ -93,6 +94,9 @@ public class RenderTestRule extends TestWatcher {
     /** Parameterized tests have a prefix inserted at the front of the test description. */
     private String mVariantPrefix;
 
+    /** Prefix on the render test images that describes light/dark mode. */
+    private String mNightModePrefix;
+
     // How much a channel must differ when comparing pixels in order to be considered different.
     private int mPixelDiffThreshold;
 
@@ -145,19 +149,20 @@ public class RenderTestRule extends TestWatcher {
     public void render(final View view, String id) throws IOException {
         Assert.assertTrue("Render Tests must have the RenderTest feature.", mHasRenderTestFeature);
 
-        Bitmap testBitmap = ThreadUtils.runOnUiThreadBlockingNoException(new Callable<Bitmap>() {
-            @Override
-            public Bitmap call() throws Exception {
-                int height = view.getMeasuredHeight();
-                int width = view.getMeasuredWidth();
-                if (height <= 0 || width <= 0) {
-                    throw new IllegalStateException(
-                            "Invalid view dimensions: " + width + "x" + height);
-                }
+        Bitmap testBitmap =
+                ThreadUtils.runOnUiThreadBlockingNoException(new Callable<Bitmap>() {
+                    @Override
+                    public Bitmap call() throws Exception {
+                        int height = view.getMeasuredHeight();
+                        int width = view.getMeasuredWidth();
+                        if (height <= 0 || width <= 0) {
+                            throw new IllegalStateException(
+                                    "Invalid view dimensions: " + width + "x" + height);
+                        }
 
-                return UiUtils.generateScaledScreenshot(view, 0, Bitmap.Config.ARGB_8888);
-            }
-        });
+                        return UiUtils.generateScaledScreenshot(view, 0, Bitmap.Config.ARGB_8888);
+                    }
+                });
 
         compareForResult(testBitmap, id);
     }
@@ -210,7 +215,7 @@ public class RenderTestRule extends TestWatcher {
      * example it will disable the blinking cursor in EditTexts.
      */
     public static void sanitize(View view) {
-        ThreadUtils.runOnUiThreadBlocking(() -> {
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
             // Add more sanitizations as we discover more flaky attributes.
             if (view instanceof ViewGroup) {
                 ViewGroup viewGroup = (ViewGroup) view;
@@ -273,6 +278,13 @@ public class RenderTestRule extends TestWatcher {
     }
 
     /**
+     * Sets a string prefix that describes the light/dark mode in the golden image name.
+     */
+    public void setNightModeEnabled(boolean nightModeEnabled) {
+        mNightModePrefix = nightModeEnabled ? "NightModeEnabled" : "NightModeDisabled";
+    }
+
+    /**
      * Sets the threshold that a pixel must differ by when comparing channels in order to be
      * considered different.
      */
@@ -288,7 +300,11 @@ public class RenderTestRule extends TestWatcher {
      * This function must be kept in sync with |RE_RENDER_IMAGE_NAME| from
      * src/build/android/pylib/local/device/local_device_instrumentation_test_run.py.
      */
-    private static String imageName(String testClass, String variantPrefix, String desc) {
+    private String imageName(String testClass, String variantPrefix, String desc) {
+        if (!TextUtils.isEmpty(mNightModePrefix)) {
+            desc = mNightModePrefix + "-" + desc;
+        }
+
         if (!TextUtils.isEmpty(variantPrefix)) {
             desc = variantPrefix + "-" + desc;
         }
@@ -411,26 +427,6 @@ public class RenderTestRule extends TestWatcher {
         int[] testPixels =
                 writeBitmapToArray(testImage, startWidth, startHeight, diffWidth, diffHeight);
 
-        for (int y = 0; y < diffHeight; ++y) {
-            int rowOffset = y * diffWidth;
-            for (int x = 0; x < diffWidth; ++x) {
-                int index = x + rowOffset;
-                if (goldenPixels[index] == testPixels[index]) continue;
-                int goldenColor = goldenPixels[index];
-                int testColor = testPixels[index];
-
-                int redDiff = Math.abs(Color.red(goldenColor) - Color.red(testColor));
-                int greenDiff = Math.abs(Color.green(goldenColor) - Color.green(testColor));
-                int blueDiff = Math.abs(Color.blue(goldenColor) - Color.blue(testColor));
-                int alphaDiff = Math.abs(Color.alpha(goldenColor) - Color.alpha(testColor));
-
-                if (redDiff > diffThreshold || blueDiff > diffThreshold || greenDiff > diffThreshold
-                        || alphaDiff > diffThreshold) {
-                    diffPixels++;
-                    diffImage.setPixel(x, y, Color.RED);
-                }
-            }
-        }
         int diffArea = diffHeight * diffWidth;
         for (int i = 0; i < diffArea; ++i) {
             if (goldenPixels[i] == testPixels[i]) continue;
@@ -472,6 +468,7 @@ public class RenderTestRule extends TestWatcher {
     private static int compareSizes(
             Bitmap diffImage, int minWidth, int maxWidth, int minHeight, int maxHeight) {
         int diffPixels = 0;
+
         if (maxWidth > minWidth) {
             int diffWidth = maxWidth - minWidth;
             int totalPixels = diffWidth * maxHeight;
@@ -485,11 +482,12 @@ public class RenderTestRule extends TestWatcher {
         }
         if (maxHeight > minHeight) {
             int diffHeight = maxHeight - minHeight;
-            int totalPixels = diffHeight * minHeight;
+            int totalPixels = diffHeight * minWidth;
             int[] pixels = new int[totalPixels];
             Arrays.fill(pixels, 0, totalPixels, Color.RED);
             diffImage.setPixels(pixels, 0 /* offset */, minWidth /* stride */, 0 /* x */,
                     minHeight /* y */, minWidth /* width */, diffHeight /* height */);
+            diffPixels += totalPixels;
         }
         return diffPixels;
     }

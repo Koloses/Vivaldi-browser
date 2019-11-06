@@ -38,13 +38,6 @@ class RenderFrameHost;
 class WebContents;
 }
 
-namespace net {
-class NetLog;
-class NetworkDelegate;
-class URLRequest;
-class URLRequestJob;
-}
-
 namespace network {
 namespace mojom {
 class NetworkContext;
@@ -57,16 +50,13 @@ class UpdateClient;
 
 namespace extensions {
 
-struct ComponentExtensionResourceInfo;
 class ComponentExtensionResourceManager;
 class Extension;
 class ExtensionCache;
 class ExtensionError;
 class ExtensionHostDelegate;
-class ExtensionPrefsObserver;
 class ExtensionApiFrameIdMap;
 class ExtensionApiFrameIdMapHelper;
-class ExtensionNavigationUIData;
 class ExtensionSet;
 class ExtensionSystem;
 class ExtensionSystemProvider;
@@ -155,22 +145,11 @@ class ExtensionsBrowserClient {
       const extensions::Extension* extension,
       content::BrowserContext* context) const = 0;
 
-  // Returns an URLRequestJob to load an extension resource from the embedder's
-  // resource bundle (.pak) files. Returns NULL if the request is not for a
-  // resource bundle resource or if the embedder does not support this feature.
-  // Used for component extensions. Called on the IO thread.
-  virtual net::URLRequestJob* MaybeCreateResourceBundleRequestJob(
-      net::URLRequest* request,
-      net::NetworkDelegate* network_delegate,
-      const base::FilePath& directory_path,
-      const std::string& content_security_policy,
-      bool send_cors_header) = 0;
-
   // Return the resource relative path and id for the given request.
   virtual base::FilePath GetBundleResourcePath(
       const network::ResourceRequest& request,
       const base::FilePath& extension_resources_path,
-      ComponentExtensionResourceInfo* resource_info) const = 0;
+      int* resource_id) const = 0;
 
   // Creates and starts a URLLoader to load an extension resource from the
   // embedder's resource bundle (.pak) files. Used for component extensions.
@@ -178,7 +157,7 @@ class ExtensionsBrowserClient {
       const network::ResourceRequest& request,
       network::mojom::URLLoaderRequest loader,
       const base::FilePath& resource_relative_path,
-      const ComponentExtensionResourceInfo& resource_info,
+      int resource_id,
       const std::string& content_security_policy,
       network::mojom::URLLoaderClientPtr client,
       bool send_cors_header) = 0;
@@ -206,7 +185,7 @@ class ExtensionsBrowserClient {
   // are not owned by ExtensionPrefs.
   virtual void GetEarlyExtensionPrefsObservers(
       content::BrowserContext* context,
-      std::vector<ExtensionPrefsObserver*>* observers) const = 0;
+      std::vector<EarlyExtensionPrefsObserver*>* observers) const = 0;
 
   // Returns the ProcessManagerDelegate shared across all BrowserContexts. May
   // return NULL in tests or for simple embedders.
@@ -272,9 +251,6 @@ class ExtensionsBrowserClient {
       const std::string& event_name,
       std::unique_ptr<base::ListValue> args) = 0;
 
-  // Returns the embedder's net::NetLog.
-  virtual net::NetLog* GetNetLog() = 0;
-
   // Gets the single ExtensionCache instance shared across the browser process.
   virtual ExtensionCache* GetExtensionCache() = 0;
 
@@ -320,9 +296,6 @@ class ExtensionsBrowserClient {
 
   // Returns true if activity logging is enabled for the given |context|.
   virtual bool IsActivityLoggingEnabled(content::BrowserContext* context);
-
-  virtual ExtensionNavigationUIData* GetExtensionNavigationUIData(
-      net::URLRequest* request);
 
   // Retrives the embedder's notion of tab and window ID for a given
   // WebContents. May return -1 for either or both values if the embedder does

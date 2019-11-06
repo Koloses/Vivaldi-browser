@@ -52,18 +52,13 @@ class CORE_EXPORT PerformanceResourceTiming : public PerformanceEntry {
   // This constructor is for PerformanceNavigationTiming.
   // Related doc: https://goo.gl/uNecAj.
   PerformanceResourceTiming(const AtomicString& name,
-                            TimeTicks time_origin,
+                            base::TimeTicks time_origin,
+                            bool is_secure_context,
                             const WebVector<WebServerTimingInfo>&);
   PerformanceResourceTiming(const WebResourceTimingInfo&,
-                            TimeTicks time_origin,
+                            base::TimeTicks time_origin,
                             const AtomicString& initiator_type);
   ~PerformanceResourceTiming() override;
-  static PerformanceResourceTiming* Create(const WebResourceTimingInfo& info,
-                                           TimeTicks time_origin,
-                                           const AtomicString& initiator_type) {
-    return MakeGarbageCollected<PerformanceResourceTiming>(info, time_origin,
-                                                           initiator_type);
-  }
 
   AtomicString entryType() const override;
   PerformanceEntryType EntryTypeEnum() const override;
@@ -96,7 +91,7 @@ class CORE_EXPORT PerformanceResourceTiming : public PerformanceEntry {
   virtual AtomicString AlpnNegotiatedProtocol() const;
   virtual AtomicString ConnectionInfo() const;
 
-  TimeTicks TimeOrigin() const { return time_origin_; }
+  base::TimeTicks TimeOrigin() const { return time_origin_; }
 
  private:
   static AtomicString GetNextHopProtocol(
@@ -115,17 +110,17 @@ class CORE_EXPORT PerformanceResourceTiming : public PerformanceEntry {
   AtomicString initiator_type_;
   AtomicString alpn_negotiated_protocol_;
   AtomicString connection_info_;
-  TimeTicks time_origin_;
+  base::TimeTicks time_origin_;
   scoped_refptr<ResourceLoadTiming> timing_;
-  TimeTicks last_redirect_end_time_;
-  TimeTicks response_end_;
-  uint64_t transfer_size_;
-  uint64_t encoded_body_size_;
-  uint64_t decoded_body_size_;
-  bool did_reuse_connection_;
-  bool allow_timing_details_;
-  bool allow_redirect_details_;
-  bool allow_negative_value_;
+  base::TimeTicks last_redirect_end_time_;
+  base::TimeTicks response_end_;
+  uint64_t transfer_size_ = 0;
+  uint64_t encoded_body_size_ = 0;
+  uint64_t decoded_body_size_ = 0;
+  bool did_reuse_connection_ = false;
+  bool allow_timing_details_ = false;
+  bool allow_redirect_details_ = false;
+  bool allow_negative_value_ = false;
   bool is_secure_context_ = false;
   HeapVector<Member<PerformanceServerTiming>> server_timing_;
 };

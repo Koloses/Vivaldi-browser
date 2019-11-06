@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/task/post_task.h"
+#include "content/public/android/content_jni_headers/BackgroundSyncNetworkObserver_jni.h"
 #include "content/public/browser/browser_task_traits.h"
-#include "jni/BackgroundSyncNetworkObserver_jni.h"
 
 using base::android::JavaParamRef;
 
@@ -16,7 +16,7 @@ namespace content {
 // static
 scoped_refptr<BackgroundSyncNetworkObserverAndroid::Observer>
 BackgroundSyncNetworkObserverAndroid::Observer::Create(
-    base::Callback<void(network::mojom::ConnectionType)> callback) {
+    base::RepeatingCallback<void(network::mojom::ConnectionType)> callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   scoped_refptr<BackgroundSyncNetworkObserverAndroid::Observer> observer(
       new BackgroundSyncNetworkObserverAndroid::Observer(callback));
@@ -58,7 +58,7 @@ void BackgroundSyncNetworkObserverAndroid::Observer::
 }
 
 BackgroundSyncNetworkObserverAndroid::Observer::Observer(
-    base::Callback<void(network::mojom::ConnectionType)> callback)
+    base::RepeatingCallback<void(network::mojom::ConnectionType)> callback)
     : callback_(callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 }

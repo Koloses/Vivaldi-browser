@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
@@ -13,6 +14,7 @@
 #include "base/callback.h"
 #include "base/containers/queue.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/stringprintf.h"
@@ -38,6 +40,16 @@ DataTypeStatusTable::TypeErrorMap GenerateCryptoErrorsForTypes(
   return crypto_errors;
 }
 
+ConfigureReason GetReasonForProgrammaticReconfigure(
+    ConfigureReason original_reason) {
+  // This reconfiguration can happen within the first configure cycle and in
+  // this case we want to stick to the original reason -- doing the first sync
+  // cycle.
+  return (original_reason == ConfigureReason::CONFIGURE_REASON_NEW_CLIENT)
+             ? ConfigureReason::CONFIGURE_REASON_NEW_CLIENT
+             : ConfigureReason::CONFIGURE_REASON_PROGRAMMATIC;
+}
+
 }  // namespace
 
 DataTypeManagerImpl::AssociationTypesInfo::AssociationTypesInfo() {}
@@ -61,10 +73,27 @@ DataTypeManagerImpl::DataTypeManagerImpl(
       model_association_manager_(controllers, this),
       observer_(observer),
       encryption_handler_(encryption_handler),
-      download_started_(false),
-      weak_ptr_factory_(this) {
+      download_started_(false) {
   DCHECK(configurer_);
   DCHECK(observer_);
+
+  // Check if any of the controllers are already in a FAILED state, and if so,
+  // mark them accordingly in the status table.
+  DataTypeStatusTable::TypeErrorMap existing_errors;
+  for (const auto& kv : *controllers_) {
+    ModelType type = kv.first;
+    const DataTypeController* controller = kv.second.get();
+    DataTypeController::State state = controller->state();
+    DCHECK(state == DataTypeController::NOT_RUNNING ||
+           state == DataTypeController::STOPPING ||
+           state == DataTypeController::FAILED);
+    if (state == DataTypeController::FAILED) {
+      existing_errors[type] =
+          SyncError(FROM_HERE, SyncError::DATATYPE_ERROR,
+                    "Preexisting controller error on Sync startup", type);
+    }
+  }
+  data_type_status_table_.UpdateFailedDataTypes(existing_errors);
 }
 
 DataTypeManagerImpl::~DataTypeManagerImpl() {}
@@ -82,23 +111,6 @@ void DataTypeManagerImpl::Configure(ModelTypeSet desired_types,
   ConfigureImpl(Intersection(desired_types, allowed_types), context);
 }
 
-void DataTypeManagerImpl::ReenableType(ModelType type) {
-  // TODO(zea): move the "should we reconfigure" logic into the datatype handler
-  // itself.
-  // Only reconfigure if the type actually had a data type or unready error.
-  if (!data_type_status_table_.ResetDataTypeErrorFor(type) &&
-      !data_type_status_table_.ResetUnreadyErrorFor(type)) {
-    return;
-  }
-
-  // Only reconfigure if the type is actually desired.
-  if (!last_requested_types_.Has(type))
-    return;
-
-  DVLOG(1) << "Reenabling " << ModelTypeToString(type);
-  ForceReconfiguration();
-}
-
 void DataTypeManagerImpl::ReadyForStartChanged(ModelType type) {
   if (!UpdateUnreadyTypeError(type)) {
     // Nothing changed.
@@ -111,14 +123,16 @@ void DataTypeManagerImpl::ReadyForStartChanged(ModelType type) {
         SyncError(FROM_HERE, syncer::SyncError::UNREADY_ERROR,
                   "Data type is unready.", type));
   } else if (last_requested_types_.Has(type)) {
-    // Only reconfigure if the type is both ready and desired.
+    // Only reconfigure if the type is both ready and desired. This will
+    // internally also update ready state of all other requested types.
     ForceReconfiguration();
   }
 }
 
 void DataTypeManagerImpl::ForceReconfiguration() {
   needs_reconfigure_ = true;
-  last_requested_context_.reason = CONFIGURE_REASON_PROGRAMMATIC;
+  last_requested_context_.reason =
+      GetReasonForProgrammaticReconfigure(last_requested_context_.reason);
   ProcessReconfigure();
 }
 
@@ -262,7 +276,7 @@ void DataTypeManagerImpl::Restart() {
       // TODO(wychen): enum uma should be strongly typed. crbug.com/661401
       UMA_HISTOGRAM_ENUMERATION("Sync.ConfigureDataTypes",
                                 ModelTypeToHistogramInt(type),
-                                static_cast<int>(MODEL_TYPE_COUNT));
+                                static_cast<int>(ModelType::NUM_ENTRIES));
     }
   }
 
@@ -677,7 +691,8 @@ void DataTypeManagerImpl::OnSingleDataTypeWillStop(ModelType type,
     // reconfigure.
     if (error.error_type() != SyncError::UNRECOVERABLE_ERROR) {
       needs_reconfigure_ = true;
-      last_requested_context_.reason = CONFIGURE_REASON_PROGRAMMATIC;
+      last_requested_context_.reason =
+          GetReasonForProgrammaticReconfigure(last_requested_context_.reason);
       // Do this asynchronously so the ModelAssociationManager has a chance to
       // finish stopping this type, otherwise DeactivateDataType() and Stop()
       // end up getting called twice on the controller.
@@ -821,12 +836,17 @@ void DataTypeManagerImpl::NotifyDone(const ConfigureResult& raw_result) {
   ConfigureResult result = raw_result;
   result.data_type_status_table = data_type_status_table_;
 
+  const std::string prefix_uma =
+      (last_requested_context_.reason == CONFIGURE_REASON_NEW_CLIENT)
+          ? "Sync.ConfigureTime_Initial"
+          : "Sync.ConfigureTime_Subsequent";
+
   DVLOG(1) << "Total time spent configuring: " << configure_time.InSecondsF()
            << "s";
   switch (result.status) {
     case DataTypeManager::OK:
       DVLOG(1) << "NotifyDone called with result: OK";
-      UMA_HISTOGRAM_LONG_TIMES("Sync.ConfigureTime_Long.OK", configure_time);
+      base::UmaHistogramLongTimes(prefix_uma + ".OK", configure_time);
       if (debug_info_listener_.IsInitialized() &&
           !configuration_stats_.empty()) {
         debug_info_listener_.Call(
@@ -837,13 +857,12 @@ void DataTypeManagerImpl::NotifyDone(const ConfigureResult& raw_result) {
       break;
     case DataTypeManager::ABORTED:
       DVLOG(1) << "NotifyDone called with result: ABORTED";
-      UMA_HISTOGRAM_LONG_TIMES("Sync.ConfigureTime_Long.ABORTED",
-                               configure_time);
+      base::UmaHistogramLongTimes(prefix_uma + ".ABORTED", configure_time);
       break;
     case DataTypeManager::UNRECOVERABLE_ERROR:
       DVLOG(1) << "NotifyDone called with result: UNRECOVERABLE_ERROR";
-      UMA_HISTOGRAM_LONG_TIMES("Sync.ConfigureTime_Long.UNRECOVERABLE_ERROR",
-                               configure_time);
+      base::UmaHistogramLongTimes(prefix_uma + ".UNRECOVERABLE_ERROR",
+                                  configure_time);
       break;
     case DataTypeManager::UNKNOWN:
       NOTREACHED();

@@ -17,6 +17,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeSwitches;
@@ -79,8 +80,8 @@ public class NotificationPlatformBridgeIntentTest {
                 });
         Assert.assertNotNull("Could not find the Preferences activity", activity);
 
-        SingleCategoryPreferences fragment =
-                ActivityUtils.waitForFragmentToAttach(activity, SingleCategoryPreferences.class);
+        SingleCategoryPreferences fragment = ActivityUtils.waitForFragmentToAttachCompat(
+                activity, SingleCategoryPreferences.class);
         Assert.assertNotNull("Could not find the SingleCategoryPreferences fragment", fragment);
     }
 
@@ -118,8 +119,8 @@ public class NotificationPlatformBridgeIntentTest {
                 });
         Assert.assertNotNull("Could not find the Preferences activity", activity);
 
-        SingleWebsitePreferences fragment =
-                ActivityUtils.waitForFragmentToAttach(activity, SingleWebsitePreferences.class);
+        SingleWebsitePreferences fragment = ActivityUtils.waitForFragmentToAttachCompat(
+                activity, SingleWebsitePreferences.class);
         Assert.assertNotNull("Could not find the SingleWebsitePreferences fragment", fragment);
     }
 
@@ -133,6 +134,7 @@ public class NotificationPlatformBridgeIntentTest {
      */
     @Test
     @MediumTest
+    @DisabledTest(message = "https://crbug.com/950635")
     @Feature({"Browser", "Notifications"})
     public void testLaunchProcessForNotificationActivation() throws Exception {
         Assert.assertFalse("The native library should not be loaded yet",

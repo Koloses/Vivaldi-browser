@@ -27,10 +27,10 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/constants/chromeos_switches.h"
-#include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
 #include "components/arc/metrics/arc_metrics_constants.h"
+#include "components/arc/session/arc_bridge_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/browser/browser_thread.h"
@@ -415,7 +415,7 @@ NoteTakingHelper::~NoteTakingHelper() {
 bool NoteTakingHelper::IsWhitelistedChromeApp(
     const extensions::Extension* extension) const {
   DCHECK(extension);
-  return base::ContainsValue(whitelisted_chrome_app_ids_, extension->id());
+  return base::Contains(whitelisted_chrome_app_ids_, extension->id());
 }
 
 std::vector<const extensions::Extension*> NoteTakingHelper::GetChromeApps(
@@ -437,7 +437,7 @@ std::vector<const extensions::Extension*> NoteTakingHelper::GetChromeApps(
   // Add any extensions which have a "note" action in their manifest
   // "action_handler" entry.
   for (const auto& extension : enabled_extensions) {
-    if (base::ContainsValue(extensions, extension.get()))
+    if (base::Contains(extensions, extension.get()))
       continue;
 
     if (extensions::ActionHandlersInfo::HasActionHandler(

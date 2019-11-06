@@ -33,7 +33,6 @@
 #include "services/network/public/cpp/url_loader_completion_status.h"
 #include "services/network/public/mojom/cors.mojom-shared.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
-#include "services/network/public/mojom/request_context_frame_type.mojom-shared.h"
 #include "url/ipc/url_param_traits.h"
 #include "url/origin.h"
 
@@ -95,17 +94,14 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE)
 IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::CorsError,
                           network::mojom::CorsError::kMaxValue)
 
-IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::FetchCredentialsMode,
-                          network::mojom::FetchCredentialsMode::kMaxValue)
+IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::CredentialsMode,
+                          network::mojom::CredentialsMode::kMaxValue)
 
-IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::FetchRedirectMode,
-                          network::mojom::FetchRedirectMode::kMaxValue)
+IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::RedirectMode,
+                          network::mojom::RedirectMode::kMaxValue)
 
-IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::FetchRequestMode,
-                          network::mojom::FetchRequestMode::kMaxValue)
-
-IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::RequestContextFrameType,
-                          network::mojom::RequestContextFrameType::kMaxValue)
+IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::RequestMode,
+                          network::mojom::RequestMode::kMaxValue)
 
 IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::CorsPreflightPolicy,
                           network::mojom::CorsPreflightPolicy::kMaxValue)
@@ -178,16 +174,34 @@ IPC_STRUCT_TRAITS_BEGIN(network::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(async_revalidation_requested)
   IPC_STRUCT_TRAITS_MEMBER(did_mime_sniff)
   IPC_STRUCT_TRAITS_MEMBER(is_signed_exchange_inner_response)
+  IPC_STRUCT_TRAITS_MEMBER(was_in_prefetch_cache)
   IPC_STRUCT_TRAITS_MEMBER(is_legacy_tls_version)
+  IPC_STRUCT_TRAITS_MEMBER(auth_challenge_info)
 IPC_STRUCT_TRAITS_END()
 
 IPC_ENUM_TRAITS_MAX_VALUE(network::mojom::FetchResponseType,
                           network::mojom::FetchResponseType::kMaxValue)
 
+IPC_ENUM_TRAITS_MAX_VALUE(network::OriginPolicyState,
+                          network::OriginPolicyState::kMaxValue)
+
+IPC_STRUCT_TRAITS_BEGIN(network::OriginPolicyContents)
+  IPC_STRUCT_TRAITS_MEMBER(features)
+  IPC_STRUCT_TRAITS_MEMBER(content_security_policies)
+  IPC_STRUCT_TRAITS_MEMBER(content_security_policies_report_only)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(network::OriginPolicy)
+  IPC_STRUCT_TRAITS_MEMBER(state)
+  IPC_STRUCT_TRAITS_MEMBER(policy_url)
+  IPC_STRUCT_TRAITS_MEMBER(contents)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(network::ResourceResponseHead)
   IPC_STRUCT_TRAITS_PARENT(network::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(request_start)
   IPC_STRUCT_TRAITS_MEMBER(response_start)
+  IPC_STRUCT_TRAITS_MEMBER(origin_policy)
 IPC_STRUCT_TRAITS_END()
 
 #endif  // SERVICES_NETWORK_PUBLIC_CPP_NETWORK_IPC_PARAM_TRAITS_H_

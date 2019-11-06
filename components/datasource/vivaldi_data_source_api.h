@@ -9,12 +9,9 @@
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/synchronization/lock.h"
 #include "components/prefs/json_pref_store.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/url_data_source.h"
-#include "extensions/browser/browser_context_keyed_api_factory.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 
 namespace content {
 class BrowserContext;
@@ -22,144 +19,168 @@ class BrowserContext;
 
 namespace extensions {
 
-class VivaldiDataSourceItem {
- public:
-  VivaldiDataSourceItem(const std::string& id, const base::FilePath& path);
-  VivaldiDataSourceItem(int bookmark_id, const base::FilePath& path);
-  explicit VivaldiDataSourceItem(const std::string& id);
-  ~VivaldiDataSourceItem();
-
-  bool HasCachedData();
-
-  scoped_refptr<base::RefCountedMemory> cached_data() {
-    return cached_image_data_;
-  }
-
-  void SetPath(const base::FilePath& path) {
-    file_path_ = path;
-  }
-
-  base::FilePath GetPath() {
-    return file_path_;
-  }
-
-  std::string GetPathString() {
-    return file_path_.AsUTF8Unsafe();
-  }
-
-  int bookmark_id() {
-    return bookmark_id_;
-  }
-
-  void SetCachedData(scoped_refptr<base::RefCountedMemory> data);
-
- private:
-  // The file on disk.
-  base::FilePath file_path_;
-
-  // The id used to request this file from the protocol side.
-  std::string mapping_id_;
-
-  // If this is a bookmark, this is the bookmark id.
-  int bookmark_id_ = 0;
-
-  // The cached image data.
-  scoped_refptr<base::RefCountedMemory> cached_image_data_;
-};
+class VivaldiDataSourcesAPIHolder;
 
 /*
 This is used to setup and control the mapping between local images and the
 images exposed to the UI using the chrome://vivaldi-data/ protocol.
 */
-class VivaldiDataSourcesAPI : public BrowserContextKeyedAPI {
+class VivaldiDataSourcesAPI
+    : public base::RefCountedThreadSafe<VivaldiDataSourcesAPI> {
  public:
-  explicit VivaldiDataSourcesAPI(content::BrowserContext* context);
-  ~VivaldiDataSourcesAPI() override;
+  explicit VivaldiDataSourcesAPI(Profile* profile);
 
-  typedef base::Callback<void(int bookmark_id, std::string& image_url)>
-    AddBookmarkImageCallback;
+  // number and preferences containing data mapping urls.
+  static constexpr int kDataMappingPrefsCount = 2;
+  static const char* kDataMappingPrefs[kDataMappingPrefsCount];
 
-  // KeyedService implementation.
-  void Shutdown() override;
+  static void InitFactory();
 
-  // BrowserContextKeyedAPI implementation.
-  static BrowserContextKeyedAPIFactory<VivaldiDataSourcesAPI>*
-    GetFactoryInstance();
+  static VivaldiDataSourcesAPI* FromBrowserContext(
+      content::BrowserContext* browser_context);
 
-  // The version with an existing id already and creates a straight mapping
-  // between an absolute path and an id.
-  bool AddMapping(const std::string& id, const base::FilePath& file_path);
+  // Read the given file into the vector. Return false when file does not exit
+  // or is empty or on errors. The errors are logged. This should only be used
+  // on threads that are allowed to block.
+  static bool ReadFileOnBlockingThread(const base::FilePath& file_path,
+                                       std::vector<unsigned char>* data);
 
-  // This version connects the bookmark id with the given path.
-  bool AddMapping(int bookmark_id, const base::FilePath& file_path);
+  static scoped_refptr<base::RefCountedMemory> ReadFileOnBlockingThread(
+      const base::FilePath& file_path);
 
-  bool RemoveMapping(const std::string& id);
-  bool RemoveMapping(int bookmark_id);
+  static bool IsBookmarkCapureUrl(const std::string& url);
+  static std::string GetBookmarkThumbnailUrl(int64_t bookmarkId);
 
-  // This method should be called from the UI thread.
-  void GetDataForId(const std::string& id,
-                    const content::URLDataSource::GotDataCallback& callback);
+  // The following methods taking the BrowserContext* argument are static to
+  // spare the caller from calling FromBrowserContext and checking the result.
+
+  // Creates a straight mapping between an absolute path and an id.
+  // In AddMappingCallback the profile argument is the original "recording"
+  // profile which is different from browser_context for incognito windows.
+  // profile is null during the shutdown.
+  using AddMappingCallback = base::OnceCallback<
+      void(Profile* profile, bool success, std::string image_url)>;
+  static void AddMapping(content::BrowserContext* browser_context,
+                         base::FilePath file_path,
+                         AddMappingCallback callback);
+
+  static void OnUrlChange(content::BrowserContext* browser_context,
+                          const std::string& old_url,
+                          const std::string& new_url);
+
+  void OnUrlChange(const std::string& old_url, const std::string& new_url);
 
   // Add image data to disk and set up a mapping so it can be requested
   // using the usual image data protocol.
-  void AddImageDataForBookmark(int bookmark_id,
-                               std::unique_ptr<SkBitmap> bitmap,
-                               AddBookmarkImageCallback callback);
+  using AddBookmarkImageCallback = base::OnceCallback<void(bool success)>;
+  static void AddImageDataForBookmark(
+      content::BrowserContext* browser_context,
+      int64_t bookmark_id,
+      scoped_refptr<base::RefCountedMemory> png_data,
+      AddBookmarkImageCallback callback);
 
-  void AddImageDataForBookmark(int bookmark_id,
+  // This can be called from any thread. The callback will be called from the UI
+  // thread.
+  void AddImageDataForBookmark(int64_t bookmark_id,
                                scoped_refptr<base::RefCountedMemory> png_data,
-                               AddBookmarkImageCallback callback);
+                               AddBookmarkImageCallback ui_thread_callback);
 
-  // If bookmark_id is provided, use that, otherwise lookup based on url.
-  bool HasBookmarkThumbnail(int bookmark_id);
+  // This method must be called from the IO thread.
+  void GetDataForId(const std::string& id,
+                    content::URLDataSource::GotDataCallback callback);
+
+  // During bulk changes the file mapping is not saved after each mutation
+  // operation.
+  static void SetBulkChangesMode(content::BrowserContext* browser_context,
+                                 bool enable);
+
+  void LoadMappings();
 
  private:
+  friend class base::RefCountedThreadSafe<VivaldiDataSourcesAPI>;
+  friend class VivaldiDataSourcesAPIHolder;
+
+  class DataSourceItem {
+   public:
+    DataSourceItem();
+    explicit DataSourceItem(base::FilePath file_path);
+    DataSourceItem(DataSourceItem&&);
+    DataSourceItem& operator=(DataSourceItem&&);
+    ~DataSourceItem();
+
+    const base::FilePath& GetFilePath() const { return file_path_; }
+
+   private:
+    // The file on disk.
+    base::FilePath file_path_;
+
+    DISALLOW_COPY_AND_ASSIGN(DataSourceItem);
+  };
+
+  ~VivaldiDataSourcesAPI();
+
+  static scoped_refptr<base::RefCountedMemory> ReadFileOnFileThread(
+      const base::FilePath& file_path);
+
+  static bool GetDataMappingId(const std::string& url, std::string* id);
+  static std::string GetDataMappingUrl(const std::string& id);
+
+  void AddMappingOnFileThread(base::FilePath file_path,
+                              AddMappingCallback callback);
+  void FinishAddMappingOnUIThread(std::string id, AddMappingCallback callback);
+
+  void RemoveMappingOnFileThread(std::string id);
+
+  void SetCacheOnIOThread(std::string id,
+                          scoped_refptr<base::RefCountedMemory> data);
+  void ClearCacheOnIOThread(std::string id);
   void GetDataForIdOnFileThread(
-      const std::string& id,
-      const content::URLDataSource::GotDataCallback& callback,
-      content::BrowserThread::ID thread_id);
+      std::string id,
+      content::URLDataSource::GotDataCallback callback);
+  void FinishGetDataForIdOnIOThread(
+      std::string id,
+      scoped_refptr<base::RefCountedMemory> data,
+      content::URLDataSource::GotDataCallback callback);
 
-  void PostResultsOnThread(
-      const content::URLDataSource::GotDataCallback& callback,
-      scoped_refptr<base::RefCountedMemory> data);
-
-  void AddRawImageDataForBookmarkOnFileThread(
-      int bookmark_id,
-      scoped_refptr<base::RefCountedMemory> png_data,
-      AddBookmarkImageCallback callback,
-      content::BrowserThread::ID thread_id);
   void AddImageDataForBookmarkOnFileThread(
-      int bookmark_id,
-      std::unique_ptr<SkBitmap> bitmap,
-      AddBookmarkImageCallback callback,
-      content::BrowserThread::ID thread_id);
+      int64_t bookmark_id,
+      scoped_refptr<base::RefCountedMemory> png_data,
+      AddBookmarkImageCallback callback);
 
-  void PostAddBookmarkImageResultsOnThread(AddBookmarkImageCallback callback,
-                                           base::FilePath image_path,
-                                           int bookmark_id);
+  void LoadMappingsOnFileThread();
+  void InitMappingsOnFileThread(const base::DictionaryValue* dict);
+  void SetBulkChangesModeOnFileThread(bool enable);
 
-  bool LoadMappings();
-  bool GetMappings();
-  void SaveMappings();
+  std::string GetMappingJSONOnFileThread();
+  void SaveMappingsOnFileThread();
 
-  friend class BrowserContextKeyedAPIFactory<VivaldiDataSourcesAPI>;
+  base::FilePath GetFileMappingFilePath();
+  base::FilePath GetBookmarkThumbnailPath(int64_t bookmark_id);
 
-  content::BrowserContext* browser_context_;
+  // This must be accessed only on UI thread. It is reset to null on shutdown.
+  Profile* profile_;
 
-  // This is a map between the exposed id and the file name
-  std::map<std::string, VivaldiDataSourceItem*> id_to_file_map_;
+  const base::FilePath user_data_dir_;
 
-  // Lock access to the map for one thread at a time.
-  base::Lock map_lock_;
+  // Runner to ensure that tasks to manipulate the data mapping runs in sequence
+  // with the proper order.
+  scoped_refptr<base::SequencedTaskRunner> sequence_task_runner_;
 
-  scoped_refptr<JsonPrefStore> store_;
+  // Outside constructor or destructor this must be accessed only from the
+  // sequence_task_runner_.
+  std::map<std::string, DataSourceItem> id_to_file_map_;
 
-  // BrowserContextKeyedAPI implementation.
-  static const char* service_name() {
-    return "VivaldiDataSourcesAPI";
-  }
-  static const bool kServiceIsNULLWhileTesting = false;
-  static const bool kServiceRedirectedInIncognito = true;
+  // Flags to prevent frequent writes on bulk changes. They must be accessed
+  // only from sequence_task_runner_.
+  bool bulk_changes_ = false;
+  bool unsaved_changes_ = false;
+
+  // Outside constructor or destructor this must be accessed only from the IO
+  // thread.
+  std::map<std::string, scoped_refptr<base::RefCountedMemory>>
+      io_thread_data_cache_;
+
+  DISALLOW_COPY_AND_ASSIGN(VivaldiDataSourcesAPI);
 };
 
 }  // namespace extensions

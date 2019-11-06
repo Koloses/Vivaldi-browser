@@ -6,8 +6,12 @@
 #define ASH_WM_OVERVIEW_OVERVIEW_CONSTANTS_H_
 
 #include "ash/ash_export.h"
+#include "base/time/time.h"
 
 namespace ash {
+
+// The time duration for transformation animations.
+constexpr base::TimeDelta kTransition = base::TimeDelta::FromMilliseconds(300);
 
 // In the conceptual overview table, the window margin is the space reserved
 // around the window within the cell. This margin does not overlap so the

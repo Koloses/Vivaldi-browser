@@ -263,45 +263,45 @@
   OP(FramebufferParameteri)                                /* 504 */ \
   OP(BindImageTexture)                                     /* 505 */ \
   OP(DispatchCompute)                                      /* 506 */ \
-  OP(GetProgramInterfaceiv)                                /* 507 */ \
-  OP(GetProgramResourceIndex)                              /* 508 */ \
-  OP(GetProgramResourceName)                               /* 509 */ \
-  OP(GetProgramResourceiv)                                 /* 510 */ \
-  OP(GetProgramResourceLocation)                           /* 511 */ \
-  OP(MemoryBarrierEXT)                                     /* 512 */ \
-  OP(MemoryBarrierByRegion)                                /* 513 */ \
-  OP(SwapBuffers)                                          /* 514 */ \
-  OP(GetMaxValueInBufferCHROMIUM)                          /* 515 */ \
-  OP(EnableFeatureCHROMIUM)                                /* 516 */ \
-  OP(MapBufferRange)                                       /* 517 */ \
-  OP(UnmapBuffer)                                          /* 518 */ \
-  OP(FlushMappedBufferRange)                               /* 519 */ \
-  OP(ResizeCHROMIUM)                                       /* 520 */ \
-  OP(GetRequestableExtensionsCHROMIUM)                     /* 521 */ \
-  OP(RequestExtensionCHROMIUM)                             /* 522 */ \
-  OP(GetProgramInfoCHROMIUM)                               /* 523 */ \
-  OP(GetUniformBlocksCHROMIUM)                             /* 524 */ \
-  OP(GetTransformFeedbackVaryingsCHROMIUM)                 /* 525 */ \
-  OP(GetUniformsES3CHROMIUM)                               /* 526 */ \
-  OP(DescheduleUntilFinishedCHROMIUM)                      /* 527 */ \
-  OP(GetTranslatedShaderSourceANGLE)                       /* 528 */ \
-  OP(PostSubBufferCHROMIUM)                                /* 529 */ \
-  OP(CopyTextureCHROMIUM)                                  /* 530 */ \
-  OP(CopySubTextureCHROMIUM)                               /* 531 */ \
-  OP(DrawArraysInstancedANGLE)                             /* 532 */ \
-  OP(DrawElementsInstancedANGLE)                           /* 533 */ \
-  OP(VertexAttribDivisorANGLE)                             /* 534 */ \
-  OP(ProduceTextureDirectCHROMIUMImmediate)                /* 535 */ \
-  OP(CreateAndConsumeTextureINTERNALImmediate)             /* 536 */ \
-  OP(BindUniformLocationCHROMIUMBucket)                    /* 537 */ \
-  OP(BindTexImage2DCHROMIUM)                               /* 538 */ \
-  OP(BindTexImage2DWithInternalformatCHROMIUM)             /* 539 */ \
-  OP(ReleaseTexImage2DCHROMIUM)                            /* 540 */ \
-  OP(TraceBeginCHROMIUM)                                   /* 541 */ \
-  OP(TraceEndCHROMIUM)                                     /* 542 */ \
-  OP(DiscardFramebufferEXTImmediate)                       /* 543 */ \
-  OP(LoseContextCHROMIUM)                                  /* 544 */ \
-  OP(InsertFenceSyncCHROMIUM)                              /* 545 */ \
+  OP(DispatchComputeIndirect)                              /* 507 */ \
+  OP(GetProgramInterfaceiv)                                /* 508 */ \
+  OP(GetProgramResourceIndex)                              /* 509 */ \
+  OP(GetProgramResourceName)                               /* 510 */ \
+  OP(GetProgramResourceiv)                                 /* 511 */ \
+  OP(GetProgramResourceLocation)                           /* 512 */ \
+  OP(MemoryBarrierEXT)                                     /* 513 */ \
+  OP(MemoryBarrierByRegion)                                /* 514 */ \
+  OP(SwapBuffers)                                          /* 515 */ \
+  OP(GetMaxValueInBufferCHROMIUM)                          /* 516 */ \
+  OP(EnableFeatureCHROMIUM)                                /* 517 */ \
+  OP(MapBufferRange)                                       /* 518 */ \
+  OP(UnmapBuffer)                                          /* 519 */ \
+  OP(FlushMappedBufferRange)                               /* 520 */ \
+  OP(ResizeCHROMIUM)                                       /* 521 */ \
+  OP(GetRequestableExtensionsCHROMIUM)                     /* 522 */ \
+  OP(RequestExtensionCHROMIUM)                             /* 523 */ \
+  OP(GetProgramInfoCHROMIUM)                               /* 524 */ \
+  OP(GetUniformBlocksCHROMIUM)                             /* 525 */ \
+  OP(GetTransformFeedbackVaryingsCHROMIUM)                 /* 526 */ \
+  OP(GetUniformsES3CHROMIUM)                               /* 527 */ \
+  OP(DescheduleUntilFinishedCHROMIUM)                      /* 528 */ \
+  OP(GetTranslatedShaderSourceANGLE)                       /* 529 */ \
+  OP(PostSubBufferCHROMIUM)                                /* 530 */ \
+  OP(CopyTextureCHROMIUM)                                  /* 531 */ \
+  OP(CopySubTextureCHROMIUM)                               /* 532 */ \
+  OP(DrawArraysInstancedANGLE)                             /* 533 */ \
+  OP(DrawElementsInstancedANGLE)                           /* 534 */ \
+  OP(VertexAttribDivisorANGLE)                             /* 535 */ \
+  OP(ProduceTextureDirectCHROMIUMImmediate)                /* 536 */ \
+  OP(CreateAndConsumeTextureINTERNALImmediate)             /* 537 */ \
+  OP(BindUniformLocationCHROMIUMBucket)                    /* 538 */ \
+  OP(BindTexImage2DCHROMIUM)                               /* 539 */ \
+  OP(BindTexImage2DWithInternalformatCHROMIUM)             /* 540 */ \
+  OP(ReleaseTexImage2DCHROMIUM)                            /* 541 */ \
+  OP(TraceBeginCHROMIUM)                                   /* 542 */ \
+  OP(TraceEndCHROMIUM)                                     /* 543 */ \
+  OP(DiscardFramebufferEXTImmediate)                       /* 544 */ \
+  OP(LoseContextCHROMIUM)                                  /* 545 */ \
   OP(UnpremultiplyAndDitherCopyCHROMIUM)                   /* 546 */ \
   OP(DrawBuffersEXTImmediate)                              /* 547 */ \
   OP(DiscardBackbufferCHROMIUM)                            /* 548 */ \
@@ -357,7 +357,7 @@
   OP(WaitGpuFenceCHROMIUM)                                 /* 598 */ \
   OP(DestroyGpuFenceCHROMIUM)                              /* 599 */ \
   OP(SetReadbackBufferShadowAllocationINTERNAL)            /* 600 */ \
-  OP(FramebufferTextureMultiviewLayeredANGLE)              /* 601 */ \
+  OP(FramebufferTextureMultiviewOVR)                       /* 601 */ \
   OP(MaxShaderCompilerThreadsKHR)                          /* 602 */ \
   OP(CreateAndTexStorage2DSharedImageINTERNALImmediate)    /* 603 */ \
   OP(BeginSharedImageAccessDirectCHROMIUM)                 /* 604 */ \

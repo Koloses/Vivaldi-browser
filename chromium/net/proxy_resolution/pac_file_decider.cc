@@ -66,10 +66,9 @@ PacFileDataWithSource::PacFileDataWithSource(const PacFileDataWithSource&) =
 PacFileDataWithSource& PacFileDataWithSource::operator=(
     const PacFileDataWithSource&) = default;
 
-std::unique_ptr<base::Value> PacFileDecider::PacSource::NetLogCallback(
-    const GURL* effective_pac_url,
-    NetLogCaptureMode /* capture_mode */) const {
-  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+base::Value PacFileDecider::PacSource::NetLogParams(
+    const GURL& effective_pac_url) const {
+  base::Value dict(base::Value::Type::DICTIONARY);
   std::string source;
   switch (type) {
     case PacSource::WPAD_DHCP:
@@ -77,15 +76,15 @@ std::unique_ptr<base::Value> PacFileDecider::PacSource::NetLogCallback(
       break;
     case PacSource::WPAD_DNS:
       source = "WPAD DNS: ";
-      source += effective_pac_url->possibly_invalid_spec();
+      source += effective_pac_url.possibly_invalid_spec();
       break;
     case PacSource::CUSTOM:
       source = "Custom PAC URL: ";
-      source += effective_pac_url->possibly_invalid_spec();
+      source += effective_pac_url.possibly_invalid_spec();
       break;
   }
-  dict->SetString("source", source);
-  return std::move(dict);
+  dict.SetStringKey("source", source);
+  return dict;
 }
 
 PacFileDecider::PacFileDecider(PacFileFetcher* pac_file_fetcher,
@@ -147,13 +146,8 @@ void PacFileDecider::OnShutdown() {
   if (next_state_ == STATE_NONE)
     return;
 
-  CompletionOnceCallback callback = std::move(callback_);
-
   // Just cancel any pending work.
   Cancel();
-
-  if (callback)
-    std::move(callback).Run(ERR_CONTEXT_SHUT_DOWN);
 }
 
 const ProxyConfigWithAnnotation& PacFileDecider::effective_config() const {
@@ -317,10 +311,9 @@ int PacFileDecider::DoFetchPacScript() {
   GURL effective_pac_url;
   DetermineURL(pac_source, &effective_pac_url);
 
-  net_log_.BeginEvent(
-      NetLogEventType::PAC_FILE_DECIDER_FETCH_PAC_SCRIPT,
-      base::Bind(&PacSource::NetLogCallback, base::Unretained(&pac_source),
-                 &effective_pac_url));
+  net_log_.BeginEvent(NetLogEventType::PAC_FILE_DECIDER_FETCH_PAC_SCRIPT, [&] {
+    return pac_source.NetLogParams(effective_pac_url);
+  });
 
   if (pac_source.type == PacSource::WPAD_DHCP) {
     if (!dhcp_pac_file_fetcher_) {

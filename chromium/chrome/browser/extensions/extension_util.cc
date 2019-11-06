@@ -131,16 +131,6 @@ void SetIsIncognitoEnabled(const std::string& extension_id,
   }
 }
 
-bool CanCrossIncognito(const Extension* extension,
-                       content::BrowserContext* context) {
-  // We allow the extension to see events and data from another profile iff it
-  // uses "spanning" behavior and it has incognito access. "split" mode
-  // extensions only see events for a matching profile.
-  CHECK(extension);
-  return IsIncognitoEnabled(extension->id(), context) &&
-         !IncognitoInfo::IsSplitMode(extension);
-}
-
 bool CanLoadInIncognito(const Extension* extension,
                         content::BrowserContext* context) {
   CHECK(extension);
@@ -309,26 +299,6 @@ const gfx::ImageSkia& GetDefaultExtensionIcon() {
       IDR_EXTENSION_DEFAULT_ICON);
 }
 
-bool IsNewBookmarkAppsEnabled() {
-#if defined(OS_MACOSX)
-  return base::FeatureList::IsEnabled(features::kBookmarkApps) ||
-         base::FeatureList::IsEnabled(features::kAppBanners) ||
-         banners::AppBannerManager::IsExperimentalAppBannersEnabled();
-#else
-  return true;
-#endif
-}
-
-bool CanHostedAppsOpenInWindows() {
-#if defined(OS_MACOSX)
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             ::switches::kEnableHostedAppsInWindows) ||
-         base::FeatureList::IsEnabled(features::kDesktopPWAWindowing);
-#else
-  return true;
-#endif
-}
-
 bool IsExtensionSupervised(const Extension* extension, Profile* profile) {
   return WasInstalledByCustodian(extension->id(), profile) &&
          profile->IsSupervised();
@@ -338,7 +308,6 @@ const Extension* GetInstalledPwaForUrl(
     content::BrowserContext* context,
     const GURL& url,
     base::Optional<LaunchContainer> launch_container_filter) {
-  DCHECK(base::FeatureList::IsEnabled(::features::kDesktopPWAWindowing));
   const ExtensionPrefs* prefs = ExtensionPrefs::Get(context);
   for (scoped_refptr<const Extension> app :
        ExtensionRegistry::Get(context)->enabled_extensions()) {
@@ -357,7 +326,7 @@ const Extension* GetInstalledPwaForUrl(
 }
 
 const Extension* GetPwaForSecureActiveTab(Browser* browser) {
-  switch (browser->location_bar_model()->GetSecurityLevel(true)) {
+  switch (browser->location_bar_model()->GetSecurityLevel()) {
     case security_state::SECURITY_LEVEL_COUNT:
       NOTREACHED();
       FALLTHROUGH;
@@ -381,7 +350,7 @@ bool IsWebContentsInAppWindow(content::WebContents* web_contents) {
   // TODO(loyso): Unify this check as a util (including
   // MaybeCreateHostedAppController).
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
-  return browser && browser->hosted_app_controller();
+  return browser && browser->app_controller();
 }
 
 }  // namespace util

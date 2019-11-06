@@ -7,8 +7,9 @@
 #include "ui/gl/gl_utils.h"
 
 #include "base/logging.h"
-#include "ui/gfx/color_space.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_features.h"
+#include "ui/gl/gl_switches.h"
 
 #if defined(OS_ANDROID)
 #include "base/posix/eintr_wrapper.h"
@@ -16,12 +17,6 @@
 #endif
 
 namespace gl {
-
-int GetGLColorSpace(const gfx::ColorSpace& color_space) {
-  if (color_space.IsHDR())
-    return GL_COLOR_SPACE_SCRGB_LINEAR_CHROMIUM;
-  return GL_COLOR_SPACE_UNSPECIFIED_CHROMIUM;
-}
 
 // Used by chrome://gpucrash and gpu_benchmarking_extension's
 // CrashForTesting.
@@ -45,4 +40,21 @@ base::ScopedFD MergeFDs(base::ScopedFD a, base::ScopedFD b) {
   return merged;
 }
 #endif
+
+bool UsePassthroughCommandDecoder(const base::CommandLine* command_line) {
+  std::string switch_value;
+  if (command_line->HasSwitch(switches::kUseCmdDecoder)) {
+    switch_value = command_line->GetSwitchValueASCII(switches::kUseCmdDecoder);
+  }
+
+  if (switch_value == kCmdDecoderPassthroughName) {
+    return true;
+  } else if (switch_value == kCmdDecoderValidatingName) {
+    return false;
+  } else {
+    // Unrecognized or missing switch, use the default.
+    return base::FeatureList::IsEnabled(
+        features::kDefaultPassthroughCommandDecoder);
+  }
+}
 }

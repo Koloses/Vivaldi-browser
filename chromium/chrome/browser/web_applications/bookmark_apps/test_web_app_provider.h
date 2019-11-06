@@ -19,23 +19,57 @@ class BrowserContext;
 
 namespace web_app {
 
+class AppRegistrar;
+class InstallManager;
+class InstallFinalizer;
 class PendingAppManager;
 class SystemWebAppManager;
 class WebAppPolicyManager;
 
 class TestWebAppProvider : public WebAppProvider {
  public:
-  explicit TestWebAppProvider(Profile* profile);
+  // Used by the TestingProfile in unit tests.
+  // Builds a stub WebAppProvider which will not fire subsystem startup tasks.
+  // Use TestWebAppProvider::Get() to replace subsystems.
+  static std::unique_ptr<KeyedService> BuildDefault(
+      content::BrowserContext* context);
+
+  // Gets a TestWebAppProvider that can have its subsystems set. This should
+  // only be called once during SetUp(), and clients must call Start() before
+  // using the subsystems.
+  static TestWebAppProvider* Get(Profile* profile);
+
+  // |run_subsystem_startup_tasks| is true by default as browser test clients
+  // will generally want to construct their TestWebAppProvider to behave as it
+  // would in a production browser.
+  explicit TestWebAppProvider(Profile* profile,
+                              bool run_subsystem_startup_tasks = true);
   ~TestWebAppProvider() override;
 
+  void SetRegistrar(std::unique_ptr<AppRegistrar> registrar);
+  void SetInstallManager(std::unique_ptr<InstallManager> install_manager);
+  void SetInstallFinalizer(std::unique_ptr<InstallFinalizer> install_finalizer);
   void SetPendingAppManager(
       std::unique_ptr<PendingAppManager> pending_app_manager);
+  void SetWebAppUiManager(std::unique_ptr<WebAppUiManager> ui_manager);
   void SetSystemWebAppManager(
       std::unique_ptr<SystemWebAppManager> system_web_app_manager);
   void SetWebAppPolicyManager(
       std::unique_ptr<WebAppPolicyManager> web_app_policy_manager);
+
+ private:
+  // WebAppProvider:
+  void StartImpl() override;
+
+  // If true, when Start()ed the TestWebAppProvider will call
+  // WebAppProvider::StartImpl() and fire startup tasks like a real
+  // WebAppProvider.
+  bool run_subsystem_startup_tasks_;
 };
 
+// Used in BrowserTests to ensure that the WebAppProvider that is create on
+// profile startup is the TestWebAppProvider. Hooks into the
+// BrowserContextKeyedService initialization pipeline.
 class TestWebAppProviderCreator {
  public:
   using CreateWebAppProviderCallback =

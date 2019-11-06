@@ -51,8 +51,10 @@ class ReportingGarbageCollectorImpl : public ReportingGarbageCollector,
   }
 
  private:
+  // TODO(crbug.com/912622): Garbage collect clients, reports with no matching
+  // endpoints.
   void CollectGarbage() {
-    base::TimeTicks now = context_->tick_clock()->NowTicks();
+    base::TimeTicks now = context_->tick_clock().NowTicks();
     const ReportingPolicy& policy = context_->policy();
 
     std::vector<const ReportingReport*> all_reports;

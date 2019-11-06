@@ -40,10 +40,10 @@ a {
 
 cr-toggle {
   align-self: center;
-  width: 36px;
 }
 
 #usageStatsLabelContainer {
+  color: var(--google-grey-refresh-700); /* #5F6368 */
   line-height: 20px;
   margin-inline-start: 16px;
 }

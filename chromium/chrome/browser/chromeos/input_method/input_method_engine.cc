@@ -254,7 +254,7 @@ bool InputMethodEngine::UpdateMenuItems(
 void InputMethodEngine::HideInputView() {
   auto* keyboard_client = ChromeKeyboardControllerClient::Get();
   if (keyboard_client->is_keyboard_enabled())
-    keyboard_client->HideKeyboard(ash::mojom::HideReason::kUser);
+    keyboard_client->HideKeyboard(ash::HideReason::kUser);
 }
 
 void InputMethodEngine::UpdateComposition(
@@ -268,17 +268,43 @@ void InputMethodEngine::UpdateComposition(
                                          is_visible);
 }
 
+bool InputMethodEngine::SetCompositionRange(
+    uint32_t before,
+    uint32_t after,
+    const std::vector<ui::ImeTextSpan>& text_spans) {
+  ui::IMEInputContextHandlerInterface* input_context =
+      ui::IMEBridge::Get()->GetInputContextHandler();
+  if (!input_context)
+    return false;
+  return input_context->SetCompositionRange(before, after, text_spans);
+}
+
 void InputMethodEngine::CommitTextToInputContext(int context_id,
                                                  const std::string& text) {
-  ui::IMEBridge::Get()->GetInputContextHandler()->CommitText(text);
+  bool committed = false;
+  ui::IMEInputContextHandlerInterface* input_context =
+      ui::IMEBridge::Get()->GetInputContextHandler();
+  if (input_context) {
+    input_context->CommitText(text);
+    committed = true;
+  }
 
-  // Records histograms for committed characters.
-  if (!composition_text_->text.empty()) {
+  if (committed && !composition_text_->text.empty()) {
+    // Records histograms for committed characters.
     base::string16 wtext = base::UTF8ToUTF16(text);
     UMA_HISTOGRAM_CUSTOM_COUNTS("InputMethod.CommitLength", wtext.length(), 1,
                                 25, 25);
     composition_text_.reset(new ui::CompositionText());
   }
+}
+
+void InputMethodEngine::DeleteSurroundingTextToInputContext(
+    int offset,
+    size_t number_of_chars) {
+  ui::IMEInputContextHandlerInterface* input_context =
+      ui::IMEBridge::Get()->GetInputContextHandler();
+  if (input_context)
+    input_context->DeleteSurroundingText(offset, number_of_chars);
 }
 
 bool InputMethodEngine::SendKeyEvent(ui::KeyEvent* event,
@@ -287,18 +313,30 @@ bool InputMethodEngine::SendKeyEvent(ui::KeyEvent* event,
   if (event->key_code() == ui::VKEY_UNKNOWN)
     event->set_key_code(ui::DomKeycodeToKeyboardCode(code));
 
-  ui::IMEInputContextHandlerInterface* input_context =
-      ui::IMEBridge::Get()->GetInputContextHandler();
-  if (!input_context)
-    return false;
-
   // Marks the simulated key event is from the Virtual Keyboard.
   ui::Event::Properties properties;
-  properties[ui::kPropertyFromVK] = std::vector<uint8_t>();
+  properties[ui::kPropertyFromVK] =
+      std::vector<uint8_t>(ui::kPropertyFromVKSize);
+  properties[ui::kPropertyFromVK][ui::kPropertyFromVKIsMirroringIndex] =
+      (uint8_t)is_mirroring_;
   event->SetProperties(properties);
 
-  input_context->SendKeyEvent(event);
-  return true;
+  ui::IMEInputContextHandlerInterface* input_context =
+      ui::IMEBridge::Get()->GetInputContextHandler();
+  if (input_context) {
+    input_context->SendKeyEvent(event);
+    return true;
+  }
+  return false;
+}
+
+void InputMethodEngine::ConfirmCompositionText() {
+  ui::IMEInputContextHandlerInterface* input_context =
+      ui::IMEBridge::Get()->GetInputContextHandler();
+  if (input_context) {
+    input_context->ConfirmCompositionText();
+    composition_text_.reset(new ui::CompositionText());
+  }
 }
 
 void InputMethodEngine::EnableInputView() {

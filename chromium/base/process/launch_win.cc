@@ -21,10 +21,12 @@
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/process/environment_internal.h"
 #include "base/process/kill.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
+#include "base/threading/scoped_thread_priority.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_process_information.h"
 #include "base/win/startup_information.h"
@@ -199,6 +201,10 @@ Process LaunchProcess(const CommandLine& cmdline,
 
 Process LaunchProcess(const string16& cmdline,
                       const LaunchOptions& options) {
+  // Mitigate the issues caused by loading DLLs on a background thread
+  // (http://crbug/973868).
+  base::ScopedThreadMayLoadLibraryOnBackgroundThread priority_boost(FROM_HERE);
+
   win::StartupInformation startup_info_wrapper;
   STARTUPINFO* startup_info = startup_info_wrapper.startup_info();
 
@@ -261,7 +267,7 @@ Process LaunchProcess(const string16& cmdline,
     // automatically associated with a job object created by the debugger.
     // The CREATE_BREAKAWAY_FROM_JOB flag is used to prevent this on Windows
     // releases that do not support nested jobs.
-    if (win::GetVersion() < win::VERSION_WIN8)
+    if (win::GetVersion() < win::Version::WIN8)
       flags |= CREATE_BREAKAWAY_FROM_JOB;
   }
 
@@ -288,6 +294,10 @@ Process LaunchProcess(const string16& cmdline,
       return Process();
     }
 
+    // Environment options are not implemented for use with |as_user|.
+    DCHECK(!options.clear_environment);
+    DCHECK(options.environment.empty());
+
     BOOL launched = CreateProcessAsUser(
         options.as_user, nullptr, as_writable_wcstr(writable_cmdline), nullptr,
         nullptr, inherit_handles, flags, enviroment_block, current_directory,
@@ -299,11 +309,33 @@ Process LaunchProcess(const string16& cmdline,
       return Process();
     }
   } else {
+    char16* new_environment = nullptr;
+    string16 env_storage;
+    if (options.clear_environment || !options.environment.empty()) {
+      if (options.clear_environment) {
+        static const char16 kEmptyEnvironment[] = {0};
+        env_storage =
+            internal::AlterEnvironment(kEmptyEnvironment, options.environment);
+      } else {
+        wchar_t* old_environment = GetEnvironmentStrings();
+        if (!old_environment) {
+          DPLOG(ERROR);
+          return Process();
+        }
+        env_storage = internal::AlterEnvironment(as_u16cstr(old_environment),
+                                                 options.environment);
+        FreeEnvironmentStrings(old_environment);
+      }
+      new_environment = data(env_storage);
+      flags |= CREATE_UNICODE_ENVIRONMENT;
+    }
+
     if (!CreateProcess(nullptr, as_writable_wcstr(writable_cmdline), nullptr,
-                       nullptr, inherit_handles, flags, nullptr,
-                       current_directory, startup_info, &temp_process_info)) {
-      DPLOG(ERROR) << "Command line:" << std::endl << UTF16ToUTF8(cmdline)
-                   << std::endl;
+                       nullptr, inherit_handles, flags,
+                       as_writable_wcstr(new_environment), current_directory,
+                       startup_info, &temp_process_info)) {
+      DPLOG(ERROR) << "Command line:" << std::endl
+                   << UTF16ToUTF8(cmdline) << std::endl;
       return Process();
     }
   }

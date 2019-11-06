@@ -30,14 +30,14 @@ function waitFor(condition, error_message = 'Reaches the maximum frames.') {
   });
 }
 
-// Returns a promise that resolves when the given condition holds for 100
-// animation frames or rejects if the condition changes to false within 100
+// Returns a promise that resolves when the given condition holds for 10
+// animation frames or rejects if the condition changes to false within 10
 // animation frames.
 function conditionHolds(condition, error_message = 'Condition is not true anymore.') {
-  const MAX_FRAME = 100;
+  const MAX_FRAME = 10;
   return new Promise((resolve, reject) => {
     function tick(frames) {
-      // We requestAnimationFrame either for 100 frames or until condition is
+      // We requestAnimationFrame either for 10 frames or until condition is
       // violated.
       if (frames >= MAX_FRAME)
         resolve();
@@ -361,4 +361,24 @@ function doubleTapAt(xPosition, yPosition) {
 
 function approx_equals(actual, expected, epsilon) {
   return actual >= expected - epsilon && actual <= expected + epsilon;
+}
+
+// Returns the given element's client rect center in an object with |x| and |y|
+// properties. Client rect being relative to the layout viewport. i.e. this will
+// not do what you thing if the page is pinch-zoomed.
+function elementCenter(element) {
+  const rect = element.getBoundingClientRect();
+  return {
+    x: rect.x + rect.width / 2,
+    y: rect.y + rect.height / 2
+  };
+}
+
+// Requests an animation frame.
+function raf() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      resolve();
+    });
+  });
 }

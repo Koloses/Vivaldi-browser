@@ -17,6 +17,7 @@
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrContext.h"
+#include "v8/include/v8.h"
 
 namespace blink {
 
@@ -146,6 +147,8 @@ bool StaticBitmapImage::ConvertToArrayBufferContents(
       rect.Width(), rect.Height(), color_type, kUnpremul_SkAlphaType,
       color_params.GetSkColorSpaceForSkSurfaces());
   sk_sp<SkImage> sk_image = src_image->PaintImageForCurrentFrame().GetSkImage();
+  if (!sk_image)
+    return false;
   bool read_pixels_successful = sk_image->readPixels(
       info, result.Data(), info.minRowBytes(), rect.X(), rect.Y());
   DCHECK(read_pixels_successful ||

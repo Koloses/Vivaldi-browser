@@ -65,6 +65,11 @@ class AvSettings {
     FIXED_VOLUME,
   };
 
+  enum class HdmiContentType {
+    NO_DATA_TYPE,
+    GAME_TYPE,
+  };
+
   // Defines the status of platform wake-on-cast feature.
   enum WakeOnCastStatus {
     WAKE_ON_CAST_UNKNOWN,  // Should only been used very rarely when platform
@@ -223,6 +228,14 @@ class AvSettings {
   // Not all displays support this function.
   static bool GetDisplayMaxBrightnessNits(float* nits) __attribute__((weak));
 
+  // Set Hdmi content type. Return false if such operation fails. The operation
+  // fails if unexpected errors occur, or if the desired |content_type| is not
+  // supported by Hdmi sink, in which case implementation shall return false
+  // without actually setting the content type.
+  // This function should only be implemented on HDMI platforms.
+  static bool SetHdmiContentType(HdmiContentType content_type)
+      __attribute__((weak));
+
   // Gets the HDMI latency in microseconds.
   // Returns valid values when HDMI is connected.
   // Returns 0 when HDMI is not connected or when the latency cannot be
@@ -259,6 +272,13 @@ class AvSettings {
   // Retrieves the resolution of screen of the device (or HDMI sinks).
   // Returns true if it gets resolution successfully.
   virtual bool GetScreenResolution(int* width, int* height) = 0;
+
+  // Retrieves the refresh rate of screen of the device (or HDMI sinks) in
+  // millihertz.
+  // Returns true if it gets refresh rate successfully.
+  // TODO(jiaqih): Update to virtual function in next API update.
+  static CHROMECAST_EXPORT bool GetRefreshRateMillihertz(int* refresh_rate)
+      __attribute__((weak));
 
   // Returns the current HDCP version multiplied by ten (so, for example, for
   // HDCP 2.2 the return value is 22). The return value should by 0 if HDCP is

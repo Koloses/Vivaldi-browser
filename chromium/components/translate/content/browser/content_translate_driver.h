@@ -16,6 +16,7 @@
 #include "components/translate/core/common/translate_errors.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 
 namespace content {
@@ -95,6 +96,7 @@ class ContentTranslateDriver : public TranslateDriver,
   const std::string& GetContentsMimeType() override;
   const GURL& GetLastCommittedURL() override;
   const GURL& GetVisibleURL() override;
+  ukm::SourceId GetUkmSourceId() override;
   bool HasCurrentPage() override;
   void OpenUrlInNewTab(const GURL& url) override;
 
@@ -152,7 +154,7 @@ class ContentTranslateDriver : public TranslateDriver,
   // other end of this binding in the form of a ContentTranslateDriverPtr.
   mojo::BindingSet<translate::mojom::ContentTranslateDriver> bindings_;
 
-  base::WeakPtrFactory<ContentTranslateDriver> weak_pointer_factory_;
+  base::WeakPtrFactory<ContentTranslateDriver> weak_pointer_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ContentTranslateDriver);
 };

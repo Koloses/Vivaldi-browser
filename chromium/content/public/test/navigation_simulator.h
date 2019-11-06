@@ -19,6 +19,7 @@ class GURL;
 namespace net {
 class IPEndPoint;
 class HttpResponseHeaders;
+class SSLInfo;
 }  // namespace net
 
 namespace content {
@@ -244,6 +245,9 @@ class NavigationSimulator {
   // Sets whether this navigation originated as the result of a form submission.
   virtual void SetIsFormSubmission(bool is_form_submission) = 0;
 
+  // Sets whether this navigation originated as the result of a link click.
+  virtual void SetWasInitiatedByLinkClick(bool was_initiated_by_link_click) = 0;
+
   // The following parameters can change during redirects. They should be
   // specified before calling |Start| if they need to apply to the navigation to
   // the original url. Otherwise, they should be specified before calling
@@ -253,6 +257,9 @@ class NavigationSimulator {
   // The following parameters can change at any point until the page fails or
   // commits. They should be specified before calling |Fail| or |Commit|.
   virtual void SetSocketAddress(const net::IPEndPoint& remote_endpoint) = 0;
+
+  // Pretend the navigation response is served from cache.
+  virtual void SetWasFetchedViaCache(bool was_fetched_via_cache) = 0;
 
   // Pretend the navigation is against an inner response of a signed exchange.
   virtual void SetIsSignedExchangeInnerResponse(
@@ -281,6 +288,10 @@ class NavigationSimulator {
   // in throttles deferring the navigation with a call to Wait().
   virtual void SetAutoAdvance(bool auto_advance) = 0;
 
+  // Sets the SSLInfo to be set on the response. This should be called before
+  // Commit().
+  virtual void SetSSLInfo(const net::SSLInfo& ssl_info) = 0;
+
   // --------------------------------------------------------------------------
 
   // Gets the last throttle check result computed by the navigation throttles.
@@ -291,13 +302,13 @@ class NavigationSimulator {
   // Returns the NavigationHandle associated with the navigation being
   // simulated. It is an error to call this before Start() or after the
   // navigation has finished (successfully or not).
-  virtual NavigationHandle* GetNavigationHandle() const = 0;
+  virtual NavigationHandle* GetNavigationHandle() = 0;
 
   // Returns the GlobalRequestID for the simulated navigation request. Can be
   // invoked after the navigation has completed. It is an error to call this
   // before the simulated navigation has completed its WillProcessResponse
   // callback.
-  virtual GlobalRequestID GetGlobalRequestID() const = 0;
+  virtual GlobalRequestID GetGlobalRequestID() = 0;
 
  private:
   // This interface should only be implemented inside content.

@@ -26,7 +26,7 @@
 class Profile;
 
 namespace base {
-class CancellationFlag;
+class AtomicFlag;
 }
 
 namespace {
@@ -49,11 +49,12 @@ class ProfileResetter : public content::BrowsingDataRemover::Observer {
     PINNED_TABS = 1 << 6,
     SHORTCUTS = 1 << 7,
     NTP_CUSTOMIZATIONS = 1 << 8,
+    LANGUAGES = 1 << 9,
     // Update ALL if you add new values and check whether the type of
     // ResettableFlags needs to be enlarged.
     ALL = DEFAULT_SEARCH_ENGINE | HOMEPAGE | CONTENT_SETTINGS |
           COOKIES_AND_SITE_DATA | EXTENSIONS | STARTUP_PAGES | PINNED_TABS |
-          SHORTCUTS | NTP_CUSTOMIZATIONS
+          SHORTCUTS | NTP_CUSTOMIZATIONS | LANGUAGES
   };
 
   // Bit vector for Resettable enum.
@@ -90,6 +91,7 @@ class ProfileResetter : public content::BrowsingDataRemover::Observer {
   void ResetPinnedTabs();
   void ResetShortcuts();
   void ResetNtpCustomizations();
+  void ResetLanguages();
 
   // BrowsingDataRemover::Observer:
   void OnBrowsingDataRemoverDone() override;
@@ -119,7 +121,7 @@ class ProfileResetter : public content::BrowsingDataRemover::Observer {
   // Used for resetting NTP customizations.
   InstantService* ntp_service_;
 
-  base::WeakPtrFactory<ProfileResetter> weak_ptr_factory_;
+  base::WeakPtrFactory<ProfileResetter> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ProfileResetter);
 };
@@ -127,7 +129,7 @@ class ProfileResetter : public content::BrowsingDataRemover::Observer {
 // Path to shortcut and command line arguments.
 typedef std::pair<base::FilePath, base::string16> ShortcutCommand;
 
-typedef base::RefCountedData<base::CancellationFlag> SharedCancellationFlag;
+typedef base::RefCountedData<base::AtomicFlag> SharedCancellationFlag;
 
 #if defined(OS_WIN)
 // On Windows returns all the shortcuts which launch Chrome and corresponding

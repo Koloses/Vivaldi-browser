@@ -268,7 +268,7 @@ class Generator(generator.Generator):
                 for typename in
                 self.module.structs + all_enums + self.module.unions)
     headers = set()
-    for typename, typemap in self.typemap.iteritems():
+    for typename, typemap in self.typemap.items():
       if typename in types:
         headers.update(typemap.get("public_headers", []))
     return sorted(headers)
@@ -294,6 +294,7 @@ class Generator(generator.Generator):
       "all_enums": all_enums,
       "disallow_interfaces": self.disallow_interfaces,
       "disallow_native_types": self.disallow_native_types,
+      "enable_kythe_annotations": self.enable_kythe_annotations,
       "enums": self.module.enums,
       "export_attribute": self.export_attribute,
       "export_header": self.export_header,
@@ -337,6 +338,7 @@ class Generator(generator.Generator):
       "format_constant_declaration": self._FormatConstantDeclaration,
       "get_container_validate_params_ctor_args":
           self._GetContainerValidateParamsCtorArgs,
+      "get_full_mojom_name_for_kind": self._GetFullMojomNameForKind,
       "get_name_for_kind": self._GetNameForKind,
       "get_pad": pack.GetPad,
       "get_qualified_name_for_kind": self._GetQualifiedNameForKind,
@@ -351,6 +353,7 @@ class Generator(generator.Generator):
       "is_enum_kind": mojom.IsEnumKind,
       "is_integral_kind": mojom.IsIntegralKind,
       "is_interface_kind": mojom.IsInterfaceKind,
+      "is_receiver_kind": self._IsReceiverKind,
       "is_native_only_kind": IsNativeOnlyKind,
       "is_any_handle_kind": mojom.IsAnyHandleKind,
       "is_any_interface_kind": mojom.IsAnyInterfaceKind,
@@ -593,6 +596,12 @@ class Generator(generator.Generator):
     if mojom.IsPendingReceiverKind(kind):
       return "mojo::PendingReceiver<%s>" % self._GetNameForKind(
           kind.kind, add_same_module_namespaces=add_same_module_namespaces)
+    if mojom.IsPendingAssociatedRemoteKind(kind):
+      return "mojo::PendingAssociatedRemote<%s>" % self._GetNameForKind(
+          kind.kind, add_same_module_namespaces=add_same_module_namespaces)
+    if mojom.IsPendingAssociatedReceiverKind(kind):
+      return "mojo::PendingAssociatedReceiver<%s>" % self._GetNameForKind(
+          kind.kind, add_same_module_namespaces=add_same_module_namespaces)
     if mojom.IsAssociatedInterfaceKind(kind):
       return "%sAssociatedPtrInfo" % self._GetNameForKind(
           kind.kind, add_same_module_namespaces=add_same_module_namespaces)
@@ -634,6 +643,10 @@ class Generator(generator.Generator):
     if mojom.IsAnyHandleOrInterfaceKind(kind):
       return True
     return False
+
+  def _IsReceiverKind(self, kind):
+    return (mojom.IsPendingReceiverKind(kind) or
+            mojom.IsInterfaceRequestKind(kind))
 
   def _IsCopyablePassByValue(self, kind):
     if not self._IsTypemappedKind(kind):
@@ -683,9 +696,11 @@ class Generator(generator.Generator):
       return "mojo::internal::Interface_Data"
     if mojom.IsInterfaceRequestKind(kind) or mojom.IsPendingReceiverKind(kind):
       return "mojo::internal::Handle_Data"
-    if mojom.IsAssociatedInterfaceKind(kind):
+    if (mojom.IsAssociatedInterfaceKind(kind) or
+        mojom.IsPendingAssociatedRemoteKind(kind)):
       return "mojo::internal::AssociatedInterface_Data"
-    if mojom.IsAssociatedInterfaceRequestKind(kind):
+    if (mojom.IsAssociatedInterfaceRequestKind(kind) or
+        mojom.IsPendingAssociatedReceiverKind(kind)):
       return "mojo::internal::AssociatedEndpointHandle_Data"
     if mojom.IsEnumKind(kind):
       return "int32_t"
@@ -773,7 +788,7 @@ class Generator(generator.Generator):
         return "std::numeric_limits<float>::quiet_NaN()"
 
     if (kind is not None and mojom.IsFloatKind(kind)):
-        return token if token.isdigit() else token + "f";
+      return token if token.isdigit() else token + "f"
 
     # Per C++11, 2.14.2, the type of an integer literal is the first of the
     # corresponding list in Table 6 in which its value can be represented. In
@@ -903,9 +918,11 @@ class Generator(generator.Generator):
     if mojom.IsPendingReceiverKind(kind):
       return ("mojo::InterfaceRequestDataView<%sInterfaceBase>" %
               _GetName(kind.kind))
-    if mojom.IsAssociatedInterfaceKind(kind):
+    if (mojom.IsAssociatedInterfaceKind(kind) or
+        mojom.IsPendingAssociatedRemoteKind(kind)):
       return "%sAssociatedPtrInfoDataView" % _GetName(kind.kind)
-    if mojom.IsAssociatedInterfaceRequestKind(kind):
+    if (mojom.IsAssociatedInterfaceRequestKind(kind) or
+        mojom.IsPendingAssociatedReceiverKind(kind)):
       return "%sAssociatedRequestDataView" % _GetName(kind.kind)
     if mojom.IsGenericHandleKind(kind):
       return "mojo::ScopedHandle"

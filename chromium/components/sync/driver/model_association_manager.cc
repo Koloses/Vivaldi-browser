@@ -27,10 +27,10 @@ namespace syncer {
 namespace {
 
 static const ModelType kStartOrder[] = {
-    NIGORI,       //  Listed for completeness.
-    DEVICE_INFO,  //  Listed for completeness.
-    EXPERIMENTS,  //  Listed for completeness.
-    PROXY_TABS,   //  Listed for completeness.
+    NIGORI,  //  Listed for completeness.
+    DEVICE_INFO,
+    DEPRECATED_EXPERIMENTS,  //  Listed for completeness.
+    PROXY_TABS,              //  Listed for completeness.
 
     // Kick off the association of the non-UI types first so they can associate
     // in parallel with the UI types.
@@ -48,10 +48,10 @@ static const ModelType kStartOrder[] = {
     NOTES,
     DEPRECATED_SUPERVISED_USERS, MOUNTAIN_SHARES,
     DEPRECATED_SUPERVISED_USER_SHARED_SETTINGS, DEPRECATED_ARTICLES,
-    SEND_TAB_TO_SELF, SECURITY_EVENTS};
+    SEND_TAB_TO_SELF, SECURITY_EVENTS, WEB_APPS, WIFI_CONFIGURATIONS};
 
 static_assert(base::size(kStartOrder) ==
-                  MODEL_TYPE_COUNT - FIRST_REAL_MODEL_TYPE,
+                  ModelType::NUM_ENTRIES - FIRST_REAL_MODEL_TYPE,
               "When adding a new type, update kStartOrder.");
 
 // The amount of time we wait for association to finish. If some types haven't
@@ -100,8 +100,7 @@ ModelAssociationManager::ModelAssociationManager(
       controllers_(controllers),
       delegate_(processor),
       configure_status_(DataTypeManager::UNKNOWN),
-      notified_about_ready_for_configure_(false),
-      weak_ptr_factory_(this) {}
+      notified_about_ready_for_configure_(false) {}
 
 ModelAssociationManager::~ModelAssociationManager() {}
 
@@ -124,8 +123,14 @@ void ModelAssociationManager::Initialize(ModelTypeSet desired_types,
   // Only keep types that have controllers.
   desired_types_.Clear();
   for (ModelType type : desired_types) {
-    if (controllers_->find(type) != controllers_->end())
+    auto dtc_iter = controllers_->find(type);
+    if (dtc_iter != controllers_->end()) {
+      DataTypeController* dtc = dtc_iter->second.get();
+      // Controllers in a FAILED state should have been filtered out by the
+      // DataTypeManager.
+      DCHECK_NE(dtc->state(), DataTypeController::FAILED);
       desired_types_.Put(type);
+    }
   }
 
   DVLOG(1) << "ModelAssociationManager: Initializing for "
@@ -450,7 +455,7 @@ void ModelAssociationManager::ModelAssociationDone(State new_state) {
       // TODO(wychen): enum uma should be strongly typed. crbug.com/661401
       UMA_HISTOGRAM_ENUMERATION("Sync.ConfigureFailed",
                                 ModelTypeToHistogramInt(dtc->type()),
-                                static_cast<int>(MODEL_TYPE_COUNT));
+                                static_cast<int>(ModelType::NUM_ENTRIES));
       StopDatatypeImpl(SyncError(FROM_HERE, SyncError::DATATYPE_ERROR,
                                  "Association timed out.", dtc->type()),
                        STOP_SYNC, dtc, base::DoNothing());

@@ -26,7 +26,6 @@
 #include "chrome/browser/engagement/site_engagement_score.h"
 #include "chrome/browser/engagement/site_engagement_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
@@ -1083,10 +1082,10 @@ TEST_F(SiteEngagementServiceTest, NavigationAccumulation) {
                                              ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   NavigateWithTransitionAndExpectHigherScore(
       service, url, ui::PAGE_TRANSITION_KEYWORD_GENERATED);
+  NavigateWithTransitionAndExpectHigherScore(service, url,
+                                             ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
 
   // Other transition types should not accumulate engagement.
-  NavigateWithTransitionAndExpectEqualScore(service, url,
-                                            ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
   NavigateWithTransitionAndExpectEqualScore(service, url,
                                             ui::PAGE_TRANSITION_LINK);
   NavigateWithTransitionAndExpectEqualScore(service, url,

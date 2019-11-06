@@ -27,7 +27,7 @@ class SkBitmap;
 
 namespace base {
 class DictionaryValue;
-}
+}  // namespace base
 
 namespace blink {
 class WebView;
@@ -35,7 +35,7 @@ class WebView;
 
 namespace test_runner {
 class AppBannerService;
-}
+}  // namespace test_runner
 
 namespace content {
 
@@ -52,11 +52,6 @@ class BlinkTestRunner : public RenderViewObserver,
   // RenderViewObserver implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
   void DidClearWindowObject(blink::WebLocalFrame* frame) override;
-  void Navigate(const GURL& url) override;
-  void DidCommitProvisionalLoad(blink::WebLocalFrame* frame,
-                                bool is_new_navigation) override;
-  void DidFailProvisionalLoad(blink::WebLocalFrame* frame,
-                              const blink::WebURLError& error) override;
 
   // WebTestDelegate implementation.
   void ClearEditCommand() override;
@@ -91,6 +86,7 @@ class BlinkTestRunner : public RenderViewObserver,
       const base::Optional<base::string16>& reply) override;
   void SimulateWebNotificationClose(const std::string& title,
                                     bool by_user) override;
+  void SimulateWebContentIndexDelete(const std::string& id) override;
   void SetDeviceScaleFactor(float factor) override;
   void SetDeviceColorSpace(const std::string& name) override;
   float GetWindowToViewportScale() override;
@@ -126,8 +122,8 @@ class BlinkTestRunner : public RenderViewObserver,
   bool AllowExternalPages() override;
   void FetchManifest(
       blink::WebView* view,
-      base::OnceCallback<void(const GURL&, const blink::Manifest&)> callback)
-      override;
+      base::OnceCallback<void(const blink::WebURL&, const blink::Manifest&)>
+          callback) override;
   void SetPermission(const std::string& name,
                      const std::string& value,
                      const GURL& origin,
@@ -155,6 +151,7 @@ class BlinkTestRunner : public RenderViewObserver,
   void OnReplicateTestConfiguration(mojom::ShellTestConfigurationPtr params);
   void OnSetupSecondaryRenderer();
   void CaptureDump(mojom::WebTestControl::CaptureDumpCallback callback);
+  void DidCommitNavigationInMainFrame();
 
  private:
   // Message handlers.
@@ -176,8 +173,7 @@ class BlinkTestRunner : public RenderViewObserver,
   void CaptureDumpComplete();
   void CaptureLocalAudioDump();
   void CaptureLocalLayoutDump();
-  // Returns true if the browser should capture pixels instead.
-  bool CaptureLocalPixelsDump();
+  void CaptureLocalPixelsDump();
 
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner();
 
@@ -192,9 +188,8 @@ class BlinkTestRunner : public RenderViewObserver,
       base::OnceCallback<void(const std::vector<std::string>&)>>
       get_bluetooth_events_callbacks_;
 
-  bool is_main_window_;
+  bool is_main_window_ = false;
 
-  bool focus_on_next_commit_;
   bool waiting_for_reset_ = false;
 
   std::unique_ptr<test_runner::AppBannerService> app_banner_service_;

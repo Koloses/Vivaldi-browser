@@ -6,10 +6,14 @@
 
 #include <type_traits>
 
+#include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_pump_for_io.h"
 #include "base/message_loop/message_pump_for_ui.h"
+#include "base/run_loop.h"
+#include "base/task/single_thread_task_executor.h"
 #include "base/test/bind_test_util.h"
+#include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -28,9 +32,9 @@ namespace base {
 
 namespace {
 
-bool PumpTypeUsesDoSomeWork(MessageLoopBase::Type type) {
+bool PumpTypeUsesDoSomeWork(MessageLoop::Type type) {
   switch (type) {
-    case MessageLoopBase::Type::TYPE_DEFAULT:
+    case MessagePump::Type::DEFAULT:
 #if defined(OS_IOS)
       // iOS uses a MessagePumpCFRunLoop instead of MessagePumpDefault for
       // TYPE_DEFAULT. TODO(gab): migrate MessagePumpCFRunLoop too.
@@ -39,12 +43,12 @@ bool PumpTypeUsesDoSomeWork(MessageLoopBase::Type type) {
       return true;
 #endif
 
-    case MessageLoopBase::Type::TYPE_UI:
+    case MessagePump::Type::UI:
 #if defined(OS_IOS)
       // iOS uses a MessagePumpDefault for UI in unit tests, ref.
       // test_support_ios.mm::CreateMessagePumpForUIForTests().
       return true;
-#elif defined(OS_WIN)
+#elif defined(OS_WIN) || defined(OS_ANDROID) || defined(USE_GLIB)
       return true;
 #elif defined(OS_POSIX) && !defined(OS_NACL_SFI)
       // MessagePumpLibevent was migrated (ref. message_pump_for_ui.h and
@@ -56,7 +60,7 @@ bool PumpTypeUsesDoSomeWork(MessageLoopBase::Type type) {
       return false;
 #endif
 
-    case MessageLoopBase::Type::TYPE_IO:
+    case MessagePump::Type::IO:
 #if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
       return true;
 #elif defined(OS_POSIX) && !defined(OS_NACL_SFI)
@@ -69,10 +73,16 @@ bool PumpTypeUsesDoSomeWork(MessageLoopBase::Type type) {
       return false;
 #endif
 
-    case MessageLoopBase::Type::TYPE_CUSTOM:
+    case MessagePump::Type::CUSTOM:
 #if defined(OS_ANDROID)
-    case MessageLoopBase::Type::TYPE_JAVA:
+    case MessagePump::Type::JAVA:
 #endif  // defined(OS_ANDROID)
+#if defined(OS_MACOSX)
+    case MessagePump::Type::NS_RUNLOOP:
+#endif  // defined(OS_MACOSX)
+#if defined(OS_WIN)
+    case MessagePump::Type::UI_WITH_WM_QUIT_SUPPORT:
+#endif  // defined(OS_WIN)
       // Not tested in this file.
       NOTREACHED();
       return false;
@@ -96,10 +106,9 @@ class MockMessagePumpDelegate : public MessagePump::Delegate {
   DISALLOW_COPY_AND_ASSIGN(MockMessagePumpDelegate);
 };
 
-class MessagePumpTest : public ::testing::TestWithParam<MessageLoopBase::Type> {
+class MessagePumpTest : public ::testing::TestWithParam<MessageLoop::Type> {
  public:
-  MessagePumpTest()
-      : message_pump_(MessageLoop::CreateMessagePumpForType(GetParam())) {}
+  MessagePumpTest() : message_pump_(MessagePump::Create(GetParam())) {}
 
  protected:
   const bool pump_uses_do_some_work_ = PumpTypeUsesDoSomeWork(GetParam());
@@ -351,5 +360,32 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::Values(MessageLoop::TYPE_DEFAULT,
                                            MessageLoop::TYPE_UI,
                                            MessageLoop::TYPE_IO));
+
+#if defined(OS_WIN)
+
+TEST(MessagePumpTestWin, WmQuitIsNotIgnoredWithEnableWmQuit) {
+  SingleThreadTaskExecutor task_executor(
+      MessagePump::Type::UI_WITH_WM_QUIT_SUPPORT);
+
+  // Post a WM_QUIT message to the current thread.
+  ::PostQuitMessage(0);
+
+  // Post a task to the current thread, with a small delay to make it less
+  // likely that we process the posted task before looking for WM_* messages.
+  RunLoop run_loop;
+  task_executor.task_runner()->PostDelayedTask(FROM_HERE,
+                                               BindOnce(
+                                                   [](OnceClosure closure) {
+                                                     ADD_FAILURE();
+                                                     std::move(closure).Run();
+                                                   },
+                                                   run_loop.QuitClosure()),
+                                               TestTimeouts::tiny_timeout());
+
+  // Run the loop. It should not result in ADD_FAILURE() getting called.
+  run_loop.Run();
+}
+
+#endif  // defined(OS_WIN)
 
 }  // namespace base

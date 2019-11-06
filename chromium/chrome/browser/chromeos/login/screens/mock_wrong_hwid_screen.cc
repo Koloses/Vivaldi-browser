@@ -7,10 +7,9 @@
 namespace chromeos {
 
 MockWrongHWIDScreen::MockWrongHWIDScreen(
-    BaseScreenDelegate* base_screen_delegate,
     WrongHWIDScreenView* view,
     const base::RepeatingClosure& exit_callback)
-    : WrongHWIDScreen(base_screen_delegate, view, exit_callback) {}
+    : WrongHWIDScreen(view, exit_callback) {}
 
 MockWrongHWIDScreen::~MockWrongHWIDScreen() {}
 
@@ -21,7 +20,7 @@ MockWrongHWIDScreenView::~MockWrongHWIDScreenView() {
     delegate_->OnViewDestroyed(this);
 }
 
-void MockWrongHWIDScreenView::SetDelegate(Delegate* delegate) {
+void MockWrongHWIDScreenView::SetDelegate(WrongHWIDScreen* delegate) {
   delegate_ = delegate;
   MockSetDelegate(delegate);
 }

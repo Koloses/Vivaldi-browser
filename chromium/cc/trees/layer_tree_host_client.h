@@ -18,7 +18,6 @@ struct PresentationFeedback;
 }
 
 namespace viz {
-class LocalSurfaceIdAllocation;
 struct BeginFrameArgs;
 }
 
@@ -37,6 +36,10 @@ struct ApplyViewportChangesArgs {
   // main_thread_scale * delta == impl_thread_scale.
   float page_scale_delta;
 
+  // Indicates that a pinch gesture is currently active or not; used to allow
+  // subframe compositors to throttle their re-rastering during the gesture.
+  bool is_pinch_gesture_active;
+
   // How much the browser controls have been shown or hidden. The ratio runs
   // between 0 (hidden) and 1 (full-shown). This is additive.
   float browser_controls_delta;
@@ -49,6 +52,14 @@ struct ApplyViewportChangesArgs {
   // ended.
   bool scroll_gesture_did_end;
 };
+
+using ManipulationInfo = uint32_t;
+constexpr ManipulationInfo kManipulationInfoNone = 0;
+constexpr ManipulationInfo kManipulationInfoHasScrolledByWheel = 1 << 0;
+constexpr ManipulationInfo kManipulationInfoHasScrolledByTouch = 1 << 1;
+constexpr ManipulationInfo kManipulationInfoHasScrolledByPrecisionTouchPad =
+    1 << 2;
+constexpr ManipulationInfo kManipulationInfoHasPinchZoomed = 1 << 3;
 
 // A LayerTreeHost is bound to a LayerTreeHostClient. The main rendering
 // loop (in ProxyMain or SingleThreadProxy) calls methods on the
@@ -81,6 +92,7 @@ class LayerTreeHostClient {
   virtual void BeginMainFrameNotExpectedSoon() = 0;
   virtual void BeginMainFrameNotExpectedUntil(base::TimeTicks time) = 0;
   virtual void DidBeginMainFrame() = 0;
+  virtual void WillUpdateLayers() = 0;
   virtual void DidUpdateLayers() = 0;
 
   // Visual frame-based updates to the state of the LayerTreeHost are expected
@@ -100,9 +112,9 @@ class LayerTreeHostClient {
   // related to pinch-zoom, browser controls (aka URL bar), overscroll, etc.
   virtual void ApplyViewportChanges(const ApplyViewportChangesArgs& args) = 0;
 
-  virtual void RecordWheelAndTouchScrollingCount(
-      bool has_scrolled_by_wheel,
-      bool has_scrolled_by_touch) = 0;
+  // Record use counts of different methods of scrolling (e.g. wheel, touch,
+  // precision touchpad, etc.).
+  virtual void RecordManipulationTypeCounts(ManipulationInfo info) = 0;
 
   // Notifies the client when an overscroll has happened.
   virtual void SendOverscrollEventFromImplSide(
@@ -131,8 +143,6 @@ class LayerTreeHostClient {
   // the time from the start of BeginMainFrame to the Commit, or early out.
   virtual void RecordStartOfFrameMetrics() = 0;
   virtual void RecordEndOfFrameMetrics(base::TimeTicks frame_begin_time) = 0;
-  virtual void DidGenerateLocalSurfaceIdAllocation(
-      const viz::LocalSurfaceIdAllocation& allocation) = 0;
 
  protected:
   virtual ~LayerTreeHostClient() {}

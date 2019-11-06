@@ -83,6 +83,7 @@ To add JNI to a class:
 1. Enable the JNI processor by adding to your `android_library` target:
    ```python
    annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
+   deps = [ "//base:jni_java" ]
    ```
 2. Create a nested-interface annotated with `@NativeMethods` that contains
    the declaration of the corresponding static methods you wish to have
@@ -98,7 +99,15 @@ Example:
 class Legacy {
   static native void nativeFoo();
   static native double nativeBar(int a, int b);
-  native void nativeNonStatic(long nativePointer);
+
+  // Either the |ClassName| part of the |nativeClassName| parameter name must
+  // match the native class name exactly, or the method annotation
+  // @NativeClassQualifiedName("ClassName") must be used.
+  //
+  // If the native class is nested, use
+  // @NativeClassQualifiedName("FooClassName::BarClassName") and call the
+  // parameter |nativePointer|.
+  native void nativeNonStatic(long nativeClassName);
 
   void callNatives() {
     nativeFoo()
@@ -109,13 +118,26 @@ class Legacy {
 
 // Equivalent using new style:
 class NewStyle {
+  // Cannot be private. Must be package or public.
   @NativeMethods
-  interface Natives {
+  /* package */ interface Natives {
     void foo();
     double bar(int a, int b);
-    // @JCaller is passed to C++ as the java "this" object, and nativePointer
+    // @JCaller is passed to C++ as the java "this" object, and nativeClassName
     // as the C++ "this" object.
-    void nonStatic(@JCaller NewStyle self, long nativePointer);
+    //
+    // If the C++ object does not use its Java caller in this method, you may
+    // omit the @JCaller parameter here. The C++ method still must have a caller
+    // parameter, but it will not be an instance of NewStyle.
+    //
+    // Either the |ClassName| part of the |nativeClassName| parameter name must
+    // match the native class name exactly, or the method annotation
+    // @NativeClassQualifiedName("ClassName") must be used.
+    //
+    // If the native class is nested, use
+    // @NativeClassQualifiedName("FooClassName::BarClassName") and call the
+    // parameter |nativePointer|.
+    void nonStatic(@JCaller NewStyle self, long nativeClassName);
   }
 
   void callNatives() {
@@ -135,6 +157,10 @@ class NewStyle {
 1. Add the `JniMocker` rule to your test.
 2. Call `JniMocker#mock` in a `setUp()` method for each interface you want to
    stub out.
+
+Note: Mocking native methods doesn't work in tests that are part of APKs that
+use an [`apk_under_test`](https://cs.chromium.org/search/?q=file:BUILD.gn+%22apk_under_test+%3D%22&type=cs).
+[This crbug](http://crbug.com/890452) tracks removing the `apk_under_test` variable.
 
 JniMocker will reset the stubs during `tearDown()`.
 
@@ -173,6 +199,8 @@ If a native method is called without setting a mock in a unit test, an
 ### Calling Native -> Java
 
  * Methods annotated with `@CalledByNative` will have stubs generated for them.
+   * Inner class methods must provide the inner class name explicitly
+     (ex. `@CalledByNative("InnerClassName")`)
  * Just call the generated stubs defined in generated `.h` files.
 
 ### Java Objects and Garbage Collection

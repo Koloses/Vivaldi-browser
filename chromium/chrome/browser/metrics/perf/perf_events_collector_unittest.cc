@@ -13,6 +13,8 @@
 
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
+#include "base/task/thread_pool/thread_pool.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/metrics/perf/cpu_identity.h"
@@ -30,6 +32,10 @@ namespace {
 const char kPerfRecordCyclesCmd[] = "perf record -a -e cycles -c 1000003";
 const char kPerfRecordCallgraphCmd[] = "perf record -a -e cycles -g -c 4000037";
 const char kPerfRecordLBRCmd[] = "perf record -a -e r20c4 -b -c 200011";
+const char kPerfRecordLBRCmdAtom[] = "perf record -a -e rc4 -b -c 300001";
+const char kPerfRecordDataTLBMissesCmdGLM[] = "perf record -a -e r13d0 -c 2003";
+const char kPerfRecordDataTLBMissesCmd[] =
+    "perf record -a -e dTLB-misses -c 2003";
 const char kPerfRecordCacheMissesCmd[] =
     "perf record -a -e cache-misses -c 10007";
 const char kPerfStatMemoryBandwidthCmd[] =
@@ -129,6 +135,7 @@ class TestPerfCollector : public PerfCollector {
   using MetricCollector::PerfProtoType;
   using PerfCollector::collection_params;
   using PerfCollector::command_selector;
+  using PerfCollector::max_frequencies_mhz_;
   using PerfCollector::ParseOutputProtoIfValid;
 
  private:
@@ -140,8 +147,9 @@ class TestPerfCollector : public PerfCollector {
 class PerfCollectorTest : public testing::Test {
  public:
   PerfCollectorTest()
-      : task_runner_(base::MakeRefCounted<base::TestSimpleTaskRunner>()),
-        task_runner_handle_(task_runner_) {}
+      : scoped_task_environment_(
+            std::make_unique<base::test::ScopedTaskEnvironment>()),
+        task_runner_(base::MakeRefCounted<base::TestSimpleTaskRunner>()) {}
 
   void SetUp() override {
     // PerfCollector requires chromeos::LoginState and
@@ -165,8 +173,11 @@ class PerfCollectorTest : public testing::Test {
  protected:
   std::unique_ptr<TestPerfCollector> perf_collector_;
 
+  // scoped_task_environment_ must be the first member (or at least before any
+  // member that cares about tasks) to be initialized first and destroyed last.
+  std::unique_ptr<base::test::ScopedTaskEnvironment> scoped_task_environment_;
+
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  base::ThreadTaskRunnerHandle task_runner_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(PerfCollectorTest);
 };
@@ -180,6 +191,9 @@ TEST_F(PerfCollectorTest, CheckSetup) {
                    ->incognito_launched());
   EXPECT_TRUE(TestIncognitoObserver::CreateWithIncognitoLaunched(true)
                   ->incognito_launched());
+  base::ThreadPoolInstance::Get()->FlushForTesting();
+  scoped_task_environment_->RunUntilIdle();
+  EXPECT_GT(perf_collector_->max_frequencies_mhz_.size(), 0u);
 }
 
 // Simulate opening and closing of incognito window in between calls to
@@ -189,6 +203,8 @@ TEST_F(PerfCollectorTest, IncognitoWindowOpened) {
   PerfStatProto perf_stat_proto = GetExamplePerfStatProto();
   EXPECT_GT(perf_data_proto.ByteSize(), 0);
   EXPECT_GT(perf_stat_proto.ByteSize(), 0);
+  base::ThreadPoolInstance::Get()->FlushForTesting();
+  scoped_task_environment_->RunUntilIdle();
 
   auto sampled_profile = std::make_unique<SampledProfile>();
   sampled_profile->set_trigger_event(SampledProfile::PERIODIC_COLLECTION);
@@ -196,8 +212,15 @@ TEST_F(PerfCollectorTest, IncognitoWindowOpened) {
   perf_collector_->ParseOutputProtoIfValid(
       TestIncognitoObserver::CreateWithIncognitoLaunched(false),
       std::move(sampled_profile),
-      TestPerfCollector::PerfProtoType::PERF_TYPE_DATA,
+      TestPerfCollector::PerfProtoType::PERF_TYPE_DATA, true,
       perf_data_proto.SerializeAsString());
+
+  // Run the (Thread|Sequenced)TaskRunnerHandle queue until both the
+  // (Thread|Sequenced)TaskRunnerHandle queue and the TaskSchedule queue are
+  // empty as the above ParseOutputProtoIfValid call posts a task to
+  // asynchronously collect process and thread types and the profile cache will
+  // be updated only after this collection completes.
+  scoped_task_environment_->RunUntilIdle();
 
   std::vector<SampledProfile> stored_profiles1;
   EXPECT_TRUE(perf_collector_->GetSampledProfiles(&stored_profiles1));
@@ -210,6 +233,7 @@ TEST_F(PerfCollectorTest, IncognitoWindowOpened) {
   EXPECT_FALSE(profile1.has_perf_stat());
   EXPECT_EQ(SerializeMessageToVector(perf_data_proto),
             SerializeMessageToVector(profile1.perf_data()));
+  EXPECT_GT(profile1.cpu_max_frequency_mhz_size(), 0);
 
   sampled_profile = std::make_unique<SampledProfile>();
   sampled_profile->set_trigger_event(SampledProfile::RESTORE_SESSION);
@@ -217,8 +241,10 @@ TEST_F(PerfCollectorTest, IncognitoWindowOpened) {
   perf_collector_->ParseOutputProtoIfValid(
       TestIncognitoObserver::CreateWithIncognitoLaunched(false),
       std::move(sampled_profile),
-      TestPerfCollector::PerfProtoType::PERF_TYPE_STAT,
+      TestPerfCollector::PerfProtoType::PERF_TYPE_STAT, false,
       perf_stat_proto.SerializeAsString());
+
+  scoped_task_environment_->RunUntilIdle();
 
   std::vector<SampledProfile> stored_profiles2;
   EXPECT_TRUE(perf_collector_->GetSampledProfiles(&stored_profiles2));
@@ -232,6 +258,7 @@ TEST_F(PerfCollectorTest, IncognitoWindowOpened) {
   ASSERT_TRUE(profile2.has_perf_stat());
   EXPECT_EQ(SerializeMessageToVector(perf_stat_proto),
             SerializeMessageToVector(profile2.perf_stat()));
+  EXPECT_EQ(profile2.cpu_max_frequency_mhz_size(), 0);
 
   sampled_profile = std::make_unique<SampledProfile>();
   sampled_profile->set_trigger_event(SampledProfile::RESUME_FROM_SUSPEND);
@@ -239,8 +266,10 @@ TEST_F(PerfCollectorTest, IncognitoWindowOpened) {
   perf_collector_->ParseOutputProtoIfValid(
       TestIncognitoObserver::CreateWithIncognitoLaunched(true),
       std::move(sampled_profile),
-      TestPerfCollector::PerfProtoType::PERF_TYPE_DATA,
+      TestPerfCollector::PerfProtoType::PERF_TYPE_DATA, true,
       perf_data_proto.SerializeAsString());
+
+  scoped_task_environment_->RunUntilIdle();
 
   std::vector<SampledProfile> stored_profiles_empty;
   EXPECT_FALSE(perf_collector_->GetSampledProfiles(&stored_profiles_empty));
@@ -251,8 +280,10 @@ TEST_F(PerfCollectorTest, IncognitoWindowOpened) {
   perf_collector_->ParseOutputProtoIfValid(
       TestIncognitoObserver::CreateWithIncognitoLaunched(true),
       std::move(sampled_profile),
-      TestPerfCollector::PerfProtoType::PERF_TYPE_STAT,
+      TestPerfCollector::PerfProtoType::PERF_TYPE_STAT, false,
       perf_stat_proto.SerializeAsString());
+
+  scoped_task_environment_->RunUntilIdle();
 
   EXPECT_FALSE(perf_collector_->GetSampledProfiles(&stored_profiles_empty));
 
@@ -264,8 +295,10 @@ TEST_F(PerfCollectorTest, IncognitoWindowOpened) {
   perf_collector_->ParseOutputProtoIfValid(
       TestIncognitoObserver::CreateWithIncognitoLaunched(false),
       std::move(sampled_profile),
-      TestPerfCollector::PerfProtoType::PERF_TYPE_DATA,
+      TestPerfCollector::PerfProtoType::PERF_TYPE_DATA, true,
       perf_data_proto.SerializeAsString());
+
+  scoped_task_environment_->RunUntilIdle();
 
   std::vector<SampledProfile> stored_profiles3;
   EXPECT_TRUE(perf_collector_->GetSampledProfiles(&stored_profiles3));
@@ -280,6 +313,7 @@ TEST_F(PerfCollectorTest, IncognitoWindowOpened) {
   EXPECT_FALSE(profile3.has_perf_stat());
   EXPECT_EQ(SerializeMessageToVector(perf_data_proto),
             SerializeMessageToVector(profile3.perf_data()));
+  EXPECT_GT(profile3.cpu_max_frequency_mhz_size(), 0);
 }
 
 TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_IvyBridge) {
@@ -338,6 +372,46 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_SandyBridge) {
   found = std::find_if(cmds.begin(), cmds.end(),
                        [](const RandomSelector::WeightAndValue& cmd) -> bool {
                          return cmd.value == kPerfRecordCacheMissesCmd;
+                       });
+  EXPECT_NE(cmds.end(), found);
+}
+
+TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_Goldmont) {
+  CPUIdentity cpuid;
+  cpuid.arch = "x86_64";
+  cpuid.vendor = "GenuineIntel";
+  cpuid.family = 0x06;
+  cpuid.model = 0x5c;  // Goldmont
+  cpuid.model_name = "";
+  std::vector<RandomSelector::WeightAndValue> cmds =
+      internal::GetDefaultCommandsForCpu(cpuid);
+  ASSERT_GE(cmds.size(), 2UL);
+  EXPECT_EQ(cmds[0].value, kPerfRecordCyclesCmd);
+  EXPECT_EQ(cmds[1].value, kPerfRecordCallgraphCmd);
+  auto found =
+      std::find_if(cmds.begin(), cmds.end(),
+                   [](const RandomSelector::WeightAndValue& cmd) -> bool {
+                     return cmd.value == kPerfStatMemoryBandwidthCmd;
+                   });
+  EXPECT_EQ(cmds.end(), found) << "Goldmont does not support this command";
+  found = std::find_if(cmds.begin(), cmds.end(),
+                       [](const RandomSelector::WeightAndValue& cmd) -> bool {
+                         return cmd.value == kPerfRecordLBRCmdAtom;
+                       });
+  EXPECT_NE(cmds.end(), found);
+  found = std::find_if(cmds.begin(), cmds.end(),
+                       [](const RandomSelector::WeightAndValue& cmd) -> bool {
+                         return cmd.value == kPerfRecordCacheMissesCmd;
+                       });
+  EXPECT_NE(cmds.end(), found);
+  found = std::find_if(cmds.begin(), cmds.end(),
+                       [](const RandomSelector::WeightAndValue& cmd) -> bool {
+                         return cmd.value == kPerfRecordDataTLBMissesCmd;
+                       });
+  EXPECT_EQ(cmds.end(), found) << "Goldmont requires specialized dTLB command";
+  found = std::find_if(cmds.begin(), cmds.end(),
+                       [](const RandomSelector::WeightAndValue& cmd) -> bool {
+                         return cmd.value == kPerfRecordDataTLBMissesCmdGLM;
                        });
   EXPECT_NE(cmds.end(), found);
 }
@@ -547,10 +621,7 @@ TEST_F(PerfCollectorTest, CommandMatching_SpecificModel_LongestMatch) {
 
 class PerfCollectorCollectionParamsTest : public testing::Test {
  public:
-  PerfCollectorCollectionParamsTest()
-      : task_runner_(base::MakeRefCounted<base::TestSimpleTaskRunner>()),
-        task_runner_handle_(task_runner_),
-        field_trial_list_(nullptr) {}
+  PerfCollectorCollectionParamsTest() : field_trial_list_(nullptr) {}
 
   void SetUp() override {
     // PerfCollector requires chromeos::LoginState and
@@ -571,8 +642,10 @@ class PerfCollectorCollectionParamsTest : public testing::Test {
   }
 
  private:
-  scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  base::ThreadTaskRunnerHandle task_runner_handle_;
+  // scoped_task_environment_ must be the first member (or at least before any
+  // member that cares about tasks) to be initialized first and destroyed last.
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
+
   base::FieldTrialList field_trial_list_;
 
   DISALLOW_COPY_AND_ASSIGN(PerfCollectorCollectionParamsTest);
@@ -697,6 +770,41 @@ TEST_F(PerfCollectorCollectionParamsTest, Parameters_Override) {
   EXPECT_EQ(2, parsed_params.restore_session.sampling_factor);
   EXPECT_EQ(base::TimeDelta::FromSeconds(20),
             parsed_params.restore_session.max_collection_delay);
+}
+
+TEST(PerfCollectorInternalTest, CommandSamplesCPUCycles) {
+  EXPECT_TRUE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "cycles", "-c", "1000003"}));
+  EXPECT_TRUE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "cycles", "-g", "-c", "4000037"}));
+  EXPECT_TRUE(internal::CommandSamplesCPUCycles({"perf", "record", "-a", "-e",
+                                                 "cycles", "-c", "4000037",
+                                                 "--call-graph", "lbr"}));
+
+  EXPECT_FALSE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "r20c4", "-b", "-c", "200011"}));
+  EXPECT_FALSE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "rc4", "-b", "-c", "300001"}));
+  EXPECT_FALSE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "r0481", "-c", "2003"}));
+  EXPECT_FALSE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "r13d0", "-c", "2003"}));
+  EXPECT_FALSE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "iTLB-misses", "-c", "2003"}));
+  EXPECT_FALSE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "dTLB-misses", "-c", "2003"}));
+  EXPECT_FALSE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "cache-misses", "-c", "10007"}));
+
+  EXPECT_TRUE(internal::CommandSamplesCPUCycles({"perf", "record", "-a", "-e",
+                                                 "instructions", "-e", "cycles",
+                                                 "-c", "1000003"}));
+
+  EXPECT_FALSE(internal::CommandSamplesCPUCycles(
+      {"perf", "stat", "-a", "-e", "cycles", "-e", "instructions", "-e",
+       "uncore_imc/data_reads/", "-e", "uncore_imc/data_writes/", "-e",
+       "cpu/event=0xD0,umask=0x11,name=MEM_UOPS_RETIRED-STLB_MISS_LOADS/", "-e",
+       "cpu/event=0xD0,umask=0x12,name=MEM_UOPS_RETIRED-STLB_MISS_STORES/"}));
 }
 
 }  // namespace metrics

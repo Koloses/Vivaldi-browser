@@ -69,12 +69,19 @@ newSettingsMainControllerWithBrowserState:(ios::ChromeBrowserState*)browserState
 newAccountsController:(ios::ChromeBrowserState*)browserState
              delegate:(id<SettingsNavigationControllerDelegate>)delegate;
 
-// Creates a new SignInSettingsCollectionViewController and the chrome around
+// Creates a new GoogleServicesSettingsCollectionViewController and the chrome
+// around it. |browserState| is used to personalize some settings aspects and
+// should not be nil. |delegate| may be nil.
++ (SettingsNavigationController*)
+    newGoogleServicesController:(ios::ChromeBrowserState*)browserState
+                       delegate:
+                           (id<SettingsNavigationControllerDelegate>)delegate;
+
+// Creates a new SyncSettingsCollectionViewController and the chrome around
 // it. |browserState| is used to personalize some settings aspects and should
 // not be nil. |delegate| may be nil.
 + (SettingsNavigationController*)
      newSyncController:(ios::ChromeBrowserState*)browserState
-allowSwitchSyncAccount:(BOOL)allowSwitchSyncAccount
               delegate:(id<SettingsNavigationControllerDelegate>)delegate;
 
 // Creates a new SyncEncryptionPassphraseCollectionViewController and the chrome
@@ -136,6 +143,11 @@ initWithRootViewController:(UIViewController*)rootViewController
 
 - (instancetype)initWithRootViewController:(UIViewController*)rootViewController
     NS_UNAVAILABLE;
+- (instancetype)initWithNavigationBarClass:(Class)navigationBarClass
+                              toolbarClass:(Class)toolbarClass NS_UNAVAILABLE;
+- (instancetype)initWithNibName:(NSString*)nibNameOrNil
+                         bundle:(NSBundle*)nibBundleOrNil NS_UNAVAILABLE;
+- (instancetype)initWithCoder:(NSCoder*)aDecoder NS_UNAVAILABLE;
 
 // Returns a new Done button for a UINavigationItem which will call
 // closeSettings when it is pressed. Should only be called by view controllers

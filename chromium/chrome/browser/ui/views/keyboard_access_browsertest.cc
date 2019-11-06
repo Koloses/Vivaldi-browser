@@ -16,7 +16,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -74,7 +73,7 @@ class ViewFocusChangeWaiter : public views::FocusChangeListener {
 
   void OnDidChangeFocus(views::View* focused_before,
                         views::View* focused_now) override {
-    if (focused_now && focused_now->id() != previous_view_id_) {
+    if (focused_now && focused_now->GetID() != previous_view_id_) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE, base::RunLoop::QuitCurrentWhenIdleClosureDeprecated());
     }
@@ -153,7 +152,7 @@ class KeyboardAccessTest : public InProcessBrowserTest {
     views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
     const views::FocusManager* focus_manager = widget->GetFocusManager();
     const views::View* focused_view = focus_manager->GetFocusedView();
-    return focused_view ? focused_view->id() : -1;
+    return focused_view ? focused_view->GetID() : -1;
   }
 
   void WaitForFocusedViewIDToChange(int original_view_id) {
@@ -198,9 +197,7 @@ void KeyboardAccessTest::TestMenuKeyboardAccess(bool alternate_key_sequence,
   // page menu, then wait until the focused view changes.
   int original_view_id = GetFocusedViewID();
 
-  content::WindowedNotificationObserver new_tab_observer(
-      chrome::NOTIFICATION_TAB_ADDED,
-      content::Source<content::WebContentsDelegate>(browser()));
+  ui_test_utils::TabAddedWaiter tab_add(browser());
 
   BrowserView* browser_view = reinterpret_cast<BrowserView*>(
       browser()->window());
@@ -244,7 +241,7 @@ void KeyboardAccessTest::TestMenuKeyboardAccess(bool alternate_key_sequence,
 #endif
 
   // Wait for the new tab to appear.
-  new_tab_observer.Wait();
+  tab_add.Wait();
 
   // Make sure that the new tab index is 1.
   ASSERT_EQ(1, browser()->tab_strip_model()->active_index());
@@ -279,9 +276,7 @@ void KeyboardAccessTest::TestSystemMenuWithKeyboard() {
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
 
-  content::WindowedNotificationObserver new_tab_observer(
-      chrome::NOTIFICATION_TAB_ADDED,
-      content::Source<content::WebContentsDelegate>(browser()));
+  ui_test_utils::TabAddedWaiter tab_add(browser());
   // Sending the Alt space keys to the browser will bring up the system menu
   // which runs a model loop. We set a CBT hook to look for the menu and send
   // keystrokes to it.
@@ -297,7 +292,7 @@ void KeyboardAccessTest::TestSystemMenuWithKeyboard() {
 
   if (ret) {
     // Wait for the new tab to appear.
-    new_tab_observer.Wait();
+    tab_add.Wait();
     // Make sure that the new tab index is 1.
     EXPECT_EQ(1, browser()->tab_strip_model()->active_index());
   }
@@ -343,9 +338,7 @@ void KeyboardAccessTest::TestSystemMenuReopenClosedTabWithKeyboard() {
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
 
-  content::WindowedNotificationObserver new_tab_observer(
-      chrome::NOTIFICATION_TAB_PARENTED,
-      content::NotificationService::AllSources());
+  ui_test_utils::TabAddedWaiter tab_add(browser());
   // Sending the Alt space keys to the browser will bring up the system menu
   // which runs a model loop. We set a CBT hook to look for the menu and send
   // keystrokes to it.
@@ -360,7 +353,7 @@ void KeyboardAccessTest::TestSystemMenuReopenClosedTabWithKeyboard() {
 
   if (ret) {
     // Wait for the new tab to appear.
-    new_tab_observer.Wait();
+    tab_add.Wait();
     // Make sure that the new tab index is 1.
     EXPECT_EQ(1, browser()->tab_strip_model()->active_index());
   }

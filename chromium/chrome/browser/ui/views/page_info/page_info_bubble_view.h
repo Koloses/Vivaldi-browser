@@ -8,24 +8,31 @@
 #include <memory>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/lookalikes/safety_tips/safety_tip_ui.h"
+#include "chrome/browser/ui/page_info/page_info_dialog.h"
 #include "chrome/browser/ui/page_info/page_info_ui.h"
 #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
+#include "chrome/browser/ui/views/hover_button.h"
 #include "chrome/browser/ui/views/page_info/chosen_object_view_observer.h"
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view_base.h"
+#include "chrome/browser/ui/views/page_info/page_info_hover_button.h"
 #include "chrome/browser/ui/views/page_info/permission_selector_row.h"
 #include "chrome/browser/ui/views/page_info/permission_selector_row_observer.h"
+#include "components/security_state/core/security_state.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/separator.h"
+#include "ui/views/controls/styled_label.h"
 #include "ui/views/controls/styled_label_listener.h"
+#include "ui/views/widget/widget.h"
 
 class BubbleHeaderView;
 class GURL;
-class HoverButton;
 class Profile;
 class Browser;
 
@@ -41,10 +48,6 @@ namespace net {
 class X509Certificate;
 }  // namespace net
 
-namespace security_state {
-struct SecurityInfo;
-}  // namespace security_state
-
 namespace test {
 class PageInfoBubbleViewTestApi;
 }  // namespace test
@@ -52,7 +55,6 @@ class PageInfoBubbleViewTestApi;
 namespace views {
 class Link;
 class View;
-class Widget;
 }  // namespace views
 
 // The views implementation of the page info UI.
@@ -77,12 +79,14 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
     VIEW_ID_PAGE_INFO_BUTTON_CHANGE_PASSWORD,
     VIEW_ID_PAGE_INFO_BUTTON_WHITELIST_PASSWORD_REUSE,
     VIEW_ID_PAGE_INFO_LABEL_SECURITY_DETAILS,
+    VIEW_ID_PAGE_INFO_LABEL_EV_CERTIFICATE_DETAILS,
     VIEW_ID_PAGE_INFO_LABEL_RESET_CERTIFICATE_DECISIONS,
     VIEW_ID_PAGE_INFO_LINK_OR_BUTTON_COOKIE_DIALOG,
     VIEW_ID_PAGE_INFO_LINK_OR_BUTTON_SITE_SETTINGS,
     VIEW_ID_PAGE_INFO_LINK_OR_BUTTON_CERTIFICATE_VIEWER,
     VIEW_ID_PAGE_INFO_BUTTON_END_VR,
     VIEW_ID_PAGE_INFO_HOVER_BUTTON_VR_PRESENTATION,
+    VIEW_ID_PAGE_INFO_BUTTON_LEAVE_SITE,
   };
 
   // Creates the appropriate page info bubble for the given |url|.
@@ -96,14 +100,17 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
       Profile* profile,
       content::WebContents* web_contents,
       const GURL& url,
-      const security_state::SecurityInfo& security_info);
+      security_state::SecurityLevel security_level,
+      const security_state::VisibleSecurityState& visible_security_state,
+      PageInfoClosingCallback closing_callback);
 
   /* this  */
   static void ShowPopupAtPos(gfx::Point anchor_pos,
           Profile* profile,
           content::WebContents* web_contents,
           const GURL& url,
-          const security_state::SecurityInfo& security_info,
+          security_state::SecurityLevel security_level,
+          const security_state::VisibleSecurityState& visible_security_state,
           Browser* browser,
           gfx::NativeView parent);
 
@@ -111,13 +118,16 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
   friend class PageInfoBubbleViewBrowserTest;
   friend class test::PageInfoBubbleViewTestApi;
 
-  PageInfoBubbleView(views::View* anchor_view,
-                     const gfx::Rect& anchor_rect,
-                     gfx::NativeView parent_window,
-                     Profile* profile,
-                     content::WebContents* web_contents,
-                     const GURL& url,
-                     const security_state::SecurityInfo& security_info);
+  PageInfoBubbleView(
+      views::View* anchor_view,
+      const gfx::Rect& anchor_rect,
+      gfx::NativeView parent_window,
+      Profile* profile,
+      content::WebContents* web_contents,
+      const GURL& url,
+      security_state::SecurityLevel security_level,
+      const security_state::VisibleSecurityState& visible_security_state,
+      PageInfoClosingCallback closing_callback);
 
   // PageInfoBubbleViewBase:
   gfx::Size CalculatePreferredSize() const override;
@@ -153,7 +163,10 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
                                   bool is_list_empty,
                                   int column_id);
 
-#if defined(SAFE_BROWSING_DB_LOCAL)
+  // WebContentsObserver:
+  void DidChangeVisibleSecurityState() override;
+
+#if defined(FULL_SAFE_BROWSING)
   std::unique_ptr<PageInfoUI::SecurityDescription>
   CreateSecurityDescriptionForPasswordReuse(
       bool is_enterprise_password) const override;
@@ -161,7 +174,7 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
 
   // Creates the contents of the |site_settings_view_|. The ownership of the
   // returned view is transferred to the caller.
-  views::View* CreateSiteSettingsView() WARN_UNUSED_RESULT;
+  std::unique_ptr<views::View> CreateSiteSettingsView() WARN_UNUSED_RESULT;
 
   // Posts a task to HandleMoreInfoRequestAsync() below.
   void HandleMoreInfoRequest(views::View* source);
@@ -174,23 +187,26 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
   // The presenter that controls the Page Info UI.
   std::unique_ptr<PageInfo> presenter_;
 
-  Profile* profile_;
+  Profile* const profile_;
 
   // The header section (containing security-related information).
-  BubbleHeaderView* header_;
+  BubbleHeaderView* header_ = nullptr;
 
   // The view that contains the certificate, cookie, and permissions sections.
-  views::View* site_settings_view_;
+  views::View* site_settings_view_ = nullptr;
 
   // The button that opens the "Cookies" dialog.
-  HoverButton* cookie_button_;
+  PageInfoHoverButton* cookie_button_ = nullptr;
+
+  // The button that opens the "Certificate" dialog.
+  PageInfoHoverButton* certificate_button_ = nullptr;
 
   // The view that contains the "Permissions" table of the bubble.
-  views::View* permissions_view_;
+  views::View* permissions_view_ = nullptr;
 
   // The view that contains ui related to features on a page, like a presenting
   // VR page.
-  views::View* page_feature_info_view_;
+  views::View* page_feature_info_view_ = nullptr;
 
   // The certificate provided by the site, if one exists.
   scoped_refptr<net::X509Certificate> certificate_;
@@ -200,9 +216,19 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
   // |Permission| changes.
   std::vector<std::unique_ptr<PermissionSelectorRow>> selector_rows_;
 
-  base::WeakPtrFactory<PageInfoBubbleView> weak_factory_;
+  PageInfoClosingCallback closing_callback_;
+
+  base::WeakPtrFactory<PageInfoBubbleView> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PageInfoBubbleView);
 };
+
+// Creates and returns a safety tip bubble. Used in unit tests.
+PageInfoBubbleViewBase* CreateSafetyTipBubbleForTesting(
+    gfx::NativeView parent_view,
+    content::WebContents* web_contents,
+    safety_tips::SafetyTipType type,
+    const GURL& virtual_url,
+    const GURL& safe_url);
 
 #endif  // CHROME_BROWSER_UI_VIEWS_PAGE_INFO_PAGE_INFO_BUBBLE_VIEW_H_

@@ -31,7 +31,10 @@
 #include "base/timer/elapsed_timer.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/net/prediction_options.h"
+#include "chrome/browser/predictors/loading_predictor.h"
+#include "chrome/browser/predictors/loading_predictor_factory.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
@@ -45,9 +48,9 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/prerender_types.h"
-#include "components/content_settings/core/common/pref_names.h"
-#include "components/prefs/pref_service.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
@@ -64,6 +67,7 @@
 #include "extensions/common/constants.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_request_headers.h"
+#include "third_party/blink/public/common/prerender/prerender_rel_type.h"
 #include "ui/gfx/geometry/rect.h"
 
 using chrome_browser_net::NetworkPredictionStatus;
@@ -162,7 +166,7 @@ struct PrerenderManager::NavigationRecord {
   GURL url;
   base::TimeTicks time;
   Origin origin;
-  FinalStatus final_status = FINAL_STATUS_MAX;
+  FinalStatus final_status = FINAL_STATUS_UNKNOWN;
 };
 
 PrerenderManager::PrerenderManager(Profile* profile)
@@ -173,8 +177,7 @@ PrerenderManager::PrerenderManager(Profile* profile)
       profile_network_bytes_(0),
       last_recorded_profile_network_bytes_(0),
       tick_clock_(base::DefaultTickClock::GetInstance()),
-      page_load_metric_observer_disabled_(false),
-      weak_factory_(this) {
+      page_load_metric_observer_disabled_(false) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   last_prerender_start_time_ =
@@ -216,10 +219,11 @@ PrerenderManager::AddPrerenderFromLinkRelPrerender(
     const GURL& url,
     const uint32_t rel_types,
     const content::Referrer& referrer,
+    const url::Origin& initiator_origin,
     const gfx::Size& size) {
-  Origin origin = rel_types & PrerenderRelTypePrerender ?
-                      ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN :
-                      ORIGIN_LINK_REL_NEXT;
+  Origin origin = rel_types & blink::kPrerenderRelTypePrerender
+                      ? ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN
+                      : ORIGIN_LINK_REL_NEXT;
   SessionStorageNamespace* session_storage_namespace = nullptr;
   // Unit tests pass in a process_id == -1.
   if (process_id != -1) {
@@ -240,20 +244,36 @@ PrerenderManager::AddPrerenderFromLinkRelPrerender(
         source_web_contents->GetController()
             .GetDefaultSessionStorageNamespace();
   }
-  return AddPrerender(
-      origin, url, referrer, gfx::Rect(size), session_storage_namespace);
+  return AddPrerenderWithPreconnectFallback(origin, url, referrer,
+                                            initiator_origin, gfx::Rect(size),
+                                            session_storage_namespace);
 }
 
 std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerenderFromOmnibox(
     const GURL& url,
     SessionStorageNamespace* session_storage_namespace,
     const gfx::Size& size) {
-  // TODO(pasko): Remove PRERENDER_MODE_ENABLED allowance. It is only used for
-  // tests.
-  if (!IsNoStatePrefetchEnabled() && GetMode() != PRERENDER_MODE_ENABLED)
+  // TODO(pasko): Remove DEPRECATED_PRERENDER_MODE_ENABLED allowance. It is only
+  // used for tests.
+  if (!IsNoStatePrefetchEnabled() &&
+      GetMode() != DEPRECATED_PRERENDER_MODE_ENABLED) {
     return nullptr;
-  return AddPrerender(ORIGIN_OMNIBOX, url, content::Referrer(), gfx::Rect(size),
-                      session_storage_namespace);
+  }
+  return AddPrerenderWithPreconnectFallback(
+      ORIGIN_OMNIBOX, url, content::Referrer(), base::nullopt, gfx::Rect(size),
+      session_storage_namespace);
+}
+
+std::unique_ptr<PrerenderHandle>
+PrerenderManager::AddPrerenderFromNavigationPredictor(
+    const GURL& url,
+    SessionStorageNamespace* session_storage_namespace,
+    const gfx::Size& size) {
+  DCHECK(IsNoStatePrefetchEnabled());
+
+  return AddPrerenderWithPreconnectFallback(
+      ORIGIN_NAVIGATION_PREDICTOR, url, content::Referrer(), base::nullopt,
+      gfx::Rect(size), session_storage_namespace);
 }
 
 std::unique_ptr<PrerenderHandle>
@@ -262,8 +282,9 @@ PrerenderManager::AddPrerenderFromExternalRequest(
     const content::Referrer& referrer,
     SessionStorageNamespace* session_storage_namespace,
     const gfx::Rect& bounds) {
-  return AddPrerender(ORIGIN_EXTERNAL_REQUEST, url, referrer,
-                      bounds, session_storage_namespace);
+  return AddPrerenderWithPreconnectFallback(ORIGIN_EXTERNAL_REQUEST, url,
+                                            referrer, base::nullopt, bounds,
+                                            session_storage_namespace);
 }
 
 std::unique_ptr<PrerenderHandle>
@@ -272,8 +293,9 @@ PrerenderManager::AddForcedPrerenderFromExternalRequest(
     const content::Referrer& referrer,
     SessionStorageNamespace* session_storage_namespace,
     const gfx::Rect& bounds) {
-  return AddPrerender(ORIGIN_EXTERNAL_REQUEST_FORCED_PRERENDER, url, referrer,
-                      bounds, session_storage_namespace);
+  return AddPrerenderWithPreconnectFallback(
+      ORIGIN_EXTERNAL_REQUEST_FORCED_PRERENDER, url, referrer, base::nullopt,
+      bounds, session_storage_namespace);
 }
 
 void PrerenderManager::CancelAllPrerenders() {
@@ -330,7 +352,7 @@ bool PrerenderManager::MaybeUsePrerenderedPage(const GURL& url,
     return false;
   DCHECK(prerender_data->contents());
 
-  if (prerender_data->contents()->prerender_mode() != FULL_PRERENDER)
+  if (prerender_data->contents()->prerender_mode() != DEPRECATED_FULL_PRERENDER)
     return false;
 
   WebContents* new_web_contents = SwapInternal(
@@ -594,7 +616,7 @@ std::vector<WebContents*> PrerenderManager::GetAllPrerenderingContents() const {
   for (const auto& prerender : active_prerenders_) {
     WebContents* contents = prerender->contents()->prerender_contents();
     if (contents &&
-        prerender->contents()->prerender_mode() == FULL_PRERENDER) {
+        prerender->contents()->prerender_mode() == DEPRECATED_FULL_PRERENDER) {
       result.push_back(contents);
     }
   }
@@ -732,18 +754,44 @@ bool PrerenderManager::IsLowEndDevice() const {
   return base::SysInfo::IsLowEndDevice();
 }
 
-std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
+void PrerenderManager::MaybePreconnect(Origin origin,
+                                       const GURL& url_arg) const {
+  if (!base::FeatureList::IsEnabled(features::kPrerenderFallbackToPreconnect)) {
+    return;
+  }
+
+  auto cookie_settings = CookieSettingsFactory::GetForProfile(profile_);
+  if (cookie_settings->ShouldBlockThirdPartyCookies()) {
+    return;
+  }
+
+  // Currently, the fallback is only enabled for prerenders initiated by
+  // omnibox.
+  if (origin != ORIGIN_OMNIBOX)
+    return;
+
+  auto* loading_predictor = predictors::LoadingPredictorFactory::GetForProfile(
+      Profile::FromBrowserContext(profile_));
+  if (loading_predictor) {
+    loading_predictor->PrepareForPageLoad(
+        url_arg, predictors::HintOrigin::OMNIBOX_PRERENDER_FALLBACK, true);
+  }
+}
+
+std::unique_ptr<PrerenderHandle>
+PrerenderManager::AddPrerenderWithPreconnectFallback(
     Origin origin,
     const GURL& url_arg,
     const content::Referrer& referrer,
+    const base::Optional<url::Origin>& initiator_origin,
     const gfx::Rect& bounds,
     SessionStorageNamespace* session_storage_namespace) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Disallow prerendering on low end devices.
   if (IsLowEndDevice()) {
-    RecordFinalStatusWithoutCreatingPrerenderContents(
-        url_arg, origin, FINAL_STATUS_LOW_END_DEVICE);
+    SkipPrerenderContentsAndMaybePreconnect(url_arg, origin,
+                                            FINAL_STATUS_LOW_END_DEVICE);
     return nullptr;
   }
 
@@ -754,10 +802,10 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
   }
 
   GURL url = url_arg;
-  GURL alias_url;
 
-  if (profile_->GetPrefs()->GetBoolean(prefs::kBlockThirdPartyCookies)) {
-    RecordFinalStatusWithoutCreatingPrerenderContents(
+  auto cookie_settings = CookieSettingsFactory::GetForProfile(profile_);
+  if (cookie_settings->ShouldBlockThirdPartyCookies()) {
+    SkipPrerenderContentsAndMaybePreconnect(
         url, origin, FINAL_STATUS_BLOCK_THIRD_PARTY_COOKIES);
     return nullptr;
   }
@@ -769,15 +817,14 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
         prerendering_status == NetworkPredictionStatus::DISABLED_DUE_TO_NETWORK
             ? FINAL_STATUS_CELLULAR_NETWORK
             : FINAL_STATUS_PRERENDERING_DISABLED;
-    RecordFinalStatusWithoutCreatingPrerenderContents(url, origin,
-                                                      final_status);
+    SkipPrerenderContentsAndMaybePreconnect(url, origin, final_status);
     return nullptr;
   }
 
   if (PrerenderData* preexisting_prerender_data =
           FindPrerenderData(url, session_storage_namespace)) {
-    RecordFinalStatusWithoutCreatingPrerenderContents(url, origin,
-                                                      FINAL_STATUS_DUPLICATE);
+    SkipPrerenderContentsAndMaybePreconnect(url, origin,
+                                            FINAL_STATUS_DUPLICATE);
     return base::WrapUnique(new PrerenderHandle(preexisting_prerender_data));
   }
 
@@ -788,8 +835,8 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
     if (!prefetch_age.is_zero() &&
         prefetch_age <
             base::TimeDelta::FromMinutes(net::HttpCache::kPrefetchReuseMins)) {
-      RecordFinalStatusWithoutCreatingPrerenderContents(url, origin,
-                                                        FINAL_STATUS_DUPLICATE);
+      SkipPrerenderContentsAndMaybePreconnect(url, origin,
+                                              FINAL_STATUS_DUPLICATE);
       return nullptr;
     }
   }
@@ -808,8 +855,8 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
   if (content::RenderProcessHost::ShouldTryToUseExistingProcessHost(
           profile_, url) &&
       !content::RenderProcessHost::run_renderer_in_process()) {
-    RecordFinalStatusWithoutCreatingPrerenderContents(
-        url, origin, FINAL_STATUS_TOO_MANY_PROCESSES);
+    SkipPrerenderContentsAndMaybePreconnect(url, origin,
+                                            FINAL_STATUS_TOO_MANY_PROCESSES);
     return nullptr;
   }
 
@@ -818,8 +865,8 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
     // Cancel the prerender. We could add it to the pending prerender list but
     // this doesn't make sense as the next prerender request will be triggered
     // by a navigation and is unlikely to be the same site.
-    RecordFinalStatusWithoutCreatingPrerenderContents(
-        url, origin, FINAL_STATUS_RATE_LIMIT_EXCEEDED);
+    SkipPrerenderContentsAndMaybePreconnect(url, origin,
+                                            FINAL_STATUS_RATE_LIMIT_EXCEEDED);
     return nullptr;
   }
 
@@ -833,8 +880,20 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
     return nullptr;
   }
 
+  // If this is GWS, and we are in the holdback, fall back to preconnect
+  // instead of prefetch. Record the status as holdback, so we can analyze via
+  // UKM.
+  if (origin == ORIGIN_GWS_PRERENDER &&
+      base::FeatureList::IsEnabled(kGWSPrefetchHoldback)) {
+    // Set the holdback status on the prefetch entry.
+    SetPrefetchFinalStatusForUrl(url, FINAL_STATUS_GWS_HOLDBACK);
+    SkipPrerenderContentsAndMaybePreconnect(url, origin,
+                                            FINAL_STATUS_GWS_HOLDBACK);
+    return nullptr;
+  }
+
   std::unique_ptr<PrerenderContents> prerender_contents =
-      CreatePrerenderContents(url, referrer, origin);
+      CreatePrerenderContents(url, referrer, initiator_origin, origin);
   DCHECK(prerender_contents);
   PrerenderContents* prerender_contents_ptr = prerender_contents.get();
   if (IsNoStatePrefetchEnabled())
@@ -983,10 +1042,11 @@ void PrerenderManager::AddObserver(
 std::unique_ptr<PrerenderContents> PrerenderManager::CreatePrerenderContents(
     const GURL& url,
     const content::Referrer& referrer,
+    const base::Optional<url::Origin>& initiator_origin,
     Origin origin) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return base::WrapUnique(prerender_contents_factory_->CreatePrerenderContents(
-      this, profile_, url, referrer, origin));
+      this, profile_, url, referrer, initiator_origin, origin));
 }
 
 void PrerenderManager::SortActivePrerenders() {
@@ -996,7 +1056,7 @@ void PrerenderManager::SortActivePrerenders() {
 
 PrerenderManager::PrerenderData* PrerenderManager::FindPrerenderData(
     const GURL& url,
-    const SessionStorageNamespace* session_storage_namespace) {
+    SessionStorageNamespace* session_storage_namespace) {
   for (const auto& prerender : active_prerenders_) {
     PrerenderContents* contents = prerender->contents();
     if (contents->Matches(url, session_storage_namespace))
@@ -1145,11 +1205,25 @@ void PrerenderManager::DestroyAllContents(FinalStatus final_status) {
   DeleteToDeletePrerenders();
 }
 
-void PrerenderManager::RecordFinalStatusWithoutCreatingPrerenderContents(
-    const GURL& url, Origin origin, FinalStatus final_status) const {
+void PrerenderManager::SkipPrerenderContentsAndMaybePreconnect(
+    const GURL& url,
+    Origin origin,
+    FinalStatus final_status) const {
   PrerenderHistory::Entry entry(url, final_status, origin, base::Time::Now());
   prerender_history_->AddEntry(entry);
   histograms_->RecordFinalStatus(origin, final_status);
+
+  if (final_status == FINAL_STATUS_LOW_END_DEVICE ||
+      final_status == FINAL_STATUS_CELLULAR_NETWORK ||
+      final_status == FINAL_STATUS_DUPLICATE ||
+      final_status == FINAL_STATUS_TOO_MANY_PROCESSES ||
+      final_status == FINAL_STATUS_GWS_HOLDBACK) {
+    MaybePreconnect(origin, url);
+  }
+
+  static_assert(
+      FINAL_STATUS_MAX == FINAL_STATUS_UNKNOWN + 1,
+      "Consider whether a failed prerender should fallback to preconnect");
 }
 
 void PrerenderManager::Observe(int type,

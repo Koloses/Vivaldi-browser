@@ -185,8 +185,7 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
   }
 
   LayoutTableSection* Header() const {
-    // TODO(mstensho): We should ideally DCHECK(!needsSectionRecalc()) here, but
-    // we currently cannot, due to crbug.com/693212
+    DCHECK(!NeedsSectionRecalc());
     return head_;
   }
   LayoutTableSection* Footer() const {
@@ -390,11 +389,12 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
 
   void PaintBoxDecorationBackground(
       const PaintInfo&,
-      const LayoutPoint& paint_offset) const final;
+      const PhysicalOffset& paint_offset) const final;
 
-  void PaintMask(const PaintInfo&, const LayoutPoint& paint_offset) const final;
+  void PaintMask(const PaintInfo&,
+                 const PhysicalOffset& paint_offset) const final;
 
-  void SubtractCaptionRect(LayoutRect&) const;
+  void SubtractCaptionRect(PhysicalRect&) const;
 
   bool IsLogicalWidthAuto() const;
 
@@ -410,7 +410,7 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
   // Whether a table has opaque foreground depends on many factors, e.g. border
   // spacing, missing cells, etc. For simplicity, just conservatively assume
   // foreground of all tables are not opaque.
-  bool ForegroundIsKnownToBeOpaqueInRect(const LayoutRect&,
+  bool ForegroundIsKnownToBeOpaqueInRect(const PhysicalRect&,
                                          unsigned) const override {
     return false;
   }
@@ -442,14 +442,14 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
   }
 
   void PaintObject(const PaintInfo&,
-                   const LayoutPoint& paint_offset) const override;
+                   const PhysicalOffset& paint_offset) const override;
   void UpdateLayout() override;
   void ComputeIntrinsicLogicalWidths(LayoutUnit& min_width,
                                      LayoutUnit& max_width) const override;
   void ComputePreferredLogicalWidths() override;
   bool NodeAtPoint(HitTestResult&,
-                   const HitTestLocation& location_in_container,
-                   const LayoutPoint& accumulated_offset,
+                   const HitTestLocation&,
+                   const PhysicalOffset& accumulated_offset,
                    HitTestAction) override;
 
   LayoutUnit BaselinePosition(
@@ -473,8 +473,8 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
   LayoutUnit ConvertStyleLogicalHeightToComputedHeight(
       const Length& style_logical_height) const;
 
-  LayoutRect OverflowClipRect(
-      const LayoutPoint& location,
+  PhysicalRect OverflowClipRect(
+      const PhysicalOffset& location,
       OverlayScrollbarClipBehavior =
           kIgnorePlatformOverlayScrollbarSize) const override;
 

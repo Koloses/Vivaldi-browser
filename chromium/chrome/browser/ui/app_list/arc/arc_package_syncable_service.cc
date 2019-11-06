@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/app_list/arc/arc_package_syncable_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "components/arc/arc_util.h"
-#include "components/arc/connection_holder.h"
+#include "components/arc/session/connection_holder.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_data.h"
@@ -121,6 +121,8 @@ bool ArcPackageSyncableService::IsPackageSyncing(
 }
 
 void ArcPackageSyncableService::WaitUntilReadyToSync(base::OnceClosure done) {
+  DCHECK(!wait_until_ready_to_sync_cb_);
+
   if (prefs_->package_list_initial_refreshed()) {
     std::move(done).Run();
     return;
@@ -157,7 +159,7 @@ syncer::SyncMergeResult ArcPackageSyncableService::MergeDataAndStartSyncing(
     std::unique_ptr<ArcSyncItem> sync_item(
         CreateSyncItemFromSyncData(sync_data));
     const std::string& package_name = sync_item->package_name;
-    if (!base::ContainsKey(local_package_set, package_name)) {
+    if (!base::Contains(local_package_set, package_name)) {
       pending_install_items_[package_name] = std::move(sync_item);
       InstallPackage(pending_install_items_[package_name].get());
     } else {
@@ -169,7 +171,7 @@ syncer::SyncMergeResult ArcPackageSyncableService::MergeDataAndStartSyncing(
   // Creates sync items for local unsynced packages.
   syncer::SyncChangeList change_list;
   for (const auto& local_package_name : local_packages) {
-    if (base::ContainsKey(sync_items_, local_package_name))
+    if (base::Contains(sync_items_, local_package_name))
       continue;
 
     if (!ShouldSyncPackage(local_package_name))
@@ -452,7 +454,12 @@ void ArcPackageSyncableService::UninstallPackage(const ArcSyncItem* sync_item) {
   if (!instance)
     return;
 
-  instance->UninstallPackage(sync_item->package_name);
+  // Make a copy of the package name string instead of handing out a reference
+  // to |sync_item->package_name|. The reason is that |sync_item| may get
+  // destroyed as a result of this call, making any references to it invalid.
+  // See crbug.com/970063.
+  std::string package_name = sync_item->package_name;
+  instance->UninstallPackage(package_name);
 }
 
 bool ArcPackageSyncableService::ShouldSyncPackage(

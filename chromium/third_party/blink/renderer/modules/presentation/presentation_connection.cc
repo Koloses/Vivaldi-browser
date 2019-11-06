@@ -15,7 +15,6 @@
 #include "third_party/blink/renderer/core/fileapi/file_reader_loader_client.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
@@ -25,6 +24,7 @@
 #include "third_party/blink/renderer/modules/presentation/presentation_controller.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_receiver.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_request.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -284,7 +284,9 @@ void ControllerPresentationConnection::Init(
 
   DidChangeState(mojom::blink::PresentationConnectionState::CONNECTING);
   target_connection_ = std::move(connection_ptr);
-  connection_binding_.Bind(std::move(connection_request));
+  connection_binding_.Bind(
+      std::move(connection_request),
+      GetExecutionContext()->GetTaskRunner(blink::TaskType::kPresentation));
 }
 
 void ControllerPresentationConnection::CloseInternal() {
@@ -332,7 +334,9 @@ void ReceiverPresentationConnection::Init(
     mojom::blink::PresentationConnectionPtr controller_connection_ptr,
     mojom::blink::PresentationConnectionRequest receiver_connection_request) {
   target_connection_ = std::move(controller_connection_ptr);
-  connection_binding_.Bind(std::move(receiver_connection_request));
+  connection_binding_.Bind(
+      std::move(receiver_connection_request),
+      GetExecutionContext()->GetTaskRunner(blink::TaskType::kPresentation));
 
   target_connection_->DidChangeState(
       mojom::blink::PresentationConnectionState::CONNECTED);
@@ -552,7 +556,7 @@ void PresentationConnection::DidReceiveBinaryMessage(const uint8_t* data,
 
   switch (binary_type_) {
     case kBinaryTypeBlob: {
-      std::unique_ptr<BlobData> blob_data = BlobData::Create();
+      auto blob_data = std::make_unique<BlobData>();
       blob_data->AppendBytes(data, length);
       Blob* blob =
           Blob::Create(BlobDataHandle::Create(std::move(blob_data), length));

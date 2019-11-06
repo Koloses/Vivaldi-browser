@@ -51,6 +51,7 @@ struct AXLocationChangeNotificationDetails;
 struct EntryChangedDetails;
 struct FaviconURL;
 struct LoadCommittedDetails;
+struct MediaPlayerId;
 struct PrunedDetails;
 struct Referrer;
 
@@ -270,6 +271,22 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
       const GlobalRequestID& request_id,
       const mojom::ResourceLoadInfo& resource_load_info) {}
 
+  // This method is invoked when a document or resource reads a cookie. Note
+  // that this isn't tied to any particular navigation (e.g., it may be called
+  // after a subsequent navigation commits).
+  virtual void OnCookiesRead(const GURL& url,
+                             const GURL& first_party_url,
+                             const net::CookieList& cookie_list,
+                             bool blocked_by_policy) {}
+
+  // This method is invoked when an attempt has been made to set |cookie|. Note
+  // that this isn't tied to any particular navigation (e.g., it may be called
+  // after a subsequent navigation commits).
+  virtual void OnCookieChange(const GURL& url,
+                              const GURL& first_party_url,
+                              const net::CanonicalCookie& cookie,
+                              bool blocked_by_policy) {}
+
   // This method is invoked when the extdata has been set (Vivaldi).
   virtual void ExtDataSet(WebContents* contents) {}
 
@@ -475,7 +492,7 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
       const std::vector<AXLocationChangeNotificationDetails>& details) {}
 
   // Invoked when theme color is changed to |theme_color|.
-  virtual void DidChangeThemeColor(SkColor theme_color) {}
+  virtual void DidChangeThemeColor(base::Optional<SkColor> theme_color) {}
 
   // Invoked when media is playing or paused.  |id| is unique per player and per
   // RenderFrameHost.  There may be multiple players within a RenderFrameHost
@@ -490,23 +507,6 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
         : has_video(has_video), has_audio(has_audio) {}
     bool has_video;
     bool has_audio;
-  };
-
-  struct CONTENT_EXPORT MediaPlayerId {
-   public:
-    static MediaPlayerId createMediaPlayerIdForTests();
-
-    MediaPlayerId(RenderFrameHost* render_frame_host, int delegate_id);
-
-    bool operator==(const MediaPlayerId& other) const;
-    bool operator!=(const MediaPlayerId& other) const;
-    bool operator<(const MediaPlayerId& other) const;
-
-    RenderFrameHost* render_frame_host = nullptr;
-    int delegate_id = 0;
-
-   private:
-    MediaPlayerId() = default;
   };
 
   virtual void MediaStartedPlaying(const MediaPlayerInfo& video_type,
@@ -533,6 +533,9 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener {
 
   // Invoked when the renderer process changes the page scale factor.
   virtual void OnPageScaleFactorChanged(float page_scale_factor) {}
+
+  // Invoked when a paste event occurs.
+  virtual void OnPaste() {}
 
   // Invoked if an IPC message is coming from a specific RenderFrameHost.
   virtual bool OnMessageReceived(const IPC::Message& message,

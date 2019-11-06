@@ -124,7 +124,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // Warning: This will re-sort profiles and thus may change indices!
   void SetGAIAGivenNameOfProfileAtIndex(size_t index,
                                         const base::string16& name);
-  void SetGAIAPictureOfProfileAtIndex(size_t index, const gfx::Image* image);
+  void SetGAIAPictureOfProfileAtIndex(size_t index, gfx::Image image);
   void SetIsUsingGAIAPictureOfProfileAtIndex(size_t index, bool value);
   void SetProfileSigninRequiredAtIndex(size_t index, bool value);
   void SetProfileIsUsingDefaultNameAtIndex(size_t index, bool value);
@@ -178,10 +178,6 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // new style default names ("Person 1"), and download and high-res avatars
   // used by the profiles.
   void MigrateLegacyProfileNamesAndDownloadAvatars();
-
-  // Remove statistics values that have previously been stored and are not used
-  // anymore.
-  void RemoveDeprecatedStatistics();
 
   std::vector<std::string> sorted_keys_;
   const base::FilePath user_data_dir_;

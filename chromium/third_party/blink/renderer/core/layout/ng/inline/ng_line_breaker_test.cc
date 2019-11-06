@@ -22,8 +22,8 @@ class NGLineBreakerTest : public NGLayoutTest {
   NGInlineNode CreateInlineNode(const String& html_content) {
     SetBodyInnerHTML(html_content);
 
-    LayoutNGBlockFlow* block_flow =
-        ToLayoutNGBlockFlow(GetLayoutObjectByElementId("container"));
+    LayoutBlockFlow* block_flow =
+        To<LayoutBlockFlow>(GetLayoutObjectByElementId("container"));
     return NGInlineNode(block_flow);
   }
 
@@ -35,10 +35,10 @@ class NGLineBreakerTest : public NGLayoutTest {
     node.PrepareLayoutIfNeeded();
 
     NGConstraintSpace space =
-        NGConstraintSpaceBuilder(
-            WritingMode::kHorizontalTb, WritingMode::kHorizontalTb,
-            /* is_new_fc */ false)
-            .SetAvailableSize({available_width, NGSizeIndefinite})
+        NGConstraintSpaceBuilder(WritingMode::kHorizontalTb,
+                                 WritingMode::kHorizontalTb,
+                                 /* is_new_fc */ false)
+            .SetAvailableSize({available_width, kIndefiniteSize})
             .ToConstraintSpace();
 
     scoped_refptr<NGInlineBreakToken> break_token;
@@ -494,8 +494,13 @@ TEST_P(NGTrailingSpaceWidthTest, TrailingSpaceWidth) {
   )HTML");
 
   Vector<NGLineInfo> line_infos = BreakToLineInfo(node, LayoutUnit(50));
-  EXPECT_EQ(line_infos[0].ComputeTrailingSpaceWidth(),
-            LayoutUnit(10) * data.trailing_space_width);
+  const NGLineInfo& line_info = line_infos[0];
+  if (line_info.ShouldHangTrailingSpaces()) {
+    EXPECT_EQ(line_info.HangWidth(),
+              LayoutUnit(10) * data.trailing_space_width);
+  } else {
+    EXPECT_EQ(line_info.HangWidth(), LayoutUnit());
+  }
 }
 
 TEST_F(NGLineBreakerTest, MinMaxWithTrailingSpaces) {
@@ -516,6 +521,29 @@ TEST_F(NGLineBreakerTest, MinMaxWithTrailingSpaces) {
       MinMaxSizeInput(/* percentage_resolution_block_size */ (LayoutUnit())));
   EXPECT_EQ(size.min_size, LayoutUnit(60));
   EXPECT_EQ(size.max_size, LayoutUnit(110));
+}
+
+TEST_F(NGLineBreakerTest, TableCellWidthCalculationQuirkOutOfFlow) {
+  NGInlineNode node = CreateInlineNode(R"HTML(
+    <style>
+    table {
+      font-size: 10px;
+      width: 5ch;
+    }
+    </style>
+    <table><tr><td id=container>
+      1234567
+      <img style="position: absolute">
+    </td></tr></table>
+  )HTML");
+  // |SetBodyInnerHTML| doesn't set compatibility mode.
+  GetDocument().SetCompatibilityMode(Document::kQuirksMode);
+  EXPECT_TRUE(node.GetDocument().InQuirksMode());
+
+  node.ComputeMinMaxSize(
+      WritingMode::kHorizontalTb,
+      MinMaxSizeInput(/* percentage_resolution_block_size */ LayoutUnit()));
+  // Pass if |ComputeMinMaxSize| doesn't hit DCHECK failures.
 }
 
 #undef MAYBE_OverflowAtomicInline

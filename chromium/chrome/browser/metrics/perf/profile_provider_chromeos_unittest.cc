@@ -13,12 +13,14 @@
 
 #include "base/allocator/buildflags.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/test_simple_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/test/scoped_task_environment.h"
+#include "base/time/time.h"
 #include "chrome/browser/metrics/perf/heap_collector.h"
 #include "chrome/browser/metrics/perf/metric_collector.h"
 #include "chromeos/login/login_state/login_state.h"
+#include "components/services/heap_profiling/public/cpp/settings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/metrics_proto/sampled_profile.pb.h"
 
@@ -59,9 +61,10 @@ PerfDataProto GetExamplePerfDataProto(int tstamp_sec) {
 template <int TSTAMP>
 class TestMetricCollector : public MetricCollector {
  public:
-  TestMetricCollector() {}
+  TestMetricCollector() : TestMetricCollector(CollectionParams()) {}
   explicit TestMetricCollector(const CollectionParams& collection_params)
-      : MetricCollector("UMA.CWP.TestData", collection_params) {}
+      : MetricCollector("UMA.CWP.TestData", collection_params),
+        weak_factory_(this) {}
 
   void CollectProfile(
       std::unique_ptr<SampledProfile> sampled_profile) override {
@@ -71,9 +74,19 @@ class TestMetricCollector : public MetricCollector {
                             perf_data_proto.SerializeAsString());
   }
 
+  base::WeakPtr<MetricCollector> GetWeakPtr() override {
+    return weak_factory_.GetWeakPtr();
+  }
+
  private:
+  base::WeakPtrFactory<TestMetricCollector> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(TestMetricCollector);
 };
+
+const base::TimeDelta kPeriodicCollectionInterval =
+    base::TimeDelta::FromHours(1);
+const base::TimeDelta kMaxCollectionDelay = base::TimeDelta::FromSeconds(1);
 
 // Allows access to some private methods for testing.
 class TestProfileProvider : public ProfileProvider {
@@ -84,7 +97,10 @@ class TestProfileProvider : public ProfileProvider {
     // to 1, so we always trigger collection.
     CollectionParams test_params;
     test_params.resume_from_suspend.sampling_factor = 1;
+    test_params.resume_from_suspend.max_collection_delay = kMaxCollectionDelay;
     test_params.restore_session.sampling_factor = 1;
+    test_params.restore_session.max_collection_delay = kMaxCollectionDelay;
+    test_params.periodic_interval = kPeriodicCollectionInterval;
 
     collectors_.clear();
     collectors_.push_back(
@@ -124,30 +140,30 @@ void ExpectTwoStoredPerfProfiles(
 class ProfileProviderTest : public testing::Test {
  public:
   ProfileProviderTest()
-      : task_runner_(base::MakeRefCounted<base::TestSimpleTaskRunner>()),
-        task_runner_handle_(task_runner_) {}
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME) {}
 
   void SetUp() override {
     // ProfileProvider requires chromeos::LoginState and
     // chromeos::PowerManagerClient to be initialized.
+    chromeos::PowerManagerClient::InitializeFake();
     chromeos::LoginState::Initialize();
-    chromeos::PowerManagerClient::Initialize();
 
     profile_provider_ = std::make_unique<TestProfileProvider>();
+    base::RunLoop().RunUntilIdle();
     profile_provider_->Init();
   }
 
   void TearDown() override {
     profile_provider_.reset();
-    chromeos::PowerManagerClient::Shutdown();
     chromeos::LoginState::Shutdown();
+    chromeos::PowerManagerClient::Shutdown();
   }
 
  protected:
-  std::unique_ptr<TestProfileProvider> profile_provider_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
-  scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  base::ThreadTaskRunnerHandle task_runner_handle_;
+  std::unique_ptr<TestProfileProvider> profile_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileProviderTest);
 };
@@ -163,7 +179,7 @@ TEST_F(ProfileProviderTest, CheckSetup) {
 
 TEST_F(ProfileProviderTest, UserLoginLogout) {
   // No user is logged in, so no collection is scheduled to run.
-  task_runner_->RunPendingTasks();
+  scoped_task_environment_.FastForwardBy(kPeriodicCollectionInterval);
 
   std::vector<SampledProfile> stored_profiles;
   EXPECT_FALSE(profile_provider_->GetSampledProfiles(&stored_profiles));
@@ -177,7 +193,7 @@ TEST_F(ProfileProviderTest, UserLoginLogout) {
 
   // Run all pending tasks. SetLoggedInState has activated timers for periodic
   // collection causing timer based pending tasks.
-  task_runner_->RunPendingTasks();
+  scoped_task_environment_.FastForwardBy(kPeriodicCollectionInterval);
   // We should find two profiles, one for each collector.
   EXPECT_TRUE(profile_provider_->GetSampledProfiles(&stored_profiles));
   ExpectTwoStoredPerfProfiles<SampledProfile::PERIODIC_COLLECTION>(
@@ -189,7 +205,7 @@ TEST_F(ProfileProviderTest, UserLoginLogout) {
       chromeos::LoginState::LOGGED_IN_NONE,
       chromeos::LoginState::LOGGED_IN_USER_NONE);
   // Run all pending tasks.
-  task_runner_->RunPendingTasks();
+  scoped_task_environment_.FastForwardBy(kPeriodicCollectionInterval);
   // We should find no new profiles.
   stored_profiles.clear();
   EXPECT_FALSE(profile_provider_->GetSampledProfiles(&stored_profiles));
@@ -200,7 +216,7 @@ TEST_F(ProfileProviderTest, SuspendDone_NoUserLoggedIn_NoCollection) {
   // No user is logged in, so no collection is done on resume from suspend.
   profile_provider_->SuspendDone(base::TimeDelta::FromMinutes(10));
   // Run all pending tasks.
-  task_runner_->RunPendingTasks();
+  scoped_task_environment_.FastForwardBy(kMaxCollectionDelay);
 
   std::vector<SampledProfile> stored_profiles;
   EXPECT_FALSE(profile_provider_->GetSampledProfiles(&stored_profiles));
@@ -220,7 +236,7 @@ TEST_F(ProfileProviderTest, CanceledSuspend_NoCollection) {
   // Trigger a canceled suspend (zero sleep duration).
   profile_provider_->SuspendDone(base::TimeDelta::FromSeconds(0));
   // Run all pending tasks.
-  task_runner_->RunPendingTasks();
+  scoped_task_environment_.FastForwardBy(kMaxCollectionDelay);
 
   // We should find no profiles.
   std::vector<SampledProfile> stored_profiles;
@@ -238,7 +254,7 @@ TEST_F(ProfileProviderTest, SuspendDone) {
   // Trigger a resume from suspend.
   profile_provider_->SuspendDone(base::TimeDelta::FromMinutes(10));
   // Run all pending tasks.
-  task_runner_->RunPendingTasks();
+  scoped_task_environment_.FastForwardBy(kMaxCollectionDelay);
 
   // We should find two profiles, one for each collector.
   std::vector<SampledProfile> stored_profiles;
@@ -251,7 +267,7 @@ TEST_F(ProfileProviderTest, OnSessionRestoreDone_NoUserLoggedIn_NoCollection) {
   // No user is logged in, so no collection is done on session restore.
   profile_provider_->OnSessionRestoreDone(10);
   // Run all pending tasks.
-  task_runner_->RunPendingTasks();
+  scoped_task_environment_.FastForwardBy(kMaxCollectionDelay);
 
   std::vector<SampledProfile> stored_profiles;
   EXPECT_FALSE(profile_provider_->GetSampledProfiles(&stored_profiles));
@@ -271,7 +287,7 @@ TEST_F(ProfileProviderTest, OnSessionRestoreDone) {
   // Trigger a session restore.
   profile_provider_->OnSessionRestoreDone(10);
   // Run all pending tasks.
-  task_runner_->RunPendingTasks();
+  scoped_task_environment_.FastForwardBy(kMaxCollectionDelay);
 
   // We should find two profiles, one for each collector.
   std::vector<SampledProfile> stored_profiles;
@@ -283,7 +299,7 @@ namespace {
 
 class TestParamsProfileProvider : public ProfileProvider {
  public:
-  TestParamsProfileProvider() {}
+  TestParamsProfileProvider() = default;
 
   using ProfileProvider::collectors_;
 
@@ -295,36 +311,34 @@ class TestParamsProfileProvider : public ProfileProvider {
 
 class ProfileProviderFeatureParamsTest : public testing::Test {
  public:
-  ProfileProviderFeatureParamsTest()
-      : task_runner_(base::MakeRefCounted<base::TestSimpleTaskRunner>()),
-        task_runner_handle_(task_runner_) {}
+  ProfileProviderFeatureParamsTest() = default;
 
   void SetUp() override {
     // ProfileProvider requires chromeos::LoginState and
     // chromeos::PowerManagerClient to be initialized.
+    chromeos::PowerManagerClient::InitializeFake();
     chromeos::LoginState::Initialize();
-    chromeos::PowerManagerClient::Initialize();
   }
 
   void TearDown() override {
-    chromeos::PowerManagerClient::Shutdown();
     chromeos::LoginState::Shutdown();
+    chromeos::PowerManagerClient::Shutdown();
   }
 
  private:
-  scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  base::ThreadTaskRunnerHandle task_runner_handle_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileProviderFeatureParamsTest);
 };
 
 TEST_F(ProfileProviderFeatureParamsTest, HeapCollectorDisabled) {
   std::map<std::string, std::string> params;
-  params.insert(std::make_pair("SamplingFactorForEnablingHeapCollector", "0"));
+  params.insert(
+      std::make_pair(heap_profiling::kOOPHeapProfilingFeatureMode, "non-cwp"));
 
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeatureWithParameters(kCWPHeapCollection,
-                                                         params);
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      heap_profiling::kOOPHeapProfilingFeature, params);
 
   TestParamsProfileProvider profile_provider;
   // We should have one collector registered.
@@ -338,11 +352,12 @@ TEST_F(ProfileProviderFeatureParamsTest, HeapCollectorDisabled) {
 
 TEST_F(ProfileProviderFeatureParamsTest, HeapCollectorEnabled) {
   std::map<std::string, std::string> params;
-  params.insert(std::make_pair("SamplingFactorForEnablingHeapCollector", "1"));
+  params.insert(std::make_pair(heap_profiling::kOOPHeapProfilingFeatureMode,
+                               "cwp-tcmalloc"));
 
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeatureWithParameters(kCWPHeapCollection,
-                                                         params);
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      heap_profiling::kOOPHeapProfilingFeature, params);
 
   TestParamsProfileProvider profile_provider;
   // We should have one collector registered.
@@ -352,7 +367,7 @@ TEST_F(ProfileProviderFeatureParamsTest, HeapCollectorEnabled) {
   // collectors, because the sampling factor param is set to 1. Otherwise, we
   // must still have one collector only.
   profile_provider.Init();
-#if BUILDFLAG(USE_NEW_TCMALLOC)
+#if !defined(MEMORY_TOOL_REPLACES_ALLOCATOR) && BUILDFLAG(USE_NEW_TCMALLOC)
   EXPECT_EQ(2u, profile_provider.collectors_.size());
 #else
   EXPECT_EQ(1u, profile_provider.collectors_.size());

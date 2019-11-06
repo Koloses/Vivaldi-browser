@@ -41,15 +41,15 @@ import org.chromium.chrome.browser.ntp.NewTabPageView.NewTabPageManager;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.suggestions.SiteSection;
-import org.chromium.chrome.browser.suggestions.SiteSectionViewHolder;
 import org.chromium.chrome.browser.suggestions.SiteSuggestion;
 import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
 import org.chromium.chrome.browser.suggestions.SuggestionsDependencyFactory;
-import org.chromium.chrome.browser.suggestions.Tile;
-import org.chromium.chrome.browser.suggestions.TileGridLayout;
-import org.chromium.chrome.browser.suggestions.TileGroup;
-import org.chromium.chrome.browser.suggestions.TileRenderer;
+import org.chromium.chrome.browser.suggestions.tile.SiteSection;
+import org.chromium.chrome.browser.suggestions.tile.SiteSectionViewHolder;
+import org.chromium.chrome.browser.suggestions.tile.Tile;
+import org.chromium.chrome.browser.suggestions.tile.TileGridLayout;
+import org.chromium.chrome.browser.suggestions.tile.TileGroup;
+import org.chromium.chrome.browser.suggestions.tile.TileRenderer;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.MathUtils;
@@ -187,7 +187,8 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
         insertSiteSectionView();
 
         int variation = ExploreSitesBridge.getVariation();
-        if (ExploreSitesBridge.isEnabled(variation)) {
+        if (ExploreSitesBridge.isEnabled(variation)
+                && !ExploreSitesBridge.isIntegratedWithMostLikely(variation)) {
             mExploreSectionView = ((ViewStub) findViewById(R.id.explore_sites_stub)).inflate();
         } else if (ExploreSitesBridge.isExperimental(variation)) {
             ViewStub exploreStub = findViewById(R.id.explore_sites_stub);
@@ -232,7 +233,8 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
         mSiteSectionViewHolder.bindDataSource(mTileGroup, tileRenderer);
 
         int variation = ExploreSitesBridge.getVariation();
-        if (ExploreSitesBridge.isEnabled(variation)) {
+        if (ExploreSitesBridge.isEnabled(variation)
+                && !ExploreSitesBridge.isIntegratedWithMostLikely(variation)) {
             mExploreSection = new ExploreSitesSection(mExploreSectionView, profile,
                     mManager.getNavigationDelegate(), SuggestionsConfig.getTileStyle(mUiConfig));
         } else if (ExploreSitesBridge.isExperimental(variation)) {
@@ -440,8 +442,10 @@ public class NewTabPageLayout extends LinearLayout implements TileGroup.Observer
         mSiteSectionView = SiteSection.inflateSiteSection(this);
         ViewGroup.LayoutParams layoutParams = mSiteSectionView.getLayoutParams();
         layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-        // If the explore sites section exists, then space it more closely.
-        if (ExploreSitesBridge.isEnabled(ExploreSitesBridge.getVariation())) {
+        // If the explore sites section exists as its own section, then space it more closely.
+        int variation = ExploreSitesBridge.getVariation();
+        if (ExploreSitesBridge.isEnabled(variation)
+                && !ExploreSitesBridge.isIntegratedWithMostLikely(variation)) {
             ((MarginLayoutParams) layoutParams).bottomMargin =
                     getResources().getDimensionPixelOffset(
                             R.dimen.tile_grid_layout_vertical_spacing);

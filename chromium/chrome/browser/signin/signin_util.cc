@@ -18,10 +18,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
-#include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_list_observer.h"
-#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/startup/startup_types.h"
 #include "chrome/browser/ui/webui/profile_helper.h"
@@ -30,12 +26,20 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/google/core/common/google_util.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/identity_utils.h"
-#include "components/signin/core/browser/signin_pref_names.h"
+#include "components/signin/public/base/signin_metrics.h"
+#include "components/signin/public/base/signin_pref_names.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/identity_utils.h"
+#include "components/signin/public/identity_manager/primary_account_mutator.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "services/identity/public/cpp/identity_manager.h"
-#include "services/identity/public/cpp/primary_account_mutator.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
+#include "chrome/browser/ui/browser_window.h"
+#endif
 
 namespace signin_util {
 namespace {
@@ -218,9 +222,8 @@ void EnsurePrimaryAccountAllowedForProfile(Profile* profile) {
 
   CoreAccountInfo primary_account = identity_manager->GetPrimaryAccountInfo();
   if (profile->GetPrefs()->GetBoolean(prefs::kSigninAllowed) &&
-      identity::LegacyIsUsernameAllowedByPatternFromPrefs(
-          g_browser_process->local_state(), primary_account.email,
-          prefs::kGoogleServicesUsernamePattern)) {
+      signin::IsUsernameAllowedByPatternFromPrefs(
+          g_browser_process->local_state(), primary_account.email)) {
     return;
   }
 
@@ -236,7 +239,7 @@ void EnsurePrimaryAccountAllowedForProfile(Profile* profile) {
       auto* primary_account_mutator =
           identity_manager->GetPrimaryAccountMutator();
       primary_account_mutator->ClearPrimaryAccount(
-          identity::PrimaryAccountMutator::ClearAccountsAction::kDefault,
+          signin::PrimaryAccountMutator::ClearAccountsAction::kDefault,
           signin_metrics::SIGNIN_NOT_ALLOWED_ON_PROFILE_INIT,
           signin_metrics::SignoutDelete::IGNORE_METRIC);
       break;

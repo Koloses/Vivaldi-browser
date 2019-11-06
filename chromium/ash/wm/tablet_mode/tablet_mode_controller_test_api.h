@@ -45,7 +45,9 @@ class TabletModeControllerTestApi {
   void CloseLid();
   void SetTabletMode(bool on);
 
-  bool GetDeferBoundsUpdates(aura::Window* window);
+  // Called to simulate the device suspend and resume.
+  void SuspendImminent();
+  void SuspendDone(base::TimeDelta sleep_duration);
 
   // Sets the event blocker on the tablet mode controller.
   void set_event_blocker(
@@ -73,12 +75,8 @@ class TabletModeControllerTestApi {
     return tablet_mode_controller_->CanUseUnstableLidAngle();
   }
 
-  TabletModeController::UiMode force_ui_mode() const {
-    return tablet_mode_controller_->force_ui_mode_;
-  }
-
   bool IsTabletModeStarted() const {
-    return tablet_mode_controller_->IsTabletModeWindowManagerEnabled();
+    return tablet_mode_controller_->InTabletMode();
   }
 
   bool AreEventsBlocked() const {

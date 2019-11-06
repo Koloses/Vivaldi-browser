@@ -8,25 +8,32 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
+import android.support.annotation.ColorInt;
 import android.support.v7.content.res.AppCompatResources;
 
 import org.chromium.base.Callback;
-import org.chromium.chrome.R;
 import org.chromium.chrome.browser.favicon.FaviconHelper;
 import org.chromium.chrome.browser.native_page.NativePageFactory;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.util.ViewUtils;
+import org.chromium.chrome.tab_ui.R;
 
 /**
  * Provider for processed favicons in Tab list.
  */
 public class TabListFaviconProvider {
-    private static Drawable sGlobeDrawable;
-    private static Drawable sChromeDrawable;
+    private static Drawable sRoundedGlobeDrawable;
+    private static Drawable sRoundedChromeDrawable;
     private final int mFaviconSize;
     private final Profile mProfile;
     private final FaviconHelper mFaviconHelper;
+    private final Context mContext;
+    @ColorInt
+    private final int mDefaultIconColor;
+    @ColorInt
+    private final int mIncognitoIconColor;
 
     /**
      * Construct the provider that provides favicons for tab list.
@@ -34,10 +41,11 @@ public class TabListFaviconProvider {
      * @param profile The profile to use for getting favicons.
      */
     public TabListFaviconProvider(Context context, Profile profile) {
+        mContext = context;
         mFaviconSize = context.getResources().getDimensionPixelSize(R.dimen.default_favicon_size);
         mProfile = profile;
         mFaviconHelper = new FaviconHelper();
-        if (sGlobeDrawable == null) {
+        if (sRoundedGlobeDrawable == null) {
             Drawable globeDrawable =
                     AppCompatResources.getDrawable(context, R.drawable.ic_globe_24dp);
             Bitmap globeBitmap =
@@ -45,13 +53,15 @@ public class TabListFaviconProvider {
             Canvas canvas = new Canvas(globeBitmap);
             globeDrawable.setBounds(0, 0, mFaviconSize, mFaviconSize);
             globeDrawable.draw(canvas);
-            sGlobeDrawable = processBitmap(globeBitmap);
+            sRoundedGlobeDrawable = processBitmap(globeBitmap);
         }
-        if (sChromeDrawable == null) {
+        if (sRoundedChromeDrawable == null) {
             Bitmap chromeBitmap =
                     BitmapFactory.decodeResource(context.getResources(), R.drawable.chromelogo16);
-            sChromeDrawable = processBitmap(chromeBitmap);
+            sRoundedChromeDrawable = processBitmap(chromeBitmap);
         }
+        mDefaultIconColor = mContext.getResources().getColor(R.color.default_icon_color);
+        mIncognitoIconColor = mContext.getResources().getColor(R.color.default_icon_color_white);
     }
 
     private Drawable processBitmap(Bitmap bitmap) {
@@ -62,9 +72,10 @@ public class TabListFaviconProvider {
 
     /**
      * @return The scaled rounded Globe Drawable as default favicon.
+     * @param isIncognito Whether the {@link Drawable} is used for incognito mode.
      */
-    public Drawable getDefaultFaviconDrawable() {
-        return sGlobeDrawable;
+    public Drawable getDefaultFaviconDrawable(boolean isIncognito) {
+        return getRoundedGlobeDrawable(isIncognito);
     }
 
     /**
@@ -76,13 +87,15 @@ public class TabListFaviconProvider {
     public void getFaviconForUrlAsync(
             String url, boolean isIncognito, Callback<Drawable> faviconCallback) {
         if (NativePageFactory.isNativePageUrl(url, isIncognito)) {
-            faviconCallback.onResult(sChromeDrawable);
+            faviconCallback.onResult(getRoundedChromeDrawable(isIncognito));
         } else {
             mFaviconHelper.getLocalFaviconImageForURL(
                     mProfile, url, mFaviconSize, (image, iconUrl) -> {
-                        if (image == null) return;
-                        Drawable drawable = processBitmap(image);
-                        faviconCallback.onResult(drawable);
+                        if (image == null) {
+                            faviconCallback.onResult(getRoundedGlobeDrawable(isIncognito));
+                        } else {
+                            faviconCallback.onResult(processBitmap(image));
+                        }
                     });
         }
     }
@@ -90,16 +103,37 @@ public class TabListFaviconProvider {
     /**
      * Synchronously get the processed favicon Drawable.
      * @param url The URL whose favicon is requested.
-     * @param isIncognito Whether the tab is in cognito or not.
+     * @param isIncognito Whether the tab is incognito or not.
      * @param icon The favicon that was received.
      * @return The processed favicon.
      */
     public Drawable getFaviconForUrlSync(String url, boolean isIncognito, Bitmap icon) {
         if (icon == null) {
             boolean isNativeUrl = NativePageFactory.isNativePageUrl(url, isIncognito);
-            return isNativeUrl ? sChromeDrawable : sGlobeDrawable;
+            return isNativeUrl ? getRoundedChromeDrawable(isIncognito)
+                               : getRoundedGlobeDrawable(isIncognito);
         } else {
             return processBitmap(icon);
         }
+    }
+
+    private Drawable getRoundedChromeDrawable(boolean isIncognito) {
+        @ColorInt
+        int color = isIncognito ? mIncognitoIconColor : mDefaultIconColor;
+        // Since static variable is still loaded when activity is destroyed due to configuration
+        // changes, e.g. light/dark theme changes, setColorFilter is needed when we retrieve the
+        // drawable. setColorFilter would be a no-op if color and the mode are the same.
+        sRoundedChromeDrawable.setColorFilter(color, PorterDuff.Mode.SRC_IN);
+        return sRoundedChromeDrawable;
+    }
+
+    private Drawable getRoundedGlobeDrawable(boolean isIncognito) {
+        @ColorInt
+        int color = isIncognito ? mIncognitoIconColor : mDefaultIconColor;
+        // Since static variable is still loaded when activity is destroyed due to configuration
+        // changes, e.g. light/dark theme changes, setColorFilter is needed when we retrieve the
+        // drawable. setColorFilter would be a no-op if color and the mode are the same.
+        sRoundedGlobeDrawable.setColorFilter(color, PorterDuff.Mode.SRC_IN);
+        return sRoundedGlobeDrawable;
     }
 }

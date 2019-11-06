@@ -9,7 +9,7 @@
 
 namespace views {
 
-MenuDelegate::~MenuDelegate() {}
+MenuDelegate::~MenuDelegate() = default;
 
 bool MenuDelegate::IsItemChecked(int id) const {
   return false;
@@ -125,7 +125,19 @@ MenuItemView* MenuDelegate::GetSiblingMenu(MenuItemView* menu,
                                            MenuAnchorPosition* anchor,
                                            bool* has_mnemonics,
                                            MenuButton** button) {
-  return NULL;
+  return nullptr;
+}
+
+MenuItemView* MenuDelegate::GetVivaldiSiblingMenu(
+    MenuItemView* menu,
+    const gfx::Point& screen_point,
+    gfx::Rect* rect) {
+  return nullptr;
+}
+
+MenuItemView* MenuDelegate::GetNextSiblingMenu(bool next, bool* has_mnemonics,
+                                               gfx::Rect* rect) {
+  return nullptr;
 }
 
 int MenuDelegate::GetMaxWidthForMenu(MenuItemView* menu) {

@@ -14,11 +14,11 @@
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "components/viz/common/gl_helper.h"
+#include "components/viz/test/test_gpu_service_holder.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "gpu/ipc/gl_in_process_context.h"
-#include "gpu/ipc/test_gpu_thread_holder.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -48,7 +48,8 @@ class YUVReadbackTest : public testing::Test {
 
     context_ = std::make_unique<gpu::GLInProcessContext>();
     auto result = context_->Initialize(
-        gpu::GetTestGpuThreadHolder()->GetTaskExecutor(), nullptr, /* surface */
+        TestGpuServiceHolder::GetInstance()->task_executor(),
+        nullptr,                 /* surface */
         true,                    /* offscreen */
         gpu::kNullSurfaceHandle, /* window */
         attributes, gpu::SharedMemoryLimits(),
@@ -352,13 +353,6 @@ class YUVReadbackTest : public testing::Test {
     gl_->TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, xsize, ysize, 0, GL_RGBA,
                     GL_UNSIGNED_BYTE, input_pixels.getPixels());
 
-    gpu::Mailbox mailbox;
-    gl_->ProduceTextureDirectCHROMIUM(src_texture, mailbox.name);
-    EXPECT_FALSE(mailbox.IsZero());
-
-    gpu::SyncToken sync_token;
-    gl_->GenSyncTokenCHROMIUM(sync_token.GetData());
-
     std::string message = base::StringPrintf(
         "input size: %dx%d "
         "output size: %dx%d "
@@ -392,8 +386,7 @@ class YUVReadbackTest : public testing::Test {
       std::move(quit_closure).Run();
     };
     yuv_reader->ReadbackYUV(
-        mailbox, sync_token, gfx::Size(xsize, ysize),
-        gfx::Rect(0, 0, xsize, ysize),
+        src_texture, gfx::Size(xsize, ysize), gfx::Rect(0, 0, xsize, ysize),
         output_frame->stride(media::VideoFrame::kYPlane),
         output_frame->data(media::VideoFrame::kYPlane),
         output_frame->stride(media::VideoFrame::kUPlane),

@@ -10,9 +10,10 @@
 #include "ash/app_list/views/app_list_main_view.h"
 #include "ash/app_list/views/contents_view.h"
 #include "ash/app_list/views/search_box_view.h"
-#include "ash/app_list/views/search_result_suggestion_chip_view.h"
 #include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/public/cpp/app_list/app_list_types.h"
+#include "ash/public/cpp/app_list/internal_app_id_constants.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -26,6 +27,18 @@ namespace {
 
 // The spacing between chips.
 constexpr int kChipSpacing = 8;
+
+// Sort suggestion chip results by |display_index| value in ascending order.
+bool IndexOrdering(const SearchResult* result1, const SearchResult* result2) {
+  return result1->display_index() < result2->display_index();
+}
+
+bool IsPolicySuggestionChip(const SearchResult* result) {
+  return result->display_location() ==
+             ash::SearchResultDisplayLocation::kSuggestionChipContainer &&
+         result->display_index() !=
+             ash::SearchResultDisplayIndex::kPlacementUndefined;
+}
 
 }  // namespace
 
@@ -45,7 +58,7 @@ SuggestionChipContainerView::SuggestionChipContainerView(
           views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
           kChipSpacing));
   layout_manager->set_main_axis_alignment(
-      views::BoxLayout::MainAxisAlignment::MAIN_AXIS_ALIGNMENT_CENTER);
+      views::BoxLayout::MainAxisAlignment::kCenter);
 
   for (size_t i = 0; i < static_cast<size_t>(
                              AppListConfig::instance().num_start_page_tiles());
@@ -53,7 +66,7 @@ SuggestionChipContainerView::SuggestionChipContainerView(
     SearchResultSuggestionChipView* chip =
         new SearchResultSuggestionChipView(view_delegate());
     chip->SetVisible(false);
-    chip->SetIndexInSuggestionChipContainer(i);
+    chip->set_index_in_container(i);
     suggestion_chip_views_.emplace_back(chip);
     AddChildView(chip);
   }
@@ -61,18 +74,48 @@ SuggestionChipContainerView::SuggestionChipContainerView(
 
 SuggestionChipContainerView::~SuggestionChipContainerView() = default;
 
-int SuggestionChipContainerView::DoUpdate() {
-  if (IgnoreUpdateAndLayout())
-    return num_results();
+SearchResultSuggestionChipView* SuggestionChipContainerView::GetResultViewAt(
+    size_t index) {
+  DCHECK(index >= 0 && index < suggestion_chip_views_.size());
+  return suggestion_chip_views_[index];
+}
 
-  auto exclude_reinstall_filter = [](const SearchResult& r) -> bool {
+int SuggestionChipContainerView::DoUpdate() {
+  // Filter out priority suggestion chips with a non-default value
+  // for |display_index|.
+  auto filter_indexed_policy_chips = [](const SearchResult& r) -> bool {
+    return IsPolicySuggestionChip(&r);
+  };
+  std::vector<SearchResult*> indexed_policy_results =
+      SearchModel::FilterSearchResultsByFunction(
+          results(), base::BindRepeating(filter_indexed_policy_chips),
+          AppListConfig::instance().num_start_page_tiles());
+
+  std::sort(indexed_policy_results.begin(), indexed_policy_results.end(),
+            &IndexOrdering);
+
+  // Need to filter out kArcAppShortcut since it will be confusing to users
+  // if shortcuts are displayed as suggestion chips. Also filter out any
+  // duplicate policy chip results.
+  auto filter_reinstall_and_shortcut = [](const SearchResult& r) -> bool {
     return r.display_type() == ash::SearchResultDisplayType::kRecommendation &&
-           r.result_type() != ash::SearchResultType::kPlayStoreReinstallApp;
+           r.result_type() != ash::SearchResultType::kPlayStoreReinstallApp &&
+           r.result_type() != ash::SearchResultType::kArcAppShortcut &&
+           !IsPolicySuggestionChip(&r);
   };
   std::vector<SearchResult*> display_results =
       SearchModel::FilterSearchResultsByFunction(
-          results(), base::BindRepeating(exclude_reinstall_filter),
-          AppListConfig::instance().num_start_page_tiles());
+          results(), base::BindRepeating(filter_reinstall_and_shortcut),
+          AppListConfig::instance().num_start_page_tiles() -
+              indexed_policy_results.size());
+
+  // Update display results list by placing policy result chips at their
+  // specified |display_index|.
+  for (auto* result : indexed_policy_results) {
+    std::vector<SearchResult*>::iterator desired_index =
+        display_results.begin() + result->display_index();
+    display_results.emplace(desired_index, result);
+  }
 
   // Update search results here, but wait until layout to add them as child
   // views when we know this view's bounds.
@@ -93,16 +136,13 @@ const char* SuggestionChipContainerView::GetClassName() const {
 }
 
 void SuggestionChipContainerView::Layout() {
-  if (IgnoreUpdateAndLayout())
-    return;
-
   // Only show the chips that fit in this view's contents bounds.
   int total_width = 0;
   const int max_width = GetContentsBounds().width();
   for (auto* chip : suggestion_chip_views_) {
     if (!chip->result())
       break;
-    const gfx::Size size = chip->CalculatePreferredSize();
+    const gfx::Size size = chip->GetPreferredSize();
     if (size.width() + total_width > max_width) {
       chip->SetVisible(false);
     } else {
@@ -140,7 +180,7 @@ bool SuggestionChipContainerView::OnKeyPressed(const ui::KeyEvent& event) {
 void SuggestionChipContainerView::DisableFocusForShowingActiveFolder(
     bool disabled) {
   for (auto* chip : suggestion_chip_views_)
-    chip->suggestion_chip_view()->SetEnabled(!disabled);
+    chip->SetEnabled(!disabled);
 
   // Ignore the container view in accessibility tree so that suggestion chips
   // will not be accessed by ChromeVox.
@@ -152,14 +192,7 @@ void SuggestionChipContainerView::DisableFocusForShowingActiveFolder(
 void SuggestionChipContainerView::OnTabletModeChanged(bool started) {
   // Enable/Disable chips' background blur based on tablet mode.
   for (auto* chip : suggestion_chip_views_)
-    chip->suggestion_chip_view()->SetBackgroundBlurEnabled(started);
-}
-
-bool SuggestionChipContainerView::IgnoreUpdateAndLayout() const {
-  // Ignore update and layout when this view is not shown.
-  const ash::AppListState state = contents_view_->GetActiveState();
-  return state != ash::AppListState::kStateStart &&
-         state != ash::AppListState::kStateApps;
+    chip->SetBackgroundBlurEnabled(started);
 }
 
 }  // namespace app_list

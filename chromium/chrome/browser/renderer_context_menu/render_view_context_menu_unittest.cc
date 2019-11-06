@@ -22,6 +22,7 @@
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
@@ -117,7 +118,6 @@ class RenderViewContextMenuTest : public testing::Test {
       std::unique_ptr<extensions::TestExtensionEnvironment> env)
       : environment_(std::move(env)) {
     // TODO(mgiuca): Add tests with DesktopPWAs enabled.
-    feature_list_.InitAndDisableFeature(features::kDesktopPWAWindowing);
   }
 
   // Proxy defined here to minimize friend classes in RenderViewContextMenu
@@ -147,7 +147,6 @@ class RenderViewContextMenuTest : public testing::Test {
 
  private:
   content::RenderViewHostTestEnabler rvh_test_enabler_;
-  base::test::ScopedFeatureList feature_list_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewContextMenuTest);
 };
@@ -389,8 +388,6 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
   RenderViewContextMenuPrefsTest() = default;
 
   void SetUp() override {
-    // TODO(mgiuca): Add tests with DesktopPWAs enabled.
-    feature_list_.InitAndDisableFeature(features::kDesktopPWAWindowing);
     ChromeRenderViewHostTestHarness::SetUp();
     registry_ = std::make_unique<ProtocolHandlerRegistry>(profile(), nullptr);
   }
@@ -408,7 +405,8 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
   // incognito mode.
   std::unique_ptr<TestRenderViewContextMenu> CreateContextMenuOnChromeLink() {
     content::ContextMenuParams params = CreateParams(MenuItem::LINK);
-    params.unfiltered_link_url = params.link_url = GURL("chrome://settings");
+    params.unfiltered_link_url = params.link_url =
+        GURL(chrome::kChromeUISettingsURL);
     auto menu = std::make_unique<TestRenderViewContextMenu>(
         web_contents()->GetMainFrame(), params);
     menu->set_protocol_handler_registry(registry_.get());
@@ -438,12 +436,9 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
     registry->RegisterDictionaryPref(proxy_config::prefs::kProxy);
     drp_test_context_->SetDataReductionProxyEnabled(
         enable_data_reduction_proxy);
-    settings->set_data_reduction_proxy_enabled_pref_name_for_test(
-        drp_test_context_->GetDataReductionProxyEnabledPrefName());
     settings->InitDataReductionProxySettings(
         drp_test_context_->io_data(), drp_test_context_->pref_service(),
-        drp_test_context_->request_context_getter(), profile(),
-        base::MakeRefCounted<network::TestSharedURLLoaderFactory>(),
+        profile(), base::MakeRefCounted<network::TestSharedURLLoaderFactory>(),
         std::make_unique<data_reduction_proxy::DataStore>(),
         base::ThreadTaskRunnerHandle::Get(),
         base::ThreadTaskRunnerHandle::Get());
@@ -465,7 +460,6 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
 
  private:
   std::unique_ptr<ProtocolHandlerRegistry> registry_;
-  base::test::ScopedFeatureList feature_list_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewContextMenuPrefsTest);
 };
@@ -550,24 +544,6 @@ TEST_F(RenderViewContextMenuPrefsTest, DataSaverDisabledSaveImageAs) {
   EXPECT_TRUE(headers.find(
       "Chrome-Proxy-Accept-Transform: identity") == std::string::npos);
   EXPECT_TRUE(headers.find("Cache-Control: no-cache") == std::string::npos);
-
-  DestroyDataReductionProxySettings();
-}
-
-// Verify that the Chrome-Proxy Lo-Fi directive causes the context menu to
-// display the "Load Image" menu item.
-TEST_F(RenderViewContextMenuPrefsTest, DataSaverLoadImage) {
-  SetupDataReductionProxy(true);
-  content::ContextMenuParams params = CreateParams(MenuItem::IMAGE);
-  params.properties[
-      data_reduction_proxy::chrome_proxy_content_transform_header()] =
-          data_reduction_proxy::empty_image_directive();
-  params.unfiltered_link_url = params.link_url;
-  auto menu = std::make_unique<TestRenderViewContextMenu>(
-      web_contents()->GetMainFrame(), params);
-  AppendImageItems(menu.get());
-
-  ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_LOAD_IMAGE));
 
   DestroyDataReductionProxySettings();
 }

@@ -16,7 +16,7 @@
 
 DomainReliabilityInternalsUI::DomainReliabilityInternalsUI(
     content::WebUI* web_ui)
-    : content::WebUIController(web_ui), weak_factory_(this) {
+    : content::WebUIController(web_ui) {
   content::WebUIDataSource* html_source = content::WebUIDataSource::Create(
       chrome::kChromeUIDomainReliabilityInternalsHost);
   html_source->OverrideContentSecurityPolicyScriptSrc(
@@ -26,7 +26,6 @@ DomainReliabilityInternalsUI::DomainReliabilityInternalsUI(
   html_source->AddResourcePath("domain_reliability_internals.js",
       IDR_DOMAIN_RELIABILITY_INTERNALS_JS);
   html_source->SetDefaultResource(IDR_DOMAIN_RELIABILITY_INTERNALS_HTML);
-  html_source->UseGzip();
 
   web_ui->RegisterMessageCallback(
       "updateData",

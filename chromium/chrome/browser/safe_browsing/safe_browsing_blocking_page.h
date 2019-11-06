@@ -37,6 +37,10 @@
 #include "components/safe_browsing/base_blocking_page.h"
 #include "components/safe_browsing/base_ui_manager.h"
 
+namespace network {
+class SharedURLLoaderFactory;
+}
+
 namespace safe_browsing {
 
 class SafeBrowsingBlockingPageFactory;
@@ -67,6 +71,10 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
   static void ShowBlockingPage(BaseUIManager* ui_manager,
                                const UnsafeResource& resource);
 
+  // Called when there is user interaction with the interstitial (e.g. user
+  // clicks 'Back to Safety' or 'Proceed anyways').
+  void CommandReceived(const std::string& page_cmd) override;
+
   // Makes the passed |factory| the factory used to instantiate
   // SafeBrowsingBlockingPage objects. Useful for tests.
   static void RegisterFactory(SafeBrowsingBlockingPageFactory* factory) {
@@ -75,7 +83,7 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
 
   // InterstitialPageDelegate method:
   void OverrideRendererPrefs(blink::mojom::RendererPreferences* prefs) override;
-  content::InterstitialPageDelegate::TypeID GetTypeForTesting() const override;
+  content::InterstitialPageDelegate::TypeID GetTypeForTesting() override;
 
  protected:
   friend class SafeBrowsingBlockingPageFactoryImpl;
@@ -107,11 +115,16 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
       content::WebContents* web_contents,
       const GURL& main_frame_url,
       const UnsafeResourceList& unsafe_resources,
-      const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options);
+      const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options,
+      network::SharedURLLoaderFactory* url_loader_for_testing = nullptr);
 
   // Called after the user clicks OnProceed(). If the page has malicious
   // subresources, then we show another interstitial.
   void HandleSubresourcesAfterProceed() override;
+
+  // Called when an interstitial is closed, either due to a click through or a
+  // navigation elsewhere.
+  void OnInterstitialClosing() override;
 
   // Called when the interstitial is going away. If there is a
   // pending threat details object, we look at the user's

@@ -7,7 +7,7 @@ import("//printing/buildflags/buildflags.gni")
 
 enable_service = use_cups && is_chromeos
 
-source_set("lib") {
+source_set("cups_ipp_parser") {
   sources = [
     "cups_ipp_parser_service.cc",
     "cups_ipp_parser_service.h",
@@ -16,6 +16,7 @@ source_set("lib") {
 
   deps = [
     "//base",
+    "//chrome/services/cups_proxy/public/cpp",
     "//mojo/public/cpp/bindings",
     "//net",
   ]
@@ -27,7 +28,7 @@ source_set("lib") {
     "//services/service_manager/public/cpp",
   ]
 
-  # We stub the implementation if libCUPS is not present
+  # We stub the implementation if libCUPS is not present.
   if (enable_service) {
     configs += [ "//printing:cups" ]
     sources += [ "ipp_parser.cc" ]

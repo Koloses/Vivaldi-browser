@@ -5,16 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_PARKABLE_STRING_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_PARKABLE_STRING_H_
 
-#include <map>
 #include <memory>
-#include <set>
 #include <utility>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
@@ -42,14 +40,6 @@ struct CompressionTaskParams;
 class PLATFORM_EXPORT ParkableStringImpl final
     : public RefCounted<ParkableStringImpl> {
  public:
-  // Histogram buckets, exported for testing.
-  enum class ParkingAction {
-    kParkedInBackground = 0,
-    kUnparkedInBackground = 1,
-    kUnparkedInForeground = 2,
-    kMaxValue = kUnparkedInForeground
-  };
-
   enum class ParkableState { kParkable, kNotParkable };
   enum class ParkingMode { kIfCompressedDataExists, kAlways };
   enum class AgeOrParkResult {
@@ -123,8 +113,15 @@ class PLATFORM_EXPORT ParkableStringImpl final
   bool is_young() const { return is_young_; }
 
  private:
-  enum class State;
-  enum class Status;
+  enum class State : uint8_t;
+  enum class Status : uint8_t;
+  friend class ParkableStringManager;
+
+  unsigned GetHash() const { return hash_; }
+
+  // Both functions below can be expensive (i.e. trigger unparking).
+  bool Equal(const ParkableStringImpl& rhs) const;
+  bool Equal(const scoped_refptr<StringImpl> rhs) const;
 
 #if defined(ADDRESS_SANITIZER)
   // See |CompressInBackground()|. Doesn't make the string young.
@@ -139,12 +136,17 @@ class PLATFORM_EXPORT ParkableStringImpl final
   bool CanParkNow() const;
   void ParkInternal(ParkingMode mode);
   void Unpark();
+  String UnparkInternal() const;
+  String ToStringTransient() const;
   // Called on the main thread after compression is done.
   // |params| is the same as the one passed to |CompressInBackground()|,
   // |compressed| is the compressed data, nullptr if compression failed.
+  // |parking_thread_time| is the CPU time used by the background compression
+  // task.
   void OnParkingCompleteOnMainThread(
       std::unique_ptr<CompressionTaskParams> params,
-      std::unique_ptr<Vector<uint8_t>> compressed);
+      std::unique_ptr<Vector<uint8_t>> compressed,
+      base::TimeDelta parking_thread_time);
 
   // Background thread.
   static void CompressInBackground(std::unique_ptr<CompressionTaskParams>);
@@ -161,6 +163,7 @@ class PLATFORM_EXPORT ParkableStringImpl final
   const bool may_be_parked_ : 1;
   const bool is_8bit_ : 1;
   const unsigned length_;
+  const wtf_size_t hash_;
 
 #if DCHECK_IS_ON()
   const base::PlatformThreadId owning_thread_;
@@ -174,6 +177,8 @@ class PLATFORM_EXPORT ParkableStringImpl final
 
   FRIEND_TEST_ALL_PREFIXES(ParkableStringTest, LockUnlock);
   FRIEND_TEST_ALL_PREFIXES(ParkableStringTest, LockParkedString);
+  FRIEND_TEST_ALL_PREFIXES(ParkableStringTest, Equality);
+  FRIEND_TEST_ALL_PREFIXES(ParkableStringTest, EqualityNoUnparking);
   DISALLOW_COPY_AND_ASSIGN(ParkableStringImpl);
 };
 

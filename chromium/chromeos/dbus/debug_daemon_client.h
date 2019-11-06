@@ -63,12 +63,6 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) DebugDaemonClient
   // Gets information about network status as json.
   virtual void GetNetworkStatus(DBusMethodCallback<std::string> callback) = 0;
 
-  // Gets information about modem status as json.
-  virtual void GetModemStatus(DBusMethodCallback<std::string> callback) = 0;
-
-  // Gets information about WiMAX status as json.
-  virtual void GetWiMaxStatus(DBusMethodCallback<std::string> callback) = 0;
-
   // Gets information about network interfaces as json.
   // For details, please refer to
   // http://gerrit.chromium.org/gerrit/#/c/28045/5/src/helpers/netif.cc
@@ -88,24 +82,25 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) DebugDaemonClient
                              int file_descriptor,
                              DBusMethodCallback<uint64_t> callback) = 0;
 
-  // Callback type for GetScrubbedLogs(), GetAllLogs() or GetUserLogFiles().
-  using GetLogsCallback =
-      base::Callback<void(bool succeeded,
-                          const std::map<std::string, std::string>& logs)>;
+  // Stops the perf session identified with |session_id| that was started by a
+  // prior call to GetPerfOutput(), and let the caller of GetPerfOutput() gather
+  // profiling data right away. If the profiler session as identified by
+  // |session_id| has ended, this method will silently succeed.
+  virtual void StopPerf(uint64_t session_id,
+                        VoidDBusMethodCallback callback) = 0;
 
-  // Gets scrubbed logs from debugd.
-  virtual void GetScrubbedLogs(const GetLogsCallback& callback) = 0;
+  // Callback type for GetAllLogs()
+  using GetLogsCallback =
+      base::OnceCallback<void(bool succeeded,
+                              const std::map<std::string, std::string>& logs)>;
 
   // Gets the scrubbed logs from debugd that are very large and cannot be
   // returned directly from D-Bus. These logs will include ARC and cheets
   // system information.
-  virtual void GetScrubbedBigLogs(const GetLogsCallback& callback) = 0;
+  virtual void GetScrubbedBigLogs(GetLogsCallback callback) = 0;
 
   // Gets all logs collected by debugd.
-  virtual void GetAllLogs(const GetLogsCallback& callback) = 0;
-
-  // Gets list of user log files that must be read by Chrome.
-  virtual void GetUserLogFiles(const GetLogsCallback& callback) = 0;
+  virtual void GetAllLogs(GetLogsCallback callback) = 0;
 
   // Gets an individual log source provided by debugd.
   virtual void GetLog(const std::string& log_name,
@@ -114,25 +109,25 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) DebugDaemonClient
   virtual void SetStopAgentTracingTaskRunner(
       scoped_refptr<base::TaskRunner> task_runner) = 0;
 
-  // Called once TestICMP() is complete. Takes two parameters:
-  // - succeeded: information was obtained successfully.
-  // - status: information about ICMP connectivity to a specified host as json.
+  // Called once TestICMP() is complete. Takes an optional string.
+  // - The optional string has value if information was obtained successfully.
+  // - The string value contains information about ICMP connectivity to a
+  //   specified host as json.
   //   For details please refer to
   //   https://gerrit.chromium.org/gerrit/#/c/30310/2/src/helpers/icmp.cc
-  typedef base::Callback<void(bool succeeded, const std::string& status)>
-      TestICMPCallback;
+  using TestICMPCallback = DBusMethodCallback<std::string>;
 
   // Tests ICMP connectivity to a specified host. The |ip_address| contains the
   // IPv4 or IPv6 address of the host, for example "8.8.8.8".
   virtual void TestICMP(const std::string& ip_address,
-                        const TestICMPCallback& callback) = 0;
+                        TestICMPCallback callback) = 0;
 
   // Tests ICMP connectivity to a specified host. The |ip_address| contains the
   // IPv4 or IPv6 address of the host, for example "8.8.8.8".
   virtual void TestICMPWithOptions(
       const std::string& ip_address,
       const std::map<std::string, std::string>& options,
-      const TestICMPCallback& callback) = 0;
+      TestICMPCallback callback) = 0;
 
   // Called once EnableDebuggingFeatures() is complete. |succeeded| will be true
   // if debugging features have been successfully enabled.
@@ -212,14 +207,14 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) DebugDaemonClient
       CupsAddPrinterCallback callback) = 0;
 
   // A callback to handle the result of CupsRemovePrinter.
-  using CupsRemovePrinterCallback = base::Callback<void(bool success)>;
+  using CupsRemovePrinterCallback = base::OnceCallback<void(bool success)>;
 
   // Calls CupsRemovePrinter.  |name| is the printer name as registered in
   // CUPS.  |callback| is called with true if removing the printer from CUPS was
   // successful and false if there was an error.  |error_callback| will be
   // called if there was an error in communicating with debugd.
   virtual void CupsRemovePrinter(const std::string& name,
-                                 const CupsRemovePrinterCallback& callback,
+                                 CupsRemovePrinterCallback callback,
                                  const base::Closure& error_callback) = 0;
 
   // A callback to handle the result of StartConcierge/StopConcierge.
@@ -230,6 +225,16 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) DebugDaemonClient
   // Calls debugd::kStopVmConcierge, which stops the Concierge service.
   // |callback| is called when the method finishes.
   virtual void StopConcierge(ConciergeCallback callback) = 0;
+
+  // A callback to handle the result of
+  // StartPluginVmDispatcher/StopPluginVmDispatcher.
+  using PluginVmDispatcherCallback = base::OnceCallback<void(bool success)>;
+  // Calls debugd::kStartVmPluginDispatcher, which starts the PluginVm
+  // dispatcher service. |callback| is called when the method finishes.
+  virtual void StartPluginVmDispatcher(PluginVmDispatcherCallback callback) = 0;
+  // Calls debug::kStopVmPluginDispatcher, which stops the PluginVm dispatcher
+  // service. |callback| is called when the method finishes.
+  virtual void StopPluginVmDispatcher(PluginVmDispatcherCallback callback) = 0;
 
   // A callback to handle the result of SetRlzPingSent.
   using SetRlzPingSentCallback = base::OnceCallback<void(bool success)>;
@@ -243,9 +248,16 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) DebugDaemonClient
   virtual void SetSchedulerConfiguration(const std::string& config_name,
                                          VoidDBusMethodCallback callback) = 0;
 
+  // Set U2F flags.
+  virtual void SetU2fFlags(const std::set<std::string>& flags,
+                           VoidDBusMethodCallback callback) = 0;
+  // Get U2F flags.
+  virtual void GetU2fFlags(
+      DBusMethodCallback<std::set<std::string>> callback) = 0;
+
   // Factory function, creates a new instance and returns ownership.
   // For normal usage, access the singleton via DBusThreadManager::Get().
-  static DebugDaemonClient* Create();
+  static std::unique_ptr<DebugDaemonClient> Create();
 
  protected:
   // Create() should be used instead.

@@ -88,7 +88,7 @@ class ModuleScriptLoaderTestModulator final : public DummyModulator {
       requests_.emplace_back(request, TextPosition::MinimumPosition());
     }
   }
-  Vector<ModuleRequest> ModuleRequestsFromScriptModule(ScriptModule) override {
+  Vector<ModuleRequest> ModuleRequestsFromModuleRecord(ModuleRecord) override {
     return requests_;
   }
 
@@ -143,6 +143,11 @@ class ModuleScriptLoaderTest : public PageTestBase {
         ->RunUntilIdle();
   }
 
+ private:
+  const base::TickClock* GetTickClock() override {
+    return platform_->test_task_runner()->GetMockTickClock();
+  }
+
  protected:
   const KURL url_;
   const scoped_refptr<const SecurityOrigin> security_origin_;
@@ -166,7 +171,7 @@ void ModuleScriptLoaderTest::InitializeForDocument() {
   auto* properties =
       MakeGarbageCollected<TestResourceFetcherProperties>(security_origin_);
   fetcher_ = MakeGarbageCollected<ResourceFetcher>(
-      ResourceFetcherInit(*properties, fetch_context,
+      ResourceFetcherInit(properties->MakeDetachable(), fetch_context,
                           base::MakeRefCounted<scheduler::FakeTaskRunner>(),
                           MakeGarbageCollected<TestLoaderFactory>()));
   modulator_ = MakeGarbageCollected<ModuleScriptLoaderTestModulator>(
@@ -178,7 +183,7 @@ void ModuleScriptLoaderTest::InitializeForWorklet() {
   auto* properties =
       MakeGarbageCollected<TestResourceFetcherProperties>(security_origin_);
   fetcher_ = MakeGarbageCollected<ResourceFetcher>(
-      ResourceFetcherInit(*properties, fetch_context,
+      ResourceFetcherInit(properties->MakeDetachable(), fetch_context,
                           base::MakeRefCounted<scheduler::FakeTaskRunner>(),
                           MakeGarbageCollected<TestLoaderFactory>()));
   reporting_proxy_ = std::make_unique<MockWorkerReportingProxy>();
@@ -194,8 +199,7 @@ void ModuleScriptLoaderTest::InitializeForWorklet() {
       MakeGarbageCollected<WorkletModuleResponsesMap>());
   global_scope_ = MakeGarbageCollected<WorkletGlobalScope>(
       std::move(creation_params), *reporting_proxy_, &GetFrame());
-  ASSERT_TRUE(global_scope_->ScriptController()->InitializeContext(
-      "Dummy Context", NullURL()));
+  global_scope_->ScriptController()->Initialize(NullURL());
   modulator_ = MakeGarbageCollected<ModuleScriptLoaderTestModulator>(
       global_scope_->ScriptController()->GetScriptState());
 }
@@ -203,7 +207,7 @@ void ModuleScriptLoaderTest::InitializeForWorklet() {
 void ModuleScriptLoaderTest::TestFetchDataURL(
     ModuleScriptCustomFetchType custom_fetch_type,
     TestModuleScriptLoaderClient* client) {
-  ModuleScriptLoaderRegistry* registry = ModuleScriptLoaderRegistry::Create();
+  auto* registry = MakeGarbageCollected<ModuleScriptLoaderRegistry>();
   KURL url("data:text/javascript,export default 'grapes';");
   ModuleScriptLoader::Fetch(ModuleScriptFetchRequest::CreateForTest(url),
                             fetcher_, ModuleGraphLevel::kTopLevelModuleFetch,
@@ -260,7 +264,7 @@ TEST_F(ModuleScriptLoaderTest, FetchDataURL_OnWorklet) {
 void ModuleScriptLoaderTest::TestInvalidSpecifier(
     ModuleScriptCustomFetchType custom_fetch_type,
     TestModuleScriptLoaderClient* client) {
-  ModuleScriptLoaderRegistry* registry = ModuleScriptLoaderRegistry::Create();
+  auto* registry = MakeGarbageCollected<ModuleScriptLoaderRegistry>();
   KURL url("data:text/javascript,import 'invalid';export default 'grapes';");
   GetModulator()->SetModuleRequests({"invalid"});
   ModuleScriptLoader::Fetch(ModuleScriptFetchRequest::CreateForTest(url),
@@ -304,7 +308,7 @@ TEST_F(ModuleScriptLoaderTest, InvalidSpecifier_OnWorklet) {
 void ModuleScriptLoaderTest::TestFetchInvalidURL(
     ModuleScriptCustomFetchType custom_fetch_type,
     TestModuleScriptLoaderClient* client) {
-  ModuleScriptLoaderRegistry* registry = ModuleScriptLoaderRegistry::Create();
+  auto* registry = MakeGarbageCollected<ModuleScriptLoaderRegistry>();
   KURL url;
   EXPECT_FALSE(url.IsValid());
   ModuleScriptLoader::Fetch(ModuleScriptFetchRequest::CreateForTest(url),
@@ -347,7 +351,7 @@ void ModuleScriptLoaderTest::TestFetchURL(
   url_test_helpers::RegisterMockedURLLoad(
       url, test::CoreTestDataPath("module.js"), "text/javascript");
 
-  ModuleScriptLoaderRegistry* registry = ModuleScriptLoaderRegistry::Create();
+  auto* registry = MakeGarbageCollected<ModuleScriptLoaderRegistry>();
   ModuleScriptLoader::Fetch(ModuleScriptFetchRequest::CreateForTest(url),
                             fetcher_, ModuleGraphLevel::kTopLevelModuleFetch,
                             GetModulator(), custom_fetch_type, registry,

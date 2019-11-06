@@ -15,17 +15,25 @@
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "third_party/perfetto/include/perfetto/tracing/core/trace_packet.h"
+#include "third_party/perfetto/include/perfetto/ext/tracing/core/trace_packet.h"
 
 namespace perfetto {
 namespace protos {
 class ChromeLegacyJsonTrace;
 class ChromeMetadata;
+class ChromeTraceEvent_Arg;
+class DebugAnnotation;
 class TraceStats;
 }  // namespace protos
 }  // namespace perfetto
 
 namespace tracing {
+
+void OutputJSONFromArgumentProto(
+    const perfetto::protos::ChromeTraceEvent_Arg& arg,
+    std::string* out);
+void OutputJSONFromArgumentProto(const perfetto::protos::DebugAnnotation& arg,
+                                 std::string* out);
 
 // Converts proto-encoded trace data into the legacy JSON trace format.
 // Conversion happens on-the-fly as new trace packets are received.
@@ -36,19 +44,36 @@ class JSONTraceExporter {
   using ArgumentNameFilterPredicate =
       base::RepeatingCallback<bool(const char* arg_name)>;
 
-  using OnTraceEventJSONCallback =
-      base::RepeatingCallback<void(const std::string& json,
-                                   base::DictionaryValue* metadata,
-                                   bool has_more)>;
+  // Given trace event name and category group name, returns a argument name
+  // filter predicate callback that can filter arguments for the given event.
+  using ArgumentFilterPredicate =
+      base::RepeatingCallback<bool(const char* category_group_name,
+                                   const char* event_name,
+                                   ArgumentNameFilterPredicate*)>;
 
-  JSONTraceExporter(bool filter_args, OnTraceEventJSONCallback callback);
+  // Given a metadata name, returns if the event should be filtered or not.
+  using MetadataFilterPredicate =
+      base::RepeatingCallback<bool(const std::string& metadata_name)>;
+
+  using OnTraceEventJSONCallback = base::RepeatingCallback<
+      void(std::string* json, base::DictionaryValue* metadata, bool has_more)>;
+
+  JSONTraceExporter(ArgumentFilterPredicate argument_filter_predicate,
+                    MetadataFilterPredicate metadata_filter_predicate,
+                    OnTraceEventJSONCallback callback);
   virtual ~JSONTraceExporter();
 
   // Called to notify the exporter of new trace packets. Will call the
   // |json_callback| passed in the constructor with the converted trace data.
   void OnTraceData(std::vector<perfetto::TracePacket> packets, bool has_more);
 
-  void set_filter_args_for_testing(bool value) { filter_args_ = value; }
+  void SetArgumentFilterForTesting(ArgumentFilterPredicate predicate) {
+    argument_filter_predicate_ = std::move(predicate);
+  }
+
+  void SetMetdataFilterPredicateForTesting(MetadataFilterPredicate predicate) {
+    metadata_filter_predicate_ = std::move(predicate);
+  }
 
   void set_label_filter(const std::string& label_filter) {
     label_filter_ = label_filter;
@@ -71,6 +96,8 @@ class JSONTraceExporter {
     std::string* mutable_out();
     const std::string& out();
 
+    void reserve(size_t size);
+
     template <typename... Args>
     void AppendF(const char* format, Args&&... args) {
       MaybeRunCallback();
@@ -92,7 +119,7 @@ class JSONTraceExporter {
 
   class ArgumentBuilder {
    public:
-    ArgumentBuilder(bool filter_args,
+    ArgumentBuilder(const ArgumentFilterPredicate& argument_filter_predicate,
                     const char* name,
                     const char* category_group_name,
                     StringBuffer* out);
@@ -139,6 +166,7 @@ class JSONTraceExporter {
     void AddDuration(int64_t duration);
     void AddThreadDuration(int64_t thread_duration);
     void AddThreadTimestamp(int64_t thread_timestamp);
+    void AddThreadInstructionDelta(int64_t thread_instruction_delta);
     void AddBindId(uint64_t bind_id);
     // A set of bit flags for this trace event, along with a |scope|. |scope| is
     // ignored if empty.
@@ -172,14 +200,15 @@ class JSONTraceExporter {
    private:
     // Subclasses of JSONTraceExporter can create a new instance by calling
     // AddTraceEvent().
-    ScopedJSONTraceEventAppender(StringBuffer* out,
-                                 bool filter_args,
-                                 const char* name,
-                                 const char* categories,
-                                 int32_t phase,
-                                 int64_t timestamp,
-                                 int32_t pid,
-                                 int32_t tid);
+    ScopedJSONTraceEventAppender(
+        StringBuffer* out,
+        ArgumentFilterPredicate argument_filter_predicate,
+        const char* name,
+        const char* categories,
+        int32_t phase,
+        int64_t timestamp,
+        int32_t pid,
+        int32_t tid);
     friend class JSONTraceExporter;
 
     char phase_;
@@ -187,14 +216,14 @@ class JSONTraceExporter {
     StringBuffer* out_;
     const char* event_name_;
     const char* category_group_name_;
-    bool filter_args_;
+    ArgumentFilterPredicate argument_filter_predicate_;
   };
 
   // Subclasses implement this to add data from |packets| to the JSON output.
   // For example they can add traceEvents through AddTraceEvent(), or add
   // metadata through AddChromeMetadata().
-  virtual void ProcessPackets(
-      const std::vector<perfetto::TracePacket>& packets) = 0;
+  virtual void ProcessPackets(const std::vector<perfetto::TracePacket>& packets,
+                              bool has_more) = 0;
 
   // If true then all trace events should be skipped. AddTraceEvent should not
   // be called.
@@ -237,7 +266,8 @@ class JSONTraceExporter {
   std::string label_filter_;
   std::string legacy_system_ftrace_output_;
   std::unique_ptr<base::DictionaryValue> metadata_;
-  bool filter_args_;
+  ArgumentFilterPredicate argument_filter_predicate_;
+  MetadataFilterPredicate metadata_filter_predicate_;
 
   DISALLOW_COPY_AND_ASSIGN(JSONTraceExporter);
 };

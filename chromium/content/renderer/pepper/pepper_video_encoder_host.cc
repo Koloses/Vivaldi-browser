@@ -168,7 +168,8 @@ PepperVideoEncoderHost::ShmBuffer::ShmBuffer(
 PepperVideoEncoderHost::ShmBuffer::~ShmBuffer() {}
 
 media::BitstreamBuffer PepperVideoEncoderHost::ShmBuffer::ToBitstreamBuffer() {
-  return media::BitstreamBuffer(id, shm->handle(), shm->mapped_size());
+  return media::BitstreamBuffer(id, shm->handle(), false /* read_only */,
+                                shm->mapped_size());
 }
 
 PepperVideoEncoderHost::PepperVideoEncoderHost(RendererPpapiHost* host,
@@ -181,8 +182,7 @@ PepperVideoEncoderHost::PepperVideoEncoderHost(RendererPpapiHost* host,
       initialized_(false),
       encoder_last_error_(PP_ERROR_FAILED),
       frame_count_(0),
-      media_input_format_(media::PIXEL_FORMAT_UNKNOWN),
-      weak_ptr_factory_(this) {}
+      media_input_format_(media::PIXEL_FORMAT_UNKNOWN) {}
 
 PepperVideoEncoderHost::~PepperVideoEncoderHost() {
   Close();

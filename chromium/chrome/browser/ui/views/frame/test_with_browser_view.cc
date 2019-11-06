@@ -27,7 +27,7 @@
 #include "components/omnibox/browser/test_scheme_classifier.h"
 #include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/signin/core/browser/list_accounts_test_utils.h"
+#include "components/signin/public/base/list_accounts_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "services/network/test/test_url_loader_factory.h"
 
@@ -108,7 +108,7 @@ TestingProfile* TestWithBrowserView::CreateProfile() {
   return profile;
 }
 
-BrowserWindow* TestWithBrowserView::CreateBrowserWindow() {
+std::unique_ptr<BrowserWindow> TestWithBrowserView::CreateBrowserWindow() {
   // Allow BrowserWithTestWindowTest to use Browser to create the default
   // BrowserView and BrowserFrame.
   return nullptr;

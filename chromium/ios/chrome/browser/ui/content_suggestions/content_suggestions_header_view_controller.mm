@@ -4,13 +4,14 @@
 
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_header_view_controller.h"
 
+#include "base/feature_list.h"
 #include "base/ios/ios_util.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/metrics/user_metrics.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ntp/new_tab_page_tab_helper.h"
-#import "ios/chrome/browser/ui/UIView+SizeClassSupport.h"
+#import "ios/chrome/browser/signin/feature_flags.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_collection_synchronizing.h"
@@ -19,6 +20,7 @@
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_header_view.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_header_view_controller_delegate.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
+#import "ios/chrome/browser/ui/content_suggestions/user_account_image_update_delegate.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_controller_delegate.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_constants.h"
 #import "ios/chrome/browser/ui/toolbar/public/fakebox_focuser.h"
@@ -38,7 +40,8 @@
 
 using base::UserMetricsAction;
 
-@interface ContentSuggestionsHeaderViewController ()
+@interface ContentSuggestionsHeaderViewController () <
+    UserAccountImageUpdateDelegate>
 
 // If YES the animations of the fake omnibox triggered when the collection is
 // scrolled (expansion) are disabled. This is used for the fake omnibox focus
@@ -68,6 +71,7 @@ using base::UserMetricsAction;
 @property(nonatomic, strong) ContentSuggestionsHeaderView* headerView;
 @property(nonatomic, strong) UIButton* fakeOmnibox;
 @property(nonatomic, strong) UIButton* accessibilityButton;
+@property(nonatomic, strong) UIButton* identityDiscButton;
 @property(nonatomic, strong) NSLayoutConstraint* doodleHeightConstraint;
 @property(nonatomic, strong) NSLayoutConstraint* doodleTopMarginConstraint;
 @property(nonatomic, strong) NSLayoutConstraint* fakeOmniboxWidthConstraint;
@@ -212,6 +216,12 @@ using base::UserMetricsAction;
   self.view = [[ContentSuggestionsHeaderView alloc] init];
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+  [super viewDidAppear:animated];
+  UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification,
+                                  self.fakeOmnibox);
+}
+
 - (CGFloat)headerHeight {
   return content_suggestions::heightForLogoHeader(
       self.logoIsShowing, self.promoCanShow, YES, [self topInset]);
@@ -230,6 +240,13 @@ using base::UserMetricsAction;
     [self.headerView addSubview:self.fakeOmnibox];
     self.logoVendor.view.translatesAutoresizingMaskIntoConstraints = NO;
     self.fakeOmnibox.translatesAutoresizingMaskIntoConstraints = NO;
+
+    [self.headerView addSeparatorToSearchField:self.fakeOmnibox];
+
+    // Identity disc needs to be added after the Google logo/doodle since it
+    // needs to respond to user taps first.
+    if (IsIdentityDiscFeatureEnabled())
+      [self addIdentityDisc];
 
     // -headerForView is regularly called before self.headerView has been added
     // to the view hierarchy, so there's no simple way to get the correct
@@ -308,12 +325,30 @@ using base::UserMetricsAction;
 - (void)addFakeTapView {
   UIButton* fakeTapButton = [[UIButton alloc] init];
   fakeTapButton.translatesAutoresizingMaskIntoConstraints = NO;
-  fakeTapButton.accessibilityLabel =
-      l10n_util::GetNSString(IDS_ACCNAME_LOCATION);
+  fakeTapButton.isAccessibilityElement = NO;
   [self.headerView addToolbarView:fakeTapButton];
   [fakeTapButton addTarget:self
                     action:@selector(fakeboxTapped)
           forControlEvents:UIControlEventTouchUpInside];
+}
+
+- (void)addIdentityDisc {
+  // Set up a button. Details for the button will be set through delegate
+  // implementation of UserAccountImageUpdateDelegate.
+  self.identityDiscButton = [UIButton buttonWithType:UIButtonTypeCustom];
+  self.identityDiscButton.accessibilityLabel =
+      l10n_util::GetNSString(IDS_ACCNAME_PARTICLE_DISC);
+  self.identityDiscButton.imageEdgeInsets = UIEdgeInsetsMake(
+      ntp_home::kIdentityAvatarMargin, ntp_home::kIdentityAvatarMargin,
+      ntp_home::kIdentityAvatarMargin, ntp_home::kIdentityAvatarMargin);
+  [self.identityDiscButton addTarget:self
+                              action:@selector(identityDiscTapped)
+                    forControlEvents:UIControlEventTouchUpInside];
+  // TODO(crbug.com/965958): Set action on button to launch into Settings.
+  [self.headerView setIdentityDiscView:self.identityDiscButton];
+
+  // Register to receive the avatar of the currently signed in user.
+  [self.delegate registerImageUpdater:self];
 }
 
 - (void)loadVoiceSearch:(id)sender {
@@ -360,6 +395,11 @@ using base::UserMetricsAction;
   if ([self.delegate ignoreLoadRequests])
     return;
   [self shiftTilesUp];
+}
+
+- (void)identityDiscTapped {
+  base::RecordAction(base::UserMetricsAction("MobileNTPIdentityDiscTapped"));
+  [self.dispatcher showGoogleServicesSettingsFromViewController:self];
 }
 
 // TODO(crbug.com/807330) The fakebox is currently a collection of views spread
@@ -539,6 +579,14 @@ using base::UserMetricsAction;
   }
 
   [self shiftTilesDown];
+}
+
+#pragma mark - UserAccountImageUpdateDelegate
+
+- (void)updateAccountImage:(UIImage*)image {
+  [self.identityDiscButton setImage:image forState:UIControlStateNormal];
+  self.identityDiscButton.imageView.layer.cornerRadius = image.size.width / 2;
+  self.identityDiscButton.imageView.layer.masksToBounds = YES;
 }
 
 @end

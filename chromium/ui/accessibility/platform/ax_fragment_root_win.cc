@@ -4,17 +4,22 @@
 
 #include "ui/accessibility/platform/ax_fragment_root_win.h"
 
+#include <unordered_map>
+
 #include "base/no_destructor.h"
+#include "ui/accessibility/platform/ax_fragment_root_delegate_win.h"
 #include "ui/accessibility/platform/ax_platform_node_win.h"
 #include "ui/base/win/atl_module.h"
 
 namespace ui {
 
 class AXFragmentRootPlatformNodeWin : public AXPlatformNodeWin,
-                                      public IRawElementProviderFragmentRoot {
+                                      public IRawElementProviderFragmentRoot,
+                                      public IRawElementProviderAdviseEvents {
  public:
   BEGIN_COM_MAP(AXFragmentRootPlatformNodeWin)
   COM_INTERFACE_ENTRY(IRawElementProviderFragmentRoot)
+  COM_INTERFACE_ENTRY(IRawElementProviderAdviseEvents)
   COM_INTERFACE_ENTRY_CHAIN(AXPlatformNodeWin)
   END_COM_MAP()
 
@@ -110,6 +115,43 @@ class AXFragmentRootPlatformNodeWin : public AXPlatformNodeWin,
 
     return S_OK;
   }
+
+  //
+  // IRawElementProviderAdviseEvents methods.
+  //
+  STDMETHODIMP AdviseEventAdded(EVENTID event_id,
+                                SAFEARRAY* property_ids) override {
+    if (event_id == UIA_LiveRegionChangedEventId) {
+      live_region_change_listeners_++;
+
+      if (live_region_change_listeners_ == 1) {
+        // Fire a LiveRegionChangedEvent for each live-region to tell the
+        // newly-attached assistive technology about the regions.
+        //
+        // Ideally we'd be able to direct these events to only the
+        // newly-attached AT, but we don't have that capability, so we only
+        // fire events when the *first* AT attaches. (A common scenario will
+        // be an attached screen-reader, then a software-keyboard attaches to
+        // handle an input field; we don't want the screen-reader to announce
+        // that every live-region has changed.) There isn't a perfect solution,
+        // but this heuristic seems to work well in practice.
+        FireLiveRegionChangeRecursive();
+      }
+    }
+    return S_OK;
+  }
+
+  STDMETHODIMP AdviseEventRemoved(EVENTID event_id,
+                                  SAFEARRAY* property_ids) override {
+    if (event_id == UIA_LiveRegionChangedEventId) {
+      DCHECK(live_region_change_listeners_ > 0);
+      live_region_change_listeners_--;
+    }
+    return S_OK;
+  }
+
+ private:
+  int32_t live_region_change_listeners_ = 0;
 };
 
 class AXFragmentRootMapWin {
@@ -135,9 +177,8 @@ class AXFragmentRootMapWin {
 };
 
 AXFragmentRootWin::AXFragmentRootWin(gfx::AcceleratedWidget widget,
-                                     gfx::NativeViewAccessible child) {
-  widget_ = widget;
-  SetChild(child);
+                                     AXFragmentRootDelegateWin* delegate)
+    : widget_(widget), delegate_(delegate) {
   platform_node_ = ui::AXFragmentRootPlatformNodeWin::Create(this);
   AXFragmentRootMapWin::GetInstance().AddFragmentRoot(widget, this);
 }
@@ -146,7 +187,6 @@ AXFragmentRootWin::~AXFragmentRootWin() {
   AXFragmentRootMapWin::GetInstance().RemoveFragmentRoot(widget_);
   platform_node_->Destroy();
   platform_node_ = nullptr;
-  child_ = nullptr;
 }
 
 AXFragmentRootWin* AXFragmentRootWin::GetForAcceleratedWidget(
@@ -158,56 +198,34 @@ gfx::NativeViewAccessible AXFragmentRootWin::GetNativeViewAccessible() {
   return platform_node_.Get();
 }
 
-void AXFragmentRootWin::SetParent(gfx::NativeViewAccessible parent) {
-  if (parent != nullptr) {
-    parent_ = static_cast<ui::AXPlatformNodeWin*>(
-        ui::AXPlatformNode::FromNativeViewAccessible(parent));
-    DCHECK(parent_);
-  } else {
-    parent_ = nullptr;
-  }
-}
-
-void AXFragmentRootWin::SetChild(gfx::NativeViewAccessible child) {
-  if (child != nullptr) {
-    child_ = static_cast<ui::AXPlatformNodeWin*>(
-        ui::AXPlatformNode::FromNativeViewAccessible(child));
-    DCHECK(child_);
-  } else {
-    child_ = nullptr;
-  }
-}
-
 gfx::NativeViewAccessible AXFragmentRootWin::GetParent() {
-  if (parent_ != nullptr) {
-    return parent_->GetNativeViewAccessible();
-  }
-
-  return nullptr;
+  return delegate_->GetParentOfAXFragmentRoot();
 }
 
 int AXFragmentRootWin::GetChildCount() {
-  return (child_ != nullptr) ? 1 : 0;
+  return delegate_->GetChildOfAXFragmentRoot() ? 1 : 0;
 }
 
 gfx::NativeViewAccessible AXFragmentRootWin::ChildAtIndex(int index) {
-  if (index == 0 && child_ != nullptr) {
-    return child_->GetNativeViewAccessible();
+  if (index == 0) {
+    return delegate_->GetChildOfAXFragmentRoot();
   }
 
   return nullptr;
 }
 
 gfx::NativeViewAccessible AXFragmentRootWin::HitTestSync(int x, int y) {
-  if (child_ != nullptr)
-    return child_->GetDelegate()->HitTestSync(x, y);
+  AXPlatformNodeDelegate* child_delegate = GetChildNodeDelegate();
+  if (child_delegate)
+    return child_delegate->HitTestSync(x, y);
 
   return nullptr;
 }
 
 gfx::NativeViewAccessible AXFragmentRootWin::GetFocus() {
-  if (child_ != nullptr)
-    return child_->GetDelegate()->GetFocus();
+  AXPlatformNodeDelegate* child_delegate = GetChildNodeDelegate();
+  if (child_delegate)
+    return child_delegate->GetFocus();
 
   return nullptr;
 }
@@ -220,4 +238,13 @@ gfx::AcceleratedWidget
 AXFragmentRootWin::GetTargetForNativeAccessibilityEvent() {
   return widget_;
 }
+
+AXPlatformNodeDelegate* AXFragmentRootWin::GetChildNodeDelegate() {
+  gfx::NativeViewAccessible child = delegate_->GetChildOfAXFragmentRoot();
+  if (child)
+    return ui::AXPlatformNode::FromNativeViewAccessible(child)->GetDelegate();
+
+  return nullptr;
+}
+
 }  // namespace ui

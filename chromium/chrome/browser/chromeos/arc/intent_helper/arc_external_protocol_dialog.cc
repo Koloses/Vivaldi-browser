@@ -4,14 +4,16 @@
 
 #include "chrome/browser/chromeos/arc/intent_helper/arc_external_protocol_dialog.h"
 
+#include <map>
 #include <memory>
 #include <string>
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/chromeos/apps/intent_helper/apps_navigation_throttle.h"
-#include "chrome/browser/chromeos/apps/intent_helper/apps_navigation_types.h"
-#include "chrome/browser/chromeos/apps/intent_helper/page_transition_util.h"
+#include "base/metrics/histogram_functions.h"
+#include "chrome/browser/apps/intent_helper/apps_navigation_types.h"
+#include "chrome/browser/apps/intent_helper/page_transition_util.h"
+#include "chrome/browser/chromeos/apps/intent_helper/chromeos_apps_navigation_throttle.h"
 #include "chrome/browser/chromeos/arc/arc_web_contents_data.h"
 #include "chrome/browser/chromeos/arc/intent_helper/arc_intent_picker_app_fetcher.h"
 #include "chrome/browser/chromeos/external_protocol_dialog.h"
@@ -19,8 +21,9 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "components/arc/arc_bridge_service.h"
+#include "chrome/browser/ui/intent_picker_tab_helper.h"
 #include "components/arc/arc_service_manager.h"
+#include "components/arc/session/arc_bridge_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/page_navigator.h"
@@ -357,7 +360,7 @@ void OnIntentPickerClosed(int render_process_host_id,
                           std::vector<mojom::IntentHandlerInfoPtr> handlers,
                           const std::string& selected_app_package,
                           apps::mojom::AppType app_type,
-                          chromeos::IntentPickerCloseReason reason,
+                          apps::IntentPickerCloseReason reason,
                           bool should_persist) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -368,11 +371,8 @@ void OnIntentPickerClosed(int render_process_host_id,
   WebContents* web_contents =
       tab_util::GetWebContentsByID(render_process_host_id, routing_id);
 
-  Browser* browser =
-      web_contents ? chrome::FindBrowserWithWebContents(web_contents) : nullptr;
-
-  if (browser)
-    browser->window()->SetIntentPickerViewVisibility(/*visible=*/false);
+  if (web_contents)
+    IntentPickerTabHelper::SetShouldShowIcon(web_contents, false);
 
   // If the user selected an app to continue the navigation, confirm that the
   // |package_name| matches a valid option and return the index.
@@ -388,17 +388,18 @@ void OnIntentPickerClosed(int render_process_host_id,
   }
 
   if (!instance)
-    reason = chromeos::IntentPickerCloseReason::ERROR;
+    reason = apps::IntentPickerCloseReason::ERROR_AFTER_PICKER;
 
-  if (reason == chromeos::IntentPickerCloseReason::OPEN_APP ||
-      reason == chromeos::IntentPickerCloseReason::STAY_IN_CHROME) {
+  if (reason == apps::IntentPickerCloseReason::OPEN_APP ||
+      reason == apps::IntentPickerCloseReason::STAY_IN_CHROME) {
     if (selected_app_index == handlers.size()) {
-      reason = chromeos::IntentPickerCloseReason::ERROR;
+      // Selected app does not exist.
+      reason = apps::IntentPickerCloseReason::ERROR_AFTER_PICKER;
     }
   }
 
   switch (reason) {
-    case chromeos::IntentPickerCloseReason::OPEN_APP:
+    case apps::IntentPickerCloseReason::OPEN_APP:
       // Only ARC apps are offered in the external protocol intent picker, so if
       // the user decided to open in app the type must be ARC.
       DCHECK_EQ(apps::mojom::AppType::kArc, app_type);
@@ -417,29 +418,54 @@ void OnIntentPickerClosed(int render_process_host_id,
       HandleUrl(render_process_host_id, routing_id, url, handlers,
                 selected_app_index, /*out_result=*/nullptr, safe_to_bypass_ui);
       break;
-    case chromeos::IntentPickerCloseReason::PREFERRED_APP_FOUND:
+    case apps::IntentPickerCloseReason::PREFERRED_APP_FOUND:
       // We shouldn't be here if a preferred app was found.
       NOTREACHED();
       return;  // no UMA recording.
-    case chromeos::IntentPickerCloseReason::STAY_IN_CHROME:
+    case apps::IntentPickerCloseReason::STAY_IN_CHROME:
       LOG(ERROR) << "Chrome is not a valid option for external protocol URLs";
       NOTREACHED();
       return;  // no UMA recording.
-    case chromeos::IntentPickerCloseReason::ERROR:
+    case apps::IntentPickerCloseReason::ERROR_BEFORE_PICKER:
+      // This can happen since an error could occur right before invoking
+      // Show() on the bubble's UI code.
+      FALLTHROUGH;
+    case apps::IntentPickerCloseReason::ERROR_AFTER_PICKER:
       LOG(ERROR) << "IntentPickerBubbleView returned CloseReason::ERROR: "
                  << "instance=" << instance
                  << ", selected_app_index=" << selected_app_index
                  << ", handlers.size=" << handlers.size();
       FALLTHROUGH;
-    case chromeos::IntentPickerCloseReason::DIALOG_DEACTIVATED:
+    case apps::IntentPickerCloseReason::DIALOG_DEACTIVATED:
       // The user didn't select any ARC activity.
       OnIntentPickerDialogDeactivated(render_process_host_id, routing_id,
                                       safe_to_bypass_ui, handlers);
       break;
   }
 
-  chromeos::AppsNavigationThrottle::RecordUma(selected_app_package, app_type,
-                                              reason, should_persist);
+  const std::map<base::StringPiece, Scheme> string_to_scheme = {
+      {"bitcoin", Scheme::BITCOIN}, {"geo", Scheme::GEO},
+      {"im", Scheme::IM},           {"irc", Scheme::IRC},
+      {"magnet", Scheme::MAGNET},   {"mailto", Scheme::MAILTO},
+      {"mms", Scheme::MMS},         {"sip", Scheme::SIP},
+      {"skype", Scheme::SKYPE},     {"sms", Scheme::SMS},
+      {"spotify", Scheme::SPOTIFY}, {"ssh", Scheme::SSH},
+      {"tel", Scheme::TEL},         {"telnet", Scheme::TELNET},
+      {"webcal", Scheme::WEBCAL}};
+
+  bool protocol_accepted =
+      (reason == apps::IntentPickerCloseReason::OPEN_APP) ? true : false;
+
+  Scheme url_scheme = Scheme::OTHER;
+  base::StringPiece scheme = url.scheme_piece();
+  auto scheme_it = string_to_scheme.find(scheme);
+  if (scheme_it != string_to_scheme.end())
+    url_scheme = scheme_it->second;
+  RecordUmaDialogAction(url_scheme, protocol_accepted, should_persist);
+
+  chromeos::ChromeOsAppsNavigationThrottle::RecordUma(
+      selected_app_package, app_type, reason, apps::Source::kExternalProtocol,
+      should_persist);
 }
 
 // Called when ARC returned activity icons for the |handlers|.
@@ -452,7 +478,7 @@ void OnAppIconsReceived(
     std::unique_ptr<ArcIntentHelperBridge::ActivityToIconsMap> icons) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  using AppInfo = chromeos::IntentPickerAppInfo;
+  using AppInfo = apps::IntentPickerAppInfo;
   std::vector<AppInfo> app_info;
 
   for (const auto& handler : handlers) {
@@ -470,14 +496,15 @@ void OnAppIconsReceived(
   Browser* browser =
       web_contents ? chrome::FindBrowserWithWebContents(web_contents) : nullptr;
 
-  if (!browser)
+  if (!web_contents || !browser)
     return;
 
-  browser->window()->SetIntentPickerViewVisibility(/*visible=*/true);
+  const bool stay_in_chrome = IsChromeAnAppCandidate(handlers);
+  IntentPickerTabHelper::SetShouldShowIcon(web_contents, true);
   browser->window()->ShowIntentPickerBubble(
-      std::move(app_info), !IsChromeAnAppCandidate(handlers),
-      base::Bind(OnIntentPickerClosed, render_process_host_id, routing_id, url,
-                 safe_to_bypass_ui, base::Passed(&handlers)));
+      std::move(app_info), stay_in_chrome, /*show_persistence_options=*/true,
+      base::BindOnce(OnIntentPickerClosed, render_process_host_id, routing_id,
+                     url, safe_to_bypass_ui, std::move(handlers)));
 }
 
 // Called when ARC returned a handler list for the |url|.
@@ -519,9 +546,10 @@ void OnUrlHandlerList(int render_process_host_id,
   if (HandleUrl(render_process_host_id, routing_id, url, handlers,
                 handlers.size(), &result, safe_to_bypass_ui)) {
     if (result == GetActionResult::HANDLE_URL_IN_ARC) {
-      chromeos::AppsNavigationThrottle::RecordUma(
+      chromeos::ChromeOsAppsNavigationThrottle::RecordUma(
           std::string(), apps::mojom::AppType::kArc,
-          chromeos::IntentPickerCloseReason::PREFERRED_APP_FOUND,
+          apps::IntentPickerCloseReason::PREFERRED_APP_FOUND,
+          apps::Source::kExternalProtocol,
           /*should_persist=*/false);
     }
     return;  // the |url| has been handled.
@@ -551,13 +579,12 @@ bool RunArcExternalProtocolDialog(const GURL& url,
   DCHECK(!url.SchemeIsHTTPOrHTTPS()) << url;
 
   // For external protocol navigation, always ignore the FROM_API qualifier.
-  const ui::PageTransition masked_page_transition =
-      chromeos::MaskOutPageTransition(page_transition,
-                                      ui::PAGE_TRANSITION_FROM_API);
+  const ui::PageTransition masked_page_transition = apps::MaskOutPageTransition(
+      page_transition, ui::PAGE_TRANSITION_FROM_API);
 
-  if (chromeos::ShouldIgnoreNavigation(masked_page_transition,
-                                       /*allow_form_submit=*/true,
-                                       /*allow_client_redirect=*/true)) {
+  if (apps::ShouldIgnoreNavigation(masked_page_transition,
+                                   /*allow_form_submit=*/true,
+                                   /*allow_client_redirect=*/true)) {
     LOG(WARNING) << "RunArcExternalProtocolDialog: ignoring " << url
                  << " with PageTransition=" << masked_page_transition;
     return false;
@@ -615,6 +642,122 @@ bool GetAndResetSafeToRedirectToArcWithoutUserConfirmationFlagForTesting(
 bool IsChromeAnAppCandidateForTesting(
     const std::vector<mojom::IntentHandlerInfoPtr>& handlers) {
   return IsChromeAnAppCandidate(handlers);
+}
+
+void RecordUmaDialogAction(Scheme scheme, bool accepted, bool persisted) {
+  ProtocolAction action = GetProtocolAction(scheme, accepted, persisted);
+  if (accepted) {
+    base::UmaHistogramEnumeration(
+        "ChromeOS.Apps.ExternalProtocolDialog.Accepted", action,
+        ProtocolAction::kMaxValue);
+  } else {
+    base::UmaHistogramEnumeration(
+        "ChromeOS.Apps.ExternalProtocolDialog.Rejected", action,
+        ProtocolAction::kMaxValue);
+  }
+}
+
+ProtocolAction GetProtocolAction(Scheme scheme, bool accepted, bool persisted) {
+  switch (scheme) {
+    case Scheme::OTHER:
+      if (!accepted)
+        return ProtocolAction::OTHER_REJECTED;
+      if (persisted)
+        return ProtocolAction::OTHER_ACCEPTED_PERSISTED;
+      return ProtocolAction::OTHER_ACCEPTED_NOT_PERSISTED;
+    case Scheme::BITCOIN:
+      if (!accepted)
+        return ProtocolAction::BITCOIN_REJECTED;
+      if (persisted)
+        return ProtocolAction::BITCOIN_ACCEPTED_PERSISTED;
+      return ProtocolAction::BITCOIN_ACCEPTED_NOT_PERSISTED;
+    case Scheme::GEO:
+      if (!accepted)
+        return ProtocolAction::GEO_REJECTED;
+      if (persisted)
+        return ProtocolAction::GEO_ACCEPTED_PERSISTED;
+      return ProtocolAction::GEO_ACCEPTED_NOT_PERSISTED;
+    case Scheme::IM:
+      if (!accepted)
+        return ProtocolAction::IM_REJECTED;
+      if (persisted)
+        return ProtocolAction::IM_ACCEPTED_PERSISTED;
+      return ProtocolAction::IM_ACCEPTED_NOT_PERSISTED;
+    case Scheme::IRC:
+      if (!accepted)
+        return ProtocolAction::IRC_REJECTED;
+      if (persisted)
+        return ProtocolAction::IRC_ACCEPTED_PERSISTED;
+      return ProtocolAction::IRC_ACCEPTED_NOT_PERSISTED;
+    case Scheme::MAGNET:
+      if (!accepted)
+        return ProtocolAction::MAGNET_REJECTED;
+      if (persisted)
+        return ProtocolAction::MAGNET_ACCEPTED_PERSISTED;
+      return ProtocolAction::MAGNET_ACCEPTED_NOT_PERSISTED;
+    case Scheme::MAILTO:
+      if (!accepted)
+        return ProtocolAction::MAILTO_REJECTED;
+      if (persisted)
+        return ProtocolAction::MAILTO_ACCEPTED_PERSISTED;
+      return ProtocolAction::MAILTO_ACCEPTED_NOT_PERSISTED;
+    case Scheme::MMS:
+      if (!accepted)
+        return ProtocolAction::MMS_REJECTED;
+      if (persisted)
+        return ProtocolAction::MMS_ACCEPTED_PERSISTED;
+      return ProtocolAction::MMS_ACCEPTED_NOT_PERSISTED;
+    case Scheme::SIP:
+      if (!accepted)
+        return ProtocolAction::SIP_REJECTED;
+      if (persisted)
+        return ProtocolAction::SIP_ACCEPTED_PERSISTED;
+      return ProtocolAction::SIP_ACCEPTED_NOT_PERSISTED;
+    case Scheme::SKYPE:
+      if (!accepted)
+        return ProtocolAction::SKYPE_REJECTED;
+      if (persisted)
+        return ProtocolAction::SKYPE_ACCEPTED_PERSISTED;
+      return ProtocolAction::SKYPE_ACCEPTED_NOT_PERSISTED;
+    case Scheme::SMS:
+      if (!accepted)
+        return ProtocolAction::SMS_REJECTED;
+      if (persisted)
+        return ProtocolAction::SMS_ACCEPTED_PERSISTED;
+      return ProtocolAction::SMS_ACCEPTED_NOT_PERSISTED;
+    case Scheme::SPOTIFY:
+      if (!accepted)
+        return ProtocolAction::SPOTIFY_REJECTED;
+      if (persisted)
+        return ProtocolAction::SPOTIFY_ACCEPTED_PERSISTED;
+      return ProtocolAction::SPOTIFY_ACCEPTED_NOT_PERSISTED;
+    case Scheme::SSH:
+      if (!accepted)
+        return ProtocolAction::SSH_REJECTED;
+      if (persisted)
+        return ProtocolAction::SSH_ACCEPTED_PERSISTED;
+      return ProtocolAction::SSH_ACCEPTED_NOT_PERSISTED;
+    case Scheme::TEL:
+      if (!accepted)
+        return ProtocolAction::TEL_REJECTED;
+      if (persisted)
+        return ProtocolAction::TEL_ACCEPTED_PERSISTED;
+      return ProtocolAction::TEL_ACCEPTED_NOT_PERSISTED;
+    case Scheme::TELNET:
+      if (!accepted)
+        return ProtocolAction::TELNET_REJECTED;
+      if (persisted)
+        return ProtocolAction::TELNET_ACCEPTED_PERSISTED;
+      return ProtocolAction::TELNET_ACCEPTED_NOT_PERSISTED;
+    case Scheme::WEBCAL:
+      if (!accepted)
+        return ProtocolAction::WEBCAL_REJECTED;
+      if (persisted)
+        return ProtocolAction::WEBCAL_ACCEPTED_PERSISTED;
+      return ProtocolAction::WEBCAL_ACCEPTED_NOT_PERSISTED;
+  }
+  NOTREACHED();
+  return ProtocolAction::OTHER_REJECTED;
 }
 
 }  // namespace arc

@@ -30,6 +30,7 @@
 #include "content/browser/devtools/protocol/io_handler.h"
 #include "content/browser/devtools/protocol/memory_handler.h"
 #include "content/browser/devtools/protocol/network_handler.h"
+#include "content/browser/devtools/protocol/overlay_handler.h"
 #include "content/browser/devtools/protocol/page_handler.h"
 #include "content/browser/devtools/protocol/protocol.h"
 #include "content/browser/devtools/protocol/schema_handler.h"
@@ -64,6 +65,8 @@
 #include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "services/device/public/mojom/wake_lock_context.mojom.h"
+#else
+#include "content/browser/devtools/protocol/webauthn_handler.h"
 #endif
 
 namespace content {
@@ -115,6 +118,14 @@ DevToolsAgentHostImpl* RenderFrameDevToolsAgentHost::GetFor(
     FrameTreeNode* frame_tree_node) {
   frame_tree_node = GetFrameTreeNodeAncestor(frame_tree_node);
   return FindAgentHost(frame_tree_node);
+}
+
+// static
+DevToolsAgentHostImpl* RenderFrameDevToolsAgentHost::GetFor(
+    RenderFrameHostImpl* rfh) {
+  return ShouldCreateDevToolsForHost(rfh)
+             ? FindAgentHost(rfh->frame_tree_node())
+             : GetFor(rfh->frame_tree_node());
 }
 
 scoped_refptr<DevToolsAgentHost> RenderFrameDevToolsAgentHost::GetOrCreateFor(
@@ -283,16 +294,30 @@ bool RenderFrameDevToolsAgentHost::AttachSession(DevToolsSession* session) {
   session->AddHandler(std::make_unique<protocol::DOMHandler>(
       session->client()->MayReadLocalFiles()));
   session->AddHandler(std::move(emulation_handler));
-  session->AddHandler(std::make_unique<protocol::InputHandler>());
+  auto input_handler = std::make_unique<protocol::InputHandler>();
+  input_handler->OnPageScaleFactorChanged(page_scale_factor_);
+  session->AddHandler(std::move(input_handler));
   session->AddHandler(std::make_unique<protocol::InspectorHandler>());
   session->AddHandler(std::make_unique<protocol::IOHandler>(GetIOContext()));
   session->AddHandler(std::make_unique<protocol::MemoryHandler>());
+  if (!frame_tree_node_ || !frame_tree_node_->parent())
+    session->AddHandler(std::make_unique<protocol::OverlayHandler>());
   session->AddHandler(std::make_unique<protocol::NetworkHandler>(
       GetId(),
       frame_tree_node_ ? frame_tree_node_->devtools_frame_token()
                        : base::UnguessableToken(),
-      GetIOContext()));
-  session->AddHandler(std::make_unique<protocol::FetchHandler>(GetIOContext()));
+      GetIOContext(),
+      base::BindRepeating(
+          &RenderFrameDevToolsAgentHost::UpdateResourceLoaderFactories,
+          base::Unretained(this))));
+  session->AddHandler(std::make_unique<protocol::FetchHandler>(
+      GetIOContext(), base::BindRepeating(
+                          [](RenderFrameDevToolsAgentHost* self,
+                             base::OnceClosure done_callback) {
+                            self->UpdateResourceLoaderFactories();
+                            std::move(done_callback).Run();
+                          },
+                          base::Unretained(this))));
   session->AddHandler(std::make_unique<protocol::SchemaHandler>());
   session->AddHandler(std::make_unique<protocol::ServiceWorkerHandler>());
   session->AddHandler(std::make_unique<protocol::StorageHandler>());
@@ -302,13 +327,17 @@ bool RenderFrameDevToolsAgentHost::AttachSession(DevToolsSession* session) {
           : protocol::TargetHandler::AccessMode::kAutoAttachOnly,
       GetId(), GetRendererChannel(), session->GetRootSession()));
   session->AddHandler(std::make_unique<protocol::PageHandler>(
-      emulation_handler_ptr, session->client()->MayWriteLocalFiles()));
+      emulation_handler_ptr, &active_file_chooser_interceptor_,
+      session->client()->MayWriteLocalFiles(),
+      session->client()->MayReadLocalFiles()));
   session->AddHandler(std::make_unique<protocol::SecurityHandler>());
   if (!frame_tree_node_ || !frame_tree_node_->parent()) {
     session->AddHandler(std::make_unique<protocol::TracingHandler>(
-        frame_tree_node_, GetIOContext(),
-        session->client()->UsesBinaryProtocol()));
+        frame_tree_node_, GetIOContext()));
   }
+#if !defined(OS_ANDROID)
+  session->AddHandler(std::make_unique<protocol::WebAuthnHandler>());
+#endif  // !defined(OS_ANDROID)
 
   if (sessions().empty()) {
     bool use_video_capture_api = true;
@@ -396,7 +425,8 @@ void RenderFrameDevToolsAgentHost::DidFinishNavigation(
   if (handle->frame_tree_node() != frame_tree_node_)
     return;
   navigation_handles_.erase(handle);
-  NotifyNavigated();
+  if (handle->HasCommitted())
+    NotifyNavigated();
 
   // UpdateFrameHost may destruct |this|.
   scoped_refptr<RenderFrameDevToolsAgentHost> protect(this);
@@ -566,6 +596,7 @@ void RenderFrameDevToolsAgentHost::OnVisibilityChanged(
 
 void RenderFrameDevToolsAgentHost::OnPageScaleFactorChanged(
     float page_scale_factor) {
+  page_scale_factor_ = page_scale_factor;
   for (auto* input : protocol::InputHandler::ForAgentHost(this))
     input->OnPageScaleFactorChanged(page_scale_factor);
 }
@@ -614,6 +645,10 @@ std::string RenderFrameDevToolsAgentHost::GetOpenerId() {
 }
 
 std::string RenderFrameDevToolsAgentHost::GetType() {
+  if (web_contents() &&
+      static_cast<WebContentsImpl*>(web_contents())->IsPortal()) {
+    return kTypePage;
+  }
   if (web_contents() &&
       static_cast<WebContentsImpl*>(web_contents())->GetOuterWebContents()) {
     return kTypeGuest;
@@ -701,7 +736,7 @@ base::TimeTicks RenderFrameDevToolsAgentHost::GetLastActivityTime() {
 
 void RenderFrameDevToolsAgentHost::SignalSynchronousSwapCompositorFrame(
     RenderFrameHost* frame_host,
-    viz::CompositorFrameMetadata frame_metadata) {
+    const DevToolsFrameMetadata& frame_metadata) {
   scoped_refptr<RenderFrameDevToolsAgentHost> dtah(FindAgentHost(
       static_cast<RenderFrameHostImpl*>(frame_host)->frame_tree_node()));
   if (dtah) {
@@ -710,14 +745,14 @@ void RenderFrameDevToolsAgentHost::SignalSynchronousSwapCompositorFrame(
         FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             &RenderFrameDevToolsAgentHost::SynchronousSwapCompositorFrame,
-            dtah.get(), std::move(frame_metadata)));
+            dtah.get(), frame_metadata));
   }
 }
 
 void RenderFrameDevToolsAgentHost::SynchronousSwapCompositorFrame(
-    viz::CompositorFrameMetadata frame_metadata) {
+    const DevToolsFrameMetadata& frame_metadata) {
   for (auto* page : protocol::PageHandler::ForAgentHost(this))
-    page->OnSynchronousSwapCompositorFrame(frame_metadata.Clone());
+    page->OnSynchronousSwapCompositorFrame(frame_metadata);
 
   if (!frame_trace_recorder_)
     return;
@@ -761,6 +796,23 @@ bool RenderFrameDevToolsAgentHost::ShouldAllowSession(
   if (!session->client()->MayAttachToRenderer(frame_host_, is_webui))
     return false;
   return true;
+}
+
+void RenderFrameDevToolsAgentHost::UpdateResourceLoaderFactories() {
+  if (!frame_tree_node_)
+    return;
+  base::queue<FrameTreeNode*> queue;
+  queue.push(frame_tree_node_);
+  while (!queue.empty()) {
+    FrameTreeNode* node = queue.front();
+    queue.pop();
+    RenderFrameHostImpl* host = node->current_frame_host();
+    if (node != frame_tree_node_ && host->IsCrossProcessSubframe())
+      continue;
+    host->UpdateSubresourceLoaderFactories();
+    for (size_t i = 0; i < node->child_count(); ++i)
+      queue.push(node->child_at(i));
+  }
 }
 
 }  // namespace content

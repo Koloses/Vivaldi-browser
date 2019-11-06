@@ -85,8 +85,8 @@ struct BLINK_COMMON_EXPORT Manifest {
     };
 
     enum class Enctype {
-      kApplication,
-      kMultipart,
+      kFormUrlEncoded,
+      kMultipartFormData,
     };
 
     ShareTarget();
@@ -105,8 +105,12 @@ struct BLINK_COMMON_EXPORT Manifest {
     ShareTargetParams params;
   };
 
-  // Structure representing a File Handler's query parameter keys.
-  using FileHandler = std::vector<FileFilter>;
+  // Structure representing a File Handler.
+  struct BLINK_COMMON_EXPORT FileHandler {
+    // The URL which will be opened when the file handler is invoked.
+    GURL action;
+    std::vector<FileFilter> files;
+  };
 
   // Structure representing a related application.
   struct BLINK_COMMON_EXPORT RelatedApplication {
@@ -186,16 +190,14 @@ struct BLINK_COMMON_EXPORT Manifest {
   // Null if field is not present or parsing failed.
   base::Optional<SkColor> background_color;
 
-  // A URL of the HTML splash screen.
-  // Empty if the parsing failed or the field was not present.
-  GURL splash_screen_url;
-
   // This is a proprietary extension of the web Manifest, double-check that it
   // is okay to use this entry.
   // Null if parsing failed or the field was not present.
   base::NullableString16 gcm_sender_id;
 
-  // Empty if the parsing failed or the field was not present.
+  // Empty if the parsing failed. Otherwise defaults to the start URL (or
+  // document URL if start URL isn't present) with filename, query, and fragment
+  // removed.
   GURL scope;
 };
 

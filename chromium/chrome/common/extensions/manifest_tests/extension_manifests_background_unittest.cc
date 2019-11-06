@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/test/values_test_util.h"
 #include "base/values.h"
 #include "chrome/common/extensions/manifest_tests/chrome_manifest_test.h"
 #include "components/version_info/version_info.h"
@@ -94,6 +95,40 @@ TEST_F(ExtensionManifestBackgroundTest, BackgroundPageWebRequest) {
                      errors::kWebRequestConflictsWithLazyBackground);
 }
 
+TEST_F(ExtensionManifestBackgroundTest, BackgroundPageTransientBackground) {
+  ScopedCurrentChannel current_channel(version_info::Channel::DEV);
+
+  scoped_refptr<Extension> extension(
+      LoadAndExpectSuccess(ManifestData(base::test::ParseJson(R"(
+          {
+            "name": "test",
+            "manifest_version": 2,
+            "version": "1",
+            "background": {
+              "page": "foo.html"
+            }
+          })"),
+                                        "")));
+  ASSERT_TRUE(extension.get());
+  EXPECT_TRUE(BackgroundInfo::HasPersistentBackgroundPage(extension.get()));
+
+  LoadAndExpectError(
+      ManifestData(base::test::ParseJson(R"(
+          {
+            "name": "test",
+            "manifest_version": 2,
+            "version": "1",
+            "permissions": [
+              "transientBackground"
+            ],
+            "background": {
+              "page": "foo.html"
+            }
+          })"),
+                   ""),
+      errors::kTransientBackgroundConflictsWithPersistentBackground);
+}
+
 TEST_F(ExtensionManifestBackgroundTest, BackgroundPagePersistentPlatformApp) {
   scoped_refptr<Extension> extension =
       LoadAndExpectSuccess("background_page_persistent_app.json");
@@ -127,7 +162,7 @@ TEST_F(ExtensionManifestBackgroundTest, BackgroundPagePersistentInvalidKey) {
             warnings[0].message);
 }
 
-// Tests channel restriction on "background.service_worker_script" key.
+// Tests channel restriction on "background.service_worker" key.
 TEST_F(ExtensionManifestBackgroundTest, ServiceWorkerBasedBackgroundKey) {
   // TODO(lazyboy): Add exhaustive tests here, e.g.
   //   - specifying a non-existent file.
@@ -135,10 +170,10 @@ TEST_F(ExtensionManifestBackgroundTest, ServiceWorkerBasedBackgroundKey) {
   //   - specifying invalid type (non-string) values.
   {
     ScopedCurrentChannel beta(version_info::Channel::BETA);
-    scoped_refptr<Extension> extension = LoadAndExpectWarning(
-        "service_worker_based_background.json",
-        "'background.service_worker_script' requires trunk "
-        "channel or newer, but this is the beta channel.");
+    scoped_refptr<Extension> extension =
+        LoadAndExpectWarning("service_worker_based_background.json",
+                             "'background.service_worker' requires trunk "
+                             "channel or newer, but this is the beta channel.");
   }
   {
     ScopedCurrentChannel beta(version_info::Channel::UNKNOWN);

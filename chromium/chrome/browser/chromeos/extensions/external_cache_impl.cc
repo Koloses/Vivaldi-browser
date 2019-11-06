@@ -24,7 +24,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/browser/updater/extension_downloader.h"
 #include "extensions/common/extension.h"
@@ -254,7 +254,7 @@ bool ExternalCacheImpl::GetExtensionExistingVersion(const std::string& id,
 service_manager::Connector* ExternalCacheImpl::GetConnector() {
   if (use_null_connector_)
     return nullptr;
-  return content::ServiceManagerConnection::GetForProcess()->GetConnector();
+  return content::GetSystemConnector();
 }
 
 void ExternalCacheImpl::UpdateExtensionLoader() {
@@ -282,21 +282,25 @@ void ExternalCacheImpl::CheckCache() {
       continue;
     }
 
+    base::FilePath file_path;
+    std::string version;
+    std::string hash;
+    bool is_cached =
+        local_cache_.GetExtension(entry.first, hash, &file_path, &version);
+    if (!is_cached)
+      version = "0.0.0.0";
     if (downloader_) {
       GURL update_url =
           GetExtensionUpdateUrl(entry.second, always_check_updates_);
 
       if (update_url.is_valid()) {
-        downloader_->AddPendingExtension(
+        downloader_->AddPendingExtensionWithVersion(
             entry.first, update_url, extensions::Manifest::EXTERNAL_POLICY,
-            false, 0, extensions::ManifestFetchData::FetchPriority::BACKGROUND);
+            false, 0, extensions::ManifestFetchData::FetchPriority::BACKGROUND,
+            base::Version(version));
       }
     }
-
-    base::FilePath file_path;
-    std::string version;
-    std::string hash;
-    if (local_cache_.GetExtension(entry.first, hash, &file_path, &version)) {
+    if (is_cached) {
       cached_extensions_->SetKey(
           entry.first,
           GetExtensionValueToCache(entry.second, file_path.value(), version));

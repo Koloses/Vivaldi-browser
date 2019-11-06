@@ -30,13 +30,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "ash/shell.h"  // mash-ok
-#include "mojo/public/cpp/bindings/type_converter.h"
-#include "services/ws/public/cpp/property_type_converters.h"
-#include "services/ws/public/mojom/window_manager.mojom.h"
-#include "ui/base/ui_base_features.h"
-#include "ui/display/display.h"
-#include "ui/display/screen.h"
+#include "ash/shell.h"
 #endif
 
 namespace {
@@ -91,8 +85,9 @@ class ScreenCaptureNotificationUIViews
   ~ScreenCaptureNotificationUIViews() override;
 
   // ScreenCaptureNotificationUI interface.
-  gfx::NativeViewId OnStarted(base::OnceClosure stop_callback,
-                              base::RepeatingClosure source_callback) override;
+  gfx::NativeViewId OnStarted(
+      base::OnceClosure stop_callback,
+      content::MediaStreamUI::SourceCallback source_callback) override;
 
   // views::View overrides.
   void Layout() override;
@@ -121,7 +116,7 @@ class ScreenCaptureNotificationUIViews
 
   const base::string16 text_;
   base::OnceClosure stop_callback_;
-  base::RepeatingClosure source_callback_;
+  content::MediaStreamUI::SourceCallback source_callback_;
   NotificationBarClientView* client_view_;
   views::ImageView* gripper_;
   views::Label* label_;
@@ -144,36 +139,35 @@ ScreenCaptureNotificationUIViews::ScreenCaptureNotificationUIViews(
   set_owned_by_client();
 
   SetLayoutManager(std::make_unique<views::BoxLayout>(
-      views::BoxLayout::kHorizontal, gfx::Insets(), kHorizontalMargin));
+      views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
+      kHorizontalMargin));
 
-  gripper_ = new views::ImageView();
-  gripper_->SetImage(
-      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-          IDR_SCREEN_CAPTURE_NOTIFICATION_GRIP));
-  AddChildView(gripper_);
+  auto gripper = std::make_unique<views::ImageView>();
+  gripper->SetImage(ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+      IDR_SCREEN_CAPTURE_NOTIFICATION_GRIP));
+  gripper_ = AddChildView(std::move(gripper));
 
-  label_ = new views::Label();
-  AddChildView(label_);
+  label_ = AddChildView(std::make_unique<views::Label>());
 
   base::string16 source_text =
       l10n_util::GetStringUTF16(IDS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_SOURCE);
-  source_button_ =
+  auto source_button =
       views::MdTextButton::CreateSecondaryUiButton(this, source_text);
-  AddChildView(source_button_);
+  source_button_ = AddChildView(std::move(source_button));
 
   base::string16 stop_text =
       l10n_util::GetStringUTF16(IDS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_STOP);
-  stop_button_ =
+  auto stop_button =
       views::MdTextButton::CreateSecondaryUiBlueButton(this, stop_text);
-  AddChildView(stop_button_);
+  stop_button_ = AddChildView(std::move(stop_button));
 
   // TODO(jiayl): IDS_PASSWORDS_PAGE_VIEW_HIDE_BUTTON is used for the need to
   // merge to M34. Change it to a new IDS_ after the merge.
-  hide_link_ = new views::Link(
+  auto hide_link = std::make_unique<views::Link>(
       l10n_util::GetStringUTF16(IDS_PASSWORDS_PAGE_VIEW_HIDE_BUTTON));
-  hide_link_->set_listener(this);
-  hide_link_->SetUnderline(false);
-  AddChildView(hide_link_);
+  hide_link->set_listener(this);
+  hide_link->SetUnderline(false);
+  hide_link_ = AddChildView(std::move(hide_link));
 }
 
 ScreenCaptureNotificationUIViews::~ScreenCaptureNotificationUIViews() {
@@ -184,7 +178,7 @@ ScreenCaptureNotificationUIViews::~ScreenCaptureNotificationUIViews() {
 
 gfx::NativeViewId ScreenCaptureNotificationUIViews::OnStarted(
     base::OnceClosure stop_callback,
-    base::RepeatingClosure source_callback) {
+    content::MediaStreamUI::SourceCallback source_callback) {
   stop_callback_ = std::move(stop_callback);
   source_callback_ = std::move(source_callback);
 
@@ -202,26 +196,18 @@ gfx::NativeViewId ScreenCaptureNotificationUIViews::OnStarted(
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   params.remove_standard_frame = true;
-  params.keep_on_top = true;
+  params.z_order = ui::ZOrderLevel::kFloatingUIElement;
   params.name = "ScreenCaptureNotificationUIViews";
 
 #if defined(OS_CHROMEOS)
   // TODO(sergeyu): The notification bar must be shown on the monitor that's
   // being captured. Make sure it's always the case. Currently we always capture
   // the primary monitor.
-  if (!features::IsUsingWindowService()) {
-    params.context = ash::Shell::GetPrimaryRootWindow();
-  } else {
-    const display::Display primary_display =
-        display::Screen::GetScreen()->GetPrimaryDisplay();
-    params.mus_properties[ws::mojom::WindowManager::kDisplayId_InitProperty] =
-        mojo::ConvertTo<std::vector<uint8_t>>(primary_display.id());
-  }
+  params.context = ash::Shell::GetPrimaryRootWindow();
 #endif
 
   widget->set_frame_type(views::Widget::FRAME_TYPE_FORCE_CUSTOM);
   widget->Init(params);
-  widget->SetAlwaysOnTop(true);
 
   SetBackground(views::CreateSolidBackground(GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_DialogBackground)));
@@ -320,7 +306,7 @@ void ScreenCaptureNotificationUIViews::LinkClicked(views::Link* source,
 
 void ScreenCaptureNotificationUIViews::NotifySourceChange() {
   if (!source_callback_.is_null())
-    source_callback_.Run();
+    source_callback_.Run(content::DesktopMediaID());
 }
 
 void ScreenCaptureNotificationUIViews::NotifyStopped() {

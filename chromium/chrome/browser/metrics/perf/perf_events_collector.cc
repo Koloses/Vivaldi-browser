@@ -5,11 +5,18 @@
 #include "chrome/browser/metrics/perf/perf_events_collector.h"
 
 #include "base/bind.h"
+#include "base/files/file_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/rand_util.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/strings/stringprintf.h"
+#include "base/system/sys_info.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/metrics/perf/cpu_identity.h"
 #include "chrome/browser/metrics/perf/perf_output.h"
+#include "chrome/browser/metrics/perf/process_type_collector.h"
 #include "chrome/browser/metrics/perf/windowed_incognito_observer.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "components/variations/variations_associated_data.h"
@@ -20,6 +27,11 @@ namespace metrics {
 namespace {
 
 const char kCWPFieldTrialName[] = "ChromeOSWideProfilingCollection";
+
+// Name the histogram that represents the success and various failure modes for
+// parsing CPU frequencies.
+const char kParseFrequenciesHistogramName[] =
+    "ChromeOS.CWP.ParseCPUFrequencies";
 
 // Limit the total size of protobufs that can be cached, so they don't take up
 // too much memory. If the size of cached protobufs exceeds this value, stop
@@ -101,6 +113,17 @@ const char kPerfRecordLBRCmd[] = "perf record -a -e r20c4 -b -c 200011";
 // we sample on the branches retired event.
 const char kPerfRecordLBRCmdAtom[] = "perf record -a -e rc4 -b -c 300001";
 
+// The following events count misses in the level 1 caches and TLBs.
+
+// Perf doesn't support the generic dTLB-misses event for Goldmont. We define it
+// in terms of raw event number and umask value. Event codes taken from
+// "Intel 64 and IA-32 Architectures Software Developer's Manual, Vol 3".
+const char kPerfRecordInstructionTLBMissesCmdGLM[] =
+    "perf record -a -e r0481 -c 2003";
+
+const char kPerfRecordDataTLBMissesCmdGLM[] = "perf record -a -e r13d0 -c 2003";
+
+// Use the generic event names for the other microarchitectures.
 const char kPerfRecordInstructionTLBMissesCmd[] =
     "perf record -a -e iTLB-misses -c 2003";
 
@@ -154,13 +177,22 @@ const std::vector<RandomSelector::WeightAndValue> GetDefaultCommands_x86_64(
     cmds.push_back(WeightAndValue(5.0, kPerfRecordCacheMissesCmd));
     return cmds;
   }
-  if (cpu_uarch == "Silvermont" || cpu_uarch == "Airmont" ||
-      cpu_uarch == "Goldmont") {
+  if (cpu_uarch == "Silvermont" || cpu_uarch == "Airmont") {
     cmds.push_back(WeightAndValue(50.0, kPerfRecordCyclesCmd));
     cmds.push_back(WeightAndValue(20.0, callgraph_cmd));
     cmds.push_back(WeightAndValue(15.0, kPerfRecordLBRCmdAtom));
     cmds.push_back(WeightAndValue(5.0, kPerfRecordInstructionTLBMissesCmd));
     cmds.push_back(WeightAndValue(5.0, kPerfRecordDataTLBMissesCmd));
+    cmds.push_back(WeightAndValue(5.0, kPerfRecordCacheMissesCmd));
+    return cmds;
+  }
+  if (cpu_uarch == "Goldmont" || cpu_uarch == "GoldmontPlus") {
+    cmds.push_back(WeightAndValue(50.0, kPerfRecordCyclesCmd));
+    cmds.push_back(WeightAndValue(20.0, callgraph_cmd));
+    cmds.push_back(WeightAndValue(15.0, kPerfRecordLBRCmdAtom));
+    // Use the Goldmont variants of iTLB and dTLB misses.
+    cmds.push_back(WeightAndValue(5.0, kPerfRecordInstructionTLBMissesCmdGLM));
+    cmds.push_back(WeightAndValue(5.0, kPerfRecordDataTLBMissesCmdGLM));
     cmds.push_back(WeightAndValue(5.0, kPerfRecordCacheMissesCmd));
     return cmds;
   }
@@ -171,6 +203,19 @@ const std::vector<RandomSelector::WeightAndValue> GetDefaultCommands_x86_64(
   cmds.push_back(WeightAndValue(5.0, kPerfRecordDataTLBMissesCmd));
   cmds.push_back(WeightAndValue(5.0, kPerfRecordCacheMissesCmd));
   return cmds;
+}
+
+void OnCollectProcessTypes(SampledProfile* sampled_profile) {
+  std::map<uint32_t, Process> process_types =
+      ProcessTypeCollector::ChromeProcessTypes();
+  std::map<uint32_t, Thread> thread_types =
+      ProcessTypeCollector::ChromeThreadTypes();
+  if (!process_types.empty() && !thread_types.empty()) {
+    sampled_profile->mutable_process_types()->insert(process_types.begin(),
+                                                     process_types.end());
+    sampled_profile->mutable_thread_types()->insert(thread_types.begin(),
+                                                    thread_types.end());
+  }
 }
 
 }  // namespace
@@ -199,7 +244,19 @@ std::vector<RandomSelector::WeightAndValue> GetDefaultCommandsForCpu(
 
 }  // namespace internal
 
-PerfCollector::PerfCollector() : MetricCollector(kPerfCollectorName) {}
+PerfCollector::PerfCollector()
+    : MetricCollector(kPerfCollectorName), weak_factory_(this) {
+  // Parsing processor information may be expensive. Compute asynchronously
+  // in a separate thread.
+  DCHECK(base::SequencedTaskRunnerHandle::IsSet());
+  auto task_runner = base::SequencedTaskRunnerHandle::Get();
+  base::PostTaskWithTraits(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindOnce(&PerfCollector::ParseCPUFrequencies, task_runner,
+                     weak_factory_.GetWeakPtr()));
+}
 
 PerfCollector::~PerfCollector() {}
 
@@ -335,22 +392,52 @@ MetricCollector::PerfProtoType PerfCollector::GetPerfProtoType(
   return PerfProtoType::PERF_TYPE_UNSUPPORTED;
 }
 
+void PerfCollector::OnPerfOutputComplete(
+    std::unique_ptr<WindowedIncognitoObserver> incognito_observer,
+    std::unique_ptr<SampledProfile> sampled_profile,
+    PerfProtoType type,
+    bool has_cycles,
+    std::string perf_stdout) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // We are done using |perf_output_call_| and may destroy it.
+  perf_output_call_ = nullptr;
+
+  ParseOutputProtoIfValid(std::move(incognito_observer),
+                          std::move(sampled_profile), type, has_cycles,
+                          perf_stdout);
+}
+
 void PerfCollector::ParseOutputProtoIfValid(
     std::unique_ptr<WindowedIncognitoObserver> incognito_observer,
     std::unique_ptr<SampledProfile> sampled_profile,
     PerfProtoType type,
+    bool has_cycles,
     const std::string& perf_stdout) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  // |perf_output_call_| called us, and owns |perf_stdout|. We must delete it,
-  // but not before parsing |perf_stdout|, and we may return early.
-  std::unique_ptr<PerfOutputCall> call_deleter(std::move(perf_output_call_));
 
   if (incognito_observer->incognito_launched()) {
     AddToUmaHistogram(CollectionAttemptStatus::INCOGNITO_LAUNCHED);
     return;
   }
-  SaveSerializedPerfProto(std::move(sampled_profile), type, perf_stdout);
+  if (has_cycles) {
+    // Store CPU max frequencies in the sampled profile.
+    std::copy(max_frequencies_mhz_.begin(), max_frequencies_mhz_.end(),
+              google::protobuf::RepeatedFieldBackInserter(
+                  sampled_profile->mutable_cpu_max_frequency_mhz()));
+  }
+
+  bool posted = base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+      base::BindOnce(&OnCollectProcessTypes, sampled_profile.get()),
+      base::BindOnce(&PerfCollector::SaveSerializedPerfProto,
+                     weak_factory_.GetWeakPtr(), std::move(sampled_profile),
+                     type, perf_stdout));
+  DCHECK(posted);
+}
+
+base::WeakPtr<MetricCollector> PerfCollector::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 bool PerfCollector::ShouldCollect() const {
@@ -377,6 +464,22 @@ bool PerfCollector::ShouldCollect() const {
   return true;
 }
 
+namespace internal {
+
+bool CommandSamplesCPUCycles(const std::vector<std::string>& args) {
+  // First two arguments are "perf record", "perf stat", etc. We are only
+  // interested in "perf record".
+  if (args.size() < 4 || args[0] != "perf" || args[1] != "record")
+    return false;
+  for (size_t i = 2; i + 1 < args.size(); ++i) {
+    if (args[i] == "-e" && args[i + 1] == "cycles")
+      return true;
+  }
+  return false;
+}
+
+}  // namespace internal
+
 void PerfCollector::CollectProfile(
     std::unique_ptr<SampledProfile> sampled_profile) {
   std::unique_ptr<WindowedIncognitoObserver> incognito_observer =
@@ -386,13 +489,61 @@ void PerfCollector::CollectProfile(
       base::SplitString(command_selector_.Select(), kPerfCommandDelimiter,
                         base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
   PerfProtoType type = GetPerfProtoType(command);
+  bool has_cycles = internal::CommandSamplesCPUCycles(command);
 
   perf_output_call_ = std::make_unique<PerfOutputCall>(
       collection_params_.collection_duration, command,
-      base::BindOnce(&PerfCollector::ParseOutputProtoIfValid,
-                     base::AsWeakPtr<PerfCollector>(this),
-                     base::Passed(&incognito_observer),
-                     base::Passed(&sampled_profile), type));
+      base::BindOnce(&PerfCollector::OnPerfOutputComplete,
+                     weak_factory_.GetWeakPtr(), std::move(incognito_observer),
+                     std::move(sampled_profile), type, has_cycles));
+}
+
+// static
+void PerfCollector::ParseCPUFrequencies(
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
+    base::WeakPtr<PerfCollector> perf_collector) {
+  const char kCPUMaxFreqPath[] =
+      "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq";
+  int num_cpus = base::SysInfo::NumberOfProcessors();
+  int num_zeros = 0;
+  std::vector<uint32_t> frequencies_mhz;
+  for (int i = 0; i < num_cpus; ++i) {
+    std::string content;
+    unsigned int frequency_khz = 0;
+    auto path = base::StringPrintf(kCPUMaxFreqPath, i);
+    if (ReadFileToString(base::FilePath(path), &content)) {
+      DCHECK(!content.empty());
+      base::StringToUint(content, &frequency_khz);
+    }
+    if (frequency_khz == 0) {
+      num_zeros++;
+    }
+    // Convert kHz frequencies to MHz.
+    frequencies_mhz.push_back(static_cast<uint32_t>(frequency_khz / 1000));
+  }
+  if (num_cpus == 0) {
+    base::UmaHistogramEnumeration(kParseFrequenciesHistogramName,
+                                  ParseFrequencyStatus::kNumCPUsIsZero);
+  } else if (num_zeros == num_cpus) {
+    base::UmaHistogramEnumeration(kParseFrequenciesHistogramName,
+                                  ParseFrequencyStatus::kAllZeroCPUFrequencies);
+  } else if (num_zeros > 0) {
+    base::UmaHistogramEnumeration(
+        kParseFrequenciesHistogramName,
+        ParseFrequencyStatus::kSomeZeroCPUFrequencies);
+  } else {
+    base::UmaHistogramEnumeration(kParseFrequenciesHistogramName,
+                                  ParseFrequencyStatus::kSuccess);
+  }
+  task_runner->PostTask(FROM_HERE,
+                        base::BindOnce(&PerfCollector::SaveCPUFrequencies,
+                                       perf_collector, frequencies_mhz));
+}
+
+void PerfCollector::SaveCPUFrequencies(
+    const std::vector<uint32_t>& frequencies) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  max_frequencies_mhz_ = frequencies;
 }
 
 }  // namespace metrics

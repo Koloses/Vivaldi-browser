@@ -12,6 +12,7 @@
 #include "chromecast/media/cma/backend/filter_group.h"
 #include "chromecast/media/cma/backend/post_processing_pipeline_impl.h"
 #include "chromecast/media/cma/backend/post_processing_pipeline_parser.h"
+#include "chromecast/public/media/audio_post_processor2_shlib.h"
 #include "media/audio/audio_device_description.h"
 
 namespace chromecast {
@@ -126,8 +127,6 @@ bool MixerPipeline::BuildPipeline(PostProcessingPipelineParser* config,
         loopback_output_group_;
   }
 
-  output_group_->PrintTopology();
-
   return true;
 }
 
@@ -155,14 +154,21 @@ bool MixerPipeline::SetGroupDeviceIds(const base::Value* ids,
       return false;
     }
     stream_sinks_[stream_type] = filter_group;
+    filter_group->AddStreamType(stream_type);
   }
   return true;
 }
 
-void MixerPipeline::Initialize(int output_samples_per_second_) {
-  for (auto&& filter_group : filter_groups_) {
-    filter_group->Initialize(output_samples_per_second_);
-  }
+void MixerPipeline::Initialize(int output_samples_per_second,
+                               int frames_per_write) {
+  // The output group will recursively set the sample rate of all other
+  // FilterGroups.
+  AudioPostProcessor2::Config config;
+  config.output_sample_rate = output_samples_per_second;
+  config.system_output_sample_rate = output_samples_per_second;
+  config.output_frames_per_write = frames_per_write;
+  output_group_->Initialize(config);
+  output_group_->PrintTopology();
 }
 
 FilterGroup* MixerPipeline::GetInputGroup(const std::string& device_id) {

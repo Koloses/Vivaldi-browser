@@ -21,6 +21,7 @@
 #include "media/base/user_input_monitor.h"
 #include "media/webrtc/audio_processor.h"
 #include "media/webrtc/webrtc_switches.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -108,7 +109,7 @@ class InputControllerTest : public ::testing::TestWithParam<bool> {
  public:
   InputControllerTest()
       : task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME),
+            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME),
         audio_manager_(std::make_unique<media::FakeAudioManager>(
             std::make_unique<media::TestAudioThread>(false),
             &log_factory_)),
@@ -137,7 +138,7 @@ class InputControllerTest : public ::testing::TestWithParam<bool> {
       media::AudioProcessingSettings settings;
       settings.echo_cancellation = media::EchoCancellationType::kAec3;
       config_ptr = mojom::AudioProcessingConfigPtr(
-          base::in_place, mojo::MakeRequest(&controls_ptr_),
+          base::in_place, remote_controls_.BindNewPipeAndPassReceiver(),
           base::UnguessableToken::Create(), settings);
     }
 #endif
@@ -161,7 +162,7 @@ class InputControllerTest : public ::testing::TestWithParam<bool> {
   media::AudioParameters params_;
   MockAudioInputStream stream_;
   base::test::ScopedFeatureList audio_processing_feature_;
-  mojom::AudioProcessorControlsPtr controls_ptr_;
+  mojo::Remote<mojom::AudioProcessorControls> remote_controls_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InputControllerTest);

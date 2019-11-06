@@ -71,14 +71,15 @@
           </cr-toggle>
           <div id="usageStatsLabelContainer">
             <span id="usageStatsLabel" i18n-content="checkboxLogging"></span>
-            <a id="" href="#" i18n-content="learnMore"
+            <a id="learn-more" href="#" i18n-content="learnMore"
                 on-tap="onUsageStatsHelpLinkClicked_">
             </a>
           </div>
         </div>
       </div>
       <div slot="bottom-buttons" class="flex layout horizontal">
-        <oobe-back-button on-tap="onEulaBackButtonPressed_"></oobe-back-button>
+        <oobe-back-button
+            on-click="onEulaBackButtonPressed_"></oobe-back-button>
         <div class="flex">
         </div>
         <oobe-text-button id="acceptButton" inverse on-tap="eulaAccepted_"
@@ -109,7 +110,7 @@
           </div>
           <div class='password-row layout horizontal'>
             <div class="flex"></div>
-            <div>{{password}}</div>
+            <div id="eula-password">{{password}}</div>
             <div class="flex"></div>
           </div>
         </div>

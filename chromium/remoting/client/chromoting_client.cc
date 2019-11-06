@@ -21,6 +21,7 @@
 #include "remoting/protocol/video_renderer.h"
 #include "remoting/protocol/webrtc_connection_to_host.h"
 #include "remoting/signaling/jid_util.h"
+#include "remoting/signaling/signaling_address.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 
 namespace remoting {
@@ -124,6 +125,11 @@ void ChromotingClient::Start(
       signal_strategy_->Connect();
       break;
   }
+}
+
+void ChromotingClient::Close() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  connection_->Disconnect(protocol::OK);
 }
 
 void ChromotingClient::SetCapabilities(
@@ -244,7 +250,7 @@ void ChromotingClient::OnSignalStrategyStateChange(
     VLOG(1) << "Signaling connection closed.";
     mouse_input_scaler_.set_input_stub(nullptr);
     connection_.reset();
-    user_interface_->OnConnectionState(protocol::ConnectionToHost::CLOSED,
+    user_interface_->OnConnectionState(protocol::ConnectionToHost::FAILED,
                                        protocol::SIGNALING_ERROR);
   }
 }

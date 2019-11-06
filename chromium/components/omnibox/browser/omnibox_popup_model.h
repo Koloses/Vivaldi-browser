@@ -64,6 +64,7 @@ class OmniboxPopupModel {
   bool IsOpen() const;
 
   OmniboxPopupView* view() const { return view_; }
+  OmniboxEditModel* edit_model() const { return edit_model_; }
 
   // Returns the AutocompleteController used by this popup.
   AutocompleteController* autocomplete_controller() const {
@@ -95,11 +96,10 @@ class OmniboxPopupModel {
   void ResetToDefaultMatch();
 
   // Immediately updates and opens the popup if necessary, then moves the
-  // current selection down (|count| > 0) or up (|count| < 0), clamping to the
-  // first or last result if necessary.  If |count| == 0, the selection will be
-  // unchanged, but the popup will still redraw and modify the text in the
-  // OmniboxEditModel.
-  void Move(int count);
+  // current selection to the respective line. If the line is unchanged, the
+  // selection will be unchanged, but the popup will still redraw and modify
+  // the text in the OmniboxEditModel.
+  void MoveTo(size_t new_line);
 
   // If the selected line has both a normal match and a keyword match, this can
   // be used to choose which to select.  This allows the user to toggle between
@@ -112,9 +112,10 @@ class OmniboxPopupModel {
   // matches (or there is no selection).
   void SetSelectedLineState(LineState state);
 
-  // Called when the user hits shift-delete.  This should determine if the item
-  // can be removed from history, and if so, remove it and update the popup.
-  void TryDeletingCurrentItem();
+  // Tries to erase the suggestion at |line|.  This should determine if the item
+  // at |line| can be removed from history, and if so, remove it and update the
+  // popup.
+  void TryDeletingLine(size_t line);
 
   // Returns true if the destination URL of the match is bookmarked.
   bool IsStarredMatch(const AutocompleteMatch& match) const;
@@ -152,6 +153,8 @@ class OmniboxPopupModel {
   // If |closes| is set true, the popup will close when the omnibox is blurred.
   bool popup_closes_on_blur() const { return popup_closes_on_blur_; }
   void set_popup_closes_on_blur(bool closes) { popup_closes_on_blur_ = closes; }
+
+  OmniboxEditModel* edit_model() { return edit_model_; }
 
   // The token value for selected_line_ and functions dealing with a "line
   // number" that indicates "no line".
@@ -192,7 +195,7 @@ class OmniboxPopupModel {
   // Observers.
   base::ObserverList<OmniboxPopupModelObserver>::Unchecked observers_;
 
-  base::WeakPtrFactory<OmniboxPopupModel> weak_factory_;
+  base::WeakPtrFactory<OmniboxPopupModel> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxPopupModel);
 };

@@ -9,9 +9,7 @@
 
 #include "ash/ash_export.h"
 #include "base/macros.h"
-#include "base/scoped_observer.h"
-#include "ui/aura/env.h"
-#include "ui/aura/env_observer.h"
+#include "ui/aura/window_observer.h"
 #include "ui/aura/window_occlusion_tracker.h"
 #include "ui/views/view.h"
 
@@ -23,16 +21,11 @@ namespace ui {
 class LayerTreeOwner;
 }
 
-namespace ws {
-class ScopedForceVisible;
-}
-
 namespace ash {
-namespace wm {
 
 // A view that mirrors the client area of a single (source) window.
 class ASH_EXPORT WindowMirrorView : public views::View,
-                                    public aura::EnvObserver {
+                                    public aura::WindowObserver {
  public:
   WindowMirrorView(aura::Window* source, bool trilinear_filtering_on_init);
   ~WindowMirrorView() override;
@@ -43,22 +36,19 @@ class ASH_EXPORT WindowMirrorView : public views::View,
   // Recreates |layer_owner_|.
   void RecreateMirrorLayers();
 
+  // aura::WindowObserver:
+  void OnWindowDestroying(aura::Window* window) override;
+
   // views::View:
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   bool GetNeedsNotificationWhenVisibleBoundsChange() const override;
   void OnVisibleBoundsChanged() override;
-  void NativeViewHierarchyChanged() override;
   void AddedToWidget() override;
   void RemovedFromWidget() override;
 
  private:
   void InitLayerOwner();
-
-  // Ensures that the |target_| window is in the list of mirror windows that is
-  // set as a property on the |source_| window. This method triggers the
-  // OnWindowPropertyChanged() on WindowObservers.
-  void UpdateSourceWindowProperty();
 
   // Gets the root of the layer tree that was lifted from |source_| (and is now
   // a child of |this->layer()|).
@@ -67,11 +57,6 @@ class ASH_EXPORT WindowMirrorView : public views::View,
   // Calculates the bounds of the client area of the Window in the widget
   // coordinate space.
   gfx::Rect GetClientAreaBounds() const;
-
-  void ForceVisibilityAndOcclusionForProxyWindow();
-
-  // aura::EnvObserver:
-  void OnWindowOcclusionTrackingResumed() override;
 
   // The original window that is being represented by |this|.
   aura::Window* source_;
@@ -87,18 +72,12 @@ class ASH_EXPORT WindowMirrorView : public views::View,
   // InitLayerOwner().
   bool trilinear_filtering_on_init_;
 
-  // These are used when mirroring a window from a remote client (a proxy
-  // window from the window-service).
   std::unique_ptr<aura::WindowOcclusionTracker::ScopedForceVisible>
       force_occlusion_tracker_visible_;
-  std::unique_ptr<ws::ScopedForceVisible> force_proxy_window_visible_;
-
-  ScopedObserver<aura::Env, aura::EnvObserver> env_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WindowMirrorView);
 };
 
-}  // namespace wm
 }  // namespace ash
 
 #endif  // ASH_WM_WINDOW_MIRROR_VIEW_H_

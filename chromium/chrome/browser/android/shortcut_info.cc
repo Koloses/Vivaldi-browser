@@ -53,8 +53,7 @@ void ShortcutInfo::UpdateFromManifest(const blink::Manifest& manifest) {
   if (manifest.start_url.is_valid())
     url = manifest.start_url;
 
-  if (manifest.scope.is_valid())
-    scope = manifest.scope;
+  scope = manifest.scope;
 
   // Set the display based on the manifest value, if any.
   if (manifest.display != blink::kWebDisplayModeUndefined)
@@ -81,10 +80,6 @@ void ShortcutInfo::UpdateFromManifest(const blink::Manifest& manifest) {
   if (manifest.background_color)
     background_color = manifest.background_color;
 
-  // Sets the URL of the HTML splash screen, if any.
-  if (manifest.splash_screen_url.is_valid())
-    splash_screen_url = manifest.splash_screen_url;
-
   // Set the icon urls based on the icons in the manifest, if any.
   icon_urls.clear();
   for (const auto& icon : manifest.icons)
@@ -93,18 +88,8 @@ void ShortcutInfo::UpdateFromManifest(const blink::Manifest& manifest) {
   if (manifest.share_target) {
     share_target = ShareTarget();
     share_target->action = manifest.share_target->action;
-    if (manifest.share_target->method ==
-        blink::Manifest::ShareTarget::Method::kPost) {
-      share_target->method = ShareTarget::Method::kPost;
-    } else {
-      share_target->method = ShareTarget::Method::kGet;
-    }
-    if (manifest.share_target->enctype ==
-        blink::Manifest::ShareTarget::Enctype::kMultipart) {
-      share_target->enctype = ShareTarget::Enctype::kMultipart;
-    } else {
-      share_target->enctype = ShareTarget::Enctype::kApplication;
-    }
+    share_target->method = manifest.share_target->method;
+    share_target->enctype = manifest.share_target->enctype;
     if (!manifest.share_target->params.text.is_null())
       share_target->params.text = manifest.share_target->params.text.string();
     if (!manifest.share_target->params.title.is_null())

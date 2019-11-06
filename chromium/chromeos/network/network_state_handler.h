@@ -94,6 +94,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkStateHandler
                    const base::Location& from_here);
   void RemoveObserver(NetworkStateHandlerObserver* observer,
                       const base::Location& from_here);
+  bool HasObserver(NetworkStateHandlerObserver* observer);
 
   // Returns the state for technology |type|. Only
   // NetworkTypePattern::Primitive, ::Mobile, ::Ethernet, and ::Tether are
@@ -379,9 +380,9 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkStateHandler
     return default_network_path_;
   }
 
-  // Sets the |last_error_| property of the matching NetworkState for tests.
-  void SetLastErrorForTest(const std::string& service_path,
-                           const std::string& error);
+  // Sets the |error_| property of the matching NetworkState for tests.
+  void SetErrorForTest(const std::string& service_path,
+                       const std::string& error);
 
   // Sets |allow_only_policy_networks_to_connect_|,
   // |allow_only_policy_networks_to_connect_if_available_| and

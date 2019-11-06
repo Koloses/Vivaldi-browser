@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/callback_helpers.h"
 #include "chrome/browser/interstitials/chrome_metrics_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
@@ -104,8 +103,7 @@ bool MITMSoftwareBlockingPage::ShouldCreateNewNavigation() const {
   return true;
 }
 
-InterstitialPageDelegate::TypeID MITMSoftwareBlockingPage::GetTypeForTesting()
-    const {
+InterstitialPageDelegate::TypeID MITMSoftwareBlockingPage::GetTypeForTesting() {
   return MITMSoftwareBlockingPage::kTypeForTesting;
 }
 
@@ -161,6 +159,5 @@ void MITMSoftwareBlockingPage::NotifyDenyCertificate() {
     return;
   }
 
-  base::ResetAndReturn(&callback_)
-      .Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_CANCEL);
+  std::move(callback_).Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_CANCEL);
 }

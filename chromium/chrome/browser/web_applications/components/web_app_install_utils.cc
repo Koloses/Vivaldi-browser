@@ -6,12 +6,15 @@
 
 #include <utility>
 
+#include "base/metrics/histogram_functions.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/banners/app_banner_manager.h"
 #include "chrome/browser/banners/app_banner_manager_desktop.h"
 #include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/installable/installable_data.h"
+#include "chrome/browser/installable/installable_metrics.h"
+#include "chrome/browser/web_applications/components/web_app_constants.h"
 #include "chrome/browser/web_applications/components/web_app_icon_generator.h"
 #include "chrome/common/web_application_info.h"
 #include "third_party/blink/public/common/manifest/manifest.h"
@@ -53,15 +56,8 @@ void UpdateWebAppInfoFromManifest(const blink::Manifest& manifest,
   if (manifest.start_url.is_valid())
     web_app_info->app_url = manifest.start_url;
 
-  if (for_installable_site == ForInstallableSite::kYes) {
-    // If there is no scope present, use 'start_url' without the filename as the
-    // scope. This does not match the spec but it matches what we do on Android.
-    // See: https://github.com/w3c/manifest/issues/550
-    if (!manifest.scope.is_empty())
-      web_app_info->scope = manifest.scope;
-    else if (manifest.start_url.is_valid())
-      web_app_info->scope = manifest.start_url.Resolve(".");
-  }
+  if (for_installable_site == ForInstallableSite::kYes)
+    web_app_info->scope = manifest.scope;
 
   if (manifest.theme_color)
     web_app_info->theme_color = *manifest.theme_color;
@@ -75,8 +71,8 @@ void UpdateWebAppInfoFromManifest(const blink::Manifest& manifest,
     // should have added ANY if there was no purpose specified in the manifest).
     DCHECK(!icon.purpose.empty());
 
-    if (!base::ContainsValue(icon.purpose,
-                             blink::Manifest::ImageResource::Purpose::ANY)) {
+    if (!base::Contains(icon.purpose,
+                        blink::Manifest::ImageResource::Purpose::ANY)) {
       continue;
     }
 
@@ -90,6 +86,9 @@ void UpdateWebAppInfoFromManifest(const blink::Manifest& manifest,
   // we picked up from the web_app stuff.
   if (!web_app_icons.empty())
     web_app_info->icons = std::move(web_app_icons);
+
+  // Copy across the file handler info.
+  web_app_info->file_handler = manifest.file_handler;
 }
 
 std::set<int> SizesToGenerate() {
@@ -101,8 +100,8 @@ std::set<int> SizesToGenerate() {
 }
 
 std::vector<GURL> GetValidIconUrlsToDownload(
-    const InstallableData& data,
-    const WebApplicationInfo& web_app_info) {
+    const WebApplicationInfo& web_app_info,
+    const InstallableData* data) {
   // Add icon urls to download from the WebApplicationInfo.
   std::vector<GURL> web_app_info_icon_urls;
   for (auto& info : web_app_info.icons) {
@@ -110,7 +109,7 @@ std::vector<GURL> GetValidIconUrlsToDownload(
       continue;
 
     // Skip downloading icon if we already have it from the InstallableManager.
-    if (info.url == data.primary_icon_url && data.primary_icon)
+    if (data && data->primary_icon && data->primary_icon_url == info.url)
       continue;
 
     web_app_info_icon_urls.push_back(info.url);
@@ -132,28 +131,33 @@ void MergeInstallableDataIcon(const InstallableData& data,
   }
 }
 
-std::vector<BitmapAndSource> FilterSquareIcons(
-    const IconsMap& icons_map,
-    const WebApplicationInfo& web_app_info) {
-  std::vector<BitmapAndSource> downloaded_icons;
-  for (const std::pair<GURL, std::vector<SkBitmap>>& url_bitmap : icons_map) {
-    for (const SkBitmap& bitmap : url_bitmap.second) {
-      if (bitmap.empty() || bitmap.width() != bitmap.height())
-        continue;
-
-      downloaded_icons.push_back(BitmapAndSource(url_bitmap.first, bitmap));
-    }
-  }
-
+void FilterSquareIconsFromInfo(const WebApplicationInfo& web_app_info,
+                               std::vector<BitmapAndSource>* square_icons) {
   // Add all existing icons from WebApplicationInfo.
   for (const WebApplicationInfo::IconInfo& icon_info : web_app_info.icons) {
     const SkBitmap& icon = icon_info.data;
-    if (!icon.drawsNothing() && icon.width() == icon.height()) {
-      downloaded_icons.push_back(BitmapAndSource(icon_info.url, icon));
+    if (!icon.drawsNothing() && icon.width() == icon.height())
+      square_icons->push_back(BitmapAndSource(icon_info.url, icon));
+  }
+}
+
+void FilterSquareIconsFromMap(const IconsMap& icons_map,
+                              std::vector<BitmapAndSource>* square_icons) {
+  for (const std::pair<GURL, std::vector<SkBitmap>>& url_icon : icons_map) {
+    for (const SkBitmap& icon : url_icon.second) {
+      if (!icon.empty() && icon.width() == icon.height())
+        square_icons->push_back(BitmapAndSource(url_icon.first, icon));
     }
   }
+}
 
-  return downloaded_icons;
+std::vector<BitmapAndSource> FilterSquareIcons(
+    const IconsMap& icons_map,
+    const WebApplicationInfo& web_app_info) {
+  std::vector<BitmapAndSource> square_icons;
+  FilterSquareIconsFromMap(icons_map, &square_icons);
+  FilterSquareIconsFromInfo(web_app_info, &square_icons);
+  return square_icons;
 }
 
 void ResizeDownloadedIconsGenerateMissing(
@@ -167,11 +171,67 @@ void ResizeDownloadedIconsGenerateMissing(
   ReplaceWebAppIcons(size_to_icons, web_app_info);
 }
 
+void UpdateWebAppIconsWithoutChangingLinks(
+    const std::map<int, BitmapAndSource>& size_map,
+    WebApplicationInfo* web_app_info) {
+  // First add in the icon data that have urls with the url / size data from the
+  // original web app info, and the data from the new icons (if any).
+  for (auto& icon : web_app_info->icons) {
+    if (!icon.url.is_empty() && icon.data.empty()) {
+      const auto& it = size_map.find(icon.width);
+      if (it != size_map.end() && it->second.source_url == icon.url)
+        icon.data = it->second.bitmap;
+    }
+  }
+
+  // Now add in any icons from the updated list that don't have URLs.
+  for (const auto& pair : size_map) {
+    if (pair.second.source_url.is_empty()) {
+      WebApplicationInfo::IconInfo icon_info;
+      icon_info.data = pair.second.bitmap;
+      icon_info.width = pair.first;
+      icon_info.height = pair.first;
+      web_app_info->icons.push_back(icon_info);
+    }
+  }
+}
+
 void RecordAppBanner(content::WebContents* contents, const GURL& app_url) {
   AppBannerSettingsHelper::RecordBannerEvent(
       contents, app_url, app_url.spec(),
       AppBannerSettingsHelper::APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN,
       base::Time::Now());
+}
+
+WebappInstallSource ConvertExternalInstallSourceToInstallSource(
+    ExternalInstallSource external_install_source) {
+  WebappInstallSource install_source;
+  switch (external_install_source) {
+    case ExternalInstallSource::kInternalDefault:
+      install_source = WebappInstallSource::INTERNAL_DEFAULT;
+      break;
+    case ExternalInstallSource::kExternalDefault:
+      install_source = WebappInstallSource::EXTERNAL_DEFAULT;
+      break;
+    case ExternalInstallSource::kExternalPolicy:
+      install_source = WebappInstallSource::EXTERNAL_POLICY;
+      break;
+    case ExternalInstallSource::kSystemInstalled:
+      install_source = WebappInstallSource::SYSTEM_DEFAULT;
+      break;
+    case ExternalInstallSource::kArc:
+      install_source = WebappInstallSource::ARC;
+      break;
+  }
+
+  return install_source;
+}
+
+void RecordExternalAppInstallResultCode(
+    const char* histogram_name,
+    std::map<GURL, InstallResultCode> install_results) {
+  for (const auto& url_and_result : install_results)
+    base::UmaHistogramEnumeration(histogram_name, url_and_result.second);
 }
 
 }  // namespace web_app

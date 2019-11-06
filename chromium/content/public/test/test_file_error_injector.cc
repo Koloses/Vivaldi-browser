@@ -20,6 +20,7 @@
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -52,9 +53,11 @@ class DownloadFileWithError : public download::DownloadFileImpl {
                   bool is_parallelizable) override;
 
   // DownloadFile interface.
-  download::DownloadInterruptReason WriteDataToFile(int64_t offset,
-                                                    const char* data,
-                                                    size_t data_len) override;
+  download::DownloadInterruptReason ValidateAndWriteDataToFile(
+      int64_t offset,
+      const char* data,
+      size_t bytes_to_validate,
+      size_t bytes_to_write) override;
 
   download::DownloadInterruptReason HandleStreamCompletionStatus(
       SourceStream* source_stream) override;
@@ -65,6 +68,7 @@ class DownloadFileWithError : public download::DownloadFileImpl {
                          const std::string& client_guid,
                          const GURL& source_url,
                          const GURL& referrer_url,
+                         std::unique_ptr<service_manager::Connector> connector,
                          const RenameCompletionCallback& callback) override;
 
  private:
@@ -174,13 +178,15 @@ void DownloadFileWithError::Initialize(
                                          received_slices, is_parallelizable);
 }
 
-download::DownloadInterruptReason DownloadFileWithError::WriteDataToFile(
-    int64_t offset,
-    const char* data,
-    size_t data_len) {
+download::DownloadInterruptReason
+DownloadFileWithError::ValidateAndWriteDataToFile(int64_t offset,
+                                                  const char* data,
+                                                  size_t bytes_to_validate,
+                                                  size_t bytes_to_write) {
   return ShouldReturnError(
       TestFileErrorInjector::FILE_OPERATION_WRITE,
-      download::DownloadFileImpl::WriteDataToFile(offset, data, data_len));
+      download::DownloadFileImpl::ValidateAndWriteDataToFile(
+          offset, data, bytes_to_validate, bytes_to_write));
 }
 
 download::DownloadInterruptReason
@@ -233,6 +239,7 @@ void DownloadFileWithError::RenameAndAnnotate(
     const std::string& client_guid,
     const GURL& source_url,
     const GURL& referrer_url,
+    std::unique_ptr<service_manager::Connector> connector,
     const RenameCompletionCallback& callback) {
   download::DownloadInterruptReason error_to_return =
       download::DOWNLOAD_INTERRUPT_REASON_NONE;
@@ -256,9 +263,9 @@ void DownloadFileWithError::RenameAndAnnotate(
                                  error_to_return);
   }
 
-  download::DownloadFileImpl::RenameAndAnnotate(full_path, client_guid,
-                                                source_url, referrer_url,
-                                                std::move(callback_to_use));
+  download::DownloadFileImpl::RenameAndAnnotate(
+      full_path, client_guid, source_url, referrer_url, nullptr,
+      std::move(callback_to_use));
 }
 
 bool DownloadFileWithError::OverwriteError(

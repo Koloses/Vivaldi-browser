@@ -10,11 +10,11 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability_callbacks.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability_observer.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability_state.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_connection.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -55,6 +55,7 @@ PresentationController* PresentationController::FromContext(
 void PresentationController::Trace(blink::Visitor* visitor) {
   visitor->Trace(presentation_);
   visitor->Trace(connections_);
+  visitor->Trace(availability_state_);
   Supplement<LocalFrame>::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
 }
@@ -70,11 +71,11 @@ void PresentationController::RegisterConnection(
 
 PresentationAvailabilityState* PresentationController::GetAvailabilityState() {
   if (!availability_state_) {
-    availability_state_.reset(
-        new PresentationAvailabilityState(GetPresentationService().get()));
+    availability_state_ = MakeGarbageCollected<PresentationAvailabilityState>(
+        GetPresentationService().get());
   }
 
-  return availability_state_.get();
+  return availability_state_;
 }
 
 void PresentationController::AddAvailabilityObserver(

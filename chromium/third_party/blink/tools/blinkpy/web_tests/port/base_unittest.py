@@ -26,7 +26,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import functools
 import json
 import optparse
 import unittest
@@ -54,6 +53,25 @@ class PortTest(LoggingTestCase):
             add_unit_tests_to_mock_filesystem(host.filesystem)
             return TestPort(host, **kwargs)
         return Port(host, port_name or 'baseport', **kwargs)
+
+    def test_validate_wpt_dirs(self):
+        # Keys should not have trailing slashes.
+        for wpt_path in Port.WPT_DIRS.keys():
+            self.assertFalse(wpt_path.endswith('/'))
+        # Values should not be empty (except the last one).
+        for url_prefix in Port.WPT_DIRS.values()[:-1]:
+            self.assertNotEqual(url_prefix, '/')
+        self.assertEqual(Port.WPT_DIRS.values()[-1], '/')
+
+    def test_validate_wpt_regex(self):
+        self.assertEquals(Port.WPT_REGEX.match('external/wpt/foo/bar.html').groups(),
+                          ('external/wpt', 'foo/bar.html'))
+        self.assertEquals(Port.WPT_REGEX.match('virtual/test/external/wpt/foo/bar.html').groups(),
+                          ('external/wpt', 'foo/bar.html'))
+        self.assertEquals(Port.WPT_REGEX.match('wpt_internal/foo/bar.html').groups(),
+                          ('wpt_internal', 'foo/bar.html'))
+        self.assertEquals(Port.WPT_REGEX.match('virtual/test/wpt_internal/foo/bar.html').groups(),
+                          ('wpt_internal', 'foo/bar.html'))
 
     def test_setup_test_run(self):
         port = self.make_port()
@@ -461,31 +479,63 @@ class PortTest(LoggingTestCase):
         tests = port.tests(['userscripts/resources'])
         self.assertEqual(tests, [])
 
+    def test_update_manifest_once_by_default(self):
+        # pylint: disable=protected-access
+        port = self.make_port(with_tests=True)
+        port._wpt_manifest('external/wpt')
+        port._wpt_manifest('external/wpt')
+        self.assertEqual(len(port.host.filesystem.written_files), 1)
+        self.assertEqual(len(port.host.executive.calls), 1)
+
+    def test_no_manifest_update_with_existing_manifest(self):
+        # pylint: disable=protected-access
+        port = self.make_port(with_tests=True)
+        port.set_option_default('manifest_update', False)
+        filesystem = port.host.filesystem
+        filesystem.write_text_file(WEB_TEST_DIR + '/external/wpt/MANIFEST.json', '{}')
+        filesystem.clear_written_files()
+
+        port._wpt_manifest('external/wpt')
+        self.assertEqual(len(port.host.filesystem.written_files), 0)
+        self.assertEqual(len(port.host.executive.calls), 0)
+
+    def test_no_manifest_update_without_existing_manifest(self):
+        # pylint: disable=protected-access
+        port = self.make_port(with_tests=True)
+        port.set_option_default('manifest_update', False)
+
+        port._wpt_manifest('external/wpt')
+        self.assertEqual(len(port.host.filesystem.written_files), 1)
+        self.assertEqual(len(port.host.executive.calls), 1)
+
     @staticmethod
-    def _add_manifest_to_mock_file_system(filesystem):
+    def _add_manifest_to_mock_file_system(port):
+        # Disable manifest update otherwise they'll be overwritten.
+        port.set_option_default('manifest_update', False)
+        filesystem = port.host.filesystem
         filesystem.write_text_file(WEB_TEST_DIR + '/external/wpt/MANIFEST.json', json.dumps({
             'items': {
                 'testharness': {
                     'dom/ranges/Range-attributes.html': [
-                        ['/dom/ranges/Range-attributes.html', {}]
+                        ['dom/ranges/Range-attributes.html', {}]
                     ],
                     'dom/ranges/Range-attributes-slow.html': [
-                        ['/dom/ranges/Range-attributes-slow.html', {'timeout': 'long'}]
+                        ['dom/ranges/Range-attributes-slow.html', {'timeout': 'long'}]
                     ],
                     'console/console-is-a-namespace.any.js': [
-                        ['/console/console-is-a-namespace.any.html', {}],
-                        ['/console/console-is-a-namespace.any.worker.html', {'timeout': 'long'}],
+                        ['console/console-is-a-namespace.any.html', {}],
+                        ['console/console-is-a-namespace.any.worker.html', {'timeout': 'long'}],
                     ],
                     'html/parse.html': [
-                        ['/html/parse.html?run_type=uri', {}],
-                        ['/html/parse.html?run_type=write', {'timeout': 'long'}],
+                        ['html/parse.html?run_type=uri', {}],
+                        ['html/parse.html?run_type=write', {'timeout': 'long'}],
                     ],
                 },
                 'manual': {},
                 'reftest': {
                     'html/dom/elements/global-attributes/dir_auto-EN-L.html': [
                         [
-                            '/html/dom/elements/global-attributes/dir_auto-EN-L.html',
+                            'html/dom/elements/global-attributes/dir_auto-EN-L.html',
                             [
                                 [
                                     '/html/dom/elements/global-attributes/dir_auto-EN-L-ref.html',
@@ -498,24 +548,35 @@ class PortTest(LoggingTestCase):
                 },
             }}))
         filesystem.write_text_file(WEB_TEST_DIR + '/external/wpt/dom/ranges/Range-attributes.html', '')
+        filesystem.write_text_file(WEB_TEST_DIR + '/external/wpt/dom/ranges/Range-attributes-slow.html', '')
         filesystem.write_text_file(WEB_TEST_DIR + '/external/wpt/console/console-is-a-namespace.any.js', '')
         filesystem.write_text_file(WEB_TEST_DIR + '/external/wpt/common/blank.html', 'foo')
 
+        filesystem.write_text_file(WEB_TEST_DIR + '/wpt_internal/MANIFEST.json', json.dumps({
+            'items': {
+                'testharness': {
+                    'dom/bar.html': [
+                        ['dom/bar.html', {}]
+                    ]
+                }
+            }}))
+        filesystem.write_text_file(WEB_TEST_DIR + '/wpt_internal/dom/bar.html', 'baz')
+
     def test_find_none_if_not_in_manifest(self):
         port = self.make_port(with_tests=True)
-        PortTest._add_manifest_to_mock_file_system(port.host.filesystem)
+        PortTest._add_manifest_to_mock_file_system(port)
         self.assertNotIn('external/wpt/common/blank.html', port.tests([]))
         self.assertNotIn('external/wpt/console/console-is-a-namespace.any.js', port.tests([]))
 
     def test_find_one_if_in_manifest(self):
         port = self.make_port(with_tests=True)
-        PortTest._add_manifest_to_mock_file_system(port.host.filesystem)
+        PortTest._add_manifest_to_mock_file_system(port)
         self.assertIn('external/wpt/dom/ranges/Range-attributes.html', port.tests([]))
         self.assertIn('external/wpt/console/console-is-a-namespace.any.html', port.tests([]))
 
     def test_wpt_tests_paths(self):
         port = self.make_port(with_tests=True)
-        PortTest._add_manifest_to_mock_file_system(port.host.filesystem)
+        PortTest._add_manifest_to_mock_file_system(port)
         all_wpt = [
             'external/wpt/console/console-is-a-namespace.any.html',
             'external/wpt/console/console-is-a-namespace.any.worker.html',
@@ -533,29 +594,32 @@ class PortTest(LoggingTestCase):
         self.assertEqual(port.tests(['external/csswg-test']), [])
         self.assertEqual(sorted(port.tests(['external/wpt'])), all_wpt)
         self.assertEqual(sorted(port.tests(['external/wpt/'])), all_wpt)
-        self.assertEqual(port.tests(['external/wpt/console']),
-                         ['external/wpt/console/console-is-a-namespace.any.worker.html',
-                          'external/wpt/console/console-is-a-namespace.any.html'])
-        self.assertEqual(port.tests(['external/wpt/console/']),
-                         ['external/wpt/console/console-is-a-namespace.any.worker.html',
-                          'external/wpt/console/console-is-a-namespace.any.html'])
-        self.assertEqual(port.tests(['external/wpt/console/console-is-a-namespace.any.js']),
-                         ['external/wpt/console/console-is-a-namespace.any.worker.html',
-                          'external/wpt/console/console-is-a-namespace.any.html'])
+        self.assertEqual(sorted(port.tests(['external/wpt/console'])),
+                         ['external/wpt/console/console-is-a-namespace.any.html',
+                          'external/wpt/console/console-is-a-namespace.any.worker.html'])
+        self.assertEqual(sorted(port.tests(['external/wpt/console/'])),
+                         ['external/wpt/console/console-is-a-namespace.any.html',
+                          'external/wpt/console/console-is-a-namespace.any.worker.html'])
+        self.assertEqual(sorted(port.tests(['external/wpt/console/console-is-a-namespace.any.js'])),
+                         ['external/wpt/console/console-is-a-namespace.any.html',
+                          'external/wpt/console/console-is-a-namespace.any.worker.html'])
         self.assertEqual(port.tests(['external/wpt/console/console-is-a-namespace.any.html']),
                          ['external/wpt/console/console-is-a-namespace.any.html'])
-        self.assertEqual(port.tests(['external/wpt/dom']),
+        self.assertEqual(sorted(port.tests(['external/wpt/dom'])),
                          ['external/wpt/dom/ranges/Range-attributes-slow.html',
                           'external/wpt/dom/ranges/Range-attributes.html'])
-        self.assertEqual(port.tests(['external/wpt/dom/']),
+        self.assertEqual(sorted(port.tests(['external/wpt/dom/'])),
                          ['external/wpt/dom/ranges/Range-attributes-slow.html',
                           'external/wpt/dom/ranges/Range-attributes.html'])
         self.assertEqual(port.tests(['external/wpt/dom/ranges/Range-attributes.html']),
                          ['external/wpt/dom/ranges/Range-attributes.html'])
 
+        # wpt_internal should work the same.
+        self.assertEqual(port.tests(['wpt_internal']), ['wpt_internal/dom/bar.html'])
+
     def test_virtual_wpt_tests_paths(self):
         port = self.make_port(with_tests=True)
-        PortTest._add_manifest_to_mock_file_system(port.host.filesystem)
+        PortTest._add_manifest_to_mock_file_system(port)
         all_wpt = [
             'virtual/virtual_wpt/external/wpt/console/console-is-a-namespace.any.html',
             'virtual/virtual_wpt/external/wpt/console/console-is-a-namespace.any.worker.html',
@@ -581,43 +645,37 @@ class PortTest(LoggingTestCase):
         self.assertEqual(port.tests(['virtual/virtual_wpt_dom/external/wpt/dom/ranges/Range-attributes.html']),
                          ['virtual/virtual_wpt_dom/external/wpt/dom/ranges/Range-attributes.html'])
 
-    def test_is_test_file(self):
+        # wpt_internal should work the same.
+        self.assertEqual(port.tests(['virtual/virtual_wpt_dom/wpt_internal']),
+                         ['virtual/virtual_wpt_dom/wpt_internal/dom/bar.html'])
+        self.assertEqual(port.tests(['virtual/virtual_wpt_dom/']),
+                         dom_wpt + ['virtual/virtual_wpt_dom/wpt_internal/dom/bar.html'])
+
+    def test_is_non_wpt_test_file(self):
         port = self.make_port(with_tests=True)
-        is_test_file = functools.partial(Port.is_test_file, port, port.host.filesystem)
-        self.assertTrue(is_test_file('', 'foo.html'))
-        self.assertTrue(is_test_file('', 'foo.svg'))
-        self.assertTrue(is_test_file('', 'test-ref-test.html'))
-        self.assertTrue(is_test_file('devtools', 'a.js'))
-        self.assertFalse(is_test_file('', 'foo.png'))
-        self.assertFalse(is_test_file('', 'foo-expected.html'))
-        self.assertFalse(is_test_file('', 'foo-expected.svg'))
-        self.assertFalse(is_test_file('', 'foo-expected.xht'))
-        self.assertFalse(is_test_file('', 'foo-expected-mismatch.html'))
-        self.assertFalse(is_test_file('', 'foo-expected-mismatch.svg'))
-        self.assertFalse(is_test_file('', 'foo-expected-mismatch.xhtml'))
-        self.assertFalse(is_test_file('', 'foo-ref.html'))
-        self.assertFalse(is_test_file('', 'foo-notref.html'))
-        self.assertFalse(is_test_file('', 'foo-notref.xht'))
-        self.assertFalse(is_test_file('', 'foo-ref.xhtml'))
-        self.assertFalse(is_test_file('', 'ref-foo.html'))
-        self.assertFalse(is_test_file('', 'notref-foo.xhr'))
+        self.assertTrue(port.is_non_wpt_test_file('', 'foo.html'))
+        self.assertTrue(port.is_non_wpt_test_file('', 'foo.svg'))
+        self.assertTrue(port.is_non_wpt_test_file('', 'test-ref-test.html'))
+        self.assertTrue(port.is_non_wpt_test_file('devtools', 'a.js'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo.png'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-expected.html'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-expected.svg'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-expected.xht'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-expected-mismatch.html'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-expected-mismatch.svg'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-expected-mismatch.xhtml'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-ref.html'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-notref.html'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-notref.xht'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'foo-ref.xhtml'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'ref-foo.html'))
+        self.assertFalse(port.is_non_wpt_test_file('', 'notref-foo.xhr'))
 
-    def test_is_test_file_in_wpt(self):
-        port = self.make_port(with_tests=True)
-        filesystem = port.host.filesystem
-        PortTest._add_manifest_to_mock_file_system(filesystem)
-
-        # A file not in MANIFEST.json is not a test even if it has .html suffix.
-        self.assertFalse(port.is_test_file(filesystem, WEB_TEST_DIR + '/external/wpt/common', 'blank.html'))
-
-        # .js is not a test in general, but it is if MANIFEST.json contains an
-        # entry for it.
-        self.assertTrue(port.is_test_file(filesystem, WEB_TEST_DIR + '/external/wpt/console', 'console-is-a-namespace.any.js'))
-
-        # A file in external/wpt, not a sub directory.
-        self.assertFalse(port.is_test_file(filesystem, WEB_TEST_DIR + '/external/wpt', 'testharness_runner.html'))
-        # A file in external/wpt_automation.
-        self.assertTrue(port.is_test_file(filesystem, WEB_TEST_DIR + '/external/wpt_automation', 'foo.html'))
+        self.assertFalse(port.is_non_wpt_test_file(WEB_TEST_DIR + '/external/wpt/common', 'blank.html'))
+        self.assertFalse(port.is_non_wpt_test_file(WEB_TEST_DIR + '/external/wpt/console', 'console-is-a-namespace.any.js'))
+        self.assertFalse(port.is_non_wpt_test_file(WEB_TEST_DIR + '/external/wpt', 'testharness_runner.html'))
+        self.assertTrue(port.is_non_wpt_test_file(WEB_TEST_DIR + '/external/wpt_automation', 'foo.html'))
+        self.assertFalse(port.is_non_wpt_test_file(WEB_TEST_DIR + '/wpt_internal/console', 'console-is-a-namespace.any.js'))
 
     def test_is_wpt_test(self):
         self.assertTrue(Port.is_wpt_test('external/wpt/dom/ranges/Range-attributes.html'))
@@ -637,7 +695,7 @@ class PortTest(LoggingTestCase):
 
     def test_is_slow_wpt_test(self):
         port = self.make_port(with_tests=True)
-        PortTest._add_manifest_to_mock_file_system(port.host.filesystem)
+        PortTest._add_manifest_to_mock_file_system(port)
 
         self.assertFalse(port.is_slow_wpt_test('external/wpt/dom/ranges/Range-attributes.html'))
         self.assertTrue(port.is_slow_wpt_test('external/wpt/dom/ranges/Range-attributes-slow.html'))
@@ -645,7 +703,7 @@ class PortTest(LoggingTestCase):
 
     def test_is_slow_wpt_test_with_variations(self):
         port = self.make_port(with_tests=True)
-        PortTest._add_manifest_to_mock_file_system(port.host.filesystem)
+        PortTest._add_manifest_to_mock_file_system(port)
 
         self.assertFalse(port.is_slow_wpt_test('external/wpt/console/console-is-a-namespace.any.html'))
         self.assertTrue(port.is_slow_wpt_test('external/wpt/console/console-is-a-namespace.any.worker.html'))
@@ -654,14 +712,14 @@ class PortTest(LoggingTestCase):
 
     def test_is_slow_wpt_test_takes_virtual_tests(self):
         port = self.make_port(with_tests=True)
-        PortTest._add_manifest_to_mock_file_system(port.host.filesystem)
+        PortTest._add_manifest_to_mock_file_system(port)
 
         self.assertFalse(port.is_slow_wpt_test('virtual/virtual_wpt/external/wpt/dom/ranges/Range-attributes.html'))
         self.assertTrue(port.is_slow_wpt_test('virtual/virtual_wpt/external/wpt/dom/ranges/Range-attributes-slow.html'))
 
     def test_is_slow_wpt_test_returns_false_for_illegal_paths(self):
         port = self.make_port(with_tests=True)
-        PortTest._add_manifest_to_mock_file_system(port.host.filesystem)
+        PortTest._add_manifest_to_mock_file_system(port)
 
         self.assertFalse(port.is_slow_wpt_test('dom/ranges/Range-attributes.html'))
         self.assertFalse(port.is_slow_wpt_test('dom/ranges/Range-attributes-slow.html'))
@@ -679,7 +737,7 @@ class PortTest(LoggingTestCase):
 
     def test_reference_files_from_manifest(self):
         port = self.make_port(with_tests=True)
-        PortTest._add_manifest_to_mock_file_system(port.host.filesystem)
+        PortTest._add_manifest_to_mock_file_system(port)
 
         self.assertEqual(port.reference_files('external/wpt/html/dom/elements/global-attributes/dir_auto-EN-L.html'),
                          [('==', port.web_tests_dir() +
@@ -911,6 +969,33 @@ class PortTest(LoggingTestCase):
             'Bug(test) failures/expected/image.html [ WontFix ]\n')
         self.assertTrue(port.skips_test('failures/expected/image.html'))
 
+    def test_split_webdriver_test_name(self):
+        port = self.make_port()
+        webdriver_expectation_name = "tests/accept_alert/accept.py>>foo"
+
+        (wb_test, subtest) = port.split_webdriver_test_name(webdriver_expectation_name)
+
+        self.assertEqual(wb_test, "tests/accept_alert/accept.py")
+        self.assertEqual(subtest, "foo")
+
+    def test_add_webdriver_subtest_suffix(self):
+        port = self.make_port()
+        wb_test_name = "abd"
+        sub_test_name = "bar"
+
+        full_webdriver_name = port.add_webdriver_subtest_suffix(wb_test_name, sub_test_name)
+
+        self.assertEqual(full_webdriver_name, "abd>>bar")
+
+
+    def test_add_webdriver_subtest_suffix(self):
+        port = self.make_port()
+        wb_test_name = "abd"
+        sub_test_name = "bar"
+
+        full_webdriver_name = port.add_webdriver_subtest_suffix(wb_test_name, sub_test_name)
+
+        self.assertEqual(full_webdriver_name, "abd>>bar")
 
 class NaturalCompareTest(unittest.TestCase):
 

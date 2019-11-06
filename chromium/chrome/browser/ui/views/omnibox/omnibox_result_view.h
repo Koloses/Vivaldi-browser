@@ -16,10 +16,10 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/window_open_disposition.h"
-#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/views/animation/animation_delegate_views.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/image_view.h"
@@ -41,7 +41,7 @@ class MenuRunner;
 }
 
 class OmniboxResultView : public views::View,
-                          private gfx::AnimationDelegate,
+                          public views::AnimationDelegateViews,
                           public views::ButtonListener,
                           public views::ContextMenuController,
                           public ui::SimpleMenuModel::Delegate {
@@ -60,7 +60,7 @@ class OmniboxResultView : public views::View,
 
   void ShowKeyword(bool show_keyword);
 
-  void Invalidate();
+  void Invalidate(bool force_reapply_styles = false);
 
   // Invoked when this result view has been selected.
   void OnSelected();
@@ -69,7 +69,7 @@ class OmniboxResultView : public views::View,
   bool IsSelected() const;
 
   OmniboxPartState GetThemeState() const;
-  OmniboxTint GetTint() const;
+  OmniboxTint CalculateTint() const;
 
   // Notification that the match icon has changed and schedules a repaint.
   void OnMatchIconUpdated();
@@ -85,6 +85,13 @@ class OmniboxResultView : public views::View,
   // Called to indicate tab switch button has been focused.
   void ProvideButtonFocusHint();
 
+  // Removes the shown |match_| from history, if possible.
+  void RemoveSuggestion() const;
+
+  // Helper to emit accessibility events (may only emit if conditions are met).
+  void EmitTextChangedAccessiblityEvent();
+  void EmitSelectedChildrenChangedAccessibilityEvent();
+
   // views::View:
   void Layout() override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
@@ -94,7 +101,7 @@ class OmniboxResultView : public views::View,
   void OnMouseExited(const ui::MouseEvent& event) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   gfx::Size CalculatePreferredSize() const override;
-  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
+  void OnThemeChanged() override;
 
   // views::ContextMenuController:
   void ShowContextMenuForViewImpl(views::View* source,
@@ -102,13 +109,10 @@ class OmniboxResultView : public views::View,
                                   ui::MenuSourceType source_type) override;
 
   // ui::SimpleMenuModel::Delegate overrides:
-  bool IsCommandIdEnabled(int command_id) const override;
+  bool IsCommandIdVisible(int command_id) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
 
  private:
-  // TODO(tommycli): This will be removed once we get final strings from UX.
-  enum CommandID { COMMAND_REMOVE_SUGGESTION };
-
   // Returns the height of the text portion of the result view.
   int GetTextHeight() const;
 
@@ -126,7 +130,7 @@ class OmniboxResultView : public views::View,
   const char* GetClassName() const override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
 
-  // gfx::AnimationDelegate:
+  // views::AnimationDelegateViews:
   void AnimationProgressed(const gfx::Animation* animation) override;
 
   // The parent view.
@@ -140,6 +144,9 @@ class OmniboxResultView : public views::View,
 
   // The data this class is built to display (the "Omnibox Result").
   AutocompleteMatch match_;
+
+  // Accessible name (enables to emit certain events).
+  base::string16 accessible_name_;
 
   // For sliding in the keyword search.
   std::unique_ptr<gfx::SlideAnimation> animation_;

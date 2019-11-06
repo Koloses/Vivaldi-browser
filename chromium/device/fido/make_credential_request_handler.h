@@ -27,6 +27,7 @@ class Connector;
 namespace device {
 
 class FidoAuthenticator;
+class FidoDiscoveryFactory;
 class AuthenticatorMakeCredentialResponse;
 
 class COMPONENT_EXPORT(DEVICE_FIDO) MakeCredentialRequestHandler
@@ -34,16 +35,12 @@ class COMPONENT_EXPORT(DEVICE_FIDO) MakeCredentialRequestHandler
  public:
   MakeCredentialRequestHandler(
       service_manager::Connector* connector,
+      FidoDiscoveryFactory* fido_discovery_factory,
       const base::flat_set<FidoTransportProtocol>& supported_transports,
       CtapMakeCredentialRequest request_parameter,
       AuthenticatorSelectionCriteria authenticator_criteria,
       CompletionCallback completion_callback);
   ~MakeCredentialRequestHandler() override;
-
-  // FidoRequestHandlerBase:
-  void SetPlatformAuthenticatorOrMarkUnavailable(
-      base::Optional<PlatformAuthenticatorInfo> platform_authenticator_info)
-      override;
 
  private:
   enum class State {
@@ -68,6 +65,8 @@ class COMPONENT_EXPORT(DEVICE_FIDO) MakeCredentialRequestHandler
       FidoAuthenticator* authenticator,
       CtapDeviceResponseCode response_code,
       base::Optional<AuthenticatorMakeCredentialResponse> response);
+  void HandleTouch(FidoAuthenticator* authenticator);
+  void HandleInapplicableAuthenticator(FidoAuthenticator* authenticator);
   void OnHavePIN(std::string pin);
   void OnRetriesResponse(CtapDeviceResponseCode status,
                          base::Optional<pin::RetriesResponse> response);
@@ -82,7 +81,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) MakeCredentialRequestHandler
                       base::Optional<pin::TokenResponse> response);
 
   State state_ = State::kWaitingForTouch;
-  CtapMakeCredentialRequest request_parameter_;
+  CtapMakeCredentialRequest request_;
   AuthenticatorSelectionCriteria authenticator_selection_criteria_;
   // authenticator_ points to the authenticator that will be used for this
   // operation. It's only set after the user touches an authenticator to select

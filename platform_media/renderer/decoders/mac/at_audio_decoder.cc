@@ -206,8 +206,7 @@ AudioConverterRef ATAudioDecoder::ScopedAudioConverterRefTraits::InvalidValue() 
 
 ATAudioDecoder::ATAudioDecoder(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner)
-    : task_runner_(task_runner),
-      needs_eos_workaround_(base::mac::IsOS10_9()) {}
+    : task_runner_(task_runner) {}
 
 ATAudioDecoder::~ATAudioDecoder() = default;
 
@@ -217,7 +216,7 @@ std::string ATAudioDecoder::GetDisplayName() const {
 
 void ATAudioDecoder::Initialize(const AudioDecoderConfig& config,
                                 CdmContext* cdm_context,
-                                const InitCB& init_cb,
+                                InitCB init_cb,
                                 const OutputCB& output_cb,
                                 const WaitingCB& waiting_for_decryption_key_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
@@ -230,7 +229,7 @@ void ATAudioDecoder::Initialize(const AudioDecoderConfig& config,
   if (config.is_encrypted()) {
     LOG(WARNING) << " PROPMEDIA(RENDERER) : " << __FUNCTION__
                  << " Unsupported Encrypted Audio codec : " << GetCodecName(config.codec());
-    task_runner_->PostTask(FROM_HERE, base::Bind(init_cb, false));
+    task_runner_->PostTask(FROM_HERE, base::BindOnce(std::move(init_cb), false));
     return;
   }
 
@@ -238,14 +237,14 @@ void ATAudioDecoder::Initialize(const AudioDecoderConfig& config,
   if (!codec_helper_) {
     VLOG(1) << " PROPMEDIA(RENDERER) : " << __FUNCTION__
             << " Unsupported codec: " << GetCodecName(config.codec());
-    task_runner_->PostTask(FROM_HERE, base::Bind(init_cb, false));
+    task_runner_->PostTask(FROM_HERE, base::BindOnce(std::move(init_cb), false));
     return;
   }
 
   if (!IsPlatformAudioDecoderAvailable(config.codec())) {
     LOG(WARNING) << " PROPMEDIA(RENDERER) : " << __FUNCTION__
                  << " PlatformAudioDecoder Not Available for codec : " << GetCodecName(config.codec());
-    task_runner_->PostTask(FROM_HERE, base::Bind(init_cb, false));
+    task_runner_->PostTask(FROM_HERE, base::BindOnce(std::move(init_cb), false));
     return;
   }
 
@@ -267,7 +266,7 @@ void ATAudioDecoder::Initialize(const AudioDecoderConfig& config,
           base::Bind(&ATAudioDecoder::ConvertAudio, base::Unretained(this)))) {
     LOG(WARNING) << " PROPMEDIA(RENDERER) : " << __FUNCTION__
                  << ": Initialize helper failed for codec : " << GetCodecName(config.codec());
-    task_runner_->PostTask(FROM_HERE, base::Bind(init_cb, false));
+    task_runner_->PostTask(FROM_HERE, base::BindOnce(std::move(init_cb), false));
     return;
   }
 
@@ -276,7 +275,7 @@ void ATAudioDecoder::Initialize(const AudioDecoderConfig& config,
 
   debug_buffer_logger_.Initialize(GetCodecName(config_.codec()));
 
-  task_runner_->PostTask(FROM_HERE, base::Bind(init_cb, true));
+  task_runner_->PostTask(FROM_HERE, base::BindOnce(std::move(init_cb), true));
 }
 
 void ATAudioDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
@@ -299,7 +298,7 @@ void ATAudioDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
   task_runner_->PostTask(FROM_HERE, base::Bind(decode_cb, status));
 }
 
-void ATAudioDecoder::Reset(const base::Closure& closure) {
+void ATAudioDecoder::Reset(base::OnceClosure closure) {
   VLOG(1) << " PROPMEDIA(RENDERER) : " << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
 
@@ -315,7 +314,7 @@ void ATAudioDecoder::Reset(const base::Closure& closure) {
 
   ResetTimestampState();
 
-  task_runner_->PostTask(FROM_HERE, closure);
+  task_runner_->PostTask(FROM_HERE, std::move(closure));
 }
 
 bool ATAudioDecoder::InitializeConverter(
@@ -445,16 +444,9 @@ bool ATAudioDecoder::ConvertAudio(const scoped_refptr<DecoderBuffer>& input,
   AudioStreamPacketDescription
       output_packet_descriptions[max_output_frame_count];
 
-  OSStatus status = noErr;
-  if (ApplyEOSWorkaround(input, &output_buffers)) {
-    VLOG(1) << " PROPMEDIA(RENDERER) : " << __FUNCTION__
-            << " Couldn't flush AudioConverter properly on this system."
-            << " Faking it";
-  } else {
-    status = AudioConverterFillComplexBuffer(
+  OSStatus status = AudioConverterFillComplexBuffer(
         converter_, &ProvideData, &input_data, &output_frame_count,
         &output_buffers, output_packet_descriptions);
-  }
 
   if (status != noErr && status != kDataConsumed) {
     OSSTATUS_VLOG(1, status) << " PROPMEDIA(RENDERER) : " << __FUNCTION__
@@ -488,25 +480,9 @@ bool ATAudioDecoder::ConvertAudio(const scoped_refptr<DecoderBuffer>& input,
             << dequeued_input->timestamp();
 
     // ProcessBuffers() computes and sets the timestamp on |output|.
-    if (discard_helper_->ProcessBuffers(*dequeued_input, output))
+    if (discard_helper_->ProcessBuffers(*dequeued_input, output.get()))
       task_runner_->PostTask(FROM_HERE, base::Bind(output_cb_, output));
   }
-
-  return true;
-}
-
-bool ATAudioDecoder::ApplyEOSWorkaround(
-    const scoped_refptr<DecoderBuffer>& input,
-    AudioBufferList* output_buffers) {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-
-  if (!needs_eos_workaround_ || !input->end_of_stream())
-    return false;
-
-  uint8_t* const data =
-      reinterpret_cast<uint8_t*>(output_buffers->mBuffers[0].mData);
-  const size_t data_size = output_buffers->mBuffers[0].mDataByteSize;
-  std::fill(data, data + data_size, 0);
 
   return true;
 }

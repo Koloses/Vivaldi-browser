@@ -86,11 +86,6 @@ class CONTENT_EXPORT CrossProcessFrameConnector
   gfx::PointF TransformPointToRootCoordSpace(
       const gfx::PointF& point,
       const viz::SurfaceId& surface_id) override;
-  bool TransformPointToLocalCoordSpaceLegacy(
-      const gfx::PointF& point,
-      const viz::SurfaceId& original_surface,
-      const viz::SurfaceId& local_surface_id,
-      gfx::PointF* transformed_point) override;
   bool TransformPointToCoordSpaceForView(
       const gfx::PointF& point,
       RenderWidgetHostViewBase* target_view,
@@ -111,10 +106,6 @@ class CONTENT_EXPORT CrossProcessFrameConnector
   bool IsHidden() const override;
   bool IsThrottled() const override;
   bool IsSubtreeThrottled() const override;
-#if defined(USE_AURA)
-  void EmbedRendererWindowTreeClientInParent(
-      ws::mojom::WindowTreeClientPtr window_tree_client) override;
-#endif
   void DidUpdateVisualProperties(
       const cc::RenderFrameMetadata& metadata) override;
 

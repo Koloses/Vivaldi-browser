@@ -69,7 +69,7 @@ class SVGFilterPrimitiveStandardAttributes : public SVGElement {
  private:
   bool IsFilterEffect() const final { return true; }
 
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
   bool LayoutObjectIsNeeded(const ComputedStyle&) const final;
 
   Member<SVGAnimatedLength> x_;
@@ -85,8 +85,13 @@ inline bool IsSVGFilterPrimitiveStandardAttributes(const SVGElement& element) {
   return element.IsFilterEffect();
 }
 
-DEFINE_SVGELEMENT_TYPE_CASTS_WITH_FUNCTION(
-    SVGFilterPrimitiveStandardAttributes);
+template <>
+struct DowncastTraits<SVGFilterPrimitiveStandardAttributes> {
+  static bool AllowFrom(const Node& node) {
+    auto* element = DynamicTo<SVGElement>(node);
+    return element && IsSVGFilterPrimitiveStandardAttributes(*element);
+  }
+};
 
 }  // namespace blink
 

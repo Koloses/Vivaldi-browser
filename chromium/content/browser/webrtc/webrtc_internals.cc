@@ -16,14 +16,15 @@
 #include "build/build_config.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/web_contents/web_contents_view.h"
+#include "content/browser/webrtc/webrtc_internals_connections_observer.h"
 #include "content/browser/webrtc/webrtc_internals_ui_observer.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/system_connector.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/webrtc_event_logger.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_manager_connection.h"
 #include "ipc/ipc_platform_file.h"
 #include "media/audio/audio_debug_recording_session.h"
 #include "media/audio/audio_manager.h"
@@ -101,8 +102,7 @@ WebRTCInternals::WebRTCInternals(int aggregate_updates_ms,
       event_log_recordings_(false),
       num_connected_connections_(0),
       should_block_power_saving_(should_block_power_saving),
-      aggregate_updates_ms_(aggregate_updates_ms),
-      weak_factory_(this) {
+      aggregate_updates_ms_(aggregate_updates_ms) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!g_webrtc_internals);
 
@@ -249,8 +249,9 @@ void WebRTCInternals::OnUpdatePeerConnection(
   EnsureLogList(record)->Append(std::move(log_entry));
 }
 
-void WebRTCInternals::OnAddStats(base::ProcessId pid, int lid,
-                                 const base::ListValue& value) {
+void WebRTCInternals::OnAddStandardStats(base::ProcessId pid,
+                                         int lid,
+                                         const base::ListValue& value) {
   if (!observers_.might_have_observers())
     return;
 
@@ -260,7 +261,22 @@ void WebRTCInternals::OnAddStats(base::ProcessId pid, int lid,
 
   dict->SetKey("reports", value.Clone());
 
-  SendUpdate("addStats", std::move(dict));
+  SendUpdate("addStandardStats", std::move(dict));
+}
+
+void WebRTCInternals::OnAddLegacyStats(base::ProcessId pid,
+                                       int lid,
+                                       const base::ListValue& value) {
+  if (!observers_.might_have_observers())
+    return;
+
+  auto dict = std::make_unique<base::DictionaryValue>();
+  dict->SetInteger("pid", static_cast<int>(pid));
+  dict->SetInteger("lid", lid);
+
+  dict->SetKey("reports", value.Clone());
+
+  SendUpdate("addLegacyStats", std::move(dict));
 }
 
 void WebRTCInternals::OnGetUserMedia(int rid,
@@ -282,6 +298,7 @@ void WebRTCInternals::OnGetUserMedia(int rid,
   dict->SetInteger("rid", rid);
   dict->SetInteger("pid", static_cast<int>(pid));
   dict->SetString("origin", origin);
+  dict->SetDouble("timestamp", base::Time::Now().ToJsTime());
   if (audio)
     dict->SetString("audio", audio_constraints);
   if (video)
@@ -318,6 +335,18 @@ void WebRTCInternals::RemoveObserver(WebRTCInternalsUIObserver* observer) {
   // TODO(tommi): Consider removing all the peer_connection_data_.
   for (auto& dictionary : peer_connection_data_)
     FreeLogList(&dictionary);
+}
+
+void WebRTCInternals::AddConnectionsObserver(
+    WebRtcInternalsConnectionsObserver* observer) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  connections_observers_.AddObserver(observer);
+}
+
+void WebRTCInternals::RemoveConnectionsObserver(
+    WebRtcInternalsConnectionsObserver* observer) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  connections_observers_.RemoveObserver(observer);
 }
 
 void WebRTCInternals::UpdateObserver(WebRTCInternalsUIObserver* observer) {
@@ -537,10 +566,7 @@ void WebRTCInternals::EnableAudioDebugRecordingsOnAllRenderProcessHosts() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!audio_debug_recording_session_);
   audio_debug_recording_session_ = audio::CreateAudioDebugRecordingSession(
-      audio_debug_recordings_file_path_,
-      content::ServiceManagerConnection::GetForProcess()
-          ->GetConnector()
-          ->Clone());
+      audio_debug_recordings_file_path_, GetSystemConnector()->Clone());
 
   for (RenderProcessHost::iterator i(
            content::RenderProcessHost::AllHostsIterator());
@@ -569,6 +595,8 @@ void WebRTCInternals::MaybeMarkPeerConnectionAsConnected(
     ++num_connected_connections_;
     record->SetBoolean("connected", true);
     UpdateWakeLock();
+    for (auto& observer : connections_observers_)
+      observer.OnConnectionsCountChange(num_connected_connections_);
   }
 }
 
@@ -581,6 +609,8 @@ void WebRTCInternals::MaybeMarkPeerConnectionAsNotConnected(
     --num_connected_connections_;
     DCHECK_GE(num_connected_connections_, 0);
     UpdateWakeLock();
+    for (auto& observer : connections_observers_)
+      observer.OnConnectionsCountChange(num_connected_connections_);
   }
 }
 
@@ -606,12 +636,9 @@ device::mojom::WakeLock* WebRTCInternals::GetWakeLock() {
   // Here is a lazy binding, and will not reconnect after connection error.
   if (!wake_lock_) {
     device::mojom::WakeLockRequest request = mojo::MakeRequest(&wake_lock_);
-    // In some testing contexts, the service manager connection isn't
-    // initialized.
-    if (ServiceManagerConnection::GetForProcess()) {
-      service_manager::Connector* connector =
-          ServiceManagerConnection::GetForProcess()->GetConnector();
-      DCHECK(connector);
+    // In some testing environments, the system Connector isn't initialized.
+    service_manager::Connector* connector = GetSystemConnector();
+    if (connector) {
       device::mojom::WakeLockProviderPtr wake_lock_provider;
       connector->BindInterface(device::mojom::kServiceName,
                                mojo::MakeRequest(&wake_lock_provider));

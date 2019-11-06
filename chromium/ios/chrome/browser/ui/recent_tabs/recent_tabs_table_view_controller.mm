@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #import "base/numerics/safe_conversions.h"
@@ -43,19 +44,22 @@
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_button_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_item.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_url_item.h"
+#import "ios/chrome/browser/ui/table_view/chrome_table_view_styler.h"
 #import "ios/chrome/browser/ui/table_view/table_view_favicon_data_source.h"
-#import "ios/chrome/browser/ui/url_loader.h"
 #import "ios/chrome/browser/ui/util/top_view_controller.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/url_loading/url_loading_params.h"
+#import "ios/chrome/browser/url_loading/url_loading_service.h"
+#import "ios/chrome/browser/url_loading/url_loading_service_factory.h"
 #import "ios/chrome/browser/url_loading/url_loading_util.h"
 #include "ios/chrome/browser/web_state_list/web_state_list.h"
 #include "ios/chrome/browser/web_state_list/web_state_opener.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #import "ios/chrome/common/favicon/favicon_attributes.h"
 #import "ios/chrome/common/favicon/favicon_view.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
-#import "ios/web/public/web_state/context_menu_params.h"
 #import "ios/web/public/web_state/web_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
@@ -222,7 +226,11 @@ const int kRecentlyClosedTabsSectionIndex = 0;
       [[TableViewImageItem alloc] initWithType:ItemTypeShowFullHistory];
   historyItem.title = l10n_util::GetNSString(IDS_HISTORY_SHOWFULLHISTORY_LINK);
   historyItem.image = [UIImage imageNamed:@"show_history"];
-  historyItem.textColor = UIColorFromRGB(kTableViewTextLabelColorBlue);
+  if (self.styler.tintColor) {
+    historyItem.textColor = self.styler.tintColor;
+  } else {
+    historyItem.textColor = [UIColor colorNamed:kTintColor];
+  }
   historyItem.accessibilityIdentifier =
       kRecentTabsShowFullHistoryCellAccessibilityIdentifier;
   [model addItem:historyItem
@@ -620,7 +628,15 @@ const int kRecentlyClosedTabsSectionIndex = 0;
       break;
     case ItemTypeShowFullHistory:
       [tableView deselectRowAtIndexPath:indexPath animated:NO];
-      [self.presentationDelegate showHistoryFromRecentTabs];
+
+      // Tapping "show full history" attempts to dismiss recent tabs to show the
+      // history UI. It is reasonable to ignore this if a modal UI is already
+      // showing above recent tabs. This can happen when a user simultaneously
+      // taps "show full history" and "enable sync". The sync settings UI
+      // appears first and we should not dismiss it to display history.
+      if (!self.presentedViewController) {
+        [self.presentationDelegate showHistoryFromRecentTabs];
+      }
       break;
     case ItemTypeOtherDevicesSyncOff:
     case ItemTypeOtherDevicesNoSessions:
@@ -743,7 +759,7 @@ const int kRecentlyClosedTabsSectionIndex = 0;
   TableViewURLCell* URLCell = base::mac::ObjCCastStrict<TableViewURLCell>(cell);
 
   NSString* itemIdentifier = URLItem.uniqueIdentifier;
-  FaviconAttributes* cachedAttributes = [self.imageDataSource
+  [self.imageDataSource
       faviconForURL:URLItem.URL
          completion:^(FaviconAttributes* attributes) {
            // Only set favicon if the cell hasn't been reused.
@@ -752,8 +768,6 @@ const int kRecentlyClosedTabsSectionIndex = 0;
              [URLCell.faviconView configureWithAttributes:attributes];
            }
          }];
-  DCHECK(cachedAttributes);
-  [URLCell.faviconView configureWithAttributes:cachedAttributes];
 }
 
 #pragma mark - Distant Sessions helpers
@@ -855,6 +869,13 @@ const int kRecentlyClosedTabsSectionIndex = 0;
 
 - (void)openTabWithContentOfDistantTab:
     (synced_sessions::DistantTab const*)distantTab {
+  // It is reasonable to ignore this request if a modal UI is already showing
+  // above recent tabs. This can happen when a user simultaneously taps a
+  // distant tab and "enable sync". The sync settings UI appears first and we
+  // should not dismiss it to show a distant tab.
+  if (self.presentedViewController)
+    return;
+
   sync_sessions::OpenTabsUIDelegate* openTabs =
       SessionSyncServiceFactory::GetForBrowserState(self.browserState)
           ->GetOpenTabsUIDelegate();
@@ -890,13 +911,27 @@ const int kRecentlyClosedTabsSectionIndex = 0;
 
 - (void)openTabWithTabRestoreEntry:
     (const sessions::TabRestoreService::Entry*)entry {
+  // It is reasonable to ignore this request if a modal UI is already showing
+  // above recent tabs. This can happen when a user simultaneously taps a
+  // recently closed tab and "enable sync". The sync settings UI appears first
+  // and we should not dismiss it to restore a recently closed tab.
+  if (self.presentedViewController)
+    return;
+
   // Only TAB type is handled.
   DCHECK_EQ(entry->type, sessions::TabRestoreService::TAB);
   base::RecordAction(
       base::UserMetricsAction("MobileRecentTabManagerRecentTabOpened"));
   new_tab_page_uma::RecordAction(
       self.browserState, new_tab_page_uma::ACTION_OPENED_RECENTLY_CLOSED_ENTRY);
-  RestoreTab(entry->id, self.restoredTabDisposition, self.browserState);
+
+  // If RecentTabs is being displayed from incognito, the resulting tab will
+  // open in the corresponding normal BVC. Change the disposition to avoid
+  // clobbering any tabs.
+  WindowOpenDisposition disposition =
+      self.isIncognito ? WindowOpenDisposition::NEW_FOREGROUND_TAB
+                       : self.restoredTabDisposition;
+  RestoreTab(entry->id, disposition, self.browserState);
   [self.presentationDelegate showActiveRegularTabFromRecentTabs];
 }
 
@@ -989,20 +1024,17 @@ const int kRecentlyClosedTabsSectionIndex = 0;
     [textHeaderView animateHighlight];
   }
 
-  web::ContextMenuParams params;
   // Get view coordinates in local space.
   CGPoint viewCoordinate = [sender locationInView:self.tableView];
-  params.location = viewCoordinate;
-  params.view = self.tableView;
-
   // Present sheet/popover using controller that is added to view hierarchy.
   // TODO(crbug.com/754642): Remove TopPresentedViewController().
   UIViewController* topController =
       top_view_controller::TopPresentedViewController();
-
-  self.contextMenuCoordinator =
-      [[ContextMenuCoordinator alloc] initWithBaseViewController:topController
-                                                          params:params];
+  self.contextMenuCoordinator = [[ContextMenuCoordinator alloc]
+      initWithBaseViewController:topController
+                           title:nil
+                          inView:self.tableView
+                      atLocation:viewCoordinate];
 
   // Fill the sheet/popover with buttons.
   __weak RecentTabsTableViewController* weakSelf = self;
@@ -1031,20 +1063,23 @@ const int kRecentlyClosedTabsSectionIndex = 0;
 }
 
 - (void)openTabsFromSessionSectionIdentifier:(NSInteger)sectionIdentifier {
+  base::RecordAction(base::UserMetricsAction(
+      "MobileRecentTabManagerOpenAllTabsFromOtherDevice"));
   NSInteger section =
       [self.tableViewModel sectionForSectionIdentifier:sectionIdentifier];
   synced_sessions::DistantSession const* session =
       [self sessionForSection:section];
   for (auto const& tab : session->tabs) {
-    OpenNewTabCommand* command =
-        [[OpenNewTabCommand alloc] initWithURL:tab->virtual_url
-                                      referrer:web::Referrer()
-                                   inIncognito:[self isIncognito]
-                                  inBackground:YES
-                                      appendTo:kLastTab];
-
-    [self.loader webPageOrderedOpen:command];
+    UrlLoadParams params = UrlLoadParams::InNewTab(tab->virtual_url);
+    params.SetInBackground(YES);
+    params.web_params.transition_type = ui::PAGE_TRANSITION_AUTO_BOOKMARK;
+    params.load_strategy = self.loadStrategy;
+    params.in_incognito = self.isIncognito;
+    UrlLoadingServiceFactory::GetForBrowserState(_browserState)->Load(params);
   }
+  UMA_HISTOGRAM_COUNTS_100(
+      "Mobile.RecentTabsManager.TotalTabsFromOtherDevicesOpenAll",
+      session->tabs.size());
   [self.presentationDelegate showActiveRegularTabFromRecentTabs];
 }
 
@@ -1114,11 +1149,19 @@ const int kRecentlyClosedTabsSectionIndex = 0;
 }
 
 - (void)showSyncSettings {
-  [self.dispatcher showSyncSettingsFromViewController:self];
+  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
+    [self.dispatcher showGoogleServicesSettingsFromViewController:self];
+  } else {
+    [self.dispatcher showSyncSettingsFromViewController:self];
+  }
 }
 
 - (void)showSyncPassphraseSettings {
   [self.dispatcher showSyncPassphraseSettingsFromViewController:self];
+}
+
+- (void)showGoogleServicesSettings {
+  [self.dispatcher showGoogleServicesSettingsFromViewController:self];
 }
 
 #pragma mark - SigninPresenter

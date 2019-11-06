@@ -10,29 +10,35 @@ import android.content.res.Resources;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.support.annotation.Nullable;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.ScrollView;
 
-import com.google.android.libraries.feed.api.scope.FeedProcessScope;
-import com.google.android.libraries.feed.api.scope.FeedStreamScope;
-import com.google.android.libraries.feed.api.stream.Header;
-import com.google.android.libraries.feed.api.stream.NonDismissibleHeader;
-import com.google.android.libraries.feed.api.stream.Stream;
-import com.google.android.libraries.feed.host.action.ActionApi;
-import com.google.android.libraries.feed.host.stream.CardConfiguration;
-import com.google.android.libraries.feed.host.stream.SnackbarApi;
-import com.google.android.libraries.feed.host.stream.SnackbarCallbackApi;
-import com.google.android.libraries.feed.host.stream.StreamConfiguration;
+import com.google.android.libraries.feed.api.client.scope.ProcessScope;
+import com.google.android.libraries.feed.api.client.scope.StreamScope;
+import com.google.android.libraries.feed.api.client.stream.Header;
+import com.google.android.libraries.feed.api.client.stream.NonDismissibleHeader;
+import com.google.android.libraries.feed.api.client.stream.Stream;
+import com.google.android.libraries.feed.api.host.action.ActionApi;
+import com.google.android.libraries.feed.api.host.stream.CardConfiguration;
+import com.google.android.libraries.feed.api.host.stream.SnackbarApi;
+import com.google.android.libraries.feed.api.host.stream.SnackbarCallbackApi;
+import com.google.android.libraries.feed.api.host.stream.StreamConfiguration;
+import com.google.android.libraries.feed.api.host.stream.TooltipApi;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.GlobalDiscardableReferencePool;
 import org.chromium.chrome.browser.feed.action.FeedActionHandler;
+import org.chromium.chrome.browser.feed.tooltip.BasicTooltipApi;
 import org.chromium.chrome.browser.gesturenav.HistoryNavigationLayout;
+import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.native_page.NativePageHost;
 import org.chromium.chrome.browser.ntp.NewTabPage;
@@ -42,8 +48,9 @@ import org.chromium.chrome.browser.ntp.SnapScrollHelper;
 import org.chromium.chrome.browser.ntp.snippets.SectionHeaderView;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.search_engines.TemplateUrlService;
+import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.signin.PersonalizedSigninPromoView;
+import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.snackbar.Snackbar;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -95,8 +102,21 @@ public class FeedNewTabPage extends NewTabPage {
 
         @Override
         public void show(String message, String action, SnackbarCallbackApi callback) {
-            // TODO(https://crbug.com/924742): Set action text and correctly invoke callback.
-            show(message);
+            mManager.showSnackbar(
+                    Snackbar.make(message,
+                                    new SnackbarManager.SnackbarController() {
+                                        @Override
+                                        public void onAction(Object actionData) {
+                                            callback.onDismissedWithAction();
+                                        }
+
+                                        @Override
+                                        public void onDismissNoAction(Object actionData) {
+                                            callback.onDismissNoAction();
+                                        }
+                                    },
+                                    Snackbar.TYPE_ACTION, Snackbar.UMA_FEED_NTP_STREAM)
+                            .setAction(action, null));
         }
     }
 
@@ -131,7 +151,7 @@ public class FeedNewTabPage extends NewTabPage {
         public BasicCardConfiguration(Resources resources, UiConfig uiConfig) {
             mResources = resources;
             mUiConfig = uiConfig;
-            mCornerRadius = mResources.getDimensionPixelSize(R.dimen.default_card_corner_radius);
+            mCornerRadius = mResources.getDimensionPixelSize(R.dimen.default_rounded_corner_radius);
             mCardMargin = mResources.getDimensionPixelSize(
                     R.dimen.content_suggestions_card_modern_margin);
             mCardWideMargin =
@@ -145,8 +165,10 @@ public class FeedNewTabPage extends NewTabPage {
 
         @Override
         public Drawable getCardBackground() {
-            return ApiCompatibilityUtils.getDrawable(
-                    mResources, R.drawable.hairline_border_card_background);
+            return ApiCompatibilityUtils.getDrawable(mResources,
+                    FeedConfiguration.getFeedUiEnabled()
+                            ? R.drawable.hairline_border_card_background_with_inset
+                            : R.drawable.hairline_border_card_background);
         }
 
         @Override
@@ -237,10 +259,15 @@ public class FeedNewTabPage extends NewTabPage {
      * @param activity The containing {@link ChromeActivity}.
      * @param nativePageHost The host for this native page.
      * @param tabModelSelector The {@link TabModelSelector} for the containing activity.
+     * @param activityTabProvider Allows us to check if we are the current tab.
+     * @param activityLifecycleDispatcher Allows us to subscribe to backgrounding events.
      */
     public FeedNewTabPage(ChromeActivity activity, NativePageHost nativePageHost,
-            TabModelSelector tabModelSelector) {
-        super(activity, nativePageHost, tabModelSelector);
+            TabModelSelector tabModelSelector, SigninManager signinManager,
+            ActivityTabProvider activityTabProvider,
+            ActivityLifecycleDispatcher activityLifecycleDispatcher) {
+        super(activity, nativePageHost, tabModelSelector, activityTabProvider,
+                activityLifecycleDispatcher);
 
         Resources resources = activity.getResources();
         mDefaultMargin =
@@ -252,7 +279,7 @@ public class FeedNewTabPage extends NewTabPage {
 
         // Mediator should be created before any Stream changes.
         mMediator = new FeedNewTabPageMediator(
-                this, new SnapScrollHelper(mNewTabPageManager, mNewTabPageLayout));
+                this, new SnapScrollHelper(mNewTabPageManager, mNewTabPageLayout), signinManager);
 
         // Don't store a direct reference to the activity, because it might change later if the tab
         // is reparented.
@@ -264,16 +291,17 @@ public class FeedNewTabPage extends NewTabPage {
 
         mNewTabPageLayout.initialize(mNewTabPageManager, mTab, mTileGroupDelegate,
                 mSearchProviderHasLogo,
-                TemplateUrlService.getInstance().isDefaultSearchEngineGoogle(), mMediator,
+                TemplateUrlServiceFactory.get().isDefaultSearchEngineGoogle(), mMediator,
                 mContextMenuManager, mUiConfig);
     }
 
     @Override
-    protected void initializeMainView(Context context) {
+    protected void initializeMainView(Context context, NativePageHost host) {
         int topPadding = context.getResources().getDimensionPixelOffset(R.dimen.tab_strip_height);
 
         mRootView = new RootView(context, mConstructedTimeNs);
         mRootView.setPadding(0, topPadding, 0, 0);
+        mRootView.setNavigationDelegate(host.createHistoryNavigationDelegate());
         mUiConfig = new UiConfig(mRootView);
     }
 
@@ -332,7 +360,7 @@ public class FeedNewTabPage extends NewTabPage {
             mScrollViewResizer = null;
         }
 
-        FeedProcessScope feedProcessScope = FeedProcessScopeFactory.getFeedProcessScope();
+        ProcessScope feedProcessScope = FeedProcessScopeFactory.getFeedProcessScope();
         assert feedProcessScope != null;
 
         FeedAppLifecycle appLifecycle = FeedProcessScopeFactory.getFeedAppLifecycle();
@@ -342,7 +370,7 @@ public class FeedNewTabPage extends NewTabPage {
         Profile profile = mTab.getProfile();
 
         mImageLoader = new FeedImageLoader(
-                chromeActivity, chromeActivity.getChromeApplication().getReferencePool());
+                chromeActivity, GlobalDiscardableReferencePool.getReferencePool());
         FeedLoggingBridge loggingBridge = FeedProcessScopeFactory.getFeedLoggingBridge();
         FeedOfflineIndicator offlineIndicator = FeedProcessScopeFactory.getFeedOfflineIndicator();
         Runnable consumptionObserver = () -> {
@@ -355,14 +383,18 @@ public class FeedNewTabPage extends NewTabPage {
                 consumptionObserver, offlineIndicator, OfflinePageBridge.getForProfile(profile),
                 loggingBridge);
 
-        FeedStreamScope streamScope =
+        TooltipApi tooltipApi = new BasicTooltipApi();
+
+        StreamScope streamScope =
                 feedProcessScope
-                        .createFeedStreamScopeBuilder(chromeActivity, mImageLoader, actionApi,
+                        .createStreamScopeBuilder(chromeActivity, mImageLoader, actionApi,
                                 new BasicStreamConfiguration(),
                                 new BasicCardConfiguration(
                                         chromeActivity.getResources(), mUiConfig),
                                 new BasicSnackbarApi(mNewTabPageManager.getSnackbarManager()),
-                                offlineIndicator)
+                                offlineIndicator, tooltipApi)
+                        .setIsBackgroundDark(
+                                chromeActivity.getNightModeStateProvider().isInNightMode())
                         .build();
 
         mStream = streamScope.getStream();
@@ -384,6 +416,13 @@ public class FeedNewTabPage extends NewTabPage {
         mStream.setHeaderViews(Arrays.asList(new NonDismissibleHeader(mNewTabPageLayout),
                 new NonDismissibleHeader(mSectionHeaderView)));
         mStream.addScrollListener(new FeedLoggingBridge.ScrollEventReporter(loggingBridge));
+
+        // Work around https://crbug.com/943873 where default focus highlight shows up after
+        // toggling dark mode.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            view.setDefaultFocusHighlightEnabled(false);
+        }
+
         // Explicitly request focus on the scroll container to avoid UrlBar being focused after
         // the scroll container for policy is removed.
         view.requestFocus();

@@ -9,12 +9,12 @@
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/common/autofill_prefs.h"
-#include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/base/model_type.h"
+#include "components/sync/driver/profile_sync_service.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -23,8 +23,7 @@ namespace {
 
 class AutofillProfileDisabledChecker : public SingleClientStatusChangeChecker {
  public:
-  explicit AutofillProfileDisabledChecker(
-      browser_sync::ProfileSyncService* service)
+  explicit AutofillProfileDisabledChecker(syncer::ProfileSyncService* service)
       : SingleClientStatusChangeChecker(service) {}
   ~AutofillProfileDisabledChecker() override = default;
 
@@ -39,19 +38,16 @@ class AutofillProfileDisabledChecker : public SingleClientStatusChangeChecker {
   }
 };
 
-class SingleClientAutofillProfileSyncTest : public FeatureToggler,
-                                            public SyncTest {
+class SingleClientAutofillProfileSyncTest : public SyncTest {
  public:
-  SingleClientAutofillProfileSyncTest()
-      : FeatureToggler(switches::kSyncUSSAutofillProfile),
-        SyncTest(SINGLE_CLIENT) {}
+  SingleClientAutofillProfileSyncTest() : SyncTest(SINGLE_CLIENT) {}
   ~SingleClientAutofillProfileSyncTest() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SingleClientAutofillProfileSyncTest);
 };
 
-IN_PROC_BROWSER_TEST_P(SingleClientAutofillProfileSyncTest,
+IN_PROC_BROWSER_TEST_F(SingleClientAutofillProfileSyncTest,
                        DisablingAutofillAlsoDisablesSyncing) {
   ASSERT_TRUE(SetupSync());
   ASSERT_TRUE(GetClient(0)->service()->GetActiveDataTypes().Has(
@@ -79,9 +75,5 @@ IN_PROC_BROWSER_TEST_P(SingleClientAutofillProfileSyncTest,
   // The autofill profile itself should still be there though.
   EXPECT_EQ(1uL, pdm->GetProfiles().size());
 }
-
-INSTANTIATE_TEST_SUITE_P(USS,
-                         SingleClientAutofillProfileSyncTest,
-                         ::testing::Values(false, true));
 
 }  // namespace

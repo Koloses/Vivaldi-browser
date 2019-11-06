@@ -55,13 +55,21 @@ class INVALIDATION_EXPORT PerUserTopicRegistrationManager {
       PrefService* local_state,
       network::mojom::URLLoaderFactory* url_loader_factory,
       const ParseJSONCallback& parse_json,
-      const std::string& project_id);
+      const std::string& project_id,
+      bool migrate_prefs);
 
   virtual ~PerUserTopicRegistrationManager();
 
+  // RegisterProfilePrefs and RegisterPrefs register the same prefs, because on
+  // device level (sign in screen, device local account) we spin up separate
+  // InvalidationService and on profile level (when user signed in) we have
+  // another InvalidationService, and we want to keep profile data in an
+  // encrypted area of disk. While device data which is public can be kept in an
+  // unencrypted area.
   static void RegisterProfilePrefs(PrefRegistrySimple* registry);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
-  virtual void UpdateRegisteredTopics(const TopicSet& ids,
+  virtual void UpdateRegisteredTopics(const Topics& ids,
                                       const std::string& token);
 
   virtual void Init();
@@ -77,6 +85,9 @@ class INVALIDATION_EXPORT PerUserTopicRegistrationManager {
   bool HaveAllRequestsFinishedForTest() const {
     return registration_statuses_.empty();
   }
+
+  virtual base::Optional<Topic> LookupRegisteredPublicTopicByPrivateTopic(
+      const std::string& private_topic) const;
 
  private:
   struct RegistrationEntry;
@@ -113,6 +124,7 @@ class INVALIDATION_EXPORT PerUserTopicRegistrationManager {
 
   // For registered ids it maps the id value to the topic value.
   std::map<Topic, std::string> topic_to_private_topic_;
+  std::map<std::string, Topic> private_topic_to_topic_;
 
   // Token derrived from GCM IID.
   std::string token_;
@@ -131,6 +143,7 @@ class INVALIDATION_EXPORT PerUserTopicRegistrationManager {
   network::mojom::URLLoaderFactory* url_loader_factory_;
 
   const std::string project_id_;
+  const bool migrate_prefs_;
 
   base::ObserverList<Observer>::Unchecked observers_;
   SubscriptionChannelState last_issued_state_ =

@@ -13,9 +13,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Restriction;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.browsing_data.BrowsingDataType;
@@ -23,7 +23,9 @@ import org.chromium.chrome.browser.browsing_data.ClearBrowsingDataTab;
 import org.chromium.chrome.browser.browsing_data.TimePeriod;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.content_public.browser.test.util.JavaScriptUtils;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.Arrays;
@@ -55,7 +57,7 @@ public class BrowsingDataTest {
     private void clearBrowsingData(int dataType, int timePeriod)
             throws InterruptedException, TimeoutException {
         CallbackHelper helper = new CallbackHelper();
-        ThreadUtils.runOnUiThreadBlocking(() -> {
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
             BrowsingDataBridge.getInstance().clearBrowsingData(
                     helper::notifyCalled, new int[] {dataType}, timePeriod);
         });
@@ -71,7 +73,7 @@ public class BrowsingDataTest {
             out[0] = result;
             helper.notifyCalled();
         };
-        ThreadUtils.runOnUiThreadBlocking(() -> {
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
             counter[0] = new BrowsingDataCounterBridge(
                     callback, BrowsingDataType.COOKIES, ClearBrowsingDataTab.ADVANCED);
         });
@@ -136,10 +138,32 @@ public class BrowsingDataTest {
     }
 
     /**
+     * Test all data deletion for incognito profile. This only checks to see if an android specific
+     * code crashes or not. For details see, crbug.com/990624.
+     */
+    @Test
+    @SmallTest
+    public void testAllDataDeletedForIncognito() throws Exception {
+        // TODO(roagarwal) : Crashes on BrowsingDataType.SITE_SETTINGS, BrowsingDataType.BOOKMARKS
+        // data types.
+        CallbackHelper helper = new CallbackHelper();
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            BrowsingDataBridge.getInstance().clearBrowsingDataIncognitoForTesting(
+                    helper::notifyCalled,
+                    new int[] {BrowsingDataType.HISTORY, BrowsingDataType.CACHE,
+                            BrowsingDataType.COOKIES, BrowsingDataType.PASSWORDS,
+                            BrowsingDataType.FORM_DATA},
+                    TimePeriod.LAST_HOUR);
+        });
+        helper.waitForCallback(0);
+    }
+
+    /**
      * Test history deletion.
      */
     @Test
     @SmallTest
+    @Restriction({ChromeRestriction.RESTRICTION_TYPE_REQUIRES_TOUCH})
     public void testHistoryDeleted() throws Exception {
         Assert.assertEquals(0, getCookieCount());
         mActivityTestRule.loadUrlInNewTab(mUrl);

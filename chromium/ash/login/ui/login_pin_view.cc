@@ -10,6 +10,7 @@
 #include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/login_constants.h"
 #include "ash/resources/vector_icons/vector_icons.h"
+#include "ash/shelf/shelf_constants.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/bind.h"
 #include "base/callback.h"
@@ -93,10 +94,10 @@ class BasePinButton : public views::InkDropHostView {
     SetFocusBehavior(FocusBehavior::ALWAYS);
     SetPreferredSize(size);
 
-    auto layout =
-        std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical);
+    auto layout = std::make_unique<views::BoxLayout>(
+        views::BoxLayout::Orientation::kVertical);
     layout->set_main_axis_alignment(
-        views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
+        views::BoxLayout::MainAxisAlignment::kCenter);
     SetLayoutManager(std::move(layout));
 
     // Layer rendering is needed for animation. Enable it here for
@@ -105,8 +106,8 @@ class BasePinButton : public views::InkDropHostView {
     layer()->SetFillsBoundsOpaquely(false);
     SetInkDropMode(InkDropMode::ON_NO_GESTURE_HANDLER);
 
-    focus_painter_ = views::Painter::CreateSolidFocusPainter(
-        kFocusBorderColor, kFocusBorderThickness, gfx::InsetsF());
+    focus_ring_ = views::FocusRing::Install(this);
+    focus_ring_->SetColor(kShelfFocusBorderColor);
   }
 
   ~BasePinButton() override = default;
@@ -114,7 +115,6 @@ class BasePinButton : public views::InkDropHostView {
   // views::InkDropHostView:
   void OnPaint(gfx::Canvas* canvas) override {
     InkDropHostView::OnPaint(canvas);
-    views::Painter::PaintFocusPainter(this, canvas, focus_painter_.get());
   }
   void OnFocus() override {
     InkDropHostView::OnFocus();
@@ -195,7 +195,7 @@ class BasePinButton : public views::InkDropHostView {
 
  private:
   const base::string16 accessible_name_;
-  std::unique_ptr<views::Painter> focus_painter_;
+  std::unique_ptr<views::FocusRing> focus_ring_;
 
   DISALLOW_COPY_AND_ASSIGN(BasePinButton);
 };
@@ -210,7 +210,7 @@ class DigitPinButton : public BasePinButton {
       : BasePinButton(size,
                       GetButtonLabelForNumber(value),
                       base::BindRepeating(on_key, value)) {
-    set_id(GetViewIdForPinNumber(value));
+    SetID(GetViewIdForPinNumber(value));
     const gfx::FontList& base_font_list = views::Label::GetDefaultFontList();
     views::Label* label = new views::Label(GetButtonLabelForNumber(value),
                                            views::style::CONTEXT_BUTTON,
@@ -253,9 +253,7 @@ class LoginPinView::BackspacePinButton : public BasePinButton {
       : BasePinButton(size,
                       l10n_util::GetStringUTF16(
                           IDS_ASH_PIN_KEYBOARD_DELETE_ACCESSIBLE_NAME),
-                      on_press),
-        delay_timer_(std::make_unique<base::OneShotTimer>()),
-        repeat_timer_(std::make_unique<base::RepeatingTimer>()) {
+                      on_press) {
     image_ = new views::ImageView();
     image_->SetImage(gfx::CreateVectorIcon(
         kLockScreenBackspaceIcon, login_constants::kButtonEnabledColor));
@@ -271,16 +269,17 @@ class LoginPinView::BackspacePinButton : public BasePinButton {
     repeat_timer_ = std::move(repeat_timer);
   }
 
-  // BasePinButton:
-  void OnEnabledChanged() override {
+  void OnEnabledChanged() {
     SkColor color = login_constants::kButtonEnabledColor;
-    if (!enabled()) {
+    if (!GetEnabled()) {
       color = SkColorSetA(color, login_constants::kButtonDisabledAlpha);
       CancelRepeat();
     }
 
     image_->SetImage(gfx::CreateVectorIcon(kLockScreenBackspaceIcon, color));
   }
+
+  // BasePinButton:
   void OnEvent(ui::Event* event) override {
     BasePinButton::OnEvent(event);
     if (event->handled())
@@ -357,10 +356,16 @@ class LoginPinView::BackspacePinButton : public BasePinButton {
   }
 
   bool is_held_ = false;
-  std::unique_ptr<base::OneShotTimer> delay_timer_;
-  std::unique_ptr<base::RepeatingTimer> repeat_timer_;
+  std::unique_ptr<base::OneShotTimer> delay_timer_ =
+      std::make_unique<base::OneShotTimer>();
+  std::unique_ptr<base::RepeatingTimer> repeat_timer_ =
+      std::make_unique<base::RepeatingTimer>();
 
   views::ImageView* image_ = nullptr;
+  views::PropertyChangedSubscription enabled_changed_subscription_ =
+      AddEnabledChangedCallback(base::BindRepeating(
+          &LoginPinView::BackspacePinButton::OnEnabledChanged,
+          base::Unretained(this)));
 
   DISALLOW_COPY_AND_ASSIGN(BackspacePinButton);
 };
@@ -406,14 +411,14 @@ LoginPinView::LoginPinView(Style keyboard_style,
   // Builds and returns a new view which contains a row of the PIN keyboard.
   auto build_and_add_row = [this]() {
     auto* row = new NonAccessibleView();
-    row->SetLayoutManager(
-        std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal));
+    row->SetLayoutManager(std::make_unique<views::BoxLayout>(
+        views::BoxLayout::Orientation::kHorizontal));
     AddChildView(row);
     return row;
   };
 
-  SetLayoutManager(
-      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
+  SetLayoutManager(std::make_unique<views::BoxLayout>(
+      views::BoxLayout::Orientation::kVertical));
 
   bool show_letters = keyboard_style == Style::kAlphanumeric;
   const gfx::Size button_size =

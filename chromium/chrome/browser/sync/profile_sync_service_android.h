@@ -13,11 +13,8 @@
 
 class Profile;
 
-namespace browser_sync {
-class ProfileSyncService;
-}
-
 namespace syncer {
+class ProfileSyncService;
 class SyncSetupInProgressHandle;
 }
 
@@ -52,6 +49,9 @@ class ProfileSyncServiceAndroid : public syncer::SyncServiceObserver {
                                 jboolean allowed);
   jboolean IsSyncActive(JNIEnv* env,
                         const base::android::JavaParamRef<jobject>& obj);
+  jboolean IsSyncDisabledByEnterprisePolicy(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
   jboolean IsEngineInitialized(JNIEnv* env,
                                const base::android::JavaParamRef<jobject>& obj);
   void SetSetupInProgress(JNIEnv* env,
@@ -119,9 +119,7 @@ class ProfileSyncServiceAndroid : public syncer::SyncServiceObserver {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
       jboolean personalized);
-
-  // Gets SyncProtocolError.ClientAction.
-  jint GetProtocolErrorClientAction(
+  jboolean RequiresClientUpgrade(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
@@ -181,6 +179,9 @@ class ProfileSyncServiceAndroid : public syncer::SyncServiceObserver {
 
   static ProfileSyncServiceAndroid* GetProfileSyncServiceAndroid();
 
+  void TriggerRefresh(JNIEnv* env,
+                      const base::android::JavaParamRef<jobject>& obj);
+
  private:
   // Returns whether sync is allowed by Android.
   bool IsSyncAllowedByAndroid() const;
@@ -189,7 +190,7 @@ class ProfileSyncServiceAndroid : public syncer::SyncServiceObserver {
   Profile* profile_;
 
   // A reference to the sync service for this profile.
-  browser_sync::ProfileSyncService* sync_service_;
+  syncer::ProfileSyncService* sync_service_;
 
   // Prevents Sync from running until configuration is complete.
   std::unique_ptr<syncer::SyncSetupInProgressHandle> sync_blocker_;

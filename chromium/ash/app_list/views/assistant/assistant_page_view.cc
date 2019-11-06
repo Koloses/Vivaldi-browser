@@ -8,6 +8,8 @@
 #include <utility>
 
 #include "ash/app_list/app_list_view_delegate.h"
+#include "ash/app_list/views/app_list_main_view.h"
+#include "ash/app_list/views/app_list_view.h"
 #include "ash/app_list/views/assistant/assistant_main_view.h"
 #include "ash/app_list/views/contents_view.h"
 #include "ash/assistant/model/assistant_ui_model.h"
@@ -15,12 +17,12 @@
 #include "ash/assistant/ui/assistant_view_delegate.h"
 #include "ash/assistant/ui/assistant_web_view.h"
 #include "ash/assistant/util/assistant_util.h"
+#include "ash/public/cpp/view_shadow.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/chromeos/search_box/search_box_constants.h"
 #include "ui/views/background.h"
-#include "ui/views/bubble/bubble_border.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/layout/fill_layout.h"
 
@@ -28,18 +30,28 @@ namespace app_list {
 
 namespace {
 
-// The height of the search box in |search_result_page_view_|. It is only for
-// animation.
-constexpr int kSearchBoxHeightDip = 56;
-
 // The shadow elevation value for the shadow of the Assistant search box.
 constexpr int kShadowElevation = 12;
+
+int GetPreferredHeightForAppListState(AppListView* app_list_view) {
+  auto app_list_view_state = app_list_view->app_list_state();
+  switch (app_list_view_state) {
+    case ash::AppListViewState::kHalf:
+    case ash::AppListViewState::kFullscreenSearch:
+      return ash::kMaxHeightEmbeddedDip;
+    default:
+      return ash::kMinHeightEmbeddedDip;
+  }
+}
 
 }  // namespace
 
 AssistantPageView::AssistantPageView(
-    ash::AssistantViewDelegate* assistant_view_delegate)
-    : assistant_view_delegate_(assistant_view_delegate) {
+    ash::AssistantViewDelegate* assistant_view_delegate,
+    ContentsView* contents_view)
+    : assistant_view_delegate_(assistant_view_delegate),
+      contents_view_(contents_view),
+      min_height_dip_(ash::kMinHeightEmbeddedDip) {
   InitLayout();
 
   // |assistant_view_delegate_| could be nullptr in test.
@@ -55,20 +67,11 @@ AssistantPageView::~AssistantPageView() {
 void AssistantPageView::InitLayout() {
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
-
-  // Create and set a shadow to be displayed as a border for this view.
-  auto shadow_border = std::make_unique<views::BubbleBorder>(
-      views::BubbleBorder::NONE, views::BubbleBorder::SMALL_SHADOW,
-      SK_ColorWHITE);
-  shadow_border->SetCornerRadius(
+  view_shadow_ = std::make_unique<ash::ViewShadow>(this, kShadowElevation);
+  view_shadow_->SetRoundedCornerRadius(
       search_box::kSearchBoxBorderCornerRadiusSearchResult);
-  shadow_border->set_md_shadow_elevation(kShadowElevation);
-  SetBorder(std::move(shadow_border));
 
-  SetBackground(views::CreateBackgroundFromPainter(
-      views::Painter::CreateSolidRoundRectPainter(
-          SK_ColorWHITE, search_box::kSearchBoxBorderCornerRadiusSearchResult,
-          border()->GetInsets())));
+  SetBackground(views::CreateSolidBackground(SK_ColorWHITE));
 
   SetLayoutManager(std::make_unique<views::FillLayout>());
 
@@ -81,7 +84,8 @@ void AssistantPageView::InitLayout() {
     AddChildView(assistant_web_view_);
 
     // Update the view state based on the current UI mode.
-    OnUiModeChanged(assistant_view_delegate_->GetUiModel()->ui_mode());
+    OnUiModeChanged(assistant_view_delegate_->GetUiModel()->ui_mode(),
+                    /*due_to_interaction=*/false);
   }
 }
 
@@ -90,7 +94,26 @@ const char* AssistantPageView::GetClassName() const {
 }
 
 gfx::Size AssistantPageView::CalculatePreferredSize() const {
-  return gfx::Size(ash::kPreferredWidthDip, ash::kMaxHeightEmbeddedDip);
+  constexpr int width = ash::kPreferredWidthDip;
+  return gfx::Size(width, GetHeightForWidth(width));
+}
+
+int AssistantPageView::GetHeightForWidth(int width) const {
+  int preferred_height =
+      GetPreferredHeightForAppListState(contents_view_->app_list_view());
+
+  preferred_height = std::max(preferred_height, min_height_dip_);
+  return GetChildViewPreferredHeight() > preferred_height
+             ? ash::kMaxHeightEmbeddedDip
+             : preferred_height;
+}
+
+void AssistantPageView::OnBoundsChanged(const gfx::Rect& prev_bounds) {
+  if (!IsDrawn())
+    return;
+
+  // Until Assistant UI is closed, the view may grow in height but not shrink.
+  min_height_dip_ = std::max(min_height_dip_, GetContentsBounds().height());
 }
 
 void AssistantPageView::RequestFocus() {
@@ -116,6 +139,22 @@ void AssistantPageView::RequestFocus() {
 void AssistantPageView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   View::GetAccessibleNodeData(node_data);
   node_data->SetName(l10n_util::GetStringUTF16(IDS_ASH_ASSISTANT_WINDOW));
+}
+
+void AssistantPageView::ChildPreferredSizeChanged(views::View* child) {
+  MaybeUpdateAppListState(child->GetPreferredSize().height());
+  PreferredSizeChanged();
+
+  // After layout events, focus can be lost so we need to explicitly request
+  // on behalf of the child views.
+  RequestFocus();
+}
+
+void AssistantPageView::ChildVisibilityChanged(views::View* child) {
+  if (!child->GetVisible())
+    return;
+
+  MaybeUpdateAppListState(child->GetPreferredSize().height());
 }
 
 void AssistantPageView::OnMouseEvent(ui::MouseEvent* event) {
@@ -146,25 +185,9 @@ void AssistantPageView::OnGestureEvent(ui::GestureEvent* event) {
 
 gfx::Rect AssistantPageView::GetPageBoundsForState(
     ash::AppListState state) const {
-  gfx::Rect bounds;
-  if (state != ash::AppListState::kStateEmbeddedAssistant) {
-    // Hides this view behind the search box by using the same bounds.
-    bounds = AppListPage::contents_view()->GetSearchBoxBoundsForState(state);
-  } else {
-    bounds = AppListPage::GetSearchBoxBounds();
-    bounds.Offset((bounds.width() - ash::kPreferredWidthDip) / 2, 0);
-    bounds.set_size(GetPreferredSize());
-  }
-
-  return AddShadowBorderToBounds(bounds);
-}
-
-gfx::Rect AssistantPageView::GetSearchBoxBounds() const {
-  gfx::Rect bounds(AppListPage::GetSearchBoxBounds());
-
+  gfx::Rect bounds = AppListPage::GetSearchBoxBounds();
   bounds.Offset((bounds.width() - ash::kPreferredWidthDip) / 2, 0);
-  bounds.set_size(gfx::Size(ash::kPreferredWidthDip, kSearchBoxHeightDip));
-
+  bounds.set_size(GetPreferredSize());
   return bounds;
 }
 
@@ -178,9 +201,10 @@ views::View* AssistantPageView::GetLastFocusableView() {
       this, GetWidget(), /*reverse=*/true, /*dont_loop=*/false);
 }
 
-void AssistantPageView::OnUiModeChanged(ash::AssistantUiMode ui_mode) {
-  for (int i = 0; i < child_count(); ++i)
-    child_at(i)->SetVisible(false);
+void AssistantPageView::OnUiModeChanged(ash::AssistantUiMode ui_mode,
+                                        bool due_to_interaction) {
+  for (auto* child : children())
+    child->SetVisible(false);
 
   switch (ui_mode) {
     case ash::AssistantUiMode::kLauncherEmbeddedUi:
@@ -209,8 +233,10 @@ void AssistantPageView::OnUiVisibilityChanged(
   if (!assistant_view_delegate_)
     return;
 
-  if (new_visibility != ash::AssistantVisibility::kVisible)
+  if (new_visibility != ash::AssistantVisibility::kVisible) {
+    min_height_dip_ = ash::kMinHeightEmbeddedDip;
     return;
+  }
 
   const bool prefer_voice = assistant_view_delegate_->IsTabletMode() ||
                             assistant_view_delegate_->IsLaunchWithMicOpen();
@@ -220,11 +246,42 @@ void AssistantPageView::OnUiVisibilityChanged(
   }
 }
 
-gfx::Rect AssistantPageView::AddShadowBorderToBounds(
-    const gfx::Rect& bounds) const {
-  gfx::Rect new_bounds(bounds);
-  new_bounds.Inset(-border()->GetInsets());
-  return new_bounds;
+int AssistantPageView::GetChildViewPreferredHeight() const {
+  int height = 0;
+  if (assistant_view_delegate_) {
+    switch (assistant_view_delegate_->GetUiModel()->ui_mode()) {
+      case ash::AssistantUiMode::kLauncherEmbeddedUi:
+        if (assistant_main_view_)
+          height = assistant_main_view_->GetPreferredSize().height();
+        break;
+      case ash::AssistantUiMode::kWebUi:
+        if (assistant_web_view_)
+          height = assistant_web_view_->GetPreferredSize().height();
+        break;
+      case ash::AssistantUiMode::kMainUi:
+      case ash::AssistantUiMode::kMiniUi:
+        NOTREACHED();
+        break;
+    }
+  }
+  return height;
+}
+
+void AssistantPageView::MaybeUpdateAppListState(int child_height) {
+  auto* app_list_view = contents_view_->app_list_view();
+  auto* widget = app_list_view->GetWidget();
+  // |app_list_view| may not be initialized.
+  if (!widget || !widget->IsVisible())
+    return;
+
+  // Update app list view state for |assistant_page_view_|.
+  // Embedded Assistant Ui only has two sizes. The only states change is from
+  // kPeeking to kHalf state.
+  if (app_list_view->app_list_state() != ash::AppListViewState::kPeeking)
+    return;
+
+  if (child_height > GetPreferredHeightForAppListState(app_list_view))
+    app_list_view->SetState(ash::AppListViewState::kHalf);
 }
 
 }  // namespace app_list

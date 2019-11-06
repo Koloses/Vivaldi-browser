@@ -4,7 +4,6 @@
 
 #import <EarlGrey/EarlGrey.h>
 #import <UIKit/UIKit.h>
-#import <WebKit/WebKit.h>
 #import <XCTest/XCTest.h>
 
 #include "base/bind.h"
@@ -15,18 +14,16 @@
 #import "base/test/ios/wait_util.h"
 #include "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
-#import "ios/chrome/test/app/settings_test_util.h"
-#import "ios/chrome/test/app/web_view_interaction_test_util.h"
+#import "ios/chrome/test/app/tab_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/web/public/features.h"
+#import "ios/web/common/features.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #import "ios/web/public/test/http_server/error_page_response_provider.h"
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
-#import "ios/web/public/test/web_view_interaction_test_util.h"
 #import "ios/web/public/web_client.h"
 #import "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
@@ -35,7 +32,9 @@
 #error "This file requires ARC support."
 #endif
 
-using chrome_test_util::TapWebViewElementWithId;
+using base::test::ios::kWaitForPageLoadTimeout;
+using base::test::ios::kWaitForJSCompletionTimeout;
+using base::test::ios::WaitUntilConditionOrTimeout;
 
 namespace {
 
@@ -64,7 +63,7 @@ void AssertURLIs(const GURL& expectedURL) {
                     error:&error];
     return (error == nil);
   };
-  GREYAssert(base::test::ios::WaitUntilConditionOrTimeout(1.0, condition),
+  GREYAssert(WaitUntilConditionOrTimeout(kWaitForPageLoadTimeout, condition),
              description);
 }
 
@@ -84,38 +83,28 @@ void AssertURLIs(const GURL& expectedURL) {
 
 // Verifies that the content offset of the web view is set up at the correct
 // initial value when initially displaying a PDF.
-- (void)testLongPDFInitialState {
+// TODO(crbug.com/947536): Fails on iOS 12 devices.
+#if !TARGET_IPHONE_SIMULATOR
+#define MAYBE_testLongPDFInitialState DISABLED_testLongPDFInitialState
+#else
+#define MAYBE_testLongPDFInitialState testLongPDFInitialState
+#endif
+- (void)MAYBE_testLongPDFInitialState {
   web::test::SetUpFileBasedHttpServer();
   GURL URL = web::test::HttpServer::MakeUrl(
       "http://ios/testing/data/http_server_files/two_pages.pdf");
   [ChromeEarlGrey loadURL:URL];
 
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
+
   // Initial y scroll positions are set to make room for the toolbar.
   // TODO(crbug.com/618887) Replace use of specific values when API which
   // generates these values is exposed.
-  CGFloat yOffset = 0;
-  if (IsUIRefreshPhase1Enabled()) {
-    if (IsIPadIdiom()) {
-      yOffset = -89.0;
-    } else {
-      yOffset = -48.0;
-    }
-  } else {
-    if (IsIPadIdiom()) {
-      yOffset = -95.0;
-    } else {
-      yOffset = -56.0;
-    }
-  }
-  if (base::FeatureList::IsEnabled(
-          web::features::kBrowserContainerFullscreen) &&
-      base::FeatureList::IsEnabled(web::features::kOutOfWebFullscreen) &&
-      base::ios::IsRunningOnIOS12OrLater()) {
-    // In the fullscreen browser implementation, the safe area is included in
-    // the top inset as well as the toolbar heights.  Due to crbug.com/903635,
-    // however, this only occurs on iOS 12; pdf rendering does not correctly
-    // account for the safe area on iOS 11.
+  CGFloat yOffset = [ChromeEarlGrey isIPadIdiom] ? -89.0 : -48.0;
+  if (@available(iOS 12, *)) {
+    // The safe area is included in the top inset as well as the toolbar
+    // heights.  Due to crbug.com/903635, however, this only occurs on iOS 12;
+    // pdf rendering does not correctly account for the safe area on iOS 11.
     yOffset -=
         chrome_test_util::GetCurrentWebState()->GetView().safeAreaInsets.top;
   }
@@ -200,7 +189,7 @@ void AssertURLIs(const GURL& expectedURL) {
 - (void)testChromeToChromeURLKeepsHeaderOnScreen {
   const GURL kChromeAboutURL("chrome://chrome-urls");
   [ChromeEarlGrey loadURL:kChromeAboutURL];
-  [ChromeEarlGrey waitForWebViewContainingText:"chrome://version"];
+  [ChromeEarlGrey waitForWebStateContainingText:"chrome://version"];
 
   // Hide the toolbar. The page is not long enough to dismiss the toolbar using
   // the UI so we have to zoom in.
@@ -222,10 +211,10 @@ void AssertURLIs(const GURL& expectedURL) {
         finished = true;
       }));
 
-  GREYAssert(base::test::ios::WaitUntilConditionOrTimeout(1.0,
-                                                          ^{
-                                                            return finished;
-                                                          }),
+  GREYAssert(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout,
+                                         ^{
+                                           return finished;
+                                         }),
              @"JavaScript to hide the toolbar did not complete");
 
   // Scroll up to be sure the toolbar can be dismissed by scrolling down.
@@ -240,7 +229,7 @@ void AssertURLIs(const GURL& expectedURL) {
 
   // Test that the toolbar is visible when moving from one chrome:// link to
   // another chrome:// link.
-  GREYAssert(TapWebViewElementWithId("version"), @"Failed to tap \"version\"");
+  [ChromeEarlGrey tapWebStateElementWithID:@"version"];
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
 }
 
@@ -280,14 +269,12 @@ void AssertURLIs(const GURL& expectedURL) {
   web::test::SetUpSimpleHttpServer(responses);
 
   [ChromeEarlGrey loadURL:URL];
-  [ChromeEarlGrey waitForWebViewContainingText:"Tall page"];
+  [ChromeEarlGrey waitForWebStateContainingText:"Tall page"];
 
   // Hide the toolbar.
   HideToolbarUsingUI();
   [ChromeEarlGreyUI waitForToolbarVisible:NO];
-
-  GREYAssert(TapWebViewElementWithId("link"), @"Failed to tap \"link\"");
-
+  [ChromeEarlGrey tapWebStateElementWithID:@"link"];
   // Main test is here: Make sure the header is still visible!
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
 }
@@ -317,10 +304,10 @@ void AssertURLIs(const GURL& expectedURL) {
       kPageHeightEM, javaScript.c_str());
 
   web::test::SetUpSimpleHttpServer(responses);
-  chrome_test_util::SetContentSettingsBlockPopups(CONTENT_SETTING_ALLOW);
+  [ChromeEarlGrey setContentSettings:CONTENT_SETTING_ALLOW];
 
   [ChromeEarlGrey loadURL:URL];
-  [ChromeEarlGrey waitForWebViewContainingText:"link1"];
+  [ChromeEarlGrey waitForWebStateContainingText:"link1"];
   [ChromeEarlGrey waitForMainTabCount:1];
 
   // Hide the toolbar.
@@ -328,10 +315,10 @@ void AssertURLIs(const GURL& expectedURL) {
   [ChromeEarlGreyUI waitForToolbarVisible:NO];
 
   // Open new window.
-  GREYAssert(TapWebViewElementWithId("link1"), @"Failed to tap \"link1\"");
+  [ChromeEarlGrey tapWebStateElementWithID:@"link1"];
 
   // Check that a new Tab was created.
-  [ChromeEarlGrey waitForWebViewContainingText:"link2"];
+  [ChromeEarlGrey waitForWebStateContainingText:"link2"];
   [ChromeEarlGrey waitForMainTabCount:2];
 
   AssertURLIs(destinationURL);
@@ -341,20 +328,9 @@ void AssertURLIs(const GURL& expectedURL) {
   [ChromeEarlGreyUI waitForToolbarVisible:NO];
 
   // Close the tab by tapping link2.
-  NSError* error = nil;
-  if (!chrome_test_util::TapWebViewElementWithId("link2", &error)) {
-    // Sometimes, the tap will be unsuccessful due to the window.close()
-    // operation invalidating the WKWebView.  If this occurs, verify the error.
-    // This results in |TapWebViewElementWithId| returning false.
-    // TODO(crbug.com/824879): Remove conditional once flake is eliminated from
-    // TapWebViewElementWithId() for window.close() links.
-    GREYAssert(error.code == WKErrorWebViewInvalidated,
-               @"Failed to receive WKErrorWebViewInvalidated error");
-    GREYAssert([error.domain isEqualToString:WKErrorDomain],
-               @"Failed to receive WKErrorDomain error");
-  }
+  [ChromeEarlGrey tapWebStateElementWithID:@"link2"];
 
-  [ChromeEarlGrey waitForWebViewContainingText:"link1"];
+  [ChromeEarlGrey waitForWebStateContainingText:"link1"];
 
   // Make sure the toolbar is on the screen.
   [ChromeEarlGrey waitForMainTabCount:1];
@@ -385,14 +361,14 @@ void AssertURLIs(const GURL& expectedURL) {
 
   [ChromeEarlGrey loadURL:originURL];
 
-  [ChromeEarlGrey waitForWebViewContainingText:"link1"];
+  [ChromeEarlGrey waitForWebStateContainingText:"link1"];
   // Dismiss the toolbar.
   HideToolbarUsingUI();
   [ChromeEarlGreyUI waitForToolbarVisible:NO];
 
   // Navigate to the other page.
-  GREYAssert(TapWebViewElementWithId("link1"), @"Failed to tap \"link1\"");
-  [ChromeEarlGrey waitForWebViewContainingText:"link2"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"link1"];
+  [ChromeEarlGrey waitForWebStateContainingText:"link2"];
 
   // Make sure toolbar is shown since a new load has started.
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
@@ -402,7 +378,7 @@ void AssertURLIs(const GURL& expectedURL) {
   [ChromeEarlGreyUI waitForToolbarVisible:NO];
 
   // Go back.
-  GREYAssert(TapWebViewElementWithId("link2"), @"Failed to tap \"link2\"");
+  [ChromeEarlGrey tapWebStateElementWithID:@"link2"];
 
   // Make sure the toolbar has loaded now that a new page has loaded.
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
@@ -423,14 +399,14 @@ void AssertURLIs(const GURL& expectedURL) {
   web::test::SetUpSimpleHttpServer(responses);
 
   [ChromeEarlGrey loadURL:URL];
-  [ChromeEarlGrey waitForWebViewContainingText:"link"];
+  [ChromeEarlGrey waitForWebStateContainingText:"link"];
 
   // Dismiss the toolbar.
   HideToolbarUsingUI();
   [ChromeEarlGreyUI waitForToolbarVisible:NO];
 
   // Go back to NTP, which is a native view.
-  GREYAssert(TapWebViewElementWithId("link"), @"Failed to tap \"link\"");
+  [ChromeEarlGrey tapWebStateElementWithID:@"link"];
 
   // Make sure the toolbar is visible now that a new page has loaded.
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
@@ -456,7 +432,7 @@ void AssertURLIs(const GURL& expectedURL) {
   HideToolbarUsingUI();
   [ChromeEarlGreyUI waitForToolbarVisible:NO];
 
-  GREYAssert(TapWebViewElementWithId("link"), @"Failed to tap \"link\"");
+  [ChromeEarlGrey tapWebStateElementWithID:@"link"];
   AssertURLIs(ErrorPageResponseProvider::GetDnsFailureUrl());
   [ChromeEarlGreyUI waitForToolbarVisible:YES];
 }

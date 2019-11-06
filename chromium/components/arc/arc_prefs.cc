@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "components/arc/arc_prefs.h"
-#include "components/arc/arc_supervision_transition.h"
+#include "components/arc/session/arc_supervision_transition.h"
 
 #include <string>
 
@@ -39,6 +39,9 @@ const char kArcDataRemoveRequested[] = "arc.data.remove_requested";
 // utility methods (IsArcPlayStoreEnabledForProfile() and
 // SetArcPlayStoreEnabledForProfile()) in chrome/browser/chromeos/arc/arc_util.
 const char kArcEnabled[] = "arc.enabled";
+// A preference to control if ARC can access removable media on the host side.
+const char kArcHasAccessToRemovableMedia[] =
+    "arc.has_access_to_removable_media";
 // A preference that indicates that initial settings need to be applied. Initial
 // settings are applied only once per new OptIn once mojo settings instance is
 // ready. Each OptOut resets this preference. Note, its sense is close to
@@ -72,6 +75,9 @@ const char kArcProvisioningInitiatedFromOobe[] =
 const char kArcFastAppReinstallStarted[] = "arc.fast.app.reinstall.started";
 // A preference to keep list of Play Fast App Reinstall packages.
 const char kArcFastAppReinstallPackages[] = "arc.fast.app.reinstall.packages";
+// A preference to keep the current Android framework version. Note, that value
+// is only available after first packages update.
+const char kArcFrameworkVersion[] = "arc.framework.version";
 // A preference that holds the list of apps that the admin requested to be
 // push-installed.
 const char kArcPushInstallAppsRequested[] = "arc.push_install.requested";
@@ -91,7 +97,7 @@ const char kArcSkippedReportingNotice[] = "arc.skipped.reporting.notice";
 const char kArcCompatibleFilesystemChosen[] =
     "arc.compatible_filesystem.chosen";
 // Integer pref indicating the ecryptfs to ext4 migration strategy. One of
-// options: forbidden = 0, migrate = 1, wipe = 2 or ask the user = 3.
+// options: forbidden = 0, migrate = 1, wipe = 2 or minimal migrate = 4.
 const char kEcryptfsMigrationStrategy[] = "ecryptfs_migration_strategy";
 // A preference that persists total engagement time across sessions, which is
 // accumulated and sent to UMA once a day.
@@ -120,23 +126,11 @@ const char kVoiceInteractionContextEnabled[] =
     "settings.voice_interaction.context.enabled";
 // A preference that indicates the user has enabled voice interaction services.
 const char kVoiceInteractionEnabled[] = "settings.voice_interaction.enabled";
-// A preference that indicates the user has chosen to always keep hotword
-// listening on even withough DSP support.
-const char kVoiceInteractionHotwordAlwaysOn[] =
-    "settings.voice_interaction.hotword.always_on";
 // A preference that indicates the user has allowed voice interaction services
 // to use hotword listening. This preference can be overridden by the
 // VoiceInteractionHotwordEnabled administrator policy.
 const char kVoiceInteractionHotwordEnabled[] =
     "settings.voice_interaction.hotword.enabled";
-// A preference that indicates whether microphone should be open when the voice
-// interaction launches.
-const char kVoiceInteractionLaunchWithMicOpen[] =
-    "settings.voice_interaction.launch_with_mic_open";
-// A preference that indicates the user has allowed voice interaction services
-// to send notification.
-const char kVoiceInteractionNotificationEnabled[] =
-    "settings.voice_interaction.notification.enabled";
 
 // ======== LOCAL STATE PREFS ========
 
@@ -177,6 +171,7 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(kAlwaysOnVpnPackage, std::string());
   registry->RegisterBooleanPref(kArcDataRemoveRequested, false);
   registry->RegisterBooleanPref(kArcEnabled, false);
+  registry->RegisterBooleanPref(kArcHasAccessToRemovableMedia, false);
   registry->RegisterBooleanPref(kArcInitialSettingsPending, false);
   registry->RegisterBooleanPref(kArcPaiStarted, false);
   registry->RegisterBooleanPref(kArcFastAppReinstallStarted, false);
@@ -194,10 +189,7 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterTimeDeltaPref(kEngagementTimeTotal, base::TimeDelta());
   registry->RegisterBooleanPref(kVoiceInteractionContextEnabled, false);
   registry->RegisterBooleanPref(kVoiceInteractionEnabled, false);
-  registry->RegisterBooleanPref(kVoiceInteractionHotwordAlwaysOn, false);
   registry->RegisterBooleanPref(kVoiceInteractionHotwordEnabled, false);
-  registry->RegisterBooleanPref(kVoiceInteractionNotificationEnabled, true);
-  registry->RegisterBooleanPref(kVoiceInteractionLaunchWithMicOpen, false);
 }
 
 }  // namespace prefs

@@ -21,7 +21,6 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_util.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
-#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/previews/core/previews_lite_page_redirect.h"
 #include "components/variations/net/variations_http_headers.h"
 #include "content/public/common/child_process_host.h"
@@ -195,10 +194,7 @@ void AddDataToPageloadMetrics(const DataReductionProxyData& request_data,
   }
 
   bool was_preview_shown = false;
-  if (request_data.lofi_received() || request_data.client_lofi_requested()) {
-    request->set_previews_type(PageloadMetrics_PreviewsType_LOFI);
-    was_preview_shown = true;
-  } else if (request_data.lite_page_received()) {
+  if (request_data.lite_page_received()) {
     request->set_previews_type(PageloadMetrics_PreviewsType_LITE_PAGE);
     was_preview_shown = true;
   } else if (request_data.black_listed()) {
@@ -253,15 +249,16 @@ DataReductionProxyPingbackClientImpl::DataReductionProxyPingbackClientImpl(
       current_loader_message_count_(0u),
       current_loader_crash_count_(0u),
       ui_task_runner_(std::move(ui_task_runner)),
-      channel_(channel),
+      channel_(channel)
 #if defined(OS_ANDROID)
+      ,
       scoped_observer_(this),
       weak_factory_(this) {
   auto* crash_manager = crash_reporter::CrashMetricsReporter::GetInstance();
   DCHECK(crash_manager);
   scoped_observer_.Add(crash_manager);
 #else
-      weak_factory_(this){
+          {
 #endif
 }
 
@@ -445,17 +442,13 @@ void DataReductionProxyPingbackClientImpl::CreateLoaderForDataAndStart() {
         })");
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = pingback_url_;
-  resource_request->load_flags = net::LOAD_BYPASS_PROXY |
-                                 net::LOAD_DO_NOT_SEND_COOKIES |
-                                 net::LOAD_DO_NOT_SAVE_COOKIES;
+  resource_request->load_flags = net::LOAD_BYPASS_PROXY;
+  resource_request->allow_credentials = false;
   resource_request->method = "POST";
   // Attach variations headers.
   variations::AppendVariationsHeader(
       pingback_url_, variations::InIncognito::kNo, variations::SignedIn::kNo,
       resource_request.get());
-  // TODO(https://crbug.com/808498): Re-add data use measurement once
-  // SimpleURLLoader supports it.
-  // ID=data_use_measurement::DataUseUserData::DATA_REDUCTION_PROXY
   current_loader_ = network::SimpleURLLoader::Create(
       std::move(resource_request), traffic_annotation);
   current_loader_->AttachStringForUpload(serialized_request,

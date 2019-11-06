@@ -18,12 +18,15 @@
 #include "chrome/browser/offline_pages/offline_page_utils.h"
 #include "chrome/browser/offline_pages/prefetch/prefetch_service_factory.h"
 #include "chrome/browser/offline_pages/request_coordinator_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/offline_pages/core/background/request_coordinator.h"
 #include "components/offline_pages/core/model/offline_page_model_utils.h"
+#include "components/offline_pages/core/offline_page_client_policy.h"
 #include "components/offline_pages/core/offline_page_item.h"
 #include "components/offline_pages/core/offline_page_item_utils.h"
 #include "components/offline_pages/core/offline_page_model.h"
 #include "components/offline_pages/core/offline_store_utils.h"
+#include "components/offline_pages/core/page_criteria.h"
 #include "components/offline_pages/core/prefetch/offline_metrics_collector.h"
 #include "components/offline_pages/core/prefetch/prefetch_service.h"
 #include "components/offline_pages/core/request_header/offline_page_header.h"
@@ -99,8 +102,10 @@ OfflinePageTabHelper::OfflinePageTabHelper(content::WebContents* web_contents)
       mhtml_page_notifier_bindings_(web_contents, this),
       weak_ptr_factory_(this) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  prefetch_service_ = PrefetchServiceFactory::GetForBrowserContext(
-      web_contents->GetBrowserContext());
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  prefetch_service_ =
+      PrefetchServiceFactory::GetForKey(profile->GetProfileKey());
 }
 
 OfflinePageTabHelper::~OfflinePageTabHelper() {}
@@ -262,7 +267,7 @@ void OfflinePageTabHelper::ReportPrefetchMetrics(
 
   if (offline_page()) {
     // Report prefetch usage.
-    if (policy_controller_.IsSuggested(offline_page()->client_id.name_space))
+    if (GetPolicy(offline_page()->client_id.name_space).is_suggested)
       metrics_collector->OnPrefetchedPageOpened();
     // Note that navigation to offline page may happen even if network is
     // connected. For the purposes of collecting offline usage statistics,
@@ -318,8 +323,14 @@ void OfflinePageTabHelper::TryLoadingOfflinePageOnNetError(
     return;
   }
 
-  OfflinePageUtils::SelectPagesForURL(
-      web_contents()->GetBrowserContext(), navigation_handle->GetURL(), tab_id,
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+  PageCriteria criteria;
+  criteria.url = navigation_handle->GetURL();
+  criteria.pages_for_tab_id = tab_id;
+  criteria.maximum_matches = 1;
+  OfflinePageUtils::SelectPagesWithCriteria(
+      profile->GetProfileKey(), criteria,
       base::BindOnce(&OfflinePageTabHelper::SelectPagesForURLDone,
                      weak_ptr_factory_.GetWeakPtr()));
 }

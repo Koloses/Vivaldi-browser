@@ -15,12 +15,12 @@ import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.download.home.list.ListItem;
 import org.chromium.chrome.browser.download.home.metrics.UmaUtils;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.widget.FadingShadow;
-import org.chromium.chrome.browser.widget.FadingShadowView;
 import org.chromium.chrome.browser.widget.selection.SelectableListToolbar;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionObserver;
 import org.chromium.chrome.download.R;
+import org.chromium.chrome.lib.browser.widget.FadingShadow;
+import org.chromium.chrome.lib.browser.widget.FadingShadowView;
 
 import java.util.List;
 
@@ -113,8 +113,8 @@ public class ToolbarCoordinator implements SelectionObserver<ListItem> {
         mToolbar = mView.findViewById(R.id.download_toolbar);
         mShadow = mView.findViewById(R.id.shadow);
 
-        mToolbar.initialize(selectionDelegate, 0 /* titleResId */, null /* drawerLayout */,
-                normalMenuGroupId, R.id.selection_mode_menu_group, hasCloseButton);
+        mToolbar.initialize(selectionDelegate, 0 /* titleResId */, normalMenuGroupId,
+                R.id.selection_mode_menu_group, hasCloseButton);
         mToolbar.setOnMenuItemClickListener(this ::onMenuItemClick);
 
         // TODO(crbug.com/881037): Pass the visible group to the toolbar during initialization.

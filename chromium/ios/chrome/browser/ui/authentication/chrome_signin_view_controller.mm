@@ -18,8 +18,7 @@
 #import "base/strings/sys_string_conversions.h"
 #include "base/timer/elapsed_timer.h"
 #include "components/consent_auditor/consent_auditor.h"
-#include "components/signin/core/browser/account_consistency_method.h"
-#include "components/signin/core/browser/signin_metrics.h"
+#include "components/signin/public/base/signin_metrics.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/unified_consent/feature.h"
 #include "components/unified_consent/unified_consent_service.h"
@@ -39,13 +38,14 @@
 #include "ios/chrome/browser/ui/authentication/signin_account_selector_view_controller.h"
 #include "ios/chrome/browser/ui/authentication/signin_confirmation_view_controller.h"
 #include "ios/chrome/browser/ui/authentication/unified_consent/unified_consent_coordinator.h"
-#import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/util/label_link_controller.h"
 #import "ios/chrome/browser/ui/util/rtl_geometry.h"
 #import "ios/chrome/browser/ui/util/ui_util.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #include "ios/chrome/browser/unified_consent/unified_consent_service_factory.h"
+#import "ios/chrome/common/colors/UIColor+cr_semantic_colors.h"
+#import "ios/chrome/common/colors/semantic_color_names.h"
 #include "ios/chrome/common/string_util.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -65,6 +65,9 @@
 
 namespace {
 
+// Controls whether the activity indicator should be added to the sign-in view.
+BOOL gChromeSigninViewControllerShowsActivityIndicator = YES;
+
 // Default animation duration.
 const CGFloat kAnimationDuration = 0.5f;
 
@@ -73,6 +76,11 @@ const int64_t kMinimunPendingStateDurationMs = 300;
 
 // Internal padding between the title and image in the "More" button.
 const CGFloat kMoreButtonPadding = 5.0f;
+
+// The maximum size for th unified consent embedded view on regular width and
+// regular height layout.
+const CGFloat kUCEmbeddedViewMaxWidthForRegularLayout = 600;
+const CGFloat kUCEmbeddedViewMaxHeightForRegularLayout = 600;
 
 struct AuthenticationViewConstants {
   CGFloat PrimaryFontSize;
@@ -99,9 +107,9 @@ const AuthenticationViewConstants kRegularConstants = {
     1.5 * kCompactConstants.SecondaryFontSize,
     kCompactConstants.GradientHeight,
     1.5 * kCompactConstants.ButtonHeight,
-    32,
-    32,
-    32,
+    32,  // ButtonHorizontalPadding
+    32,  // ButtonTopPadding
+    32,  // ButtonBottomPadding
 };
 
 enum AuthenticationState {
@@ -136,7 +144,6 @@ enum AuthenticationState {
     SigninAccountSelectorViewControllerDelegate,
     UnifiedConsentCoordinatorDelegate>
 @property(nonatomic, strong) ChromeIdentity* selectedIdentity;
-
 @end
 
 @implementation ChromeSigninViewController {
@@ -277,7 +284,7 @@ enum AuthenticationState {
                                     : [self acceptSigninButtonStringId];
   std::string account_id =
       IdentityManagerFactory::GetForBrowserState(_browserState)
-          ->LegacyPickAccountIdForAccount(
+          ->PickAccountIdForAccount(
               base::SysNSStringToUTF8([_selectedIdentity gaiaID]),
               base::SysNSStringToUTF8([_selectedIdentity userEmail]));
 
@@ -312,7 +319,12 @@ enum AuthenticationState {
   if (unifiedConsentService)
     unifiedConsentService->SetUrlKeyedAnonymizedDataCollectionEnabled(true);
   if (!_unifiedConsentCoordinator.settingsLinkWasTapped) {
-    SyncSetupServiceFactory::GetForBrowserState(_browserState)->CommitChanges();
+    // FirstSetupComplete flag should be only turned on when the user agrees
+    // to start Sync.
+    SyncSetupService* syncSetupService =
+        SyncSetupServiceFactory::GetForBrowserState(_browserState);
+    syncSetupService->SetFirstSetupComplete();
+    syncSetupService->CommitSyncChanges();
   }
   [self acceptSignInAndShowAccountsSettings:_unifiedConsentCoordinator
                                                 .settingsLinkWasTapped];
@@ -321,26 +333,58 @@ enum AuthenticationState {
 - (void)acceptSignInAndCommitSyncChanges {
   DCHECK(_didSignIn);
   DCHECK(!_unifiedConsentEnabled);
-  SyncSetupServiceFactory::GetForBrowserState(_browserState)->CommitChanges();
+  SyncSetupServiceFactory::GetForBrowserState(_browserState)
+      ->PreUnityCommitChanges();
   [self acceptSignInAndShowAccountsSettings:NO];
 }
 
 - (void)setPrimaryButtonStyling:(MDCButton*)button {
-  [button setBackgroundColor:[[MDCPalette cr_bluePalette] tint500]
-                    forState:UIControlStateNormal];
+  UIColor* hintColor = UIColor.cr_systemBackgroundColor;
+  UIColor* backgroundColor = [UIColor colorNamed:kTintColor];
+  UIColor* titleColor = [UIColor colorNamed:kSolidButtonTextColor];
+
+#if defined(__IPHONE_13_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0)
+  if (@available(iOS 13, *)) {
+    // As of iOS 13 Beta 3, MDCFlatButton has a bug updating it's colors
+    // automatically. Here the colors are resolved and passed instead.
+    hintColor =
+        [hintColor resolvedColorWithTraitCollection:self.traitCollection];
+    backgroundColor =
+        [backgroundColor resolvedColorWithTraitCollection:self.traitCollection];
+    titleColor =
+        [titleColor resolvedColorWithTraitCollection:self.traitCollection];
+  }
+#endif
+
+  button.underlyingColorHint = hintColor;
+  button.inkColor = [UIColor colorWithWhite:1 alpha:0.2f];
+  [button setBackgroundColor:backgroundColor forState:UIControlStateNormal];
+  [button setTitleColor:titleColor forState:UIControlStateNormal];
   [button setImage:nil forState:UIControlStateNormal];
-  [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-  [button setUnderlyingColorHint:[UIColor blackColor]];
-  [button setInkColor:[UIColor colorWithWhite:1 alpha:0.2f]];
 }
 
 - (void)setSecondaryButtonStyling:(MDCButton*)button {
-  [button setBackgroundColor:self.backgroundColor
-                    forState:UIControlStateNormal];
-  [button setTitleColor:[[MDCPalette cr_bluePalette] tint500]
-               forState:UIControlStateNormal];
-  [button setUnderlyingColorHint:[UIColor whiteColor]];
-  [button setInkColor:[UIColor colorWithWhite:0 alpha:0.06f]];
+  UIColor* hintColor = UIColor.cr_systemBackgroundColor;
+  UIColor* backgroundColor = UIColor.cr_systemBackgroundColor;
+  UIColor* titleColor = [UIColor colorNamed:kTintColor];
+
+#if defined(__IPHONE_13_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0)
+  if (@available(iOS 13, *)) {
+    // As of iOS 13 Beta 3, MDCFlatButton has a bug updating it's colors
+    // automatically. Here the colors are resolved and passed instead.
+    hintColor =
+        [hintColor resolvedColorWithTraitCollection:self.traitCollection];
+    backgroundColor =
+        [backgroundColor resolvedColorWithTraitCollection:self.traitCollection];
+    titleColor =
+        [titleColor resolvedColorWithTraitCollection:self.traitCollection];
+  }
+#endif
+
+  button.underlyingColorHint = hintColor;
+  button.inkColor = [UIColor colorWithWhite:0 alpha:0.06f];
+  [button setBackgroundColor:backgroundColor forState:UIControlStateNormal];
+  [button setTitleColor:titleColor forState:UIControlStateNormal];
 }
 
 // Configures the primary button as the more button. This can be used in
@@ -395,22 +439,43 @@ enum AuthenticationState {
 }
 
 - (void)updateLayout {
-  AuthenticationViewConstants constants;
-  if ([self.traitCollection horizontalSizeClass] ==
-      UIUserInterfaceSizeClassRegular) {
-    constants = kRegularConstants;
-  } else {
-    constants = kCompactConstants;
-  }
+  BOOL isRegularSizeClass = IsRegularXRegularSizeClass(self.traitCollection);
+  AuthenticationViewConstants constants =
+      isRegularSizeClass ? kRegularConstants : kCompactConstants;
 
   [self layoutButtons:constants];
 
+  // Layout |_embeddedView|.
   CGSize viewSize = self.view.bounds.size;
-  CGFloat collectionViewHeight =
-      _primaryButton.frame.origin.y - constants.ButtonTopPadding;
-  CGRect collectionViewFrame =
-      CGRectMake(0, 0, viewSize.width, collectionViewHeight);
-  [_embeddedView setFrame:collectionViewFrame];
+  CGPoint contentViewOrigin = CGPointZero;
+  CGSize collectionViewSize =
+      CGSizeMake(viewSize.width,
+                 _primaryButton.frame.origin.y - constants.ButtonTopPadding);
+  if (_unifiedConsentEnabled) {
+    if (isRegularSizeClass &&
+        !UIContentSizeCategoryIsAccessibilityCategory(
+            self.traitCollection.preferredContentSizeCategory)) {
+      // Constraint the size to (|kUCEmbeddedViewMaxWidthForRegularLayout| x
+      // |kUCEmbeddedViewMaxHeightForRegularLayout|) on regular layout. This is
+      // required to avoid having a lot of empty space between |_embeddedView|
+      // and the buttons.
+      if (collectionViewSize.width > kUCEmbeddedViewMaxWidthForRegularLayout) {
+        contentViewOrigin.x = floorf((collectionViewSize.width -
+                                      kUCEmbeddedViewMaxWidthForRegularLayout) /
+                                     2);
+        collectionViewSize.width = kUCEmbeddedViewMaxWidthForRegularLayout;
+      }
+      if (collectionViewSize.height >
+          kUCEmbeddedViewMaxHeightForRegularLayout) {
+        contentViewOrigin.y =
+            floorf((collectionViewSize.height -
+                    kUCEmbeddedViewMaxHeightForRegularLayout) /
+                   2);
+        collectionViewSize.height = kUCEmbeddedViewMaxHeightForRegularLayout;
+      }
+    }
+  }
+  [_embeddedView setFrame:CGRect{contentViewOrigin, collectionViewSize}];
 
   // Layout the gradient view right above the buttons.
   CGFloat gradientOriginY = _primaryButton.frame.origin.y -
@@ -424,6 +489,22 @@ enum AuthenticationState {
   CGRect bounds = self.view.bounds;
   [_activityIndicator
       setCenter:CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds))];
+}
+
+- (void)updateGradientColors {
+  UIColor* backgroundColor = UIColor.cr_systemBackgroundColor;
+
+#if defined(__IPHONE_13_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0)
+  if (@available(iOS 13, *)) {
+    backgroundColor =
+        [backgroundColor resolvedColorWithTraitCollection:self.traitCollection];
+  }
+#endif
+
+  _gradientLayer.colors = @[
+    (id)[backgroundColor colorWithAlphaComponent:0].CGColor,
+    (id)backgroundColor.CGColor
+  ];
 }
 
 #pragma mark - Accessibility
@@ -442,11 +523,6 @@ enum AuthenticationState {
 
 - (id<ChromeSigninViewControllerDelegate>)delegate {
   return _delegate;
-}
-
-- (UIColor*)backgroundColor {
-  return _unifiedConsentEnabled ? [UIColor whiteColor]
-                                : [[MDCPalette greyPalette] tint50];
 }
 
 - (NSString*)identityPickerTitle {
@@ -559,6 +635,7 @@ enum AuthenticationState {
     }
   } else {
     [self changeToState:IDENTITY_PICKER_STATE];
+    [_unifiedConsentCoordinator resetSettingLinkTapped];
   }
 }
 
@@ -680,6 +757,8 @@ enum AuthenticationState {
       _unifiedConsentCoordinator.delegate = self;
       if (_selectedIdentity)
         _unifiedConsentCoordinator.selectedIdentity = _selectedIdentity;
+      _unifiedConsentCoordinator.autoOpenIdentityPicker =
+          _promoAction == signin_metrics::PromoAction::PROMO_ACTION_NOT_DEFAULT;
       [_unifiedConsentCoordinator start];
       [self
           showEmbeddedViewController:_unifiedConsentCoordinator.viewController];
@@ -885,7 +964,7 @@ enum AuthenticationState {
 
 - (void)viewDidLoad {
   [super viewDidLoad];
-  self.view.backgroundColor = self.backgroundColor;
+  self.view.backgroundColor = UIColor.cr_systemBackgroundColor;
 
   _primaryButton = [[MDCFlatButton alloc] init];
   [self setPrimaryButtonStyling:_primaryButton];
@@ -904,19 +983,19 @@ enum AuthenticationState {
   _secondaryButton.hidden = YES;
   [self.view addSubview:_secondaryButton];
 
-  _activityIndicator = [[MDCActivityIndicator alloc] initWithFrame:CGRectZero];
-  [_activityIndicator setDelegate:self];
-  [_activityIndicator setStrokeWidth:3];
-  [_activityIndicator
-      setCycleColors:@[ [[MDCPalette cr_bluePalette] tint500] ]];
-  [self.view addSubview:_activityIndicator];
+  if (gChromeSigninViewControllerShowsActivityIndicator) {
+    _activityIndicator =
+        [[MDCActivityIndicator alloc] initWithFrame:CGRectZero];
+    [_activityIndicator setDelegate:self];
+    [_activityIndicator setStrokeWidth:3];
+    [_activityIndicator setCycleColors:@[ [UIColor colorNamed:kTintColor] ]];
+    [self.view addSubview:_activityIndicator];
+  }
 
   _gradientView = [[UIView alloc] initWithFrame:CGRectZero];
   _gradientLayer = [CAGradientLayer layer];
   [_gradientView setUserInteractionEnabled:NO];
-  _gradientLayer.colors = [NSArray
-      arrayWithObjects:(id)[[UIColor colorWithWhite:1 alpha:0] CGColor],
-                       (id)[self.backgroundColor CGColor], nil];
+  [self updateGradientColors];
   [[_gradientView layer] insertSublayer:_gradientLayer atIndex:0];
   [self.view addSubview:_gradientView];
 }
@@ -937,6 +1016,23 @@ enum AuthenticationState {
 - (void)viewSafeAreaInsetsDidChange {
   [super viewSafeAreaInsetsDidChange];
   [self updateLayout];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
+#if defined(__IPHONE_13_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0)
+  if (@available(iOS 13, *)) {
+    if ([self.traitCollection
+            hasDifferentColorAppearanceComparedToTraitCollection:
+                previousTraitCollection]) {
+      [self updateGradientColors];
+      // As of iOS 13 Beta 3, MDCFlatButton doesn't update it's colors
+      // automatically. These lines do it instead.
+      [self updatePrimaryButtonForIdentityPickerState];
+      [self setSecondaryButtonStyling:_secondaryButton];
+    }
+  }
+#endif
 }
 
 #pragma mark - Events
@@ -1200,6 +1296,12 @@ enum AuthenticationState {
   [self openAuthenticationDialogAddIdentity];
 }
 
+- (void)unifiedConsentCoordinatorNeedPrimaryButtonUpdate:
+    (UnifiedConsentCoordinator*)coordinator {
+  if (_currentState == IDENTITY_PICKER_STATE)
+    [self updatePrimaryButtonForIdentityPickerState];
+}
+
 @end
 
 @implementation ChromeSigninViewController (Testing)
@@ -1210,6 +1312,11 @@ enum AuthenticationState {
 
 - (void)setTimerGenerator:(TimerGeneratorBlock)timerGenerator {
   _timerGenerator = [timerGenerator copy];
+}
+
++ (std::unique_ptr<base::AutoReset<BOOL>>)hideActivityIndicatorForTesting {
+  return std::make_unique<base::AutoReset<BOOL>>(
+      &gChromeSigninViewControllerShowsActivityIndicator, NO);
 }
 
 @end

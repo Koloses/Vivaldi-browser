@@ -17,7 +17,6 @@ import org.chromium.chrome.browser.download.DownloadNotificationService;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.download.home.metrics.FileExtensions;
 import org.chromium.chrome.browser.download.items.OfflineContentAggregatorFactory;
-import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.widget.DateDividedAdapter.TimedItem;
 import org.chromium.components.download.DownloadState;
 import org.chromium.components.offline_items_collection.LaunchLocation;
@@ -497,8 +496,7 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
         }
 
         private OfflineContentProvider getOfflineContentProvider() {
-            return OfflineContentAggregatorFactory.forProfile(
-                    Profile.getLastUsedProfile().getOriginalProfile());
+            return OfflineContentAggregatorFactory.get();
         }
 
         @Override
@@ -540,7 +538,7 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
 
         @Override
         public boolean isOfflinePage() {
-            return mItem.filter == OfflineItemFilter.FILTER_PAGE;
+            return mItem.filter == OfflineItemFilter.PAGE;
         }
 
         @Override
@@ -561,6 +559,12 @@ public abstract class DownloadHistoryItemWrapper extends TimedItem {
         @Override
         public boolean isPending() {
             return mItem.state == OfflineItemState.PENDING;
+        }
+
+        @Override
+        boolean isVisibleToUser(@DownloadFilter.Type int filter) {
+            if (mItem.state == OfflineItemState.CANCELLED) return false;
+            return super.isVisibleToUser(filter);
         }
     }
 }

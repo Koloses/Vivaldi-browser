@@ -34,14 +34,17 @@ void SupervisedUserErrorPageController::Install(
     return;
 
   v8::Local<v8::Object> global = context->Global();
-  global->Set(gin::StringToV8(isolate, "supervisedUserErrorPageController"),
-              controller.ToV8());
+  global
+      ->Set(context,
+            gin::StringToV8(isolate, "supervisedUserErrorPageController"),
+            controller.ToV8())
+      .Check();
 }
 
 SupervisedUserErrorPageController::SupervisedUserErrorPageController(
     base::WeakPtr<SupervisedUserErrorPageControllerDelegate> delegate,
     content::RenderFrame* render_frame)
-    : delegate_(delegate), render_frame_(render_frame), weak_factory_(this) {}
+    : delegate_(delegate), render_frame_(render_frame) {}
 
 SupervisedUserErrorPageController::~SupervisedUserErrorPageController() {}
 

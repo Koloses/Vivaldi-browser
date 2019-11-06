@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "content/browser/devtools/devtools_background_services_context_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -14,8 +15,10 @@
 namespace content {
 
 TestBackgroundSyncManager::TestBackgroundSyncManager(
-    scoped_refptr<ServiceWorkerContextWrapper> service_worker_context)
-    : BackgroundSyncManager(service_worker_context) {}
+    scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
+    scoped_refptr<DevToolsBackgroundServicesContextImpl> devtools_context)
+    : BackgroundSyncManager(std::move(service_worker_context),
+                            std::move(devtools_context)) {}
 
 TestBackgroundSyncManager::~TestBackgroundSyncManager() {}
 
@@ -26,10 +29,6 @@ void TestBackgroundSyncManager::DoInit() {
 void TestBackgroundSyncManager::ResumeBackendOperation() {
   ASSERT_TRUE(continuation_);
   std::move(continuation_).Run();
-}
-
-void TestBackgroundSyncManager::ClearDelayedTask() {
-  delayed_task_.Reset();
 }
 
 void TestBackgroundSyncManager::StoreDataInBackend(
@@ -87,10 +86,21 @@ void TestBackgroundSyncManager::DispatchSyncEvent(
   dispatch_sync_callback_.Run(active_version, std::move(callback));
 }
 
-void TestBackgroundSyncManager::ScheduleDelayedTask(base::OnceClosure callback,
-                                                    base::TimeDelta delay) {
-  delayed_task_ = std::move(callback);
-  delayed_task_delta_ = delay;
+void TestBackgroundSyncManager::DispatchPeriodicSyncEvent(
+    const std::string& tag,
+    scoped_refptr<ServiceWorkerVersion> active_version,
+    ServiceWorkerVersion::StatusCallback callback) {
+  ASSERT_TRUE(dispatch_periodic_sync_callback_);
+  dispatch_periodic_sync_callback_.Run(active_version, std::move(callback));
+}
+
+void TestBackgroundSyncManager::ScheduleDelayedTask(
+    blink::mojom::BackgroundSyncType sync_type,
+    base::TimeDelta delay) {
+  if (sync_type == blink::mojom::BackgroundSyncType::ONE_SHOT)
+    delayed_one_shot_sync_task_delta_ = delay;
+  else
+    delayed_periodic_sync_task_delta_ = delay;
 }
 
 void TestBackgroundSyncManager::HasMainFrameProviderHost(
@@ -113,6 +123,19 @@ void TestBackgroundSyncManager::GetDataFromBackendContinue(
     const std::string& key,
     ServiceWorkerStorage::GetUserDataForAllRegistrationsCallback callback) {
   BackgroundSyncManager::GetDataFromBackend(key, std::move(callback));
+}
+
+base::TimeDelta TestBackgroundSyncManager::GetSoonestWakeupDelta(
+    blink::mojom::BackgroundSyncType sync_type,
+    base::Time last_browser_wakeup_for_periodic_sync) {
+  base::TimeDelta soonest_wakeup_delta =
+      BackgroundSyncManager::GetSoonestWakeupDelta(
+          sync_type, last_browser_wakeup_for_periodic_sync);
+  if (sync_type == blink::mojom::BackgroundSyncType::ONE_SHOT)
+    soonest_one_shot_sync_wakeup_delta_ = soonest_wakeup_delta;
+  else
+    soonest_periodic_sync_wakeup_delta_ = soonest_wakeup_delta;
+  return soonest_wakeup_delta;
 }
 
 }  // namespace content

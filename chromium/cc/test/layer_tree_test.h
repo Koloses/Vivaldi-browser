@@ -19,7 +19,6 @@
 namespace viz {
 class BeginFrameSource;
 class TestContextProvider;
-class TestLayerTreeFrameSink;
 }
 
 namespace cc {
@@ -31,6 +30,7 @@ class LayerTreeHostForTesting;
 class LayerTreeTestLayerTreeFrameSinkClient;
 class Proxy;
 class SingleKeyframeEffectAnimation;
+class TestLayerTreeFrameSink;
 class TestTaskGraphRunner;
 
 // Creates the virtual viewport layer hierarchy under the given root_layer.
@@ -67,6 +67,26 @@ class LayerTreeHostClientForTesting;
 // thread, but be aware that ending the test is an asynchronous process.
 class LayerTreeTest : public testing::Test, public TestHooks {
  public:
+  enum RendererType {
+    RENDERER_GL,
+    RENDERER_SKIA_GL,
+    RENDERER_SKIA_VK,
+    RENDERER_SOFTWARE,
+  };
+
+  static std::string TestTypeToString(RendererType renderer_type) {
+    switch (renderer_type) {
+      case RENDERER_GL:
+        return "GL";
+      case RENDERER_SKIA_GL:
+        return "Skia GL";
+      case RENDERER_SKIA_VK:
+        return "Skia Vulkan";
+      case RENDERER_SOFTWARE:
+        return "Software";
+    }
+  }
+
   ~LayerTreeTest() override;
 
   virtual void EndTest();
@@ -102,6 +122,8 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void Timeout();
 
   AnimationHost* animation_host() const { return animation_host_.get(); }
+
+  void SetUseLayerList() { settings_.use_layer_lists = true; }
 
  protected:
   LayerTreeTest();
@@ -153,7 +175,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   // Override this and call the base class to change what viz::ContextProviders
   // will be used (such as for pixel tests). Or override it and create your own
   // TestLayerTreeFrameSink to control how it is created.
-  virtual std::unique_ptr<viz::TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
+  virtual std::unique_ptr<TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
       const viz::RendererSettings& renderer_settings,
       double refresh_rate,
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
@@ -178,8 +200,14 @@ class LayerTreeTest : public testing::Test, public TestHooks {
     begin_frame_source_ = begin_frame_source;
   }
 
-  bool use_skia_renderer_ = false;
-  bool use_software_renderer_ = false;
+  bool use_skia_renderer() {
+    return renderer_type_ == RENDERER_SKIA_GL ||
+           renderer_type_ == RENDERER_SKIA_VK;
+  }
+  bool use_software_renderer() { return renderer_type_ == RENDERER_SOFTWARE; }
+  bool use_vulkan() { return renderer_type_ == RENDERER_SKIA_VK; }
+
+  RendererType renderer_type_ = RENDERER_GL;
 
  private:
   virtual void DispatchAddNoDamageAnimation(
@@ -240,7 +268,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   base::CancelableOnceClosure timeout_;
   scoped_refptr<viz::TestContextProvider> compositor_contexts_;
   base::WeakPtr<LayerTreeTest> main_thread_weak_ptr_;
-  base::WeakPtrFactory<LayerTreeTest> weak_factory_;
+  base::WeakPtrFactory<LayerTreeTest> weak_factory_{this};
 };
 
 }  // namespace cc

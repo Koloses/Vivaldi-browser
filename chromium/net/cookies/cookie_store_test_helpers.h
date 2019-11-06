@@ -59,7 +59,7 @@ class DelayedCookieMonster : public CookieStore {
 
   void SetCanonicalCookieAsync(std::unique_ptr<CanonicalCookie> cookie,
                                std::string source_scheme,
-                               bool modify_http_only,
+                               const CookieOptions& options,
                                SetCookiesCallback callback) override;
 
   void GetCookieListWithOptionsAsync(const GURL& url,
@@ -88,7 +88,8 @@ class DelayedCookieMonster : public CookieStore {
 
   CookieChangeDispatcher& GetChangeDispatcher() override;
 
-  bool IsEphemeral() override;
+  void SetCookieableSchemes(const std::vector<std::string>& schemes,
+                            SetCookieableSchemesCallback callback) override;
 
  private:
   // Be called immediately from CookieMonster.
@@ -148,15 +149,15 @@ class FlushablePersistentStore : public CookieMonster::PersistentCookieStore {
   FlushablePersistentStore();
 
   // CookieMonster::PersistentCookieStore implementation:
-  void Load(const LoadedCallback& loaded_callback,
+  void Load(LoadedCallback loaded_callback,
             const NetLogWithSource& net_log) override;
   void LoadCookiesForKey(const std::string& key,
-                         const LoadedCallback& loaded_callback) override;
+                         LoadedCallback loaded_callback) override;
   void AddCookie(const CanonicalCookie&) override;
   void UpdateCookieAccessTime(const CanonicalCookie&) override;
   void DeleteCookie(const CanonicalCookie&) override;
   void SetForceKeepSessionState() override;
-  void SetBeforeFlushCallback(base::RepeatingClosure callback) override;
+  void SetBeforeCommitCallback(base::RepeatingClosure callback) override;
   void Flush(base::OnceClosure callback) override;
 
   int flush_count();

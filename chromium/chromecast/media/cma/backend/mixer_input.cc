@@ -34,15 +34,11 @@ int RoundUpMultiple(int value, int multiple) {
 
 }  // namespace
 
-MixerInput::MixerInput(Source* source,
-                       int output_samples_per_second,
-                       int read_size,
-                       RenderingDelay initial_rendering_delay,
-                       FilterGroup* filter_group)
+MixerInput::MixerInput(Source* source, FilterGroup* filter_group)
     : source_(source),
       num_channels_(source->num_channels()),
       input_samples_per_second_(source->input_samples_per_second()),
-      output_samples_per_second_(output_samples_per_second),
+      output_samples_per_second_(filter_group->input_samples_per_second()),
       primary_(source->primary()),
       device_id_(source->device_id()),
       content_type_(source->content_type()),
@@ -58,7 +54,10 @@ MixerInput::MixerInput(Source* source,
   DCHECK_GT(num_channels_, 0);
   DCHECK_GT(input_samples_per_second_, 0);
 
-  int source_read_size = read_size;
+  MediaPipelineBackend::AudioDecoder::RenderingDelay initial_rendering_delay =
+      filter_group->GetRenderingDelayToOutput();
+
+  int source_read_size = filter_group->input_frames_per_write();
   if (output_samples_per_second_ > 0 &&
       output_samples_per_second_ != input_samples_per_second_) {
     // Round up to nearest multiple of SincResampler::kKernelSize. The read size
@@ -162,6 +161,10 @@ int MixerInput::FillAudioData(int num_frames,
     redirected = true;
   }
 
+  float* channels[num_channels_];
+  for (int c = 0; c < num_channels_; ++c) {
+    channels[c] = dest->channel(c);
+  }
   if (first_buffer_ && redirected) {
     // If the first buffer is redirected, don't provide any data to the mixer
     // (we want to avoid a 'blip' of sound from the first buffer if it is being
@@ -174,11 +177,11 @@ int MixerInput::FillAudioData(int num_frames,
       filled = 0;
     } else {
       // Smoothly fade in from previous silence.
-      AudioFader::FadeInHelper(dest, filled, 0, filled, filled);
+      AudioFader::FadeInHelper(channels, num_channels_, filled, filled, filled);
     }
   } else if (redirected) {
     // Smoothly fade out to silence, since output is now being redirected.
-    AudioFader::FadeOutHelper(dest, filled, 0, filled, filled);
+    AudioFader::FadeOutHelper(channels, num_channels_, filled, filled, filled);
   }
   previous_ended_in_silence_ = redirected;
   first_buffer_ = false;
@@ -288,6 +291,9 @@ float MixerInput::TargetVolume() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   float volume = stream_volume_multiplier_ * type_volume_multiplier_ *
                  mute_volume_multiplier_;
+  // Volume is clamped after all gains have been multiplied, to avoid clipping.
+  // TODO(kmackay): Consider removing this clamp and use a postprocessor filter
+  // to avoid clipping instead.
   return std::max(0.0f, std::min(volume, 1.0f));
 }
 

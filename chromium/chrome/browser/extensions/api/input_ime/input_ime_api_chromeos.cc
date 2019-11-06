@@ -9,6 +9,7 @@
 #include <memory>
 #include <utility>
 
+#include "ash/public/cpp/keyboard/keyboard_config.h"
 #include "base/feature_list.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/input_method/input_method_engine.h"
@@ -27,7 +28,6 @@
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/ime/ime_engine_handler_interface.h"
 #include "ui/base/ui_base_features.h"
-#include "ui/keyboard/public/keyboard_config.mojom.h"
 
 namespace input_ime = extensions::api::input_ime;
 namespace input_method_private = extensions::api::input_method_private;
@@ -91,7 +91,7 @@ void SetMenuItemToMenu(
   out->enabled = input.enabled ? *input.enabled : true;
 }
 
-keyboard::mojom::KeyboardConfig GetKeyboardConfig() {
+keyboard::KeyboardConfig GetKeyboardConfig() {
   return ChromeKeyboardControllerClient::Get()->GetKeyboardConfig();
 }
 
@@ -224,8 +224,7 @@ class ImeObserverChromeOS : public ui::ImeObserver {
     // There is both a public and private OnFocus event. The private OnFocus
     // event is only for ChromeOS and contains additional information about pen
     // inputs. We ensure that we only trigger one OnFocus event.
-    if (ExtensionHasListener(input_method_private::OnFocus::kEventName) &&
-        base::FeatureList::IsEnabled(features::kEnableStylusVirtualKeyboard)) {
+    if (ExtensionHasListener(input_method_private::OnFocus::kEventName)) {
       input_method_private::InputContext input_context;
       input_context.context_id = context.id;
       input_context.type = input_method_private::ParseInputContextType(

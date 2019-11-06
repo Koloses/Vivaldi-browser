@@ -34,12 +34,7 @@ namespace display {
 class Screen;
 }
 
-namespace net {
-class NetworkChangeNotifier;
-}
-
 namespace ui {
-class InputDeviceManager;
 class ScopedOleInitializer;
 }
 
@@ -91,22 +86,6 @@ class RenderFrameHostTester {
 
   // Simulates a navigation stopping in the RenderFrameHost.
   virtual void SimulateNavigationStop() = 0;
-
-  // Calls DidCommitProvisionalLoad on the RenderFrameHost with the given
-  // information with various sets of parameters. These are helper functions for
-  // simulating the most common types of loads.
-  //
-  // Guidance for calling this:
-  // - nav_entry_id should be 0 if simulating a renderer-initiated navigation;
-  //   if simulating a browser-initiated one, pass the GetUniqueID() value of
-  //   the NavigationController's PendingEntry.
-  // - did_create_new_entry should be true if simulating a navigation that
-  //   created a new navigation entry; false for history navigations, reloads,
-  //   and other navigations that don't affect the history list.
-  virtual void SendNavigateWithTransition(int nav_entry_id,
-                                          bool did_create_new_entry,
-                                          const GURL& url,
-                                          ui::PageTransition transition) = 0;
 
   // Calls OnBeforeUnloadACK on this RenderFrameHost with the given parameter.
   virtual void SendBeforeUnloadACK(bool proceed) = 0;
@@ -174,9 +153,6 @@ class RenderViewHostTestEnabler {
 #if defined(OS_ANDROID)
   std::unique_ptr<display::Screen> screen_;
 #endif
-#if defined(USE_AURA)
-  std::unique_ptr<ui::InputDeviceManager> input_device_client_;
-#endif
   std::unique_ptr<base::test::ScopedTaskEnvironment> task_environment_;
   std::unique_ptr<MockRenderProcessHostFactory> rph_factory_;
   std::unique_ptr<TestRenderViewHostFactory> rvh_factory_;
@@ -238,7 +214,11 @@ class RenderViewHostTestHarness : public testing::Test {
 
   // Cover for |contents()->NavigateAndCommit(url)|. See
   // WebContentsTester::NavigateAndCommit for details.
-  void NavigateAndCommit(const GURL& url);
+  // Optional parameter transition allows transition type to be controlled for
+  // greater flexibility for tests.
+  void NavigateAndCommit(
+      const GURL& url,
+      ui::PageTransition transition = ui::PAGE_TRANSITION_LINK);
 
   // Sets the focused frame to the main frame of the WebContents for tests that
   // rely on the focused frame not being null.
@@ -277,8 +257,6 @@ class RenderViewHostTestHarness : public testing::Test {
       std::unique_ptr<TestBrowserThreadBundle> thread_bundle);
 
   std::unique_ptr<TestBrowserThreadBundle> thread_bundle_;
-
-  std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   std::unique_ptr<ContentBrowserSanityChecker> sanity_checker_;
 

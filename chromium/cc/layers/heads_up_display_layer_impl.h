@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "cc/cc_export.h"
@@ -41,7 +40,10 @@ class CC_EXPORT HeadsUpDisplayLayerImpl : public LayerImpl {
       int id) {
     return base::WrapUnique(new HeadsUpDisplayLayerImpl(tree_impl, id));
   }
+  HeadsUpDisplayLayerImpl(const HeadsUpDisplayLayerImpl&) = delete;
   ~HeadsUpDisplayLayerImpl() override;
+
+  HeadsUpDisplayLayerImpl& operator=(const HeadsUpDisplayLayerImpl&) = delete;
 
   std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
 
@@ -59,9 +61,13 @@ class CC_EXPORT HeadsUpDisplayLayerImpl : public LayerImpl {
 
   gfx::Rect GetEnclosingRectInTargetSpace() const override;
 
-  bool IsAnimatingHUDContents() const { return fade_step_ > 0; }
+  bool IsAnimatingHUDContents() const {
+    return paint_rects_fade_step_ > 0 || layout_shift_rects_fade_step_ > 0;
+  }
 
   void SetHUDTypeface(sk_sp<SkTypeface> typeface);
+  void SetLayoutShiftRects(const std::vector<gfx::Rect>& rects);
+  const std::vector<gfx::Rect>& LayoutShiftRects() const;
 
   // This evicts hud quad appended during render pass preparation.
   void EvictHudQuad(const viz::RenderPassList& list);
@@ -146,6 +152,7 @@ class CC_EXPORT HeadsUpDisplayLayerImpl : public LayerImpl {
   sk_sp<SkSurface> staging_surface_;
 
   sk_sp<SkTypeface> typeface_;
+  std::vector<gfx::Rect> layout_shift_rects_;
 
   float internal_contents_scale_;
   gfx::Size internal_content_bounds_;
@@ -153,12 +160,12 @@ class CC_EXPORT HeadsUpDisplayLayerImpl : public LayerImpl {
   Graph fps_graph_;
   Graph paint_time_graph_;
   MemoryHistory::Entry memory_entry_;
-  int fade_step_;
+  int paint_rects_fade_step_ = 0;
+  int layout_shift_rects_fade_step_ = 0;
   std::vector<DebugRect> paint_rects_;
+  std::vector<DebugRect> layout_shift_debug_rects_;
 
   base::TimeTicks time_of_last_graph_update_;
-
-  DISALLOW_COPY_AND_ASSIGN(HeadsUpDisplayLayerImpl);
 };
 
 }  // namespace cc

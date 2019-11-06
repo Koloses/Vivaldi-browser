@@ -21,13 +21,13 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "net/base/auth.h"
-#include "net/base/completion_callback.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/load_states.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_error_details.h"
 #include "net/base/net_export.h"
 #include "net/base/network_delegate.h"
+#include "net/base/network_isolation_key.h"
 #include "net/base/privacy_mode.h"
 #include "net/base/proxy_server.h"
 #include "net/base/request_priority.h"
@@ -188,7 +188,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
     // When it does so, the request will be reissued, restarting the sequence
     // of On* callbacks.
     virtual void OnAuthRequired(URLRequest* request,
-                                AuthChallengeInfo* auth_info);
+                                const AuthChallengeInfo& auth_info);
 
     // Called when we receive an SSL CertificateRequest message for client
     // authentication.  The delegate should call
@@ -210,6 +210,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
     // preference, or built-in policy). In this case, errors must not be
     // bypassable by the user.
     virtual void OnSSLCertificateError(URLRequest* request,
+                                       int net_error,
                                        const SSLInfo& ssl_info,
                                        bool fatal);
 
@@ -289,11 +290,22 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   // The origin of the top frame of the page making the request (where
   // applicable). Note that this is experimental and may not always be set.
+  // DEPRECATED: This was introduced for the cache key and will be removed once
+  // |network_isolation_key| is set for most cases.
   const base::Optional<url::Origin>& top_frame_origin() const {
     return top_frame_origin_;
   }
   void set_top_frame_origin(const base::Optional<url::Origin>& origin) {
     top_frame_origin_ = origin;
+  }
+
+  // This key is used to isolate requests from different contexts in accessing
+  // shared network resources like the cache.
+  const NetworkIsolationKey& network_isolation_key() const {
+    return network_isolation_key_;
+  }
+  void set_network_isolation_key(const NetworkIsolationKey& key) {
+    network_isolation_key_ = key;
   }
 
   // Indicate whether SameSite cookies should be attached even though the
@@ -453,7 +465,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   // Returns a partial representation of the request's state as a value, for
   // debugging.
-  std::unique_ptr<base::Value> GetStateAsValue() const;
+  base::Value GetStateAsValue() const;
 
   // Logs information about the what external object currently blocking the
   // request.  LogUnblocked must be called before resuming the request.  This
@@ -500,11 +512,6 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Indicate if this response was fetched from disk cache.
   bool was_cached() const { return response_info_.was_cached; }
 
-  // Returns true if the URLRequest was delivered through a proxy.
-  bool was_fetched_via_proxy() const {
-    return response_info_.was_fetched_via_proxy;
-  }
-
   // Returns true if the URLRequest was delivered over SPDY.
   bool was_fetched_via_spdy() const {
     return response_info_.was_fetched_via_spdy;
@@ -520,6 +527,8 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   // Get the SSL connection info.
   const SSLInfo& ssl_info() const { return response_info_.ssl_info; }
+
+  const base::Optional<AuthChallengeInfo>& auth_challenge_info() const;
 
   // Gets timing information related to the request.  Events that have not yet
   // occurred are left uninitialized.  After a second request starts, due to
@@ -568,6 +577,28 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Returns PrivacyMode that should be used for the request. Updated every time
   // the request is redirected.
   PrivacyMode privacy_mode() { return privacy_mode_; }
+
+  void set_maybe_sent_cookies(CookieStatusList cookies);
+  void set_maybe_stored_cookies(CookieAndLineStatusList cookies);
+
+  // These lists contain a list of cookies that are associated with the given
+  // request, both those that were sent and accepted, and those that were
+  // removed or flagged from the request before use. The status indicates
+  // whether they were actually used (INCLUDE), or the reason they were removed
+  // or flagged. They are cleared on redirects and other request restarts that
+  // cause sent cookies to be recomputed / new cookies to potentially be
+  // received (such as calling SetAuth() to send HTTP auth credentials, but not
+  // calling ContinueWithCertification() to respond to client cert challenges),
+  // and only contain the cookies relevant to the most recent roundtrip.
+
+  // Populated while the http request is being built.
+  const CookieStatusList& maybe_sent_cookies() const {
+    return maybe_sent_cookies_;
+  }
+  // Populated after the response headers are received.
+  const CookieAndLineStatusList& maybe_stored_cookies() const {
+    return maybe_stored_cookies_;
+  }
 
   // The new flags may change the IGNORE_LIMITS flag only when called
   // before Start() is called, it must only set the flag, and if set,
@@ -830,10 +861,12 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   // These functions delegate to |delegate_|.  See URLRequest::Delegate for the
   // meaning of these functions.
-  void NotifyAuthRequired(AuthChallengeInfo* auth_info);
+  void NotifyAuthRequired(std::unique_ptr<AuthChallengeInfo> auth_info);
   void NotifyAuthRequiredComplete(NetworkDelegate::AuthRequiredResponse result);
   void NotifyCertificateRequested(SSLCertRequestInfo* cert_request_info);
-  void NotifySSLCertificateError(const SSLInfo& ssl_info, bool fatal);
+  void NotifySSLCertificateError(int net_error,
+                                 const SSLInfo& ssl_info,
+                                 bool fatal);
   void NotifyReadCompleted(int bytes_read);
 
   // These functions delegate to |network_delegate_| if it is not NULL.
@@ -867,7 +900,11 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   std::vector<GURL> url_chain_;
   GURL site_for_cookies_;
+
+  // DEPRECATED: See comment on the getter function.
   base::Optional<url::Origin> top_frame_origin_;
+
+  NetworkIsolationKey network_isolation_key_;
 
   bool attach_same_site_cookies_;
   base::Optional<url::Origin> initiator_;
@@ -880,6 +917,9 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   int load_flags_;  // Flags indicating the request type for the load;
                     // expected values are LOAD_* enums above.
   PrivacyMode privacy_mode_;
+
+  CookieStatusList maybe_sent_cookies_;
+  CookieAndLineStatusList maybe_stored_cookies_;
 
 #if BUILDFLAG(ENABLE_REPORTING)
   int reporting_upload_depth_;
@@ -954,7 +994,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // |NotifyAuthRequired| on the NetworkDelegate. |auth_info_| holds
   // the authentication challenge being handled by |NotifyAuthRequired|.
   AuthCredentials auth_credentials_;
-  scoped_refptr<AuthChallengeInfo> auth_info_;
+  std::unique_ptr<AuthChallengeInfo> auth_info_;
 
   int64_t received_response_content_length_;
 
@@ -985,7 +1025,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   THREAD_CHECKER(thread_checker_);
 
-  base::WeakPtrFactory<URLRequest> weak_factory_;
+  base::WeakPtrFactory<URLRequest> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(URLRequest);
 };

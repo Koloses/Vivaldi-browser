@@ -21,10 +21,13 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/task/post_task.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/apps/apps_launch.h"
+#include "chrome/browser/apps/launch_service/launch_service.h"
 #include "chrome/browser/apps/platform_apps/install_chrome_app.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/defaults.h"
@@ -54,6 +57,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/prefs/pref_service.h"
 #include "components/rappor/public/rappor_utils.h"
 #include "components/rappor/rappor_service_impl.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -64,6 +68,10 @@
 #include "rlz/buildflags/buildflags.h"
 #include "ui/base/buildflags.h"
 
+#if !defined(OS_CHROMEOS)
+#include "chrome/browser/ui/webui/welcome/nux_helper.h"
+#endif  // !defined(OS_CHROMEOS)
+
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #import "chrome/browser/mac/dock.h"
@@ -73,13 +81,17 @@
 
 #if defined(OS_WIN)
 #if defined(GOOGLE_CHROME_BUILD)
-#include "chrome/browser/conflicts/incompatible_applications_updater_win.h"
+#include "chrome/browser/win/conflicts/incompatible_applications_updater.h"
 #endif  // defined(GOOGLE_CHROME_BUILD)
 #include "chrome/browser/notifications/notification_platform_bridge_win.h"
 #include "chrome/browser/shell_integration_win.h"
 #include "chrome/browser/ui/startup/credential_provider_signin_dialog_win.h"
 #include "chrome/credential_provider/common/gcp_strings.h"
 #endif  // defined(OS_WIN)
+
+#if BUILDFLAG(ENABLE_PLUGINS)
+#include "chrome/browser/plugins/flash_deprecation_infobar_delegate.h"
+#endif
 
 #if BUILDFLAG(ENABLE_RLZ)
 #include "components/google/core/common/google_util.h"
@@ -289,6 +301,23 @@ void AppendTabs(const StartupTabs& from, StartupTabs* to) {
     to->insert(to->end(), from.begin(), from.end());
 }
 
+bool ShouldShowBadFlagsSecurityWarnings() {
+#if !defined(OS_CHROMEOS)
+  PrefService* local_state = g_browser_process->local_state();
+  if (!local_state)
+    return true;
+
+  const auto* pref = local_state->FindPreference(
+      prefs::kCommandLineFlagSecurityWarningsEnabled);
+  DCHECK(pref);
+
+  // The warnings can only be disabled by policy. Default to show warnings.
+  if (pref->IsManaged())
+    return pref->GetValue()->GetBool();
+#endif
+  return true;
+}
+
 }  // namespace
 
 StartupBrowserCreatorImpl::StartupBrowserCreatorImpl(
@@ -340,26 +369,32 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   // If being started for credential provider logon purpose, only show the
   // signin page.
   if (command_line_.HasSwitch(credential_provider::kGcpwSigninSwitch)) {
-    DCHECK_EQ(Profile::ProfileType::INCOGNITO_PROFILE,
-              profile_->GetProfileType());
-    // NOTE: All launch urls are ignored when running with --gcpw-logon since
+    DCHECK(profile_->IsIncognitoProfile());
+    // NOTE: All launch urls are ignored when running with --gcpw-signin since
     // this mode only loads Google's sign in page.
-    StartGCPWSignin(command_line_, profile_);
+
+    // If GCPW signin dialog fails, returning false here will allow Chrome to
+    // exit gracefully during the launch.
+    if (!StartGCPWSignin(command_line_, profile_))
+      return false;
+
     RecordLaunchModeHistogram(LM_CREDENTIAL_PROVIDER_SIGNIN);
     return true;
   }
 #endif  // defined(OS_WIN)
 
-  if (vivaldi::LaunchVivaldi(command_line_, cur_dir_, profile)) {
-      // Operation completed in function
-  } else if (command_line_.HasSwitch(switches::kAppId)) {
-    std::string app_id = command_line_.GetSwitchValueASCII(switches::kAppId);
+  // NOTE(pettern@vivaldi.com): If the app_id argument points to our app id,
+  // ignore it and start Vivaldi as normal.
+  std::string app_id = command_line_.GetSwitchValueASCII(switches::kAppId);
+  if (command_line_.HasSwitch(switches::kAppId) && !vivaldi::IsVivaldiApp(app_id)) {
     // If |app_id| is a disabled or terminated platform app we handle it
     // specially here, otherwise it will be handled below.
     if (apps::OpenApplicationWithReenablePrompt(profile, app_id, command_line_,
                                                 cur_dir_)) {
       return true;
     }
+  } else if (vivaldi::LaunchVivaldi(command_line_, cur_dir_, profile)) {
+    // Operation completed in function
   }
 
   // Open the required browser windows and tabs. If we're being run as an
@@ -493,14 +528,16 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
           content::WebContents::Create(create_params).release();
       content::WebContentsImpl* contentsimpl =
         static_cast<content::WebContentsImpl*>(web_contents);
+      base::Optional<url::Origin> initiator_origin;
       content::NavigationControllerImpl* controller =
           &contentsimpl->GetController();
 
       std::unique_ptr<content::NavigationEntryImpl> entry =
         content::NavigationEntryImpl::FromNavigationEntry(
           controller->CreateNavigationEntry(
-            restore_url, content::Referrer(), ui::PAGE_TRANSITION_LINK,
-            true /* is_renderer_initiated */, std::string(),
+            restore_url, content::Referrer(), initiator_origin,
+            ui::PAGE_TRANSITION_LINK,
+            false /* is_renderer_initiated */, std::string(),
             controller->GetBrowserContext(),
             nullptr /* blob_url_loader_factory */));
 
@@ -582,8 +619,8 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(Profile* profile) {
   // TODO(skerner): Do something reasonable here. Pop up a warning panel?
   // Open an URL to the gallery page of the extension id?
   if (!app_id.empty()) {
-    return apps::OpenApplicationWindow(profile, app_id, command_line_,
-                                       cur_dir_);
+    return apps::LaunchService::Get(profile)->OpenApplicationWindow(
+        app_id, command_line_, cur_dir_);
   }
 
   if (url_string.empty())
@@ -615,7 +652,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationTab(Profile* profile) {
   if (!IsAppLaunch(nullptr, &app_id) || app_id.empty())
     return false;
 
-  return apps::OpenApplicationTab(profile, app_id);
+  return apps::LaunchService::Get(profile)->OpenApplicationTab(app_id);
 }
 
 void StartupBrowserCreatorImpl::DetermineURLsAndLaunch(
@@ -628,8 +665,7 @@ void StartupBrowserCreatorImpl::DetermineURLsAndLaunch(
   StartupTabs cmd_line_tabs;
   UrlsToTabs(cmd_line_urls, &cmd_line_tabs);
 
-  bool is_incognito_or_guest =
-      profile_->GetProfileType() != Profile::ProfileType::REGULAR_PROFILE;
+  const bool is_incognito_or_guest = profile_->IsOffTheRecord();
   bool is_post_crash_launch = HasPendingUncleanExit(profile_);
   bool has_incompatible_applications = false;
 #if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
@@ -637,9 +673,10 @@ void StartupBrowserCreatorImpl::DetermineURLsAndLaunch(
     // Check if there are any incompatible applications cached from the last
     // Chrome run.
     has_incompatible_applications =
-        IncompatibleApplicationsUpdater::IsWarningEnabled() &&
         IncompatibleApplicationsUpdater::HasCachedApplications();
   }
+
+  nux::JoinOnboardingGroup(profile_);
 #endif
 
   // Presentation of promotional and/or educational tabs may be controlled via
@@ -662,17 +699,29 @@ void StartupBrowserCreatorImpl::DetermineURLsAndLaunch(
         !SessionStartupPref::TypeHasRecommendedValue(profile_->GetPrefs());
   }
 
+  bool onboarding_enabled = true;
+#if !defined(OS_CHROMEOS)
+  onboarding_enabled = nux::IsNuxOnboardingEnabled(profile_) &&
+                       nux::DoesOnboardingHaveModulesToShow(profile_);
+#endif  // !defined(OS_CHROMEOS)
+
   if (vivaldi::IsVivaldiRunning()) {
     // Vivaldi always open the same sets of tabs even if the prev. session
     // crashed. TODO: We may want to make it possible to override that, but in
     // these days with webpages in processes it is less of an issue.
     is_post_crash_launch = false;
+
+    if (!command_line_.HasSwitch(switches::kNoFirstRun)) {
+      // Using the onboarding logic to add the welcome page early enough.
+      onboarding_enabled = true;
+    }
   }
 
-  StartupTabs tabs = DetermineStartupTabs(
-      StartupTabProviderImpl(), cmd_line_tabs, process_startup,
-      is_incognito_or_guest, is_post_crash_launch,
-      has_incompatible_applications, promotional_tabs_enabled);
+  StartupTabs tabs =
+      DetermineStartupTabs(StartupTabProviderImpl(), cmd_line_tabs,
+                           process_startup, is_incognito_or_guest,
+                           is_post_crash_launch, has_incompatible_applications,
+                           promotional_tabs_enabled, onboarding_enabled);
 
   // Return immediately if we start an async restore, since the remainder of
   // that process is self-contained.
@@ -725,7 +774,8 @@ StartupTabs StartupBrowserCreatorImpl::DetermineStartupTabs(
     bool is_incognito_or_guest,
     bool is_post_crash_launch,
     bool has_incompatible_applications,
-    bool promotional_tabs_enabled) {
+    bool promotional_tabs_enabled,
+    bool onboarding_enabled) {
   // Only the New Tab Page or command line URLs may be shown in incognito mode.
   // A similar policy exists for crash recovery launches, to prevent getting the
   // user stuck in a crash loop.
@@ -752,67 +802,71 @@ StartupTabs StartupBrowserCreatorImpl::DetermineStartupTabs(
   // may be shown alongside command-line tabs.
   StartupTabs tabs = provider.GetResetTriggerTabs(profile_);
 
-  // URLs passed on the command line supersede all others.
+  // URLs passed on the command line supersede all others, except pinned tabs.
   AppendTabs(cmd_line_tabs, &tabs);
-  if (!cmd_line_tabs.empty())
-    return tabs;
-
-  // For Vivaldi we always want to display an introduction to the private mode
-  // by loading a special url. This will override the session, if any, but not
-  // command line urls.
-  if (vivaldi::IsVivaldiRunning() && is_incognito_or_guest) {
-    if (profile_->IsGuestSession()) {
-      return StartupTabs(
-          {StartupTab(GURL(vivaldi::kVivaldiGuestSessionURL), false)});
-    } else {
-      PrefService* pref_service = profile_->GetPrefs();
-      if (pref_service->GetBoolean(vivaldiprefs::kIncognitoShowIntro)) {
-        return StartupTabs({StartupTab(GURL(vivaldi::kVivaldiIncognitoURL),
-            false)});
+  if (cmd_line_tabs.empty()) {
+    // For Vivaldi we always want to display an introduction to the private mode
+    // by loading a special url. This will override the session, if any, but not
+    // command line urls.
+    if (vivaldi::IsVivaldiRunning() && is_incognito_or_guest) {
+      if (profile_->IsGuestSession()) {
+        return StartupTabs(
+            {StartupTab(GURL(vivaldi::kVivaldiGuestSessionURL), false)});
+      } else {
+        PrefService* pref_service = profile_->GetPrefs();
+        if (pref_service->GetBoolean(vivaldiprefs::kIncognitoShowIntro)) {
+          return StartupTabs({StartupTab(GURL(vivaldi::kVivaldiIncognitoURL),
+              false)});
+        }
       }
     }
+
+    // A Master Preferences file provided with this distribution may specify
+    // tabs to be displayed on first run, overriding all non-command-line tabs,
+    // including the profile reset tab.
+    StartupTabs distribution_tabs =
+        provider.GetDistributionFirstRunTabs(browser_creator_);
+    if (!distribution_tabs.empty())
+      return distribution_tabs;
+
+    StartupTabs onboarding_tabs;
+    if (promotional_tabs_enabled) {
+      // This is a launch from a prompt presented to an inactive user who chose
+      // to open Chrome and is being brought to a specific URL for this one
+      // launch. Launch the browser with the desired welcome back URL in the
+      // foreground and the other ordinary URLs (e.g., a restored session) in
+      // the background.
+      StartupTabs welcome_back_tabs = provider.GetWelcomeBackTabs(
+          profile_, browser_creator_, process_startup);
+      AppendTabs(welcome_back_tabs, &tabs);
+
+      if (onboarding_enabled) {
+        // Policies for welcome (e.g., first run) may show promotional and
+        // introductory content depending on a number of system status factors,
+        // including OS and whether or not this is First Run.
+        onboarding_tabs = provider.GetOnboardingTabs(profile_);
+        AppendTabs(onboarding_tabs, &tabs);
+      }
+    }
+
+    // If the user has set the preference indicating URLs to show on opening,
+    // read and add those.
+    StartupTabs prefs_tabs =
+        provider.GetPreferencesTabs(command_line_, profile_);
+    AppendTabs(prefs_tabs, &tabs);
+
+    // Potentially add the New Tab Page. Onboarding content is designed to
+    // replace (and eventually funnel the user to) the NTP. Likewise, URLs
+    // from preferences are explicitly meant to override showing the NTP.
+    if (onboarding_tabs.empty() && prefs_tabs.empty())
+      AppendTabs(provider.GetNewTabPageTabs(command_line_, profile_), &tabs);
   }
-
-  // A Master Preferences file provided with this distribution may specify
-  // tabs to be displayed on first run, overriding all non-command-line tabs,
-  // including the profile reset tab.
-  StartupTabs distribution_tabs =
-      provider.GetDistributionFirstRunTabs(browser_creator_);
-  if (!distribution_tabs.empty())
-    return distribution_tabs;
-
-  StartupTabs onboarding_tabs;
-  if (promotional_tabs_enabled) {
-    // This is a launch from a prompt presented to an inactive user who chose to
-    // open Chrome and is being brought to a specific URL for this one launch.
-    // Launch the browser with the desired welcome back URL in the foreground
-    // and the other ordinary URLs (e.g., a restored session) in the background.
-    StartupTabs welcome_back_tabs = provider.GetWelcomeBackTabs(
-        profile_, browser_creator_, process_startup);
-    AppendTabs(welcome_back_tabs, &tabs);
-
-    // Policies for onboarding (e.g., first run) may show promotional and
-    // introductory content depending on a number of system status factors,
-    // including OS and whether or not this is First Run.
-    onboarding_tabs = provider.GetOnboardingTabs(profile_);
-    AppendTabs(onboarding_tabs, &tabs);
-  }
-
-  // If the user has set the preference indicating URLs to show on opening,
-  // read and add those.
-  StartupTabs prefs_tabs = provider.GetPreferencesTabs(command_line_, profile_);
-  AppendTabs(prefs_tabs, &tabs);
-
-  // Potentially add the New Tab Page. Onboarding content is designed to
-  // replace (and eventually funnel the user to) the NTP. Likewise, URLs
-  // from preferences are explicitly meant to override showing the NTP.
-  if (onboarding_tabs.empty() && prefs_tabs.empty())
-    AppendTabs(provider.GetNewTabPageTabs(command_line_, profile_), &tabs);
 
   if (!is_incognito_or_guest) {
   // Maybe add any tabs which the user has previously pinned.
   AppendTabs(provider.GetPinnedTabs(command_line_, profile_), &tabs);
   }
+
   return tabs;
 }
 
@@ -888,8 +942,11 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
     SessionCrashedBubble::Show(browser);
   }
 
-  if (command_line_.HasSwitch(switches::kEnableAutomation))
+  bool show_bad_flags_security_warnings = ShouldShowBadFlagsSecurityWarnings();
+  if (command_line_.HasSwitch(switches::kEnableAutomation) &&
+      show_bad_flags_security_warnings) {
     AutomationInfoBarDelegate::Create();
+  }
 
   // The below info bars are only added to the first profile which is launched.
   // Other profiles might be restoring the browsing sessions asynchronously,
@@ -904,19 +961,24 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
     content::WebContents* web_contents =
         browser->tab_strip_model()->GetActiveWebContents();
     DCHECK(web_contents);
-    chrome::ShowBadFlagsPrompt(web_contents);
+
+    if (show_bad_flags_security_warnings)
+      chrome::ShowBadFlagsPrompt(web_contents);
+
     InfoBarService* infobar_service =
         InfoBarService::FromWebContents(web_contents);
     if (!google_apis::HasAPIKeyConfigured() ||
         !google_apis::HasOAuthClientConfigured()) {
       GoogleApiKeysInfoBarDelegate::Create(infobar_service);
     }
+
     if (ObsoleteSystem::IsObsoleteNowOrSoon()) {
       PrefService* local_state = g_browser_process->local_state();
       if (!local_state ||
           !local_state->GetBoolean(prefs::kSuppressUnsupportedOSWarning))
         ObsoleteSystemInfoBarDelegate::Create(infobar_service);
     }
+
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS) && !defined(OS_ANDROID) && \
     !defined(OS_CHROMEOS)
     if (profile_->IsLegacySupervised())
@@ -933,6 +995,16 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
            browser_creator_->is_default_browser_dialog_suppressed())) {
         ShowDefaultBrowserPrompt(profile_);
       }
+    }
+#endif
+
+#if BUILDFLAG(ENABLE_PLUGINS)
+    auto* host_content_settings_map =
+        HostContentSettingsMapFactory::GetForProfile(profile_);
+    if (FlashDeprecationInfoBarDelegate::ShouldDisplayFlashDeprecation(
+            host_content_settings_map)) {
+      FlashDeprecationInfoBarDelegate::Create(infobar_service,
+                                              host_content_settings_map);
     }
 #endif
   }

@@ -115,9 +115,6 @@ enum ShelfItemType {
   // Represents a pinned shortcut to an app, the app may be running or not.
   TYPE_PINNED_APP,
 
-  // Toggles visiblity of the app list.
-  TYPE_APP_LIST,
-
   // The browser shortcut button, the browser may be running or not.
   TYPE_BROWSER_SHORTCUT,
 
@@ -130,15 +127,17 @@ enum ShelfItemType {
   // Represents an open dialog.
   TYPE_DIALOG,
 
-  // Represents the back button, which is shown in tablet mode.
-  TYPE_BACK_BUTTON,
-
   // Default value.
   TYPE_UNDEFINED,
 };
 
 // Returns true if |type| is a valid ShelfItemType.
 ASH_PUBLIC_EXPORT bool IsValidShelfItemType(int64_t type);
+
+// Returns true if types |a| and |b| have the same pin state, i.e. if they
+// are both pinned apps (or a browser shortcut which is always pinned) or both
+// unpinned apps. Returns false if either a or b aren't an app type.
+ASH_PUBLIC_EXPORT bool SamePinState(ShelfItemType a, ShelfItemType b);
 
 // Represents the status of applications in the shelf.
 enum ShelfItemStatus {

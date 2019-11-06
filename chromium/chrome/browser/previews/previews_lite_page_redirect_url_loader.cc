@@ -30,8 +30,7 @@ PreviewsLitePageRedirectURLLoader::PreviewsLitePageRedirectURLLoader(
     HandleRequest callback)
     : modified_resource_request_(tentative_resource_request),
       callback_(std::move(callback)),
-      binding_(this),
-      weak_ptr_factory_(this) {}
+      binding_(this) {}
 
 PreviewsLitePageRedirectURLLoader::~PreviewsLitePageRedirectURLLoader() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -161,11 +160,8 @@ void PreviewsLitePageRedirectURLLoader::StartHandlingRedirectToModifiedRequest(
       net::HTTP_TEMPORARY_REDIRECT,
       modified_resource_request_.url.spec().c_str());
 
-  scoped_refptr<net::HttpResponseHeaders> fake_headers_for_redirect =
-      new net::HttpResponseHeaders(net::HttpUtil::AssembleRawHeaders(
-          header_string.c_str(), header_string.length()));
-
-  response_head_.headers = fake_headers_for_redirect;
+  response_head_.headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+      net::HttpUtil::AssembleRawHeaders(header_string));
   response_head_.encoded_data_length = 0;
 
   StartHandlingRedirect(resource_request, std::move(request),

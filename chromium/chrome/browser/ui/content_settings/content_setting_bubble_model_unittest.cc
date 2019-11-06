@@ -35,6 +35,7 @@
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/web_contents_tester.h"
+#include "services/device/public/cpp/device_features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -260,6 +261,10 @@ TEST_F(ContentSettingBubbleModelTest, BlockedMediastreamMicAndCamera) {
 // Tests whether a changed setting in the setting bubble is displayed again when
 // the bubble is re-opened.
 TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubble) {
+  ASSERT_TRUE(profile()->CreateHistoryService(
+      /* delete_file= */ true,
+      /* no_db= */ false));
+
   // Required to break dependency on BrowserMainLoop.
   MediaCaptureDevicesDispatcher::GetInstance()->
       DisableDeviceEnumerationForTesting();
@@ -359,11 +364,14 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubbleMediaMenus) {
 
   blink::MediaStreamDevices audio_devices;
   blink::MediaStreamDevice fake_audio_device1(
-      blink::MEDIA_DEVICE_AUDIO_CAPTURE, "fake_dev1", "Fake Audio Device 1");
+      blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE, "fake_dev1",
+      "Fake Audio Device 1");
   blink::MediaStreamDevice fake_audio_device2(
-      blink::MEDIA_DEVICE_AUDIO_CAPTURE, "fake_dev2", "Fake Audio Device 2");
+      blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE, "fake_dev2",
+      "Fake Audio Device 2");
   blink::MediaStreamDevice fake_audio_device3(
-      blink::MEDIA_DEVICE_AUDIO_CAPTURE, "fake_dev3", "Fake Audio Device 3");
+      blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE, "fake_dev3",
+      "Fake Audio Device 3");
   audio_devices.push_back(fake_audio_device1);
   audio_devices.push_back(fake_audio_device2);
   audio_devices.push_back(fake_audio_device3);
@@ -391,7 +399,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubbleMediaMenus) {
     EXPECT_TRUE(bubble_content.custom_link.empty());
 
     EXPECT_EQ(1U, bubble_content.media_menus.size());
-    EXPECT_EQ(blink::MEDIA_DEVICE_AUDIO_CAPTURE,
+    EXPECT_EQ(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
               bubble_content.media_menus.begin()->first);
     EXPECT_FALSE(bubble_content.media_menus.begin()->second.disabled);
     // The first audio device should be selected by default.
@@ -400,7 +408,8 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubbleMediaMenus) {
 
     // Select a different (the second) device.
     content_setting_bubble_model->OnMediaMenuClicked(
-        blink::MEDIA_DEVICE_AUDIO_CAPTURE, fake_audio_device2.id);
+        blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
+        fake_audio_device2.id);
     content_setting_bubble_model->CommitChanges();
   }
   {
@@ -411,7 +420,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubbleMediaMenus) {
     std::unique_ptr<FakeOwner> owner = FakeOwner::Create(
         *content_setting_bubble_model, bubble_content.radio_group.default_item);
     EXPECT_EQ(1U, bubble_content.media_menus.size());
-    EXPECT_EQ(blink::MEDIA_DEVICE_AUDIO_CAPTURE,
+    EXPECT_EQ(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
               bubble_content.media_menus.begin()->first);
     EXPECT_FALSE(bubble_content.media_menus.begin()->second.disabled);
     // The second audio device should be selected.
@@ -430,7 +439,8 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubbleMediaMenus) {
         GetMediaStreamCaptureIndicator();
   std::unique_ptr<content::MediaStreamUI> media_stream_ui =
       indicator->RegisterMediaStream(web_contents(), audio_devices);
-  media_stream_ui->OnStarted(base::OnceClosure(), base::RepeatingClosure());
+  media_stream_ui->OnStarted(base::OnceClosure(),
+                             content::MediaStreamUI::SourceCallback());
   microphone_camera_state &= ~TabSpecificContentSettings::MICROPHONE_BLOCKED;
   content_settings->OnMediaStreamPermissionSet(url,
                                                microphone_camera_state,
@@ -451,7 +461,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubbleMediaMenus) {
     EXPECT_TRUE(bubble_content.custom_link.empty());
 
     EXPECT_EQ(1U, bubble_content.media_menus.size());
-    EXPECT_EQ(blink::MEDIA_DEVICE_AUDIO_CAPTURE,
+    EXPECT_EQ(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
               bubble_content.media_menus.begin()->first);
     EXPECT_FALSE(bubble_content.media_menus.begin()->second.disabled);
     EXPECT_TRUE(fake_audio_device2.IsSameDevice(
@@ -459,7 +469,8 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubbleMediaMenus) {
 
     // Select a different different device.
     content_setting_bubble_model->OnMediaMenuClicked(
-        blink::MEDIA_DEVICE_AUDIO_CAPTURE, fake_audio_device3.id);
+        blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
+        fake_audio_device3.id);
     content_setting_bubble_model->CommitChanges();
   }
 
@@ -500,7 +511,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubbleMediaMenus) {
 
     // Though the audio menu setting should have persisted.
     EXPECT_EQ(1U, bubble_content.media_menus.size());
-    EXPECT_EQ(blink::MEDIA_DEVICE_AUDIO_CAPTURE,
+    EXPECT_EQ(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
               bubble_content.media_menus.begin()->first);
     EXPECT_FALSE(bubble_content.media_menus.begin()->second.disabled);
     EXPECT_TRUE(fake_audio_device3.IsSameDevice(
@@ -546,7 +557,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamMic) {
   EXPECT_FALSE(bubble_content.custom_link_enabled);
   EXPECT_FALSE(bubble_content.manage_text.empty());
   EXPECT_EQ(1U, bubble_content.media_menus.size());
-  EXPECT_EQ(blink::MEDIA_DEVICE_AUDIO_CAPTURE,
+  EXPECT_EQ(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
             bubble_content.media_menus.begin()->first);
 
   // Change the microphone access.
@@ -577,7 +588,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamMic) {
   EXPECT_FALSE(new_bubble_content.custom_link_enabled);
   EXPECT_FALSE(new_bubble_content.manage_text.empty());
   EXPECT_EQ(1U, new_bubble_content.media_menus.size());
-  EXPECT_EQ(blink::MEDIA_DEVICE_AUDIO_CAPTURE,
+  EXPECT_EQ(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
             new_bubble_content.media_menus.begin()->first);
 }
 
@@ -619,7 +630,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamCamera) {
   EXPECT_FALSE(bubble_content.custom_link_enabled);
   EXPECT_FALSE(bubble_content.manage_text.empty());
   EXPECT_EQ(1U, bubble_content.media_menus.size());
-  EXPECT_EQ(blink::MEDIA_DEVICE_VIDEO_CAPTURE,
+  EXPECT_EQ(blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE,
             bubble_content.media_menus.begin()->first);
 
   // Change the camera access.
@@ -651,7 +662,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamCamera) {
   EXPECT_FALSE(new_bubble_content.custom_link_enabled);
   EXPECT_FALSE(new_bubble_content.manage_text.empty());
   EXPECT_EQ(1U, new_bubble_content.media_menus.size());
-  EXPECT_EQ(blink::MEDIA_DEVICE_VIDEO_CAPTURE,
+  EXPECT_EQ(blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE,
             new_bubble_content.media_menus.begin()->first);
 }
 
@@ -692,7 +703,7 @@ TEST_F(ContentSettingBubbleModelTest, AccumulateMediastreamMicAndCamera) {
             l10n_util::GetStringUTF16(IDS_ALLOWED_MEDIASTREAM_MIC_BLOCK));
   EXPECT_EQ(0, bubble_content.radio_group.default_item);
   EXPECT_EQ(1U, bubble_content.media_menus.size());
-  EXPECT_EQ(blink::MEDIA_DEVICE_AUDIO_CAPTURE,
+  EXPECT_EQ(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
             bubble_content.media_menus.begin()->first);
 
   // Then add camera access.
@@ -742,8 +753,8 @@ TEST_F(ContentSettingBubbleModelTest, Plugins) {
   EXPECT_FALSE(bubble_content.title.empty());
   ASSERT_EQ(0U, bubble_content.list_items.size());
   EXPECT_EQ(0U, bubble_content.radio_group.radio_items.size());
-  EXPECT_FALSE(bubble_content.custom_link.empty());
-  EXPECT_TRUE(bubble_content.custom_link_enabled);
+  EXPECT_FALSE(bubble_content.custom_link_enabled);
+  EXPECT_TRUE(bubble_content.custom_link.empty());
   EXPECT_FALSE(bubble_content.manage_text.empty());
   EXPECT_TRUE(bubble_content.show_learn_more);
 }
@@ -987,6 +998,228 @@ TEST_F(ContentSettingBubbleModelTest, SubresourceFilter) {
   EXPECT_EQ(bubble_content.manage_text,
             l10n_util::GetStringUTF16(IDS_ALWAYS_ALLOW_ADS));
   EXPECT_EQ(0U, bubble_content.media_menus.size());
+}
+
+// Regression test for https://crbug.com/955408
+// See also: ContentSettingImageModelTest.SensorAccessPermissionsChanged
+TEST_F(ContentSettingBubbleModelTest, SensorAccessPermissionsChanged) {
+  // Enable all sensors just to avoid hardcoding the expected messages to the
+  // motion sensor-specific ones.
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kGenericSensorExtraClasses);
+
+  WebContentsTester::For(web_contents())
+      ->NavigateAndCommit(GURL("https://www.example.com"));
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  HostContentSettingsMap* settings_map =
+      HostContentSettingsMapFactory::GetForProfile(profile());
+
+  // Go from allow by default to block by default to allow by default.
+  {
+    settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SENSORS,
+                                           CONTENT_SETTING_ALLOW);
+    content_settings->OnContentAllowed(CONTENT_SETTINGS_TYPE_SENSORS);
+    std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+            NULL, web_contents(), CONTENT_SETTINGS_TYPE_SENSORS));
+    const auto& bubble_content = content_setting_bubble_model->bubble_content();
+
+    EXPECT_EQ(bubble_content.title,
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_TITLE));
+    EXPECT_EQ(bubble_content.message,
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_MESSAGE));
+    ASSERT_EQ(bubble_content.radio_group.radio_items.size(), 2U);
+    EXPECT_EQ(bubble_content.radio_group.radio_items[0],
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_NO_ACTION));
+    EXPECT_EQ(
+        bubble_content.radio_group.radio_items[1],
+        l10n_util::GetStringFUTF16(IDS_ALLOWED_SENSORS_BLOCK,
+                                   url_formatter::FormatUrlForSecurityDisplay(
+                                       web_contents()->GetURL())));
+    EXPECT_EQ(bubble_content.radio_group.default_item, 0);
+
+    settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SENSORS,
+                                           CONTENT_SETTING_BLOCK);
+    content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_SENSORS);
+    content_setting_bubble_model =
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+            NULL, web_contents(), CONTENT_SETTINGS_TYPE_SENSORS);
+    const auto& bubble_content_2 =
+        content_setting_bubble_model->bubble_content();
+
+    EXPECT_EQ(bubble_content_2.title,
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_TITLE));
+    EXPECT_EQ(bubble_content_2.message,
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_MESSAGE));
+    EXPECT_EQ(bubble_content_2.radio_group.radio_items.size(), 2U);
+    EXPECT_EQ(
+        bubble_content_2.radio_group.radio_items[0],
+        l10n_util::GetStringFUTF16(IDS_BLOCKED_SENSORS_UNBLOCK,
+                                   url_formatter::FormatUrlForSecurityDisplay(
+                                       web_contents()->GetURL())));
+    EXPECT_EQ(bubble_content_2.radio_group.radio_items[1],
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_NO_ACTION));
+    EXPECT_EQ(bubble_content_2.radio_group.default_item, 1);
+
+    settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SENSORS,
+                                           CONTENT_SETTING_ALLOW);
+    content_settings->OnContentAllowed(CONTENT_SETTINGS_TYPE_SENSORS);
+    content_setting_bubble_model =
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+            NULL, web_contents(), CONTENT_SETTINGS_TYPE_SENSORS);
+    const auto& bubble_content_3 =
+        content_setting_bubble_model->bubble_content();
+
+    EXPECT_EQ(bubble_content_3.title,
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_TITLE));
+    EXPECT_EQ(bubble_content_3.message,
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_MESSAGE));
+    ASSERT_EQ(bubble_content_3.radio_group.radio_items.size(), 2U);
+    EXPECT_EQ(bubble_content_3.radio_group.radio_items[0],
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_NO_ACTION));
+    EXPECT_EQ(
+        bubble_content_3.radio_group.radio_items[1],
+        l10n_util::GetStringFUTF16(IDS_ALLOWED_SENSORS_BLOCK,
+                                   url_formatter::FormatUrlForSecurityDisplay(
+                                       web_contents()->GetURL())));
+    EXPECT_EQ(bubble_content_3.radio_group.default_item, 0);
+  }
+
+  content_settings->ClearContentSettingsExceptForNavigationRelatedSettings();
+
+  // Go from block by default to allow by default to block by default.
+  {
+    settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SENSORS,
+                                           CONTENT_SETTING_BLOCK);
+    content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_SENSORS);
+    std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+            NULL, web_contents(), CONTENT_SETTINGS_TYPE_SENSORS));
+    const auto& bubble_content = content_setting_bubble_model->bubble_content();
+
+    EXPECT_EQ(bubble_content.title,
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_TITLE));
+    EXPECT_EQ(bubble_content.message,
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_MESSAGE));
+    ASSERT_EQ(bubble_content.radio_group.radio_items.size(), 2U);
+    EXPECT_EQ(
+        bubble_content.radio_group.radio_items[0],
+        l10n_util::GetStringFUTF16(IDS_BLOCKED_SENSORS_UNBLOCK,
+                                   url_formatter::FormatUrlForSecurityDisplay(
+                                       web_contents()->GetURL())));
+    EXPECT_EQ(bubble_content.radio_group.radio_items[1],
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_NO_ACTION));
+    EXPECT_EQ(bubble_content.radio_group.default_item, 1);
+
+    settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SENSORS,
+                                           CONTENT_SETTING_ALLOW);
+    content_settings->OnContentAllowed(CONTENT_SETTINGS_TYPE_SENSORS);
+    content_setting_bubble_model =
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+            NULL, web_contents(), CONTENT_SETTINGS_TYPE_SENSORS);
+    const auto& bubble_content_2 =
+        content_setting_bubble_model->bubble_content();
+
+    EXPECT_EQ(bubble_content_2.title,
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_TITLE));
+    EXPECT_EQ(bubble_content_2.message,
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_MESSAGE));
+    EXPECT_EQ(bubble_content_2.radio_group.radio_items.size(), 2U);
+    EXPECT_EQ(bubble_content_2.radio_group.radio_items[0],
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_NO_ACTION));
+    EXPECT_EQ(
+        bubble_content_2.radio_group.radio_items[1],
+        l10n_util::GetStringFUTF16(IDS_ALLOWED_SENSORS_BLOCK,
+                                   url_formatter::FormatUrlForSecurityDisplay(
+                                       web_contents()->GetURL())));
+    EXPECT_EQ(bubble_content_2.radio_group.default_item, 0);
+
+    settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SENSORS,
+                                           CONTENT_SETTING_BLOCK);
+    content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_SENSORS);
+    content_setting_bubble_model =
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+            NULL, web_contents(), CONTENT_SETTINGS_TYPE_SENSORS);
+    const auto& bubble_content_3 =
+        content_setting_bubble_model->bubble_content();
+
+    EXPECT_EQ(bubble_content_3.title,
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_TITLE));
+    EXPECT_EQ(bubble_content_3.message,
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_MESSAGE));
+    ASSERT_EQ(bubble_content_3.radio_group.radio_items.size(), 2U);
+    EXPECT_EQ(
+        bubble_content_3.radio_group.radio_items[0],
+        l10n_util::GetStringFUTF16(IDS_BLOCKED_SENSORS_UNBLOCK,
+                                   url_formatter::FormatUrlForSecurityDisplay(
+                                       web_contents()->GetURL())));
+    EXPECT_EQ(bubble_content_3.radio_group.radio_items[1],
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_NO_ACTION));
+    EXPECT_EQ(bubble_content_3.radio_group.default_item, 1);
+  }
+
+  content_settings->ClearContentSettingsExceptForNavigationRelatedSettings();
+
+  // Block by default but allow a specific site.
+  {
+    settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SENSORS,
+                                           CONTENT_SETTING_BLOCK);
+    settings_map->SetContentSettingDefaultScope(
+        web_contents()->GetURL(), web_contents()->GetURL(),
+        CONTENT_SETTINGS_TYPE_SENSORS, std::string(), CONTENT_SETTING_ALLOW);
+    content_settings->OnContentAllowed(CONTENT_SETTINGS_TYPE_SENSORS);
+    std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+            NULL, web_contents(), CONTENT_SETTINGS_TYPE_SENSORS));
+    const auto& bubble_content = content_setting_bubble_model->bubble_content();
+
+    EXPECT_EQ(bubble_content.title,
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_TITLE));
+    EXPECT_EQ(bubble_content.message,
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_MESSAGE));
+    ASSERT_EQ(bubble_content.radio_group.radio_items.size(), 2U);
+    EXPECT_EQ(bubble_content.radio_group.radio_items[0],
+              l10n_util::GetStringUTF16(IDS_ALLOWED_SENSORS_NO_ACTION));
+    EXPECT_EQ(
+        bubble_content.radio_group.radio_items[1],
+        l10n_util::GetStringFUTF16(IDS_ALLOWED_SENSORS_BLOCK,
+                                   url_formatter::FormatUrlForSecurityDisplay(
+                                       web_contents()->GetURL())));
+    EXPECT_EQ(bubble_content.radio_group.default_item, 0);
+  }
+
+  content_settings->ClearContentSettingsExceptForNavigationRelatedSettings();
+  // Clear site-specific exceptions.
+  settings_map->ClearSettingsForOneType(CONTENT_SETTINGS_TYPE_SENSORS);
+
+  // Allow by default but block a specific site.
+  {
+    settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_SENSORS,
+                                           CONTENT_SETTING_ALLOW);
+    settings_map->SetContentSettingDefaultScope(
+        web_contents()->GetURL(), web_contents()->GetURL(),
+        CONTENT_SETTINGS_TYPE_SENSORS, std::string(), CONTENT_SETTING_BLOCK);
+    content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_SENSORS);
+    std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+        ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+            NULL, web_contents(), CONTENT_SETTINGS_TYPE_SENSORS));
+    const auto& bubble_content = content_setting_bubble_model->bubble_content();
+
+    EXPECT_EQ(bubble_content.title,
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_TITLE));
+    EXPECT_EQ(bubble_content.message,
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_MESSAGE));
+    ASSERT_EQ(bubble_content.radio_group.radio_items.size(), 2U);
+    EXPECT_EQ(
+        bubble_content.radio_group.radio_items[0],
+        l10n_util::GetStringFUTF16(IDS_BLOCKED_SENSORS_UNBLOCK,
+                                   url_formatter::FormatUrlForSecurityDisplay(
+                                       web_contents()->GetURL())));
+    EXPECT_EQ(bubble_content.radio_group.radio_items[1],
+              l10n_util::GetStringUTF16(IDS_BLOCKED_SENSORS_NO_ACTION));
+    EXPECT_EQ(bubble_content.radio_group.default_item, 1);
+  }
 }
 
 TEST_F(ContentSettingBubbleModelTest, PopupBubbleModelListItems) {

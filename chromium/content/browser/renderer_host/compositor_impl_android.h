@@ -15,7 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
-#include "cc/trees/element_id.h"
+#include "cc/paint/element_id.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
@@ -24,15 +24,17 @@
 #include "components/viz/common/surfaces/local_surface_id_allocation.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/host/host_frame_sink_client.h"
+#include "components/viz/host/host_frame_sink_manager.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/android/compositor.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "services/viz/privileged/interfaces/compositing/display_private.mojom.h"
-#include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
+#include "services/viz/public/cpp/gpu/context_provider_command_buffer.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "ui/android/resources/resource_manager_impl.h"
 #include "ui/android/resources/ui_resource_provider.h"
+#include "ui/android/window_android.h"
 #include "ui/android/window_android_compositor.h"
 #include "ui/compositor/compositor_lock.h"
 #include "ui/compositor/external_begin_frame_client.h"
@@ -51,11 +53,8 @@ class ExternalBeginFrameControllerClientImpl;
 }
 
 namespace viz {
-class Display;
 class FrameSinkId;
-class FrameSinkManagerImpl;
 class HostDisplayClient;
-class HostFrameSinkManager;
 class OutputSurface;
 }
 
@@ -79,17 +78,12 @@ class CONTENT_EXPORT CompositorImpl
 
   static bool IsInitialized();
 
-  static viz::FrameSinkManagerImpl* GetFrameSinkManager();
-  static viz::HostFrameSinkManager* GetHostFrameSinkManager();
-  static viz::FrameSinkId AllocateFrameSinkId();
-
   // ui::ResourceProvider implementation.
   cc::UIResourceId CreateUIResource(cc::UIResourceClient* client) override;
   void DeleteUIResource(cc::UIResourceId resource_id) override;
   bool SupportsETC1NonPowerOfTwo() const override;
 
   // Test functions:
-  bool IsLockedForTesting() const { return lock_manager_.IsLocked(); }
   void SetVisibleForTesting(bool visible) { SetVisible(visible); }
   void SetSwapCompletedWithSizeCallbackForTesting(
       base::RepeatingCallback<void(const gfx::Size&)> cb) {
@@ -97,20 +91,27 @@ class CONTENT_EXPORT CompositorImpl
   }
 
  private:
+  class AndroidHostDisplayClient;
+  class ScopedCachedBackBuffer;
+
   // Compositor implementation.
   void SetRootWindow(gfx::NativeWindow root_window) override;
   void SetRootLayer(scoped_refptr<cc::Layer> root) override;
-  void SetSurface(jobject surface, bool backed_by_surface_texture) override;
+  void SetSurface(jobject surface,
+                  bool can_be_used_with_surface_control) override;
   void SetBackgroundColor(int color) override;
   void SetWindowBounds(const gfx::Size& size) override;
   void SetRequiresAlphaChannel(bool flag) override;
   void SetNeedsComposite() override;
   ui::UIResourceProvider& GetUIResourceProvider() override;
   ui::ResourceManager& GetResourceManager() override;
+  void CacheBackBufferForCurrentSurface() override;
+  void EvictCachedBackBuffer() override;
 
   // LayerTreeHostClient implementation.
   void WillBeginMainFrame() override {}
   void DidBeginMainFrame() override {}
+  void WillUpdateLayers() override {}
   void DidUpdateLayers() override;
   void BeginMainFrame(const viz::BeginFrameArgs& args) override {}
   void BeginMainFrameNotExpectedSoon() override {}
@@ -118,8 +119,7 @@ class CONTENT_EXPORT CompositorImpl
   void UpdateLayerTreeHost() override;
   void ApplyViewportChanges(const cc::ApplyViewportChangesArgs& args) override {
   }
-  void RecordWheelAndTouchScrollingCount(bool has_scrolled_by_wheel,
-                                         bool has_scrolled_by_touch) override {}
+  void RecordManipulationTypeCounts(cc::ManipulationInfo args) override {}
   void SendOverscrollEventFromImplSide(
       const gfx::Vector2dF& overscroll_delta,
       cc::ElementId scroll_latched_element_id) override {}
@@ -138,8 +138,6 @@ class CONTENT_EXPORT CompositorImpl
       const gfx::PresentationFeedback& feedback) override {}
   void RecordStartOfFrameMetrics() override {}
   void RecordEndOfFrameMetrics(base::TimeTicks frame_begin_time) override {}
-  void DidGenerateLocalSurfaceIdAllocation(
-      const viz::LocalSurfaceIdAllocation& allocation) override {}
 
   // LayerTreeHostSingleThreadClient implementation.
   void DidSubmitCompositorFrame() override;
@@ -153,12 +151,11 @@ class CONTENT_EXPORT CompositorImpl
   viz::FrameSinkId GetFrameSinkId() override;
   void AddChildFrameSink(const viz::FrameSinkId& frame_sink_id) override;
   void RemoveChildFrameSink(const viz::FrameSinkId& frame_sink_id) override;
-  std::unique_ptr<ui::CompositorLock> GetCompositorLock(
-      ui::CompositorLockClient* client,
-      base::TimeDelta timeout) override;
   bool IsDrawingFirstVisibleFrame() const override;
   void SetVSyncPaused(bool paused) override;
   void OnUpdateRefreshRate(float refresh_rate) override;
+  void OnUpdateSupportedRefreshRates(
+      const std::vector<float>& supported_refresh_rates) override;
 
   // viz::HostFrameSinkClient implementation.
   void OnFirstSurfaceActivation(const viz::SurfaceInfo& surface_info) override;
@@ -200,13 +197,14 @@ class CONTENT_EXPORT CompositorImpl
   // Registers the root frame sink ID.
   void RegisterRootFrameSink();
 
-  // Called when we fail to create the context for the root frame sink.
+  // Called with the result of context creation for the root frame sink.
+  void OnContextCreationResult(gpu::ContextResult context_result);
   void OnFatalOrSurfaceContextCreationFailure(
       gpu::ContextResult context_result);
 
   // Viz specific functions:
   void InitializeVizLayerTreeFrameSink(
-      scoped_refptr<ws::ContextProviderCommandBuffer> context_provider);
+      scoped_refptr<viz::ContextProviderCommandBuffer> context_provider);
 
   viz::FrameSinkId frame_sink_id_;
 
@@ -222,15 +220,13 @@ class CONTENT_EXPORT CompositorImpl
   std::unique_ptr<cc::LayerTreeHost> host_;
   ui::ResourceManagerImpl resource_manager_;
 
-  std::unique_ptr<viz::Display> display_;
-
   gfx::ColorSpace display_color_space_;
   gfx::Size size_;
   bool requires_alpha_channel_ = false;
 
   ANativeWindow* window_;
   gpu::SurfaceHandle surface_handle_;
-  bool backed_by_surface_texture_ = false;
+  std::unique_ptr<ScopedCachedBackBuffer> cached_back_buffer_;
 
   CompositorClient* client_;
 
@@ -253,14 +249,7 @@ class CONTENT_EXPORT CompositorImpl
   bool has_layer_tree_frame_sink_ = false;
   std::unordered_set<viz::FrameSinkId, viz::FrameSinkIdHash>
       pending_child_frame_sink_ids_;
-  ui::CompositorLockManager lock_manager_;
   bool has_submitted_frame_since_became_visible_ = false;
-
-  // If true, we are using surface synchronization.
-  const bool enable_surface_synchronization_;
-
-  // If true, we are using a Viz process.
-  const bool enable_viz_;
 
   // Viz-specific members for communicating with the display.
   viz::mojom::DisplayPrivateAssociatedPtr display_private_;
@@ -272,6 +261,8 @@ class CONTENT_EXPORT CompositorImpl
   // Test-only. Called when we are notified of a swap.
   base::RepeatingCallback<void(const gfx::Size&)>
       swap_completed_with_size_for_testing_;
+
+  size_t num_of_consecutive_surface_failures_ = 0u;
 
   base::WeakPtrFactory<CompositorImpl> weak_factory_;
 

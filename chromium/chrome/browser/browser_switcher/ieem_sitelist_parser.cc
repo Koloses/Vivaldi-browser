@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "services/data_decoder/public/cpp/safe_xml_parser.h"
 #include "services/data_decoder/public/mojom/constants.mojom.h"
 #include "services/data_decoder/public/mojom/xml_parser.mojom.h"
@@ -87,7 +87,7 @@ void ParseIeFileVersionOne(const base::Value& xml, ParsedXml* result) {
       Entry domain = ParseDomainOrPath(*domain_node, result);
       if (!domain.text.empty() && !domain.exclude) {
         std::string prefix = (domain.do_not_transition ? "!" : "");
-        result->sitelist.push_back(prefix + domain.text);
+        result->rules.push_back(prefix + domain.text);
       }
       // Loop over <path> elements.
       for (const base::Value* path_node :
@@ -95,7 +95,7 @@ void ParseIeFileVersionOne(const base::Value& xml, ParsedXml* result) {
         Entry path = ParseDomainOrPath(*path_node, result);
         if (!path.text.empty() && !domain.text.empty() && !path.exclude) {
           std::string prefix = (path.do_not_transition ? "!" : "");
-          result->sitelist.push_back(prefix + domain.text + path.text);
+          result->rules.push_back(prefix + domain.text + path.text);
         }
       }
     }
@@ -121,8 +121,10 @@ void ParseIeFileVersionTwo(const base::Value& xml, ParsedXml* result) {
       GetXmlElementText(*open_in_node, &mode);
     }
     base::TrimWhitespaceASCII(mode, base::TRIM_ALL, &mode);
-    std::string prefix = (mode.empty() || mode == "none") ? "!" : "";
-    result->sitelist.push_back(prefix + url);
+    std::string prefix =
+        (mode.empty() || !base::CompareCaseInsensitiveASCII(mode, "none")) ? "!"
+                                                                           : "";
+    result->rules.push_back(prefix + url);
   }
 }
 
@@ -131,7 +133,7 @@ void RawXmlParsed(base::OnceCallback<void(ParsedXml)> callback,
                   const base::Optional<std::string>& error) {
   if (error) {
     // Copies the string, but it should only be around 20 characters.
-    std::move(callback).Run(ParsedXml({}, {}, *error));
+    std::move(callback).Run(ParsedXml({}, *error));
     return;
   }
   DCHECK(xml);
@@ -154,19 +156,15 @@ void RawXmlParsed(base::OnceCallback<void(ParsedXml)> callback,
 
 ParsedXml::ParsedXml() = default;
 ParsedXml::ParsedXml(ParsedXml&&) = default;
-ParsedXml::ParsedXml(std::vector<std::string>&& sitelist_,
-                     std::vector<std::string>&& greylist_,
+ParsedXml::ParsedXml(std::vector<std::string>&& rules_,
                      base::Optional<std::string>&& error_)
-    : sitelist(std::move(sitelist_)),
-      greylist(std::move(greylist_)),
-      error(std::move(error_)) {}
+    : rules(std::move(rules_)), error(std::move(error_)) {}
 ParsedXml::~ParsedXml() = default;
 
 void ParseIeemXml(const std::string& xml,
                   base::OnceCallback<void(ParsedXml)> callback) {
-  data_decoder::ParseXml(
-      content::ServiceManagerConnection::GetForProcess()->GetConnector(), xml,
-      base::BindOnce(&RawXmlParsed, std::move(callback)));
+  data_decoder::ParseXml(content::GetSystemConnector(), xml,
+                         base::BindOnce(&RawXmlParsed, std::move(callback)));
 }
 
 }  // namespace browser_switcher

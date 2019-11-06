@@ -32,7 +32,6 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/core/html/html_template_element.h"
@@ -51,6 +50,8 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 
@@ -249,7 +250,7 @@ HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
   // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-end.html#fragment-case
   // For efficiency, we skip step 4.2 ("Let root be a new html element with no
   // attributes") and instead use the DocumentFragment as a root node.
-  tree_.OpenElements()->PushRootNode(HTMLStackItem::Create(
+  tree_.OpenElements()->PushRootNode(MakeGarbageCollected<HTMLStackItem>(
       fragment, HTMLStackItem::kItemForDocumentFragmentNode));
 
   if (IsHTMLTemplateElement(*context_element))
@@ -265,7 +266,7 @@ void HTMLTreeBuilder::FragmentParsingContext::Init(DocumentFragment* fragment,
   DCHECK(fragment);
   DCHECK(!fragment->HasChildren());
   fragment_ = fragment;
-  context_element_stack_item_ = HTMLStackItem::Create(
+  context_element_stack_item_ = MakeGarbageCollected<HTMLStackItem>(
       context_element, HTMLStackItem::kItemForContextElement);
 }
 
@@ -584,7 +585,7 @@ void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
     // a proper html element which is a quirk in Blink's implementation.
     DCHECK(!IsParsingTemplateContents());
     DCHECK(!IsParsingFragment() ||
-           ToDocumentFragment(tree_.OpenElements()->TopNode()));
+           To<DocumentFragment>(tree_.OpenElements()->TopNode()));
     DCHECK(IsParsingFragment() ||
            tree_.OpenElements()->Top() == tree_.OpenElements()->HtmlElement());
     tree_.InsertHTMLElement(token);
@@ -2442,7 +2443,7 @@ void HTMLTreeBuilder::ProcessEndOfFile(AtomicHTMLToken* token) {
       }
       Element* el = tree_.OpenElements()->Top();
       if (IsHTMLTextAreaElement(el))
-        ToHTMLFormControlElement(el)->SetBlocksFormSubmission(true);
+        To<HTMLFormControlElement>(el)->SetBlocksFormSubmission(true);
       tree_.OpenElements()->Pop();
       DCHECK_NE(original_insertion_mode_, kTextMode);
       SetInsertionMode(original_insertion_mode_);

@@ -17,7 +17,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ResolveInfo;
@@ -47,6 +46,7 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.CachedMetrics;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.R;
+import org.chromium.content_public.browser.RenderWidgetHostView;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.UiUtils;
 
@@ -257,14 +257,24 @@ public class ShareHelper {
     }
 
     /**
+     * Returns the directory where temporary files are stored to be shared with external
+     * applications. These files are deleted on startup and when there are no longer any active
+     * Activities.
+     *
+     * @return The directory where shared files are stored.
+     */
+    public static File getSharedFilesDirectory() throws IOException {
+        File imagePath = UiUtils.getDirectoryForImageCapture(ContextUtils.getApplicationContext());
+        return new File(imagePath, SHARE_IMAGES_DIRECTORY_NAME);
+    }
+
+    /**
      * Clears all shared image files.
      */
     public static void clearSharedImages() {
         AsyncTask.SERIAL_EXECUTOR.execute(() -> {
             try {
-                File imagePath =
-                        UiUtils.getDirectoryForImageCapture(ContextUtils.getApplicationContext());
-                deleteShareImageFiles(new File(imagePath, SHARE_IMAGES_DIRECTORY_NAME));
+                deleteShareImageFiles(getSharedFilesDirectory());
             } catch (IOException ie) {
                 // Ignore exception.
             }
@@ -407,10 +417,15 @@ public class ShareHelper {
      */
     public static void captureScreenshotForContents(
             WebContents contents, int width, int height, Callback<Uri> callback) {
+        RenderWidgetHostView rwhv = contents.getRenderWidgetHostView();
+        if (rwhv == null) {
+          callback.onResult(null);
+          return;
+        }
         try {
             String path = UiUtils.getDirectoryForImageCapture(ContextUtils.getApplicationContext())
                     + File.separator + SHARE_IMAGES_DIRECTORY_NAME;
-            contents.writeContentBitmapToDiskAsync(
+            rwhv.writeContentBitmapToDiskAsync(
                     width, height, path, new ExternallyVisibleUriCallback(callback));
         } catch (IOException e) {
             Log.e(TAG, "Error getting content bitmap: ", e);
@@ -435,8 +450,8 @@ public class ShareHelper {
 
         final ShareDialogAdapter adapter =
                 new ShareDialogAdapter(activity, manager, resolveInfoList);
-        AlertDialog.Builder builder =
-                new AlertDialog.Builder(activity, R.style.Theme_Chromium_AlertDialog);
+        AlertDialog.Builder builder = new UiUtils.CompatibleAlertDialogBuilder(
+                activity, R.style.Theme_Chromium_AlertDialog);
         builder.setTitle(activity.getString(R.string.share_link_chooser_title));
         builder.setAdapter(adapter, null);
 
@@ -498,10 +513,10 @@ public class ShareHelper {
 
     /**
      * Set the icon and the title for the menu item used for direct share.
-     * @param activity Activity that is used to access the package manager.
+     * @param context The activity context used to retrieve resources.
      * @param item The menu item that is used for direct share
      */
-    public static void configureDirectShareMenuItem(Activity activity, MenuItem item) {
+    public static void configureDirectShareMenuItem(Context context, MenuItem item) {
         Intent shareIntent = getShareLinkAppCompatibilityIntent();
         Pair<Drawable, CharSequence> directShare = getShareableIconAndName(shareIntent, null);
         Drawable directShareIcon = directShare.first;
@@ -510,7 +525,7 @@ public class ShareHelper {
         item.setIcon(directShareIcon);
         if (directShareTitle != null) {
             item.setTitle(
-                    activity.getString(R.string.accessibility_menu_share_via, directShareTitle));
+                    context.getString(R.string.accessibility_menu_share_via, directShareTitle));
         }
     }
 
@@ -546,10 +561,9 @@ public class ShareHelper {
             try {
                 // TODO(dtrainor): Make asynchronous and have a callback to update the menu.
                 // https://crbug.com/729737
-                try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
                     directShareIcon = pm.getActivityIcon(component);
-                    ApplicationInfo ai = pm.getApplicationInfo(component.getPackageName(), 0);
-                    directShareTitle = pm.getApplicationLabel(ai);
+                    directShareTitle = pm.getActivityInfo(component, 0).loadLabel(pm);
                 }
                 retrieved = true;
             } catch (NameNotFoundException exception) {
@@ -584,7 +598,11 @@ public class ShareHelper {
 
     @VisibleForTesting
     public static Intent getShareLinkIntent(ShareParams params) {
-        Intent intent = new Intent(Intent.ACTION_SEND);
+        final boolean isFileShare = (params.getFileUris() != null);
+        final boolean isMultipleFileShare = isFileShare && (params.getFileUris().size() > 1);
+        final String action =
+                isMultipleFileShare ? Intent.ACTION_SEND_MULTIPLE : Intent.ACTION_SEND;
+        Intent intent = new Intent(action);
         intent.addFlags(ApiCompatibilityUtils.getActivityNewDocumentFlag());
         intent.putExtra(EXTRA_TASK_ID, params.getActivity().getTaskId());
 
@@ -610,7 +628,19 @@ public class ShareHelper {
                 intent.putExtra(Intent.EXTRA_SUBJECT, params.getTitle());
             }
             intent.putExtra(Intent.EXTRA_TEXT, params.getText());
-            intent.setType("text/plain");
+
+            if (isFileShare) {
+                intent.setType(params.getFileContentType());
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+                if (isMultipleFileShare) {
+                    intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, params.getFileUris());
+                } else {
+                    intent.putExtra(Intent.EXTRA_STREAM, params.getFileUris().get(0));
+                }
+            } else {
+                intent.setType("text/plain");
+            }
         }
 
         return intent;

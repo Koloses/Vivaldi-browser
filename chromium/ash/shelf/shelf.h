@@ -24,12 +24,13 @@ class Rect;
 namespace ui {
 class GestureEvent;
 class MouseWheelEvent;
+class MouseEvent;
 }
 
 namespace ash {
 
 enum class AnimationChangeType;
-class ShelfBezelEventHandler;
+class ShelfFocusCycler;
 class ShelfLayoutManager;
 class ShelfLayoutManagerTest;
 class ShelfLockingManager;
@@ -38,6 +39,7 @@ class ShelfWidget;
 class StatusAreaWidget;
 class ShelfObserver;
 class TrayBackgroundView;
+class WorkAreaInsets;
 
 // Controller for the shelf state. One per display, because each display might
 // have different shelf alignment, autohide, etc. Exists for the lifetime of the
@@ -88,6 +90,7 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   bool IsVisible() const;
 
   // Returns the window showing the shelf.
+  const aura::Window* GetWindow() const;
   aura::Window* GetWindow();
 
   void SetAlignment(ShelfAlignment alignment);
@@ -113,20 +116,15 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
 
   void UpdateVisibilityState();
 
+  // Sets whether shelf's visibility state updates should be suspended.
+  void SetSuspendVisibilityUpdate(bool value);
+
   void MaybeUpdateShelfBackground();
 
   ShelfVisibilityState GetVisibilityState() const;
 
-  int GetAccessibilityPanelHeight() const;
-  void SetAccessibilityPanelHeight(int height);
-
-  // Returns the height of the Docked Magnifier viewport.
-  int GetDockedMagnifierHeight() const;
-
   // Returns the ideal bounds of the shelf assuming it is visible.
   gfx::Rect GetIdealBounds() const;
-
-  gfx::Rect GetUserWorkAreaBounds() const;
 
   // Returns the screen bounds of the item for the specified window. If there is
   // no item for the specified window an empty rect is returned.
@@ -137,6 +135,9 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   // auto-hide with a swipe, even if that gesture event hits another window.
   // Returns true if the event was handled.
   bool ProcessGestureEvent(const ui::GestureEvent& event);
+
+  // Handles a mouse |event| coming from the Shelf.
+  void ProcessMouseEvent(const ui::MouseEvent& event);
 
   // Handles a mousewheel scroll event coming from the shelf.
   void ProcessMouseWheelEvent(const ui::MouseWheelEvent& event);
@@ -173,6 +174,9 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   ShelfAutoHideBehavior auto_hide_behavior() const {
     return auto_hide_behavior_;
   }
+
+  ShelfFocusCycler* shelf_focus_cycler() { return shelf_focus_cycler_.get(); }
+
   void set_is_tablet_mode_animation_running(bool value) {
     is_tablet_mode_animation_running_ = value;
   }
@@ -192,6 +196,9 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
  private:
   class AutoHideEventHandler;
   friend class ShelfLayoutManagerTest;
+
+  // Returns work area insets object for the window with this shelf.
+  WorkAreaInsets* GetWorkAreaInsets() const;
 
   // Layout manager for the shelf container window. Instances are constructed by
   // ShelfWidget and lifetimes are managed by the container windows themselves.
@@ -213,15 +220,15 @@ class ASH_EXPORT Shelf : public ShelfLayoutManagerObserver {
   // Forwards mouse and gesture events to ShelfLayoutManager for auto-hide.
   std::unique_ptr<AutoHideEventHandler> auto_hide_event_handler_;
 
-  // Forwards touch gestures on a bezel sensor to the shelf.
-  std::unique_ptr<ShelfBezelEventHandler> bezel_event_handler_;
+  // Hands focus off to different parts of the shelf.
+  std::unique_ptr<ShelfFocusCycler> shelf_focus_cycler_;
 
   // True while the animation to enter or exit tablet mode is running. Sometimes
   // this value is true when the shelf movements are not actually animating
   // (animation value = 0.0). This is because this is set to true when we
   // enter/exit tablet mode but the animation is not started until a shelf
   // OnBoundsChanged is called because of tablet mode. Use this value to sync
-  // the animation for AppListButton.
+  // the animation for HomeButton.
   bool is_tablet_mode_animation_running_ = false;
 
   // Used by ScopedAutoHideLock to maintain the state of the lock for auto-hide

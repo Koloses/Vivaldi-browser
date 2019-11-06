@@ -98,9 +98,9 @@ bool WebInputMethodControllerImpl::FinishComposingText(
   if (WebPlugin* plugin = FocusedPluginIfInputMethodSupported())
     return plugin->FinishComposingText(selection_behavior);
 
-  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // TODO(editing-dev): The use of UpdateStyleAndLayout
   // needs to be audited.  See http://crbug.com/590369 for more details.
-  GetFrame()->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetFrame()->GetDocument()->UpdateStyleAndLayout();
 
   return GetInputMethodController().FinishComposingText(
       selection_behavior == WebInputMethodController::kKeepSelection
@@ -122,16 +122,15 @@ bool WebInputMethodControllerImpl::CommitText(
                               relative_caret_position);
   }
 
-  // Select the range to be replaced with the composition later.
-  if (!replacement_range.IsNull()) {
-    web_frame_->SelectRange(replacement_range,
-                            WebLocalFrame::kHideSelectionHandle,
-                            blink::mojom::SelectionMenuBehavior::kHide);
-  }
-
-  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // TODO(editing-dev): The use of UpdateStyleAndLayout
   // needs to be audited.  See http://crbug.com/590369 for more details.
-  GetFrame()->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetFrame()->GetDocument()->UpdateStyleAndLayout();
+
+  if (!replacement_range.IsNull()) {
+    return GetInputMethodController().ReplaceText(
+        text, PlainTextRange(replacement_range.StartOffset(),
+                             replacement_range.EndOffset()));
+  }
 
   return GetInputMethodController().CommitText(
       text, ImeTextSpanVectorBuilder::Build(ime_text_spans),
@@ -162,7 +161,7 @@ WebRange WebInputMethodControllerImpl::CompositionRange() {
   Element* editable =
       GetFrame()->Selection().RootEditableElementOrDocumentElement();
 
-  editable->GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
+  editable->GetDocument().UpdateStyleAndLayout();
 
   return PlainTextRange::Create(*editable, range);
 }
@@ -190,9 +189,9 @@ bool WebInputMethodControllerImpl::GetCompositionCharacterBounds(
 }
 
 WebRange WebInputMethodControllerImpl::GetSelectionOffsets() const {
-  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // TODO(editing-dev): The use of UpdateStyleAndLayout
   // needs to be audited.  See http://crbug.com/590369 for more details.
-  GetFrame()->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+  GetFrame()->GetDocument()->UpdateStyleAndLayout();
 
   return GetFrame()->GetInputMethodController().GetSelectionOffsets();
 }

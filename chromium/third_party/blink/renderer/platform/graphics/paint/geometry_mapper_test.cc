@@ -344,7 +344,7 @@ TEST_P(GeometryMapperTest, SimpleClipOverlayScrollbars) {
   clip_state.local_transform_space = &t0();
   clip_state.clip_rect = FloatRoundedRect(10, 10, 50, 50);
   clip_state.clip_rect_excluding_overlay_scrollbars =
-      FloatRoundedRect(10, 10, 45, 43);
+      FloatClipRect(FloatRect(10, 10, 45, 43));
   auto clip = ClipPaintPropertyNode::Create(c0(), std::move(clip_state));
   local_state.SetClip(*clip);
 
@@ -698,7 +698,8 @@ TEST_P(GeometryMapperTest, FilterWithClipsAndTransforms) {
 
   input_rect = FloatRect(0, 0, 100, 100);
   // 1. transformBelowEffect
-  auto output = transform_below_effect->Matrix().MapRect(input_rect);
+  auto output = input_rect;
+  output.Move(transform_below_effect->Translation2D());
   // 2. clipBelowEffect
   output.Intersect(clip_below_effect->ClipRect().Rect());
   EXPECT_EQ(FloatRect(20, 30, 90, 80), output);
@@ -709,11 +710,11 @@ TEST_P(GeometryMapperTest, FilterWithClipsAndTransforms) {
   output.Intersect(clip_above_effect->ClipRect().Rect());
   EXPECT_EQ(FloatRect(-40, -30, 140, 130), output);
   // 5. transformAboveEffect
-  output = transform_above_effect->Matrix().MapRect(output);
+  output.Move(transform_above_effect->Translation2D());
   EXPECT_EQ(FloatRect(0, 20, 140, 130), output);
 
-  expected_translation_2d = transform_above_effect->Matrix().To2DTranslation() +
-                            transform_below_effect->Matrix().To2DTranslation();
+  expected_translation_2d = transform_above_effect->Translation2D() +
+                            transform_below_effect->Translation2D();
   expected_transformed_rect = input_rect;
   expected_transformed_rect.Move(expected_translation_2d);
   expected_visual_rect = FloatClipRect(output);
@@ -747,7 +748,8 @@ TEST_P(GeometryMapperTest, FilterWithClipsAndTransformsWithAlias) {
 
   input_rect = FloatRect(0, 0, 100, 100);
   // 1. transformBelowEffect
-  auto output = transform_below_effect->Matrix().MapRect(input_rect);
+  auto output = input_rect;
+  output.Move(transform_below_effect->Translation2D());
   // 2. clipBelowEffect
   output.Intersect(clip_below_effect->ClipRect().Rect());
   EXPECT_EQ(FloatRect(20, 30, 90, 80), output);
@@ -758,11 +760,11 @@ TEST_P(GeometryMapperTest, FilterWithClipsAndTransformsWithAlias) {
   output.Intersect(clip_above_effect->ClipRect().Rect());
   EXPECT_EQ(FloatRect(-40, -30, 140, 130), output);
   // 5. transformAboveEffect
-  output = transform_above_effect->Matrix().MapRect(output);
+  output.Move(transform_above_effect->Translation2D());
   EXPECT_EQ(FloatRect(0, 20, 140, 130), output);
 
-  expected_translation_2d = transform_above_effect->Matrix().To2DTranslation() +
-                            transform_below_effect->Matrix().To2DTranslation();
+  expected_translation_2d = transform_above_effect->Translation2D() +
+                            transform_below_effect->Translation2D();
   expected_transformed_rect = input_rect;
   expected_transformed_rect.Move(expected_translation_2d);
   expected_visual_rect = FloatClipRect(output);

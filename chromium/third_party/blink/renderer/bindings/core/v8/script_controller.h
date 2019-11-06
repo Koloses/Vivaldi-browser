@@ -50,7 +50,6 @@
 namespace blink {
 
 class DOMWrapperWorld;
-class Element;
 class ExecutionContext;
 class KURL;
 class LocalFrame;
@@ -67,12 +66,6 @@ class CORE_EXPORT ScriptController final
     kExecuteScriptWhenScriptsDisabled,
     kDoNotExecuteScriptWhenScriptsDisabled
   };
-
-  static ScriptController* Create(
-      LocalFrame& frame,
-      LocalWindowProxyManager& window_proxy_manager) {
-    return MakeGarbageCollected<ScriptController>(frame, window_proxy_manager);
-  }
 
   ScriptController(LocalFrame& frame,
                    LocalWindowProxyManager& window_proxy_manager)
@@ -120,19 +113,19 @@ class CORE_EXPORT ScriptController final
       const KURL& base_url,
       SanitizeScriptErrors sanitize_script_errors);
 
-  // Returns true if argument is a JavaScript URL.
-  bool ExecuteScriptIfJavaScriptURL(
-      const KURL&,
-      Element*,
-      ContentSecurityPolicyDisposition check_main_world_csp =
-          kCheckContentSecurityPolicy);
+  void ExecuteJavaScriptURL(const KURL&, ContentSecurityPolicyDisposition);
 
   // Creates a new isolated world for DevTools with the given human readable
   // |world_name| and returns it id or nullptr on failure.
   scoped_refptr<DOMWrapperWorld> CreateNewInspectorIsolatedWorld(
       const String& world_name);
 
+  // Disables eval for the main world.
   void DisableEval(const String& error_message);
+
+  // Disables eval for the given isolated |world_id|. This initializes the
+  // window proxy for the isolated world, if it's not yet initialized.
+  void DisableEvalForIsolatedWorld(int world_id, const String& error_message);
 
   TextPosition EventHandlerPosition() const;
 
@@ -154,6 +147,12 @@ class CORE_EXPORT ScriptController final
     return window_proxy_manager_->GetIsolate();
   }
   void EnableEval();
+
+  // Sets whether eval is enabled for the context corresponding to the given
+  // |world|. |error_message| is used only when |allow_eval| is false.
+  void SetEvalForWorld(DOMWrapperWorld& world,
+                       bool allow_eval,
+                       const String& error_message);
 
   v8::Local<v8::Value> EvaluateScriptInMainWorld(const ScriptSourceCode&,
                                                  const KURL& base_url,

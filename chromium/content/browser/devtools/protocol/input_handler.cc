@@ -25,6 +25,7 @@
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
 #include "content/common/input/synthetic_tap_gesture_params.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/blink/web_input_event_traits.h"
 #include "ui/events/gesture_detection/gesture_provider_config_helper.h"
@@ -476,8 +477,7 @@ InputHandler::InputHandler()
     : DevToolsDomainHandler(Input::Metainfo::domainName),
       host_(nullptr),
       page_scale_factor_(1.0),
-      last_id_(0),
-      weak_factory_(this) {}
+      last_id_(0) {}
 
 InputHandler::~InputHandler() {
 }
@@ -497,10 +497,15 @@ void InputHandler::SetRenderer(int process_host_id,
   WebContents* old_web_contents = WebContents::FromRenderFrameHost(host_);
   WebContents* new_web_contents = WebContents::FromRenderFrameHost(frame_host);
 
+  // When navigating, the new renderer might have a different page scale.
+  // It emits a changed event iff the new page scale is not 1
+  // (see crbug.com/929806)
+  // If attaching to a new host, we've got OnPageScaleFactorChanged(),
+  // so don't override it.
+  if (host_)
+    page_scale_factor_ = 1.0;
+
   host_ = frame_host;
-  // TODO(crbug.com/929806) The new renderer might have a different page scale.
-  // It emits a changed event iff the new page scale is not 1 .
-  page_scale_factor_ = 1.0;
 
   if (ignore_input_events_ && old_web_contents != new_web_contents) {
     if (old_web_contents)
@@ -759,14 +764,14 @@ void InputHandler::DispatchWebTouchEvent(
 
   if ((type == blink::WebInputEvent::kTouchStart ||
        type == blink::WebInputEvent::kTouchMove) &&
-      touch_points->length() == 0) {
+      touch_points->empty()) {
     callback->sendFailure(Response::InvalidParams(
         "TouchStart and TouchMove must have at least one touch point."));
     return;
   }
   if ((type == blink::WebInputEvent::kTouchEnd ||
        type == blink::WebInputEvent::kTouchCancel) &&
-      touch_points->length() > 0) {
+      !touch_points->empty()) {
     callback->sendFailure(Response::InvalidParams(
         "TouchEnd and TouchCancel must not have any touch points."));
     return;
@@ -784,9 +789,9 @@ void InputHandler::DispatchWebTouchEvent(
 
   base::flat_map<int, blink::WebTouchPoint> points;
   size_t with_id = 0;
-  for (size_t i = 0; i < touch_points->length(); ++i) {
-    Input::TouchPoint* point = touch_points->get(i);
-    int id = point->GetId(i);
+  for (size_t i = 0; i < touch_points->size(); ++i) {
+    Input::TouchPoint* point = (*touch_points)[i].get();
+    int id = point->GetId(i);  // index |i| is default for the id.
     if (point->HasId())
       with_id++;
     points[id].id = id;
@@ -800,7 +805,7 @@ void InputHandler::DispatchWebTouchEvent(
     points[id].SetPositionInScreen(point->GetX() * page_scale_factor_,
                                    point->GetY() * page_scale_factor_);
   }
-  if (with_id > 0 && with_id < touch_points->length()) {
+  if (with_id > 0 && with_id < touch_points->size()) {
     callback->sendFailure(Response::InvalidParams(
         "All or none of the provided TouchPoints must supply ids."));
     return;
@@ -907,7 +912,7 @@ void InputHandler::DispatchSyntheticPointerActionTouch(
            SyntheticPointerActionParams::PointerActionType::PRESS ||
        pointer_action_type ==
            SyntheticPointerActionParams::PointerActionType::MOVE) &&
-      touch_points->length() == 0) {
+      touch_points->empty()) {
     callback->sendFailure(Response::InvalidParams(
         "TouchStart and TouchMove must have at least one touch point."));
     return;
@@ -916,7 +921,7 @@ void InputHandler::DispatchSyntheticPointerActionTouch(
            SyntheticPointerActionParams::PointerActionType::RELEASE ||
        pointer_action_type ==
            SyntheticPointerActionParams::PointerActionType::CANCEL) &&
-      touch_points->length() > 0) {
+      !touch_points->empty()) {
     callback->sendFailure(Response::InvalidParams(
         "TouchEnd and TouchCancel must not have any touch points."));
     return;
@@ -957,9 +962,9 @@ void InputHandler::DispatchSyntheticPointerActionTouch(
   size_t with_id = 0;
   gfx::PointF original;
   std::set<int> current_pointer_ids;
-  for (size_t i = 0; i < touch_points->length(); ++i) {
-    Input::TouchPoint* point = touch_points->get(i);
-    int id = point->GetId(i);
+  for (size_t i = 0; i < touch_points->size(); ++i) {
+    Input::TouchPoint* point = (*touch_points)[i].get();
+    int id = point->GetId(i);  // index |i| is default for the id.
     if (point->HasId())
       with_id++;
 
@@ -978,7 +983,7 @@ void InputHandler::DispatchSyntheticPointerActionTouch(
     original = gfx::PointF(point->GetX(), point->GetY());
     current_pointer_ids.insert(id);
   }
-  if (with_id > 0 && with_id < touch_points->length()) {
+  if (with_id > 0 && with_id < touch_points->size()) {
     callback->sendFailure(Response::InvalidParams(
         "All or none of the provided TouchPoints must supply ids."));
     return;

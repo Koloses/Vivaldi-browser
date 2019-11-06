@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
+#include "build/build_config.h"
 #include "chromecast/media/audio/mixer_service/mixer_service_connection_factory.h"
 #include "media/audio/audio_manager_base.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -108,7 +109,14 @@ class CastAudioManager : public ::media::AudioManagerBase {
   virtual ::media::AudioOutputStream* MakeMixerOutputStream(
       const ::media::AudioParameters& params);
 
+#if defined(OS_ANDROID)
+  ::media::AudioOutputStream* MakeAudioOutputStreamProxy(
+      const ::media::AudioParameters& params,
+      const std::string& device_id) override;
+#endif
+
  private:
+  FRIEND_TEST_ALL_PREFIXES(CastAudioManagerTest, CanMakeStreamProxy);
   friend class CastAudioMixer;
   friend class CastAudioManagerTest;
   friend class CastAudioOutputStreamTest;

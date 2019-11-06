@@ -10,7 +10,6 @@
 <translation id="129863573139666797"><ph name="BEGIN_LINK" />Prueba borrando tus cookies<ph name="END_LINK" /></translation>
 <translation id="1375198122581997741">Información sobre esta versión</translation>
 <translation id="139305205187523129"><ph name="HOST_NAME" /> no ha enviado ningún dato.</translation>
-<translation id="14171126816530869">La identidad de <ph name="ORGANIZATION" /> en <ph name="LOCALITY" /> ha sido verificada por <ph name="ISSUER" />.</translation>
 <translation id="1559528461873125649">No existe tal archivo o carpeta</translation>
 <translation id="1620510694547887537">Cámara</translation>
 <translation id="1640244768702815859">Prueba a <ph name="BEGIN_LINK" />acceder a la página principal del sitio web<ph name="END_LINK" />.</translation>
@@ -27,6 +26,7 @@
 <translation id="2030481566774242610">¿Querías decir <ph name="LINK" />?</translation>
 <translation id="2032962459168915086"><ph name="BEGIN_LINK" />Comprobando el proxy y el cortafuegos<ph name="END_LINK" /></translation>
 <translation id="2091887806945687916">Sonido</translation>
+<translation id="2119505898009119320">Emitido para: <ph name="ORGANIZATION" /> [<ph name="JURISDICTION" />]</translation>
 <translation id="2147827593068025794">Sincronización en segundo plano</translation>
 <translation id="2166378884831602661">Este sitio web no puede proporcionar una conexión segura</translation>
 <translation id="2187317261103489799">Detectar (predeterminado)</translation>
@@ -220,6 +220,6 @@
 <translation id="9183425211371246419">La página <ph name="HOST_NAME" /> utiliza un protocolo no admitido.</translation>
 <translation id="9219103736887031265">Imágenes</translation>
 <translation id="936602727769022409">Podrías perder el acceso a tu cuenta de Google. Chromium te recomienda que cambies la contraseña ya. Se te pedirá que inicies sesión.</translation>
-<translation id="969892804517981540">Build oficial</translation>
-<translation id="988159990683914416">Build para desarrolladores</translation>
+<translation id="969892804517981540">Compilación oficial</translation>
+<translation id="988159990683914416">Compilación para desarrolladores</translation>
 </translationbundle>

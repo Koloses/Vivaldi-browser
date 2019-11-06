@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/io_thread.h"
-
 #include <map>
 #include <memory>
 
@@ -17,14 +15,14 @@
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "components/certificate_transparency/features.h"
-#include "components/certificate_transparency/tree_state_tracker.h"
 #include "components/prefs/pref_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
+#include "net/base/features.h"
 #include "net/base/filename_util.h"
 #include "net/base/host_port_pair.h"
 #include "net/cert/ct_verifier.h"
@@ -33,7 +31,6 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/simple_connection_listener.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
-#include "net/url_request/url_request_context.h"
 #include "services/network/public/cpp/network_quality_tracker.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -148,11 +145,12 @@ class IOThreadEctFieldTrialBrowserTest : public IOThreadBrowserTest {
     variations::testing::ClearAllVariationParams();
     std::map<std::string, std::string> variation_params;
     variation_params["force_effective_connection_type"] = "2G";
-    ASSERT_TRUE(variations::AssociateVariationParams(
-        "NetworkQualityEstimator", "Enabled", variation_params));
-    ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-        "NetworkQualityEstimator", "Enabled"));
+    scoped_feature_list_.InitAndEnableFeatureWithParameters(
+        net::features::kNetworkQualityEstimator, variation_params);
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(IOThreadEctFieldTrialBrowserTest,

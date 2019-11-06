@@ -24,7 +24,7 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #include "ios/chrome/common/channel_info.h"
-#include "ios/web/public/web_thread.h"
+#include "ios/web/public/thread/web_thread.h"
 #include "ios/web/public/webui/web_ui_ios.h"
 
 namespace {
@@ -197,7 +197,7 @@ void SyncInternalsMessageHandler::HandleGetAllNodes(
 
   syncer::SyncService* service = GetSyncService();
   if (service) {
-    service->GetAllNodes(
+    service->GetAllNodesForDebugging(
         base::Bind(&SyncInternalsMessageHandler::OnReceivedAllNodes,
                    weak_ptr_factory_.GetWeakPtr(), request_id));
   }

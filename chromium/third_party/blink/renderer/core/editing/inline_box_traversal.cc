@@ -131,25 +131,9 @@ class AbstractInlineBox {
 
   TextDirection ParagraphDirection() const {
     DCHECK(IsNotNull());
-    if (IsOldLayout()) {
-      const ComputedStyle& block_style = *GetInlineBox().Root().Block().Style();
-      if (block_style.GetUnicodeBidi() != UnicodeBidi::kPlaintext)
-        return block_style.Direction();
-
-      // There is no reliable way to get the paragraph direction in legacy
-      // layout when 'unicode-bidi: plaintext' is set. Use the lowest-level
-      // inline box's direction as a workaround.
-      UBiDiLevel min_level = 128;
-      for (const InlineBox* runner = GetInlineBox().Root().FirstLeafChild();
-           runner; runner = runner->NextLeafChild()) {
-        min_level = std::min(min_level, runner->BidiLevel());
-      }
-      return DirectionFromLevel(min_level);
-    }
-    const NGPhysicalLineBoxFragment& line_box =
-        ToNGPhysicalLineBoxFragmentOrDie(
-            GetNGPaintFragment().ContainerLineBox()->PhysicalFragment());
-    return line_box.BaseDirection();
+    if (IsOldLayout())
+      return ParagraphDirectionOf(GetInlineBox());
+    return ParagraphDirectionOf(GetNGPaintFragment());
   }
 
  private:
@@ -189,8 +173,8 @@ bool IsAtFragmentStart(const NGCaretPosition& caret_position) {
     case NGCaretPositionType::kAfterBox:
       return false;
     case NGCaretPositionType::kAtTextOffset:
-      const NGPhysicalTextFragment& text_fragment =
-          ToNGPhysicalTextFragment(caret_position.fragment->PhysicalFragment());
+      const auto& text_fragment = To<NGPhysicalTextFragment>(
+          caret_position.fragment->PhysicalFragment());
       DCHECK(caret_position.text_offset.has_value());
       return *caret_position.text_offset == text_fragment.StartOffset();
   }
@@ -206,8 +190,8 @@ bool IsAtFragmentEnd(const NGCaretPosition& caret_position) {
     case NGCaretPositionType::kAfterBox:
       return true;
     case NGCaretPositionType::kAtTextOffset:
-      const NGPhysicalTextFragment& text_fragment =
-          ToNGPhysicalTextFragment(caret_position.fragment->PhysicalFragment());
+      const auto& text_fragment = To<NGPhysicalTextFragment>(
+          caret_position.fragment->PhysicalFragment());
       DCHECK(caret_position.text_offset.has_value());
       return *caret_position.text_offset == text_fragment.EndOffset();
   }
@@ -268,16 +252,13 @@ class AbstractInlineBoxAndSideAffinity {
     DCHECK(physical_fragment.IsInline());
 
     if (physical_fragment.IsBox()) {
-      DCHECK(physical_fragment.IsInline());
       return {&fragment,
               is_at_start ? NGCaretPositionType::kBeforeBox
                           : NGCaretPositionType::kAfterBox,
               base::nullopt};
     }
 
-    DCHECK(physical_fragment.IsText());
-    const NGPhysicalTextFragment& text_fragment =
-        ToNGPhysicalTextFragment(physical_fragment);
+    const auto& text_fragment = To<NGPhysicalTextFragment>(physical_fragment);
     return {
         &fragment, NGCaretPositionType::kAtTextOffset,
         is_at_start ? text_fragment.StartOffset() : text_fragment.EndOffset()};
@@ -815,44 +796,6 @@ RangeSelectionAdjuster::RenderedPosition::Create(
 
 }  // namespace
 
-const InlineBox* InlineBoxTraversal::FindLeftBidiRun(const InlineBox& box,
-                                                     unsigned bidi_level) {
-  const AbstractInlineBox& result =
-      FindBidiRun<TraverseLeft>(AbstractInlineBox(box), bidi_level);
-  if (result.IsNull())
-    return nullptr;
-  DCHECK(result.IsOldLayout());
-  return &result.GetInlineBox();
-}
-
-const InlineBox* InlineBoxTraversal::FindRightBidiRun(const InlineBox& box,
-                                                      unsigned bidi_level) {
-  const AbstractInlineBox& result =
-      FindBidiRun<TraverseRight>(AbstractInlineBox(box), bidi_level);
-  if (result.IsNull())
-    return nullptr;
-  DCHECK(result.IsOldLayout());
-  return &result.GetInlineBox();
-}
-
-const InlineBox& InlineBoxTraversal::FindLeftBoundaryOfEntireBidiRun(
-    const InlineBox& box,
-    unsigned bidi_level) {
-  const AbstractInlineBox& result = FindBoundaryOfEntireBidiRun<TraverseLeft>(
-      AbstractInlineBox(box), bidi_level);
-  DCHECK(result.IsOldLayout());
-  return result.GetInlineBox();
-}
-
-const InlineBox& InlineBoxTraversal::FindRightBoundaryOfEntireBidiRun(
-    const InlineBox& box,
-    unsigned bidi_level) {
-  const AbstractInlineBox& result = FindBoundaryOfEntireBidiRun<TraverseRight>(
-      AbstractInlineBox(box), bidi_level);
-  DCHECK(result.IsOldLayout());
-  return result.GetInlineBox();
-}
-
 InlineBoxPosition BidiAdjustment::AdjustForCaretPositionResolution(
     const InlineBoxPosition& caret_position) {
   const AbstractInlineBoxAndSideAffinity unadjusted(caret_position);
@@ -903,6 +846,30 @@ SelectionInFlatTree BidiAdjustment::AdjustForRangeSelection(
     const PositionInFlatTreeWithAffinity& base,
     const PositionInFlatTreeWithAffinity& extent) {
   return RangeSelectionAdjuster::AdjustFor(base, extent);
+}
+
+// TODO(xiaochengh): Move this function to a better place
+TextDirection ParagraphDirectionOf(const InlineBox& box) {
+  const ComputedStyle& block_style = *box.Root().Block().Style();
+  if (block_style.GetUnicodeBidi() != UnicodeBidi::kPlaintext)
+    return block_style.Direction();
+
+  // There is no reliable way to get the paragraph direction in legacy
+  // layout when 'unicode-bidi: plaintext' is set. Use the lowest-level
+  // inline box's direction as a workaround.
+  UBiDiLevel min_level = 128;
+  for (const InlineBox* runner = box.Root().FirstLeafChild(); runner;
+       runner = runner->NextLeafChild()) {
+    min_level = std::min(min_level, runner->BidiLevel());
+  }
+  return DirectionFromLevel(min_level);
+}
+
+// TODO(xiaochengh): Move this function to a better place
+TextDirection ParagraphDirectionOf(const NGPaintFragment& fragment) {
+  const auto& line_box = To<NGPhysicalLineBoxFragment>(
+      fragment.ContainerLineBox()->PhysicalFragment());
+  return line_box.BaseDirection();
 }
 
 }  // namespace blink

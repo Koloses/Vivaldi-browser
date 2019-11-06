@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -26,6 +27,7 @@
 #include "ui/gfx/color_utils.h"
 #include "ui/views/animation/ink_drop.h"
 #include "ui/views/animation/ink_drop_highlight.h"
+#include "ui/views/animation/installable_ink_drop.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/controls/menu/menu_item_view.h"
@@ -44,10 +46,15 @@ ToolbarButton::ToolbarButton(views::ButtonListener* listener,
     : views::LabelButton(listener, base::string16(), CONTEXT_TOOLBAR_BUTTON),
       model_(std::move(model)),
       tab_strip_model_(tab_strip_model),
-      trigger_menu_on_long_press_(trigger_menu_on_long_press),
-      show_menu_factory_(this) {
+      trigger_menu_on_long_press_(trigger_menu_on_long_press) {
   set_has_ink_drop_action_on_click(true);
   set_context_menu_controller(this);
+
+  if (base::FeatureList::IsEnabled(views::kInstallableInkDropFeature)) {
+    installable_ink_drop_ = std::make_unique<views::InstallableInkDrop>(this);
+    installable_ink_drop_->SetConfig(GetToolbarInstallableInkDropConfig(this));
+  }
+
   SetInkDropMode(InkDropMode::ON);
 
   // Make sure icons are flipped by default so that back, forward, etc. follows
@@ -63,7 +70,7 @@ ToolbarButton::ToolbarButton(views::ButtonListener* listener,
   // Because we're using the internal padding to keep track of the changes we
   // make to the leading margin to handle Fitts' Law, it's easier to just
   // allocate the property once and modify the value.
-  SetProperty(views::kInternalPaddingKey, new gfx::Insets());
+  SetProperty(views::kInternalPaddingKey, gfx::Insets());
 
   UpdateHighlightBackgroundAndInsets();
 }
@@ -114,7 +121,7 @@ void ToolbarButton::UpdateHighlightBackgroundAndInsets() {
 
     // Some subclasses (AvatarToolbarButton) may be change alignment. This adds
     // an inset to the text-label side.
-    if (horizontal_alignment() == gfx::ALIGN_RIGHT) {
+    if (GetHorizontalAlignment() == gfx::ALIGN_RIGHT) {
       new_insets += gfx::Insets(0, text_side_inset, 0, 0);
     } else {
       new_insets += gfx::Insets(0, 0, 0, text_side_inset);
@@ -155,6 +162,12 @@ void ToolbarButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   LabelButton::OnBoundsChanged(previous_bounds);
 }
 
+void ToolbarButton::OnThemeChanged() {
+  LabelButton::OnThemeChanged();
+  if (installable_ink_drop_)
+    installable_ink_drop_->SetConfig(GetToolbarInstallableInkDropConfig(this));
+}
+
 gfx::Rect ToolbarButton::GetAnchorBoundsInScreen() const {
   gfx::Rect bounds = GetBoundsInScreen();
   gfx::Insets insets =
@@ -172,8 +185,8 @@ gfx::Rect ToolbarButton::GetAnchorBoundsInScreen() const {
 }
 
 bool ToolbarButton::OnMousePressed(const ui::MouseEvent& event) {
-  if (trigger_menu_on_long_press_ && IsTriggerableEvent(event) && enabled() &&
-      ShouldShowMenu() && HitTestPoint(event.location())) {
+  if (trigger_menu_on_long_press_ && IsTriggerableEvent(event) &&
+      GetEnabled() && ShouldShowMenu() && HitTestPoint(event.location())) {
     // Store the y pos of the mouse coordinates so we can use them later to
     // determine if the user dragged the mouse down (which should pop up the
     // drag down menu immediately, instead of waiting for the timer)
@@ -242,25 +255,41 @@ void ToolbarButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   Button::GetAccessibleNodeData(node_data);
   node_data->role = ax::mojom::Role::kButton;
   node_data->SetHasPopup(ax::mojom::HasPopup::kMenu);
-  if (enabled())
+  if (GetEnabled())
     node_data->SetDefaultActionVerb(ax::mojom::DefaultActionVerb::kPress);
+}
+
+std::unique_ptr<views::InkDrop> ToolbarButton::CreateInkDrop() {
+  // Ensure this doesn't get called when InstallableInkDrops are enabled.
+  DCHECK(!base::FeatureList::IsEnabled(views::kInstallableInkDropFeature));
+  return views::LabelButton::CreateInkDrop();
 }
 
 std::unique_ptr<views::InkDropHighlight> ToolbarButton::CreateInkDropHighlight()
     const {
+  // Ensure this doesn't get called when InstallableInkDrops are enabled.
+  DCHECK(!base::FeatureList::IsEnabled(views::kInstallableInkDropFeature));
   return CreateToolbarInkDropHighlight(this);
 }
 
 SkColor ToolbarButton::GetInkDropBaseColor() const {
+  // Ensure this doesn't get called when InstallableInkDrops are enabled.
+  DCHECK(!base::FeatureList::IsEnabled(views::kInstallableInkDropFeature));
   if (highlight_color_)
     return *highlight_color_;
   return GetToolbarInkDropBaseColor(this);
 }
 
+views::InkDrop* ToolbarButton::GetInkDrop() {
+  if (installable_ink_drop_)
+    return installable_ink_drop_.get();
+  return views::LabelButton::GetInkDrop();
+}
+
 void ToolbarButton::ShowContextMenuForViewImpl(View* source,
                                                const gfx::Point& point,
                                                ui::MenuSourceType source_type) {
-  if (!enabled())
+  if (!GetEnabled())
     return;
 
   show_menu_factory_.InvalidateWeakPtrs();
@@ -291,11 +320,10 @@ SkColor ToolbarButton::AdjustHighlightColorForContrast(
 
   // Add a fudge factor to the minimum contrast ratio since we'll actually be
   // blending with the adjusted color.
-  const SkAlpha blend_alpha = color_utils::GetBlendValueWithMinimumContrast(
-      contrasting_color, limit, base_color,
-      color_utils::kMinimumReadableContrastRatio * 1.05);
-
-  return color_utils::AlphaBlend(limit, contrasting_color, blend_alpha);
+  return color_utils::BlendForMinContrast(
+             contrasting_color, base_color, limit,
+             color_utils::kMinimumReadableContrastRatio * 1.05)
+      .color;
 }
 
 bool ToolbarButton::ShouldShowMenu() {
@@ -350,7 +378,7 @@ void ToolbarButton::ShowDropDownMenu(ui::MenuSourceType source_type) {
   menu_runner_ = std::make_unique<views::MenuRunner>(
       menu_model_adapter_->CreateMenu(), views::MenuRunner::HAS_MNEMONICS);
   menu_runner_->RunMenuAt(GetWidget(), nullptr, menu_anchor_bounds,
-                          views::MENU_ANCHOR_TOPLEFT, source_type);
+                          views::MenuAnchorPosition::kTopLeft, source_type);
 }
 
 void ToolbarButton::OnMenuClosed() {

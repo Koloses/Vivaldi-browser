@@ -24,6 +24,8 @@ static_library("vr_android") {
     "cardboard_input_delegate.cc",
     "cardboard_input_delegate.h",
     "gl_browser_interface.h",
+    "gvr_consent_helper_impl.cc",
+    "gvr_consent_helper_impl.h",
     "gvr_graphics_delegate.cc",
     "gvr_graphics_delegate.h",
     "gvr_input_delegate.cc",
@@ -69,6 +71,8 @@ static_library("vr_android") {
       "arcore_device/ar_renderer.cc",
       "arcore_device/ar_renderer.h",
       "arcore_device/arcore.h",
+      "arcore_device/arcore_consent_prompt.cc",
+      "arcore_device/arcore_consent_prompt.h",
       "arcore_device/arcore_device.cc",
       "arcore_device/arcore_device.h",
       "arcore_device/arcore_device_provider.cc",
@@ -79,19 +83,15 @@ static_library("vr_android") {
       "arcore_device/arcore_gl_thread.h",
       "arcore_device/arcore_impl.cc",
       "arcore_device/arcore_impl.h",
-      "arcore_device/arcore_install_utils.h",
       "arcore_device/arcore_java_utils.cc",
       "arcore_device/arcore_java_utils.h",
-      "arcore_device/arcore_permission_helper.cc",
-      "arcore_device/arcore_permission_helper.h",
+      "arcore_device/arcore_sdk.h",
+      "arcore_device/arcore_session_utils.h",
       "arcore_device/arcore_shim.cc",
       "arcore_device/arcore_shim.h",
+      "arcore_device/type_converters.cc",
+      "arcore_device/type_converters.h",
     ]
-
-    # TODO(https://crbug.com/936004): Remove this once arcore_c_api.h is
-    # -Wextra-semi clean.
-    configs -= [ "//build/config/compiler:chromium_code" ]
-    configs += [ "//build/config/compiler:no_chromium_code" ]
   }
 
   deps = [
@@ -99,9 +99,9 @@ static_library("vr_android") {
     "//base",
     "//cc",
     "//chrome/android/features/vr:jni_headers",
-    "//chrome/browser/ui:ui",
+    "//chrome/browser/ui",
     "//chrome/browser/vr:vr_common",
-    "//chrome/common:common",
+    "//chrome/common",
     "//chrome/common:constants",
     "//components/language/core/browser",
     "//components/omnibox/browser",
@@ -114,7 +114,7 @@ static_library("vr_android") {
     "//device/vr/buildflags:buildflags",
     "//services/device/public/mojom",
     "//services/metrics/public/cpp:ukm_builders",
-    "//services/ws/public/cpp/gpu",
+    "//services/viz/public/cpp/gpu",
     "//third_party/gvr-android-sdk:gvr_shim",
     "//ui/android",
     "//ui/base",
@@ -179,31 +179,59 @@ source_set("ui_module_factory") {
   ]
 }
 
+# Similar to the ui_default_factory but also tries to open a dummy lib for the
+# purpose of exercising the library loading mechanism.
+source_set("ui_module_dummy_factory") {
+  sources = [
+    "ui_module_dummy_factory.cc",
+    "ui_module_dummy_factory.h",
+  ]
+  deps = [
+    ":ui_factory",
+    "//chrome/browser/vr:vr_base",
+    "//chrome/browser/vr:vr_ui",
+  ]
+}
+
+# A dummy lib used to test the library loading mechanism.
+loadable_module("vr_ui_dummy_lib") {
+  sources = [
+    "ui_dummy.cc",
+    "ui_dummy.h",
+  ]
+  no_default_deps = true
+}
+
 android_library("ar_java") {
   deps = [
-    "//third_party/android_deps:com_google_ar_core_java",
+    "//base:base_java",
+    "//chrome/android:chrome_java",
+    "//third_party/arcore-android-sdk-client:com_google_ar_core_java",
   ]
 
   java_files = [ "//chrome/android/java/src/org/chromium/chrome/browser/vr/ArCoreShimImpl.java" ]
 
-  classpath_deps = [
-    "//base:base_java",
-    "//chrome/android:chrome_java",
-  ]
+  # TODO(crbug.com/938909): chromium_code.flags is not used as a proguard
+  # config when proguarding asynchronously. This results in AR crashing
+  # chrome when AR is an async DFM. Should implement a more scalable
+  # solution to including chromium_code.flags with all async DFMs.
+  if (async_ar) {
+    proguard_configs = [ "//base/android/proguard/chromium_code.flags" ]
+  }
 }
 
 if (enable_arcore) {
   generate_jni("ar_jni_headers") {
     sources = [
+      "//chrome/android/java/src/org/chromium/chrome/browser/vr/ArCoreInstallUtils.java",
       "//chrome/android/java/src/org/chromium/chrome/browser/vr/ArCoreJavaUtils.java",
     ]
-    jni_package = "vr"
   }
 }
 
 if (current_toolchain == default_toolchain) {
   generate_jni_registration("jni_registration") {
-    target = "//chrome/android/features/vr:java"
+    target = "//chrome/android:chrome_modern_public_bundle_vr_bundle_module"
     header_output = "$target_gen_dir/${target_name}.h"
     namespace = "vr"
   }
@@ -233,7 +261,7 @@ test("vr_android_unittests") {
     ":test_support",
     ":vr_android",
     "//base/test:test_support",
-    "//chrome/browser:browser",
+    "//chrome/browser",
     "//components/translate/core/language_detection:language_detection",
     "//device/vr:fakes",
     "//device/vr/public/mojom",
@@ -242,6 +270,6 @@ test("vr_android_unittests") {
     "//services/network:test_support",
     "//testing/android/native_test:native_test_native_code",
     "//testing/gmock",
-    "//testing/gtest:gtest",
+    "//testing/gtest",
   ]
 }

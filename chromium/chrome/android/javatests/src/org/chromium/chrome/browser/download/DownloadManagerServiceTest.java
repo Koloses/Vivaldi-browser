@@ -20,23 +20,24 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.download.DownloadInfo.Builder;
 import org.chromium.chrome.browser.download.DownloadManagerServiceTest.MockDownloadNotifier.MethodID;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
-import org.chromium.chrome.browser.test.ChromeBrowserTestRule;
+import org.chromium.chrome.test.ChromeBrowserTestRule;
 import org.chromium.components.offline_items_collection.ContentId;
 import org.chromium.components.offline_items_collection.OfflineItem.Progress;
 import org.chromium.components.offline_items_collection.OfflineItemProgressUnit;
 import org.chromium.components.offline_items_collection.PendingState;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.ConnectionType;
 
 import java.lang.annotation.Retention;
@@ -266,7 +267,7 @@ public class DownloadManagerServiceTest {
 
         @Override
         protected void scheduleUpdateIfNeeded() {
-            ThreadUtils.runOnUiThreadBlocking(
+            TestThreadUtils.runOnUiThreadBlocking(
                     () -> DownloadManagerServiceForTest.super.scheduleUpdateIfNeeded());
         }
 
@@ -296,6 +297,10 @@ public class DownloadManagerServiceTest {
         RecordHistogram.setDisabledForTests(false);
     }
 
+    private static boolean useDownloadOfflineContentProvider() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.DOWNLOAD_OFFLINE_CONTENT_PROVIDER);
+    }
+
     private static Handler getTestHandler() {
         HandlerThread handlerThread = new HandlerThread("handlerThread");
         handlerThread.start();
@@ -314,12 +319,8 @@ public class DownloadManagerServiceTest {
     }
 
     private void createDownloadManagerService(MockDownloadNotifier notifier, int delayForTest) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mService = new DownloadManagerServiceForTest(notifier, delayForTest);
-            }
-        });
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> { mService = new DownloadManagerServiceForTest(notifier, delayForTest); });
     }
 
     @Test
@@ -398,10 +399,11 @@ public class DownloadManagerServiceTest {
     @Feature({"Download"})
     @RetryOnFailure
     public void testDownloadCompletedIsCalled() throws InterruptedException {
+        if (useDownloadOfflineContentProvider()) return;
         MockDownloadNotifier notifier = new MockDownloadNotifier();
         MockDownloadSnackbarController snackbarController = new MockDownloadSnackbarController();
         createDownloadManagerService(notifier, UPDATE_DELAY_FOR_TEST);
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 (Runnable) () -> DownloadManagerService.setDownloadManagerService(mService));
         mService.setDownloadSnackbarController(snackbarController);
         // Try calling download completed directly.
@@ -430,7 +432,7 @@ public class DownloadManagerServiceTest {
         MockDownloadNotifier notifier = new MockDownloadNotifier();
         MockDownloadSnackbarController snackbarController = new MockDownloadSnackbarController();
         createDownloadManagerService(notifier, UPDATE_DELAY_FOR_TEST);
-        ThreadUtils.runOnUiThreadBlocking(
+        TestThreadUtils.runOnUiThreadBlocking(
                 (Runnable) () -> DownloadManagerService.setDownloadManagerService(mService));
         mService.setDownloadSnackbarController(snackbarController);
         // Check that if an interrupted download cannot be resumed, it will trigger a download
@@ -534,28 +536,21 @@ public class DownloadManagerServiceTest {
     }
 
     /**
-     * Test to make sure {@link DownloadManagerService#shouldOpenAfterDownload}
+     * Test to make sure {@link DownloadUtils#shouldAutoOpenDownload}
      * returns the right result for varying MIME types and Content-Dispositions.
      */
     @Test
     @SmallTest
     @Feature({"Download"})
-    public void testShouldOpenAfterDownload() {
+    public void testshouldAutoOpenDownload() {
         // Should not open any download type MIME types.
-        Assert.assertFalse(
-                DownloadManagerService.shouldOpenAfterDownload("application/download", true));
-        Assert.assertFalse(
-                DownloadManagerService.shouldOpenAfterDownload("application/x-download", true));
-        Assert.assertFalse(
-                DownloadManagerService.shouldOpenAfterDownload("application/octet-stream", true));
-        Assert.assertTrue(DownloadManagerService.shouldOpenAfterDownload("application/pdf", true));
-        Assert.assertFalse(
-                DownloadManagerService.shouldOpenAfterDownload("application/pdf", false));
-        Assert.assertFalse(
-                DownloadManagerService.shouldOpenAfterDownload("application/x-download", true));
-        Assert.assertFalse(
-                DownloadManagerService.shouldOpenAfterDownload("application/x-download", true));
-        Assert.assertFalse(
-                DownloadManagerService.shouldOpenAfterDownload("application/x-download", true));
+        Assert.assertFalse(DownloadUtils.shouldAutoOpenDownload("application/download", true));
+        Assert.assertFalse(DownloadUtils.shouldAutoOpenDownload("application/x-download", true));
+        Assert.assertFalse(DownloadUtils.shouldAutoOpenDownload("application/octet-stream", true));
+        Assert.assertTrue(DownloadUtils.shouldAutoOpenDownload("application/pdf", true));
+        Assert.assertFalse(DownloadUtils.shouldAutoOpenDownload("application/pdf", false));
+        Assert.assertFalse(DownloadUtils.shouldAutoOpenDownload("application/x-download", true));
+        Assert.assertFalse(DownloadUtils.shouldAutoOpenDownload("application/x-download", true));
+        Assert.assertFalse(DownloadUtils.shouldAutoOpenDownload("application/x-download", true));
     }
 }

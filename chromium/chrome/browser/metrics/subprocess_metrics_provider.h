@@ -94,7 +94,7 @@ class SubprocessMetricsProvider
   static std::unique_ptr<base::PersistentHistogramAllocator>
   GetSubprocessHistogramAllocatorOnIOThread(int id);
 
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   // Object for registing notification requests.
   content::NotificationRegistrar registrar_;
@@ -108,7 +108,7 @@ class SubprocessMetricsProvider
   ScopedObserver<content::RenderProcessHost, SubprocessMetricsProvider>
       scoped_observer_;
 
-  base::WeakPtrFactory<SubprocessMetricsProvider> weak_ptr_factory_;
+  base::WeakPtrFactory<SubprocessMetricsProvider> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SubprocessMetricsProvider);
 };

@@ -53,12 +53,6 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkDeviceHandlerImpl
       const base::Closure& callback,
       const network_handler::ErrorCallback& error_callback) override;
 
-  void SetCarrier(
-      const std::string& device_path,
-      const std::string& carrier,
-      const base::Closure& callback,
-      const network_handler::ErrorCallback& error_callback) override;
-
   void RequirePin(
       const std::string& device_path,
       bool require_pin,
@@ -128,6 +122,7 @@ class COMPONENT_EXPORT(CHROMEOS_NETWORK) NetworkDeviceHandlerImpl
 
  private:
   friend class NetworkHandler;
+  friend class NetworkDeviceHandler;
   friend class NetworkDeviceHandlerTest;
 
   // When there's no Wi-Fi device or there is one but we haven't asked if

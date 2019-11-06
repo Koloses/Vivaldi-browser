@@ -15,6 +15,12 @@
 
 class PrefService;
 
+namespace chromecast {
+namespace shell {
+class CastNetworkContexts;
+}  // namespace shell
+}  // namespace chromecast
+
 namespace extensions {
 
 class ExtensionsAPIClient;
@@ -25,11 +31,14 @@ class CastExtensionsBrowserClient : public ExtensionsBrowserClient {
  public:
   // |context| is the single BrowserContext used for IsValidContext() below.
   // |pref_service| is used for GetPrefServiceForContext() below.
-  CastExtensionsBrowserClient(content::BrowserContext* context,
-                              PrefService* pref_service);
+  CastExtensionsBrowserClient(
+      content::BrowserContext* context,
+      PrefService* pref_service,
+      chromecast::shell::CastNetworkContexts* cast_network_contexts);
   ~CastExtensionsBrowserClient() override;
 
   // ExtensionsBrowserClient overrides:
+  network::mojom::NetworkContext* GetSystemNetworkContext() override;
   bool IsShuttingDown() override;
   bool AreExtensionsDisabled(const base::CommandLine& command_line,
                              content::BrowserContext* context) override;
@@ -48,21 +57,15 @@ class CastExtensionsBrowserClient : public ExtensionsBrowserClient {
   bool CanExtensionCrossIncognito(
       const Extension* extension,
       content::BrowserContext* context) const override;
-  net::URLRequestJob* MaybeCreateResourceBundleRequestJob(
-      net::URLRequest* request,
-      net::NetworkDelegate* network_delegate,
-      const base::FilePath& directory_path,
-      const std::string& content_security_policy,
-      bool send_cors_header) override;
   base::FilePath GetBundleResourcePath(
       const network::ResourceRequest& request,
       const base::FilePath& extension_resources_path,
-      ComponentExtensionResourceInfo* resource_info) const override;
+      int* resource_id) const override;
   void LoadResourceFromResourceBundle(
       const network::ResourceRequest& request,
       network::mojom::URLLoaderRequest loader,
       const base::FilePath& resource_relative_path,
-      const ComponentExtensionResourceInfo& resource_info,
+      int resource_id,
       const std::string& content_security_policy,
       network::mojom::URLLoaderClientPtr client,
       bool send_cors_header) override;
@@ -78,7 +81,7 @@ class CastExtensionsBrowserClient : public ExtensionsBrowserClient {
       content::BrowserContext* context) override;
   void GetEarlyExtensionPrefsObservers(
       content::BrowserContext* context,
-      std::vector<ExtensionPrefsObserver*>* observers) const override;
+      std::vector<EarlyExtensionPrefsObserver*>* observers) const override;
   ProcessManagerDelegate* GetProcessManagerDelegate() const override;
   std::unique_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate() override;
   bool DidVersionUpdate(content::BrowserContext* context) override;
@@ -101,14 +104,11 @@ class CastExtensionsBrowserClient : public ExtensionsBrowserClient {
       events::HistogramValue histogram_value,
       const std::string& event_name,
       std::unique_ptr<base::ListValue> args) override;
-  net::NetLog* GetNetLog() override;
   ExtensionCache* GetExtensionCache() override;
   bool IsBackgroundUpdateAllowed() override;
   bool IsMinBrowserVersionSupported(const std::string& min_version) override;
   ExtensionWebContentsObserver* GetExtensionWebContentsObserver(
       content::WebContents* web_contents) override;
-  ExtensionNavigationUIData* GetExtensionNavigationUIData(
-      net::URLRequest* request) override;
   KioskDelegate* GetKioskDelegate() override;
   bool IsLockScreenContext(content::BrowserContext* context) override;
   std::string GetApplicationLocale() override;
@@ -120,6 +120,8 @@ class CastExtensionsBrowserClient : public ExtensionsBrowserClient {
  private:
   // The single BrowserContext for cast_shell. Not owned.
   content::BrowserContext* browser_context_;
+
+  chromecast::shell::CastNetworkContexts* cast_network_contexts_;
 
   // The PrefService for |browser_context_|. Not owned.
   PrefService* pref_service_;

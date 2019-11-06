@@ -15,7 +15,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.Nullable;
-import android.support.annotation.Px;
 import android.support.v4.view.ViewCompat;
 import android.support.v4.view.accessibility.AccessibilityEventCompat;
 import android.support.v4.view.accessibility.AccessibilityNodeInfoCompat;
@@ -35,7 +34,6 @@ import org.chromium.base.TraceEvent;
 import org.chromium.base.compat.ApiHelperForO;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.InsetObserverView;
-import org.chromium.chrome.browser.autofill.keyboard_accessory.KeyboardExtensionSizeManager;
 import org.chromium.chrome.browser.compositor.Invalidator.Client;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerHost;
@@ -50,12 +48,13 @@ import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.Fullscreen
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.tab.TabThemeColorHelper;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.widget.ControlContainer;
+import org.chromium.components.content_capture.ContentCaptureConsumer;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.UiUtils;
@@ -65,7 +64,9 @@ import org.chromium.ui.resources.ResourceManager;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * This class holds a {@link CompositorView}. This level of indirection is needed to benefit from
@@ -77,7 +78,7 @@ import java.util.List;
 public class CompositorViewHolder extends FrameLayout
         implements ContentOffsetProvider, LayoutManagerHost, LayoutRenderHost, Invalidator.Host,
                    FullscreenListener, InsetObserverView.WindowInsetObserver,
-                   KeyboardExtensionSizeManager.Observer {
+                   CompositorViewResizer.Observer {
     private static final long SYSTEM_UI_VIEWPORT_UPDATE_DELAY_MS = 500;
 
     private EventOffsetHandler mEventOffsetHandler;
@@ -110,7 +111,7 @@ public class CompositorViewHolder extends FrameLayout
     /** The toolbar control container. **/
     private ControlContainer mControlContainer;
 
-    private @Nullable KeyboardExtensionSizeManager mKeyboardExtensionSizeManager;
+    private Set<CompositorViewResizer> mViewResizers = new HashSet<>();
     private InsetObserverView mInsetObserverView;
     private boolean mShowingFullscreen;
     private Runnable mSystemUiFullscreenResizeRunnable;
@@ -131,6 +132,16 @@ public class CompositorViewHolder extends FrameLayout
     private boolean mHasDrawnOnce;
 
     private boolean mIsInVr;
+
+    // Indicates if ContentCaptureConsumer should be created, we only try to create it once.
+    private boolean mShouldCreateContentCaptureConsumer = true;
+    private ContentCaptureConsumer mContentCaptureConsumer;
+
+    /**
+     * Last MotionEvent dispatched to this object for a currently active gesture. If there is no
+     * active gesture, this is null.
+     */
+    private @Nullable MotionEvent mLastActiveTouchEvent;
 
     /**
      * This view is created on demand to display debugging information.
@@ -231,6 +242,38 @@ public class CompositorViewHolder extends FrameLayout
             @Override
             public void onContentChanged(Tab tab) {
                 CompositorViewHolder.this.onContentChanged();
+            }
+
+            @Override
+            public void onWebContentsSwapped(Tab tab, boolean didStartLoad, boolean didFinishLoad) {
+                /**
+                 * After swapping web contents, any gesture active in the old ContentView is
+                 * cancelled. We still want to continue a previously running gesture in the new
+                 * ContentView, so we synthetically dispatch a new ACTION_DOWN MotionEvent with the
+                 * coordinates of where we estimate the pointer currently is (the coordinates of
+                 * the last ACTION_MOVE MotionEvent received before the swap).
+                 *
+                 * We wait for layout to happen as the newly created ContentView currently has a
+                 * width and height of zero, which would result in the event not being dispatched.
+                 */
+                mView.addOnLayoutChangeListener(new OnLayoutChangeListener() {
+                    @Override
+                    public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                            int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                        v.removeOnLayoutChangeListener(this);
+                        if (mLastActiveTouchEvent == null) return;
+                        MotionEvent touchEvent = MotionEvent.obtain(mLastActiveTouchEvent);
+                        touchEvent.setAction(MotionEvent.ACTION_DOWN);
+                        CompositorViewHolder.this.dispatchTouchEvent(touchEvent);
+                        for (int i = 1; i < mLastActiveTouchEvent.getPointerCount(); i++) {
+                            MotionEvent pointerDownEvent =
+                                    MotionEvent.obtain(mLastActiveTouchEvent);
+                            pointerDownEvent.setAction(MotionEvent.ACTION_POINTER_DOWN
+                                    | (i << MotionEvent.ACTION_POINTER_INDEX_SHIFT));
+                            CompositorViewHolder.this.dispatchTouchEvent(pointerDownEvent);
+                        }
+                    }
+                });
             }
         };
 
@@ -411,35 +454,30 @@ public class CompositorViewHolder extends FrameLayout
     public void onSafeAreaChanged(Rect area) {}
 
     /**
-     * Allows to set (or unset if called with null) the {@link KeyboardExtensionSizeManager} that
-     * provides the dimensions of any keyboard extensions or replacements. Registers an observer to
-     * react to size changes immediately.
-     * @param manager A {@link KeyboardExtensionSizeManager}. Optional.
+     * Add a {@link CompositorViewResizer} whose height should be taken into account when computing
+     * the size of the content area. Registers an observer to react to size changes immediately.
+     * @param viewResizer A {@link CompositorViewResizer}.
      */
-    public void setKeyboardExtensionView(@Nullable KeyboardExtensionSizeManager manager) {
-        if (mKeyboardExtensionSizeManager != null) {
-            mKeyboardExtensionSizeManager.removeObserver(this);
-        }
-        mKeyboardExtensionSizeManager = manager;
-        if (mKeyboardExtensionSizeManager != null) {
-            mKeyboardExtensionSizeManager.addObserver(this);
-            onViewportChanged();
-        }
-    }
-
-    @Override
-    public void onKeyboardExtensionHeightChanged(int keyboardHeight) {
-        onUpdateViewportSize();
+    public void addCompositorViewResizer(CompositorViewResizer viewResizer) {
+        mViewResizers.add(viewResizer);
+        viewResizer.addObserver(this);
+        onViewportChanged();
     }
 
     /**
-     * Returns the combined height of all extensions to or replacements of the keyboard which
-     * consume space at the bottom of the content area.
-     * @return the full height in pixels.
+     * Remove a {@link CompositorViewResizer} that was previously added via {@link
+     * #addCompositorViewResizer(CompositorViewResizer)}.
+     * @param viewResizer A {@link CompositorViewResizer}.
      */
-    public @Px int getKeyboardExtensionsHeight() {
-        if (mKeyboardExtensionSizeManager == null) return 0;
-        return mKeyboardExtensionSizeManager.getKeyboardExtensionHeight();
+    public void removeCompositorViewResizer(CompositorViewResizer viewResizer) {
+        viewResizer.removeObserver(this);
+        mViewResizers.remove(viewResizer);
+        onViewportChanged();
+    }
+
+    @Override
+    public void onHeightChanged(int height) {
+        onUpdateViewportSize();
     }
 
     /**
@@ -453,6 +491,10 @@ public class CompositorViewHolder extends FrameLayout
         if (mInsetObserverView != null) {
             mInsetObserverView.removeObserver(this);
             mInsetObserverView = null;
+        }
+        if (mContentCaptureConsumer != null) {
+            mContentCaptureConsumer.onWebContentsChanged(null);
+            mContentCaptureConsumer = null;
         }
     }
 
@@ -554,6 +596,25 @@ public class CompositorViewHolder extends FrameLayout
         return ret;
     }
 
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent e) {
+        updateLastActiveTouchEvent(e);
+        return super.dispatchTouchEvent(e);
+    }
+
+    private void updateLastActiveTouchEvent(MotionEvent e) {
+        if (e.getActionMasked() == MotionEvent.ACTION_MOVE
+                || e.getActionMasked() == MotionEvent.ACTION_DOWN
+                || e.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN
+                || e.getActionMasked() == MotionEvent.ACTION_POINTER_UP) {
+            mLastActiveTouchEvent = e;
+        }
+        if (e.getActionMasked() == MotionEvent.ACTION_CANCEL
+                || e.getActionMasked() == MotionEvent.ACTION_UP) {
+            mLastActiveTouchEvent = null;
+        }
+    }
+
     /**
      * @return The {@link LayoutManager} associated with this view.
      */
@@ -590,7 +651,7 @@ public class CompositorViewHolder extends FrameLayout
         return tab != null ? tab.getContentView() : null;
     }
 
-    private WebContents getWebContents() {
+    protected WebContents getWebContents() {
         Tab tab = getCurrentTab();
         return tab != null ? tab.getWebContents() : null;
     }
@@ -630,7 +691,20 @@ public class CompositorViewHolder extends FrameLayout
         int controlsHeight = controlsResizeView()
                 ? getTopControlsHeightPixels() + getBottomControlsHeightPixels()
                 : 0;
-        controlsHeight += getKeyboardExtensionsHeight();
+
+        int resizerHeight = 0;
+        for (CompositorViewResizer viewResizer : mViewResizers) {
+            int resizerImplHeight = viewResizer.getHeight();
+            if (resizerImplHeight != 0) {
+                if (resizerHeight != 0) {
+                    throw new IllegalStateException(
+                            "Multiple CompositorViewResizer with height > 0 are not supported.");
+                }
+                resizerHeight = resizerImplHeight;
+            }
+        }
+        controlsHeight += resizerHeight;
+
         if (isAttachedToWindow(view)) {
             webContents.setSize(w, h - controlsHeight);
         } else {
@@ -882,7 +956,8 @@ public class CompositorViewHolder extends FrameLayout
 
     @Override
     public int getBrowserControlsBackgroundColor() {
-        return mTabVisible == null ? Color.WHITE : TabThemeColorHelper.getColor(mTabVisible);
+        return mTabVisible == null ? Color.WHITE
+                                   : ColorUtils.getToolbarSceneLayerBackground(mTabVisible);
     }
 
     @Override
@@ -1062,6 +1137,23 @@ public class CompositorViewHolder extends FrameLayout
         updateContentOverlayVisibility(mContentOverlayVisiblity);
 
         if (mTabVisible != null) initializeTab(mTabVisible);
+
+        if (mShouldCreateContentCaptureConsumer) {
+            mContentCaptureConsumer = createContentCaptureConsumer();
+            mShouldCreateContentCaptureConsumer = false;
+        }
+        if (mContentCaptureConsumer != null) {
+            mContentCaptureConsumer.onWebContentsChanged(getWebContents());
+        }
+    }
+
+    /**
+     * This method is used by subclass to provide ContentCaptureConsumer.
+     *
+     * @return the ContentCaptureConsumer or null if it is not available.
+     */
+    protected ContentCaptureConsumer createContentCaptureConsumer() {
+        return null;
     }
 
     /**

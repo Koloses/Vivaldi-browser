@@ -8,16 +8,15 @@
 #include <string>
 #include <utility>
 
-#include "ash/accessibility/accessibility_controller.h"
+#include "ash/accessibility/accessibility_controller_impl.h"
 #include "ash/cancel_mode.h"
 #include "ash/public/cpp/shell_window_ids.h"
-#include "ash/public/interfaces/shutdown.mojom.h"
-#include "ash/session/session_controller.h"
+#include "ash/public/cpp/shutdown_controller.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
-#include "ash/shutdown_controller.h"
 #include "ash/shutdown_reason.h"
-#include "ash/wallpaper/wallpaper_controller.h"
+#include "ash/wallpaper/wallpaper_controller_impl.h"
 #include "ash/wm/session_state_animator.h"
 #include "ash/wm/session_state_animator_impl.h"
 #include "base/bind.h"
@@ -30,8 +29,6 @@
 #include "base/strings/string_util.h"
 #include "base/system/sys_info.h"
 #include "base/timer/timer.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/session_manager_client.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/wm/core/compound_event_filter.h"
@@ -318,20 +315,12 @@ void LockStateController::StartRealShutdownTimer(bool with_animation_time) {
   }
   // Play and get shutdown sound duration from chrome in |sound_duration|. And
   // start real shutdown after a delay of |duration|.
-  Shell::Get()->accessibility_controller()->PlayShutdownSound(base::BindOnce(
-      [](base::WeakPtr<LockStateController> self, base::TimeDelta duration,
-         base::TimeDelta sound_duration) {
-        if (!self)
-          return;
-        sound_duration = std::min(
-            sound_duration,
-            base::TimeDelta::FromMilliseconds(kMaxShutdownSoundDurationMs));
-        duration = std::max(duration, sound_duration);
-        self->real_shutdown_timer_.Start(
-            FROM_HERE, duration, self.get(),
-            &LockStateController::OnRealPowerTimeout);
-      },
-      weak_ptr_factory_.GetWeakPtr(), duration));
+  base::TimeDelta sound_duration =
+      std::min(Shell::Get()->accessibility_controller()->PlayShutdownSound(),
+               base::TimeDelta::FromMilliseconds(kMaxShutdownSoundDurationMs));
+  duration = std::max(duration, sound_duration);
+  real_shutdown_timer_.Start(FROM_HERE, duration, this,
+                             &LockStateController::OnRealPowerTimeout);
 }
 
 void LockStateController::OnRealPowerTimeout() {
@@ -506,9 +495,7 @@ void LockStateController::PreLockAnimationFinished(bool request_lock) {
       base::RecordAction(
           base::UserMetricsAction("Accel_LockScreen_LockButton"));
     }
-    chromeos::DBusThreadManager::Get()
-        ->GetSessionManagerClient()
-        ->RequestLockScreen();
+    Shell::Get()->session_controller()->LockScreen();
   }
 
   lock_fail_timer_.Start(FROM_HERE, kLockFailTimeout, this,

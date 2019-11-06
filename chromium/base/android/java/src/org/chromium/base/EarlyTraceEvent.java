@@ -20,7 +20,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Support for early tracing, before the native library is loaded.
+import javax.annotation.concurrent.GuardedBy;
+
+/**
+ * Support for early tracing, before the native library is loaded.
  *
  * This is limited, as:
  * - Arguments are not supported
@@ -35,6 +38,9 @@ import java.util.Map;
  *          as some are pending, then early tracing is permanently disabled after dumping the
  *          events.  This means that if any early event is still pending when tracing is disabled,
  *          all early events are dropped.
+ *
+ * Like the TraceEvent, the event name of the trace events must be a string literal or a |static
+ * final String| class member. Otherwise NoDynamicStringsInTraceEventCheck error will be thrown.
  */
 @JNINamespace("base::android")
 @MainDex
@@ -109,11 +115,18 @@ public class EarlyTraceEvent {
 
     @VisibleForTesting static volatile int sState = STATE_DISABLED;
     // Not final as these object are not likely to be used at all.
-    @VisibleForTesting static List<Event> sCompletedEvents;
+    @GuardedBy("sLock")
+    @VisibleForTesting
+    static List<Event> sCompletedEvents;
+    @GuardedBy("sLock")
     @VisibleForTesting
     static Map<String, Event> sPendingEventByKey;
-    @VisibleForTesting static List<AsyncEvent> sAsyncEvents;
-    @VisibleForTesting static List<String> sPendingAsyncEvents;
+    @GuardedBy("sLock")
+    @VisibleForTesting
+    static List<AsyncEvent> sAsyncEvents;
+    @GuardedBy("sLock")
+    @VisibleForTesting
+    static List<String> sPendingAsyncEvents;
 
     /** @see TraceEvent#MaybeEnableEarlyTracing().
      */
@@ -269,13 +282,16 @@ public class EarlyTraceEvent {
 
     @VisibleForTesting
     static void resetForTesting() {
-        sState = EarlyTraceEvent.STATE_DISABLED;
-        sCompletedEvents = null;
-        sPendingEventByKey = null;
-        sAsyncEvents = null;
-        sPendingAsyncEvents = null;
+        synchronized (sLock) {
+            sState = EarlyTraceEvent.STATE_DISABLED;
+            sCompletedEvents = null;
+            sPendingEventByKey = null;
+            sAsyncEvents = null;
+            sPendingAsyncEvents = null;
+        }
     }
 
+    @GuardedBy("sLock")
     private static void maybeFinishLocked() {
         if (!sCompletedEvents.isEmpty()) {
             dumpEvents(sCompletedEvents);

@@ -36,6 +36,8 @@ class TestWebClient : public web::WebClient {
   base::string16 GetPluginNotSupportedText() const override;
 
   base::RefCountedMemory* GetDataResourceBytes(int id) const override;
+  bool IsDataResourceGzipped(int resource_id) const override;
+
   NSString* GetDocumentStartScriptForMainFrame(
       BrowserState* browser_state) const override;
   void AllowCertificateError(WebState*,
@@ -44,6 +46,7 @@ class TestWebClient : public web::WebClient {
                              const GURL&,
                              bool overridable,
                              const base::Callback<void(bool)>&) override;
+  UIView* GetWindowedContainer() override;
 
   // Sets |plugin_not_supported_text_|.
   void SetPluginNotSupportedText(const base::string16& text);

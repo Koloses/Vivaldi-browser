@@ -20,6 +20,7 @@
 #include "ui/aura/window.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/vivaldi_bookmark_menu_views.h"
+#include "ui/views/vivaldi_menubar_menu_views.h"
 #include "ui/views/widget/widget.h"
 
 namespace vivaldi {
@@ -30,13 +31,10 @@ VivaldiContextMenu* CreateVivaldiContextMenu(
   return new VivaldiContextMenuViews(web_contents, menu_model, params);
 }
 
-VivaldiBookmarkMenu* CreateVivaldiBookmarkMenu(
+// TODO - combine this with ConvertBookmarkButtonRectToScreen
+void ConvertMenubarButtonRectToScreen(
     content::WebContents* web_contents,
-    const vivaldi::BookmarkMenuParams& params,
-    const gfx::Rect& button_rect) {
-
-  // Convert local origin (wrt view) to a screen coordinate
-  gfx::Point screen_point(button_rect.x(), button_rect.y());
+    vivaldi::MenubarMenuParams& params) {
   aura::Window* target_window =
     VivaldiBookmarkMenuViews::GetActiveNativeViewFromWebContents(
         web_contents);
@@ -44,12 +42,50 @@ VivaldiBookmarkMenu* CreateVivaldiBookmarkMenu(
   aura::client::ScreenPositionClient* screen_position_client =
       aura::client::GetScreenPositionClient(root_window);
   if (screen_position_client) {
-    screen_position_client->ConvertPointToScreen(target_window, &screen_point);
+    for (::vivaldi::MenubarMenuEntry& e: params.siblings) {
+      gfx::Point point(e.rect.origin());
+      screen_position_client->ConvertPointToScreen(target_window, &point);
+      e.rect.set_origin(point);
+    }
   }
-  gfx::Rect rect(screen_point, button_rect.size());
-
-  return new VivaldiBookmarkMenuViews(web_contents, params, rect);
 }
+
+// TODO - combine this with ConvertBookmarkButtonRectToScreen
+void ConvertContainerRectToScreen(
+    content::WebContents* web_contents,
+    vivaldi::BookmarkMenuContainer& container) {
+  aura::Window* target_window =
+    VivaldiBookmarkMenuViews::GetActiveNativeViewFromWebContents(
+        web_contents);
+  aura::Window* root_window = target_window->GetRootWindow();
+  aura::client::ScreenPositionClient* screen_position_client =
+      aura::client::GetScreenPositionClient(root_window);
+  if (screen_position_client) {
+    for (::vivaldi::BookmarkMenuContainerEntry& e: container.siblings) {
+      gfx::Point point(e.rect.origin());
+      screen_position_client->ConvertPointToScreen(target_window, &point);
+      e.rect.set_origin(point);
+    }
+  }
+}
+
+VivaldiBookmarkMenu* CreateVivaldiBookmarkMenu(
+    content::WebContents* web_contents,
+    const BookmarkMenuContainer* container,
+    const bookmarks::BookmarkNode* node,
+    int offset,
+    const gfx::Rect& button_rect) {
+  return new VivaldiBookmarkMenuViews(web_contents, container, node, offset,
+                                      button_rect);
+}
+
+VivaldiMenubarMenu* CreateVivaldiMenubarMenu(
+    content::WebContents* web_contents,
+    vivaldi::MenubarMenuParams& params,
+    int id) {
+  return new VivaldiMenubarMenuViews(web_contents, params, id);
+}
+
 }  // vivialdi
 
 VivaldiContextMenuViews::VivaldiContextMenuViews(

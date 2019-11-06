@@ -38,6 +38,9 @@ class TEST_RUNNER_EXPORT WebFrameTestProxy : public content::RenderFrameImpl {
   void Initialize(WebTestInterfaces* interfaces,
                   content::RenderViewImpl* render_view_for_frame);
 
+  // RenderFrameImpl overrides.
+  void UpdateAllLifecyclePhasesAndCompositeForTesting() override;
+
   // WebLocalFrameClient implementation.
   blink::WebPlugin* CreatePlugin(const blink::WebPluginParams& params) override;
   void DidAddMessageToConsole(const blink::WebConsoleMessage& message,
@@ -68,15 +71,15 @@ class TEST_RUNNER_EXPORT WebFrameTestProxy : public content::RenderFrameImpl {
       const blink::WebContextMenuData& context_menu_data) override;
   void DidDispatchPingLoader(const blink::WebURL& url) override;
   void WillSendRequest(blink::WebURLRequest& request) override;
-  void DidReceiveResponse(const blink::WebURLResponse& response) override;
   void BeginNavigation(std::unique_ptr<blink::WebNavigationInfo> info) override;
   void PostAccessibilityEvent(const blink::WebAXObject& object,
-                              ax::mojom::Event event) override;
+                              ax::mojom::Event event,
+                              ax::mojom::EventFrom event_from) override;
   void MarkWebAXObjectDirty(const blink::WebAXObject& object,
                             bool subtree) override;
   void CheckIfAudioSinkExistsAndIsAuthorized(
       const blink::WebString& sink_id,
-      std::unique_ptr<blink::WebSetSinkIdCallbacks> web_callbacks) override;
+      blink::WebSetSinkIdCompleteCallback completion_callback) override;
   void DidClearWindowObject() override;
 
  private:

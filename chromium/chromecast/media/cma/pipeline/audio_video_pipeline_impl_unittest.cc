@@ -75,7 +75,7 @@ class CastCdmContextForTest : public CastCdmContext {
 
   std::unique_ptr<DecryptContextImpl> GetDecryptContext(
       const std::string& key_id,
-      const EncryptionScheme& encryption_scheme) override {
+      EncryptionScheme encryption_scheme) override {
     if (license_installed_) {
       return std::unique_ptr<DecryptContextImpl>(
           new DecryptContextImpl(KEY_SYSTEM_CLEAR_KEY));
@@ -154,9 +154,9 @@ class PipelineHelper {
       std::vector<::media::VideoDecoderConfig> video_configs;
       video_configs.push_back(::media::VideoDecoderConfig(
           ::media::kCodecH264, ::media::H264PROFILE_MAIN,
-          ::media::PIXEL_FORMAT_I420, ::media::VideoColorSpace(),
-          ::media::VIDEO_ROTATION_0, gfx::Size(640, 480),
-          gfx::Rect(0, 0, 640, 480), gfx::Size(640, 480),
+          ::media::VideoDecoderConfig::AlphaMode::kIsOpaque,
+          ::media::VideoColorSpace(), ::media::kNoTransformation,
+          gfx::Size(640, 480), gfx::Rect(0, 0, 640, 480), gfx::Size(640, 480),
           ::media::EmptyExtraData(), ::media::EncryptionScheme()));
       VideoPipelineClient client;
       client.av_pipeline_client.eos_cb = base::Bind(

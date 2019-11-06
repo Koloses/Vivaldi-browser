@@ -5,7 +5,7 @@
 #include "components/services/leveldb/public/cpp/manifest.h"
 
 #include "base/no_destructor.h"
-#include "components/services/leveldb/public/interfaces/leveldb.mojom.h"
+#include "components/services/leveldb/public/mojom/leveldb.mojom.h"
 #include "services/service_manager/public/cpp/manifest_builder.h"
 
 namespace leveldb {
@@ -15,9 +15,12 @@ const service_manager::Manifest& GetManifest() {
       service_manager::ManifestBuilder()
           .WithServiceName("leveldb")
           .WithDisplayName("LevelDB Service")
-          .WithOptions(service_manager::ManifestOptionsBuilder()
-                           .WithSandboxType("none")
-                           .Build())
+          .WithOptions(
+              service_manager::ManifestOptionsBuilder()
+                  .WithSandboxType("none")
+                  .WithExecutionMode(service_manager::Manifest::ExecutionMode ::
+                                         kStandaloneExecutable)
+                  .Build())
           .ExposeCapability(
               "leveldb:leveldb",
               service_manager::Manifest::InterfaceList<mojom::LevelDBService>())

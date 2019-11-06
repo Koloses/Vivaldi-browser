@@ -19,7 +19,7 @@
 #include "services/media_session/public/cpp/media_metadata.h"
 #include "services/media_session/public/cpp/test/mock_media_session.h"
 #include "services/media_session/public/mojom/constants.mojom.h"
-#include "third_party/blink/public/platform/modules/mediasession/media_session.mojom.h"
+#include "third_party/blink/public/mojom/mediasession/media_session.mojom.h"
 
 using ::testing::_;
 using ::testing::AnyNumber;
@@ -85,7 +85,9 @@ class MediaSessionImplServiceRoutingTest
 
     main_frame_ = contents()->GetMainFrame();
     sub_frame_ = main_frame_->AppendChild("sub_frame");
-    empty_metadata_.source_title = base::ASCIIToUTF16("http://www.example.com");
+
+    empty_metadata_.title = contents()->GetTitle();
+    empty_metadata_.artist = base::ASCIIToUTF16("http://www.example.com");
   }
 
   void TearDown() override {
@@ -158,6 +160,10 @@ class MediaSessionImplServiceRoutingTest
 
   const media_session::MediaMetadata& empty_metadata() const {
     return empty_metadata_;
+  }
+
+  const base::string16& GetSourceTitleForNonEmptyMetadata() const {
+    return empty_metadata_.artist;
   }
 
   TestRenderFrameHost* main_frame_;
@@ -268,6 +274,14 @@ TEST_F(MediaSessionImplServiceRoutingTest,
   ASSERT_EQ(services_[sub_frame_].get(), ComputeServiceForRouting());
 }
 
+TEST_F(MediaSessionImplServiceRoutingTest, NotifyMockPositionData) {
+  media_session::test::MockMediaSessionMojoObserver observer(
+      *GetMediaSession());
+
+  // Verify that the default/mock position data is received by the observer.
+  observer.WaitForNonEmptyPosition();
+}
+
 TEST_F(MediaSessionImplServiceRoutingTest,
        DontNotifyMetadataAndActionsChangeWhenUncontrollable) {
   media_session::test::MockMediaSessionMojoObserver observer(
@@ -288,7 +302,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
   expected_metadata.title = base::ASCIIToUTF16("title");
   expected_metadata.artist = base::ASCIIToUTF16("artist");
   expected_metadata.album = base::ASCIIToUTF16("album");
-  expected_metadata.source_title = empty_metadata().source_title;
+  expected_metadata.source_title = GetSourceTitleForNonEmptyMetadata();
 
   CreateServiceForFrame(main_frame_);
   StartPlayerForFrame(main_frame_);
@@ -326,7 +340,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
   expected_metadata.title = base::ASCIIToUTF16("title");
   expected_metadata.artist = base::ASCIIToUTF16("artist");
   expected_metadata.album = base::ASCIIToUTF16("album");
-  expected_metadata.source_title = empty_metadata().source_title;
+  expected_metadata.source_title = GetSourceTitleForNonEmptyMetadata();
 
   CreateServiceForFrame(main_frame_);
 
@@ -368,7 +382,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
   expected_metadata.title = base::ASCIIToUTF16("title");
   expected_metadata.artist = base::ASCIIToUTF16("artist");
   expected_metadata.album = base::ASCIIToUTF16("album");
-  expected_metadata.source_title = empty_metadata().source_title;
+  expected_metadata.source_title = GetSourceTitleForNonEmptyMetadata();
 
   CreateServiceForFrame(main_frame_);
 
@@ -414,7 +428,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
 
   EXPECT_CALL(*GetPlayerForFrame(sub_frame_), OnSuspend(_));
   EXPECT_CALL(*GetClientForFrame(main_frame_),
-              DidReceiveAction(MediaSessionAction::kPause))
+              DidReceiveAction(MediaSessionAction::kPause, _))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
 
   services_[main_frame_]->EnableAction(MediaSessionAction::kPause);
@@ -436,7 +450,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
 
   EXPECT_CALL(*GetPlayerForFrame(main_frame_), OnSuspend(_));
   EXPECT_CALL(*GetClientForFrame(sub_frame_),
-              DidReceiveAction(MediaSessionAction::kPause))
+              DidReceiveAction(MediaSessionAction::kPause, _))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
 
   services_[sub_frame_]->EnableAction(MediaSessionAction::kPause);
@@ -469,7 +483,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
   CreateServiceForFrame(main_frame_);
 
   EXPECT_CALL(*GetClientForFrame(main_frame_),
-              DidReceiveAction(MediaSessionAction::kPreviousTrack))
+              DidReceiveAction(MediaSessionAction::kPreviousTrack, _))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
 
   services_[main_frame_]->EnableAction(MediaSessionAction::kPreviousTrack);
@@ -488,7 +502,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
   CreateServiceForFrame(main_frame_);
 
   EXPECT_CALL(*GetClientForFrame(main_frame_),
-              DidReceiveAction(MediaSessionAction::kNextTrack))
+              DidReceiveAction(MediaSessionAction::kNextTrack, _))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
 
   services_[main_frame_]->EnableAction(MediaSessionAction::kNextTrack);
@@ -507,7 +521,7 @@ TEST_F(MediaSessionImplServiceRoutingTest, TestSeekBackwardBehaviourDefault) {
               OnSeekBackward(_, kDefaultSeekTime))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
   EXPECT_CALL(*GetClientForFrame(main_frame_),
-              DidReceiveAction(MediaSessionAction::kSeekBackward))
+              DidReceiveAction(MediaSessionAction::kSeekBackward, _))
       .Times(0);
 
   MediaSessionImpl::Get(contents())->Seek(kDefaultSeekTime * -1);
@@ -523,7 +537,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
 
   EXPECT_CALL(*GetPlayerForFrame(main_frame_), OnSeekBackward(_, _)).Times(0);
   EXPECT_CALL(*GetClientForFrame(main_frame_),
-              DidReceiveAction(MediaSessionAction::kSeekBackward))
+              DidReceiveAction(MediaSessionAction::kSeekBackward, _))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
 
   services_[main_frame_]->EnableAction(MediaSessionAction::kSeekBackward);
@@ -542,7 +556,7 @@ TEST_F(MediaSessionImplServiceRoutingTest, TestSeekForwardBehaviourDefault) {
               OnSeekForward(_, kDefaultSeekTime))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
   EXPECT_CALL(*GetClientForFrame(main_frame_),
-              DidReceiveAction(MediaSessionAction::kSeekForward))
+              DidReceiveAction(MediaSessionAction::kSeekForward, _))
       .Times(0);
 
   MediaSessionImpl::Get(contents())->Seek(kDefaultSeekTime);
@@ -558,7 +572,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
 
   EXPECT_CALL(*GetPlayerForFrame(main_frame_), OnSeekForward(_, _)).Times(0);
   EXPECT_CALL(*GetClientForFrame(main_frame_),
-              DidReceiveAction(MediaSessionAction::kSeekForward))
+              DidReceiveAction(MediaSessionAction::kSeekForward, _))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
 
   services_[main_frame_]->EnableAction(MediaSessionAction::kSeekForward);
@@ -573,7 +587,7 @@ TEST_F(MediaSessionImplServiceRoutingTest,
   expected_metadata.title = base::ASCIIToUTF16("title");
   expected_metadata.artist = base::ASCIIToUTF16("artist");
   expected_metadata.album = base::ASCIIToUTF16("album");
-  expected_metadata.source_title = empty_metadata().source_title;
+  expected_metadata.source_title = GetSourceTitleForNonEmptyMetadata();
 
   CreateServiceForFrame(main_frame_);
   StartPlayerForFrame(main_frame_);
@@ -692,7 +706,22 @@ TEST_F(MediaSessionImplServiceRoutingTest, NotifyObserverOnNavigation) {
   contents()->NavigateAndCommit(GURL("http://www.google.com/test"));
 
   media_session::MediaMetadata expected_metadata;
-  expected_metadata.source_title = base::ASCIIToUTF16("http://www.google.com");
+  expected_metadata.title = contents()->GetTitle();
+  expected_metadata.artist = base::ASCIIToUTF16("http://www.google.com");
+  observer.WaitForExpectedMetadata(expected_metadata);
+}
+
+TEST_F(MediaSessionImplServiceRoutingTest, NotifyObserverOnTitleChange) {
+  media_session::test::MockMediaSessionMojoObserver observer(
+      *GetMediaSession());
+
+  media_session::MediaMetadata expected_metadata;
+  expected_metadata.title = base::ASCIIToUTF16("new title");
+  expected_metadata.artist = GetSourceTitleForNonEmptyMetadata();
+
+  contents()->UpdateTitle(contents()->GetMainFrame(), expected_metadata.title,
+                          base::i18n::TextDirection::LEFT_TO_RIGHT);
+
   observer.WaitForExpectedMetadata(expected_metadata);
 }
 
@@ -848,6 +877,39 @@ TEST_F(MediaSessionImplServiceRoutingTest,
   std::vector<media_session::MediaImage> empty_images;
   observer.WaitForExpectedImagesOfType(MediaSessionImageType::kArtwork,
                                        empty_images);
+}
+
+TEST_F(MediaSessionImplServiceRoutingTest, StopBehaviourDefault) {
+  base::RunLoop run_loop;
+
+  StartPlayerForFrame(main_frame_);
+  CreateServiceForFrame(main_frame_);
+
+  EXPECT_CALL(*GetPlayerForFrame(main_frame_), OnSuspend(_))
+      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
+  EXPECT_CALL(*GetClientForFrame(main_frame_),
+              DidReceiveAction(MediaSessionAction::kStop, _))
+      .Times(0);
+
+  MediaSessionImpl::Get(contents())->Stop(MediaSession::SuspendType::kUI);
+  run_loop.Run();
+}
+
+TEST_F(MediaSessionImplServiceRoutingTest, StopBehaviourWhenActionEnabled) {
+  base::RunLoop run_loop;
+
+  StartPlayerForFrame(main_frame_);
+  CreateServiceForFrame(main_frame_);
+
+  EXPECT_CALL(*GetPlayerForFrame(main_frame_), OnSuspend(_));
+  EXPECT_CALL(*GetClientForFrame(main_frame_),
+              DidReceiveAction(MediaSessionAction::kStop, _))
+      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
+
+  services_[main_frame_]->EnableAction(MediaSessionAction::kStop);
+
+  MediaSessionImpl::Get(contents())->Stop(MediaSession::SuspendType::kUI);
+  run_loop.Run();
 }
 
 }  // namespace content

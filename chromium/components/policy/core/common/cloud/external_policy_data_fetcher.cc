@@ -13,7 +13,6 @@
 #include "base/macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
-#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -92,9 +91,8 @@ void ExternalPolicyDataFetcher::Job::Start(
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = url;
   resource_request->load_flags =
-      net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE |
-      net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES |
-      net::LOAD_DO_NOT_SEND_AUTH_DATA;
+      net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE;
+  resource_request->allow_credentials = false;
 
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("external_policy_fetcher", R"(
@@ -128,9 +126,6 @@ void ExternalPolicyDataFetcher::Job::Start(
       base::BindOnce(&ExternalPolicyDataFetcher::Job::OnResponseStarted,
                      base::Unretained(this)));
   url_loader_->DownloadAsStream(url_loader_factory, this);
-
-  // TODO(https://crbug.com/808498): Use ServiceURLLoader to flag data usage as
-  // data_use_measurement::DataUseUserData::POLICY.
 }
 
 void ExternalPolicyDataFetcher::Job::Cancel() {
@@ -223,8 +218,7 @@ ExternalPolicyDataFetcher::ExternalPolicyDataFetcher(
     const base::WeakPtr<ExternalPolicyDataFetcherBackend>& backend)
     : task_runner_(std::move(task_runner)),
       backend_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      backend_(backend),
-      weak_factory_(this) {}
+      backend_(backend) {}
 
 ExternalPolicyDataFetcher::~ExternalPolicyDataFetcher() {
   // No RunsTasksInCurrentSequence() check to avoid unit tests failures.
@@ -292,7 +286,7 @@ void ExternalPolicyDataFetcher::OnJobFinished(
 
 ExternalPolicyDataFetcherBackend::ExternalPolicyDataFetcherBackend(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
-    : url_loader_factory_(std::move(url_loader_factory)), weak_factory_(this) {}
+    : url_loader_factory_(std::move(url_loader_factory)) {}
 
 ExternalPolicyDataFetcherBackend::~ExternalPolicyDataFetcherBackend() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);

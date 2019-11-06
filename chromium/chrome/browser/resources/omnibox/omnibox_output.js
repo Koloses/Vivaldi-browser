@@ -47,8 +47,7 @@ cr.define('omnibox_output', function() {
     /** @param {!DisplayInputs} displayInputs */
     updateDisplayInputs(displayInputs) {
       this.displayInputs_ = displayInputs;
-      this.updateVisibility_();
-      this.updateEliding_();
+      this.updateDisplay_();
     }
 
     /** @param {string} filterText */
@@ -109,7 +108,7 @@ cr.define('omnibox_output', function() {
       this.resultsGroups_.push(resultsGroup);
       this.$$('#contents').appendChild(resultsGroup);
 
-      this.updateVisibility_();
+      this.updateDisplay_();
       this.updateFilterHighlights_();
     }
 
@@ -120,6 +119,13 @@ cr.define('omnibox_output', function() {
     updateAnswerImage(url, data) {
       this.autocompleteMatches.forEach(
           match => match.updateAnswerImage(url, data));
+    }
+
+    /** @private */
+    updateDisplay_() {
+      this.updateVisibility_();
+      this.updateEliding_();
+      this.updateRowHeights_();
     }
 
     /**
@@ -151,6 +157,13 @@ cr.define('omnibox_output', function() {
       this.resultsGroups_.forEach(
           resultsGroup =>
               resultsGroup.updateEliding(this.displayInputs_.elideCells));
+    }
+
+    /** @private */
+    updateRowHeights_() {
+      this.resultsGroups_.forEach(
+          resultsGroup =>
+              resultsGroup.updateRowHeights(this.displayInputs_.thinRows));
     }
 
     /** @private */
@@ -304,6 +317,12 @@ cr.define('omnibox_output', function() {
     updateEliding(elideCells) {
       this.autocompleteMatches.forEach(
           match => match.updateEliding(elideCells));
+    }
+
+    /** @param {boolean} thinRows */
+    updateRowHeights(thinRows) {
+      this.autocompleteMatches.forEach(
+          match => match.classList.toggle('thin', thinRows));
     }
 
     /**
@@ -802,25 +821,47 @@ cr.define('omnibox_output', function() {
      * @return {string|undefined}
      */
     static classifyJsonWord(word) {
-      if (/^\d+$/.test(word)) {
+      // Statically creating the regexes only once.
+      OutputJsonProperty.classifications =
+          OutputJsonProperty.classifications || [
+            {re: /^"[^]*":$/, clazz: 'key'},
+            {re: /^"[^]*"$/, clazz: 'string'},
+            {re: /true|false/, clazz: 'boolean'},
+            {re: /null/, clazz: 'null'},
+          ];
+      OutputJsonProperty.spaceRegex = OutputJsonProperty.spaceRegex || /^\s*$/;
+
+      // Using isNaN, because Number.isNaN checks explicitly for NaN whereas
+      // isNaN coerces the param to a Number. I.e. isNaN('3') === false, while
+      // Number.isNaN('3') === true.
+      if (isNaN(word)) {
+        const classification =
+            OutputJsonProperty.classifications.find(({re}) => re.test(word));
+        return classification && classification.clazz;
+      } else if (!OutputJsonProperty.spaceRegex.test(word)) {
         return 'number';
-      }
-      if (/^"[^]*":$/.test(word)) {
-        return 'key';
-      }
-      if (/^"[^]*"$/.test(word)) {
-        return 'string';
-      }
-      if (/true|false/.test(word)) {
-        return 'boolean';
-      }
-      if (/null/.test(word)) {
-        return 'null';
       }
     }
   }
 
-  class OutputKeyValueTuplesProperty extends OutputJsonProperty {
+  class OutputAdditionalInfoProperty extends OutputProperty {
+    constructor() {
+      super();
+      const container = document.createElement('div');
+
+      /** @private {!Element} */
+      this.pre_ = document.createElement('pre');
+      this.pre_.classList.add('json');
+      container.appendChild(this.pre_);
+
+      /** @private {!Element} */
+      this.link_ = document.createElement('a');
+      this.link_.download = 'AdditionalInfo.json';
+
+      container.appendChild(this.link_);
+      this.appendChild(container);
+    }
+
     /** @private @override */
     render_() {
       clearChildren(this.pre_);
@@ -830,12 +871,23 @@ cr.define('omnibox_output', function() {
         this.pre_.appendChild(
             OutputJsonProperty.renderJsonWord(value + '\n', ['number']));
       });
+      this.link_.href = this.createDownloadLink_();
     }
 
     /** @override @return {string} */
     get text() {
       return this.value.reduce(
           (prev, {key, value}) => `${prev}${key}: ${value}\n`, '');
+    }
+
+    /** @private @return {string} */
+    createDownloadLink_() {
+      const obj = this.value.reduce((obj, {key, value}) => {
+        obj[key] = value;
+        return obj;
+      }, {});
+      const obj64 = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+      return `data:application/json;base64,${obj64}`;
     }
   }
 
@@ -1067,7 +1119,7 @@ cr.define('omnibox_output', function() {
     new Column(
         ['Additional Info'], '', 'additionalInfo', false,
         'Additional Info\nProvider-specific information about the result.',
-        ['additionalInfo'], OutputKeyValueTuplesProperty)
+        ['additionalInfo'], OutputAdditionalInfoProperty)
   ];
 
   /** @type {!Column} */
@@ -1097,7 +1149,7 @@ cr.define('omnibox_output', function() {
   customElements.define(
       'output-json-property', OutputJsonProperty, {extends: 'td'});
   customElements.define(
-      'output-key-value-tuple-property', OutputKeyValueTuplesProperty,
+      'output-additional-info-property', OutputAdditionalInfoProperty,
       {extends: 'td'});
   customElements.define(
       'output-url-property', OutputUrlProperty, {extends: 'td'});

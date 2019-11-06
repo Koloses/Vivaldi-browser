@@ -13,10 +13,10 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/no_destructor.h"
+#include "base/one_shot_event.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -57,7 +57,6 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/common/one_shot_event.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "url/gurl.h"
 
@@ -123,41 +122,30 @@ class ImportEndedObserver : public importer::ImporterProgressObserver {
   DISALLOW_COPY_AND_ASSIGN(ImportEndedObserver);
 };
 
-// Helper class that performs delayed first-run tasks that need more of the
-// chrome infrastructure to be up and running before they can be attempted.
-class FirstRunDelayedTasks : public content::NotificationObserver {
+// Helper class that makes sure extensions get updated as soon as the
+// ExtensionService is ready.
+class FirstRunDelayedExtensionUpdater : public content::NotificationObserver {
  public:
-  FirstRunDelayedTasks() : weak_ptr_factory_(this) {
-    registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CREATED,
-                   content::NotificationService::AllSources());
-    registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSED,
-                   content::NotificationService::AllSources());
-  }
+  static void Create() { new FirstRunDelayedExtensionUpdater(); }
 
+  // content::NotificationObserver:
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override {
-    switch (type) {
-      case chrome::NOTIFICATION_PROFILE_CREATED: {
-        content::BrowserContext* context =
-            content::Source<Profile>(source).ptr();
-        extensions::ExtensionSystem::Get(context)->ready().Post(
-            FROM_HERE, base::Bind(&FirstRunDelayedTasks::OnExtensionSystemReady,
-                                  weak_ptr_factory_.GetWeakPtr(), context));
-        break;
-      }
-      case chrome::NOTIFICATION_BROWSER_CLOSED: {
-        delete this;
-        break;
-      }
-      default:
-        NOTREACHED();
-    }
+    DCHECK_EQ(chrome::NOTIFICATION_PROFILE_CREATED, type);
+    content::BrowserContext* context = content::Source<Profile>(source).ptr();
+    extensions::ExtensionSystem::Get(context)->ready().Post(
+        FROM_HERE,
+        base::BindOnce(&FirstRunDelayedExtensionUpdater::OnExtensionSystemReady,
+                       base::Unretained(this), context));
   }
 
  private:
-  // Private ctor forces it to be created only in the heap.
-  ~FirstRunDelayedTasks() override {}
+  FirstRunDelayedExtensionUpdater() {
+    registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CREATED,
+                   content::NotificationService::AllSources());
+  }
+  ~FirstRunDelayedExtensionUpdater() override = default;
 
   void OnExtensionSystemReady(content::BrowserContext* context) {
     // Process the notification and delete this.
@@ -173,23 +161,7 @@ class FirstRunDelayedTasks : public content::NotificationObserver {
   }
 
   content::NotificationRegistrar registrar_;
-  base::WeakPtrFactory<FirstRunDelayedTasks> weak_ptr_factory_;
 };
-
-// Installs a task to do an extensions update check once the extensions system
-// is running.
-void DoDelayedInstallExtensions() {
-  new FirstRunDelayedTasks();
-}
-
-void DoDelayedInstallExtensionsIfNeeded(
-    installer::MasterPreferences* install_prefs) {
-  base::DictionaryValue* extensions = 0;
-  if (install_prefs->GetExtensionsBlock(&extensions)) {
-    DVLOG(1) << "Extensions block found in master preferences";
-    DoDelayedInstallExtensions();
-  }
-}
 
 // Launches the import, via |importer_host|, from |source_profile| into
 // |target_profile| for the items specified in the |items_to_import| bitfield.
@@ -337,13 +309,6 @@ void SetupMasterPrefsFromInstallPrefs(
   install_prefs.GetString(
       installer::master_preferences::kDistroSuppressDefaultBrowserPromptPref,
       &out_prefs->suppress_default_browser_prompt_for_version);
-
-  if (install_prefs.GetBool(
-          installer::master_preferences::kDistroWelcomePageOnOSUpgradeEnabled,
-          &value) &&
-      !value) {
-    out_prefs->welcome_page_on_os_upgrade_enabled = false;
-  }
 }
 
 bool GetFirstRunSentinelFilePath(base::FilePath* path) {
@@ -450,10 +415,8 @@ bool ShouldShowWelcomePage() {
 }
 
 bool IsOnWelcomePage(content::WebContents* contents) {
-  const GURL welcome_page(chrome::kChromeUIWelcomeURL);
-  const GURL welcome_page_win10(chrome::kChromeUIWelcomeWin10URL);
-  const GURL current = contents->GetURL().GetWithEmptyPath();
-  return current == welcome_page || current == welcome_page_win10;
+  return contents->GetURL().GetWithEmptyPath() ==
+         GURL(chrome::kChromeUIWelcomeURL);
 }
 
 void SetShouldDoPersonalDataManagerFirstRun() {
@@ -510,7 +473,11 @@ ProcessMasterPreferencesResult ProcessMasterPreferences(
       DLOG(ERROR) << "Failed to initialize from master_preferences.";
     }
 
-    DoDelayedInstallExtensionsIfNeeded(install_prefs.get());
+    base::DictionaryValue* extensions = 0;
+    if (install_prefs->GetExtensionsBlock(&extensions)) {
+      DVLOG(1) << "Extensions block found in master preferences";
+      FirstRunDelayedExtensionUpdater::Create();
+    }
 
     internal::SetupMasterPrefsFromInstallPrefs(*install_prefs, out_prefs);
   }

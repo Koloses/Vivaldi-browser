@@ -143,9 +143,7 @@ void RenderWidgetHostLatencyTracker::OnInputEvent(
       timestamp_original = timestamp_now;
 
     latency->AddLatencyNumberWithTimestamp(
-        ui::INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT,
-        timestamp_original,
-        1);
+        ui::INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT, timestamp_original);
   }
 
   latency->AddLatencyNumberWithTraceName(
@@ -165,14 +163,16 @@ void RenderWidgetHostLatencyTracker::OnInputEvent(
           has_seen_first_gesture_scroll_update_
               ? ui::INPUT_EVENT_LATENCY_SCROLL_UPDATE_ORIGINAL_COMPONENT
               : ui::INPUT_EVENT_LATENCY_FIRST_SCROLL_UPDATE_ORIGINAL_COMPONENT,
-          original_event_timestamp, 1);
+          original_event_timestamp);
       latency->AddLatencyNumberWithTimestamp(
           ui::INPUT_EVENT_LATENCY_SCROLL_UPDATE_LAST_EVENT_COMPONENT,
-          original_event_timestamp, 1);
+          original_event_timestamp);
     }
 
     has_seen_first_gesture_scroll_update_ = true;
     latency->set_scroll_update_delta(
+        static_cast<const WebGestureEvent&>(event).data.scroll_update.delta_y);
+    latency->set_predicted_scroll_update_delta(
         static_cast<const WebGestureEvent&>(event).data.scroll_update.delta_y);
   }
 }

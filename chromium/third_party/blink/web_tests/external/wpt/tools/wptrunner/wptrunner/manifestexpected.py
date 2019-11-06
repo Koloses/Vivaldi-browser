@@ -1,9 +1,9 @@
 import os
-import urlparse
+from six.moves.urllib.parse import urljoin
 from collections import deque
 
 from wptmanifest.backends import static
-from wptmanifest.backends.static import ManifestItem
+from wptmanifest.backends.base import ManifestItem
 
 import expected
 
@@ -40,6 +40,17 @@ def int_prop(name, node):
         return int(node.get(name))
     except KeyError:
         return None
+
+
+def list_prop(name, node):
+    """List property"""
+    try:
+        list_prop = node.get(name)
+        if isinstance(list_prop, basestring):
+            return [list_prop]
+        return list(list_prop)
+    except KeyError:
+        return []
 
 
 def tags(node):
@@ -198,7 +209,7 @@ def fuzzy_prop(node):
 
 
 class ExpectedManifest(ManifestItem):
-    def __init__(self, name, test_path, url_base):
+    def __init__(self, node, test_path, url_base):
         """Object representing all the tests in a particular manifest
 
         :param name: Name of the AST Node associated with this object.
@@ -207,13 +218,14 @@ class ExpectedManifest(ManifestItem):
         :param test_path: Path of the test file associated with this manifest.
         :param url_base: Base url for serving the tests in this manifest
         """
+        name = node.data
         if name is not None:
             raise ValueError("ExpectedManifest should represent the root node")
         if test_path is None:
             raise ValueError("ExpectedManifest requires a test path")
         if url_base is None:
             raise ValueError("ExpectedManifest requires a base url")
-        ManifestItem.__init__(self, name)
+        ManifestItem.__init__(self, node)
         self.child_map = {}
         self.test_path = test_path
         self.url_base = url_base
@@ -236,8 +248,8 @@ class ExpectedManifest(ManifestItem):
 
     @property
     def url(self):
-        return urlparse.urljoin(self.url_base,
-                                "/".join(self.test_path.split(os.path.sep)))
+        return urljoin(self.url_base,
+                       "/".join(self.test_path.split(os.path.sep)))
 
     @property
     def disabled(self):
@@ -286,6 +298,14 @@ class ExpectedManifest(ManifestItem):
     @property
     def fuzzy(self):
         return fuzzy_prop(self)
+
+    @property
+    def expected(self):
+        return list_prop("expected", self)[0]
+
+    @property
+    def known_intermittent(self):
+        return list_prop("expected", self)[1:]
 
 
 class DirectoryManifest(ManifestItem):
@@ -339,12 +359,12 @@ class DirectoryManifest(ManifestItem):
 
 
 class TestNode(ManifestItem):
-    def __init__(self, name):
+    def __init__(self, node, **kwargs):
         """Tree node associated with a particular test in a manifest
 
         :param name: name of the test"""
-        assert name is not None
-        ManifestItem.__init__(self, name)
+        assert node.data is not None
+        ManifestItem.__init__(self, node, **kwargs)
         self.updated_expected = []
         self.new_expected = []
         self.subtests = {}
@@ -353,7 +373,7 @@ class TestNode(ManifestItem):
 
     @property
     def is_empty(self):
-        required_keys = set(["type"])
+        required_keys = {"type"}
         if set(self._data.keys()) != required_keys:
             return False
         return all(child.is_empty for child in self.children)
@@ -364,7 +384,7 @@ class TestNode(ManifestItem):
 
     @property
     def id(self):
-        return urlparse.urljoin(self.parent.url, self.name)
+        return urljoin(self.parent.url, self.name)
 
     @property
     def disabled(self):
@@ -414,6 +434,14 @@ class TestNode(ManifestItem):
     def fuzzy(self):
         return fuzzy_prop(self)
 
+    @property
+    def expected(self):
+        return list_prop("expected", self)[0]
+
+    @property
+    def known_intermittent(self):
+        return list_prop("expected", self)[1:]
+
     def append(self, node):
         """Add a subtest to the current test
 
@@ -431,12 +459,6 @@ class TestNode(ManifestItem):
 
 
 class SubtestNode(TestNode):
-    def __init__(self, name):
-        """Tree node associated with a particular subtest in a manifest
-
-        :param name: name of the subtest"""
-        TestNode.__init__(self, name)
-
     @property
     def is_empty(self):
         if self._data:

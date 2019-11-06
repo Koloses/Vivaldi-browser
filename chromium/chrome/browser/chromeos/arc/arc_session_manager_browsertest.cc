@@ -28,7 +28,6 @@
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
-#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -36,8 +35,8 @@
 #include "components/account_id/account_id.h"
 #include "components/arc/arc_prefs.h"
 #include "components/arc/arc_service_manager.h"
-#include "components/arc/arc_session_runner.h"
 #include "components/arc/arc_util.h"
+#include "components/arc/session/arc_session_runner.h"
 #include "components/arc/test/fake_arc_session.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
@@ -45,6 +44,7 @@
 #include "components/policy/core/common/policy_switches.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -53,7 +53,6 @@
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
 #include "net/url_request/url_request_test_job.h"
-#include "services/identity/public/cpp/identity_test_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -121,7 +120,8 @@ class ArcSessionManagerTest : public chromeos::MixinBasedInProcessBrowserTest {
     ArcSessionManager::SetUiEnabledForTesting(false);
     ArcSessionManager::EnableCheckAndroidManagementForTesting(true);
     ArcSessionManager::Get()->SetArcSessionRunnerForTesting(
-        std::make_unique<ArcSessionRunner>(base::Bind(FakeArcSession::Create)));
+        std::make_unique<ArcSessionRunner>(
+            base::BindRepeating(FakeArcSession::Create)));
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
@@ -198,7 +198,7 @@ class ArcSessionManagerTest : public chromeos::MixinBasedInProcessBrowserTest {
 
   Profile* profile() { return profile_.get(); }
 
-  identity::IdentityTestEnvironment* identity_test_env() {
+  signin::IdentityTestEnvironment* identity_test_env() {
     return identity_test_environment_adaptor_->identity_test_env();
   }
 
@@ -230,7 +230,7 @@ IN_PROC_BROWSER_TEST_F(ArcSessionManagerTest, WellKnownConsumerAccount) {
 
 IN_PROC_BROWSER_TEST_F(ArcSessionManagerTest, ManagedChromeAccount) {
   policy::ProfilePolicyConnector* const connector =
-      policy::ProfilePolicyConnectorFactory::GetForBrowserContext(profile());
+      profile()->GetProfilePolicyConnector();
   connector->OverrideIsManagedForTesting(true);
 
   EnableArc();

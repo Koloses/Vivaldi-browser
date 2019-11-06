@@ -9,8 +9,10 @@
 #include <vector>
 
 #include "ash/app_list/views/search_result_container_view.h"
+#include "ash/app_list/views/search_result_view.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/timer/timer.h"
 #include "ui/views/view.h"
 
 namespace app_list {
@@ -20,7 +22,6 @@ class SearchResultListViewTest;
 
 class AppListMainView;
 class AppListViewDelegate;
-class SearchResultView;
 
 // SearchResultListView displays SearchResultList with a list of
 // SearchResultView.
@@ -29,9 +30,6 @@ class APP_LIST_EXPORT SearchResultListView : public SearchResultContainerView {
   SearchResultListView(AppListMainView* main_view,
                        AppListViewDelegate* view_delegate);
   ~SearchResultListView() override;
-
-  // Helper function to get SearchResultView at given |index|.
-  SearchResultView* GetResultViewAt(size_t index);
 
   void SearchResultActivated(SearchResultView* view, int event_flags);
 
@@ -52,6 +50,7 @@ class APP_LIST_EXPORT SearchResultListView : public SearchResultContainerView {
   void ListItemsRemoved(size_t start, size_t count) override;
 
   // Overridden from SearchResultContainerView:
+  SearchResultView* GetResultViewAt(size_t index) override;
   void NotifyFirstResultYIndex(int y_index) override;
   int GetYSize() override;
   SearchResultBaseView* GetFirstResultView() override;
@@ -67,6 +66,9 @@ class APP_LIST_EXPORT SearchResultListView : public SearchResultContainerView {
   // Overridden from views::View:
   void Layout() override;
   int GetHeightForWidth(int w) const override;
+  // Log the set of recommendations (impression) that were shown to the user
+  // after a priod of time.
+  void LogImpressions();
 
   AppListMainView* main_view_;          // Owned by views hierarchy.
   AppListViewDelegate* view_delegate_;  // Not owned.
@@ -74,6 +76,9 @@ class APP_LIST_EXPORT SearchResultListView : public SearchResultContainerView {
   views::View* results_container_;
 
   std::vector<SearchResultView*> search_result_views_;  // Not owned.
+
+  // Used for logging impression shown to users.
+  base::OneShotTimer impression_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchResultListView);
 };

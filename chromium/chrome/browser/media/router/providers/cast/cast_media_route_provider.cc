@@ -4,6 +4,8 @@
 
 #include "chrome/browser/media/router/providers/cast/cast_media_route_provider.h"
 
+#include <vector>
+
 #include "base/bind.h"
 #include "base/stl_util.h"
 #include "chrome/browser/media/router/data_decoder_util.h"
@@ -126,10 +128,17 @@ void CastMediaRouteProvider::JoinRoute(const std::string& media_source,
                                        base::TimeDelta timeout,
                                        bool incognito,
                                        JoinRouteCallback callback) {
-  NOTIMPLEMENTED();
-  std::move(callback).Run(
-      base::nullopt, nullptr, std::string("Not implemented"),
-      RouteRequestResult::ResultCode::NO_SUPPORTED_PROVIDER);
+  std::unique_ptr<CastMediaSource> cast_source =
+      CastMediaSource::FromMediaSourceId(media_source);
+  if (!cast_source) {
+    std::move(callback).Run(
+        base::nullopt, nullptr, std::string("Invalid source"),
+        RouteRequestResult::ResultCode::NO_SUPPORTED_PROVIDER);
+    return;
+  }
+
+  activity_manager_->JoinSession(*cast_source, presentation_id, origin, tab_id,
+                                 incognito, std::move(callback));
 }
 
 void CastMediaRouteProvider::ConnectRouteByRouteId(
@@ -141,6 +150,8 @@ void CastMediaRouteProvider::ConnectRouteByRouteId(
     base::TimeDelta timeout,
     bool incognito,
     ConnectRouteByRouteIdCallback callback) {
+  // TODO(crbug.com/951061): We'll need to implement this to allow joining from
+  // the dialog.
   NOTIMPLEMENTED();
   std::move(callback).Run(
       base::nullopt, nullptr, std::string("Not implemented"),
@@ -168,7 +179,7 @@ void CastMediaRouteProvider::StartObservingMediaSinks(
     const std::string& media_source) {
   DVLOG(1) << __func__ << ", media_source: " << media_source;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (base::ContainsKey(sink_queries_, media_source))
+  if (base::Contains(sink_queries_, media_source))
     return;
 
   std::unique_ptr<CastMediaSource> cast_source =
@@ -221,6 +232,8 @@ void CastMediaRouteProvider::StopListeningForRouteMessages(
 }
 
 void CastMediaRouteProvider::DetachRoute(const std::string& route_id) {
+  // DetachRoute() isn't implemented. Instead, a presentation connection
+  // associated with the route will call DidClose(). See CastSessionClientImpl.
   NOTIMPLEMENTED();
 }
 

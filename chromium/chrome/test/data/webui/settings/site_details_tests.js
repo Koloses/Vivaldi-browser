@@ -126,9 +126,6 @@ suite('SiteDetails', function() {
     // flag string.
     const optionalSiteDetailsContentSettingsTypes =
         /** @type {!settings.ContentSettingsType : string} */ ({});
-    optionalSiteDetailsContentSettingsTypes[settings.ContentSettingsTypes
-                                                .CLIPBOARD] =
-        'enableClipboardContentSetting';
     optionalSiteDetailsContentSettingsTypes[settings.ContentSettingsTypes.ADS] =
         'enableSafeBrowsingSubresourceFilter';
 
@@ -138,6 +135,12 @@ suite('SiteDetails', function() {
     optionalSiteDetailsContentSettingsTypes[settings.ContentSettingsTypes
                                                 .PAYMENT_HANDLER] =
         'enablePaymentHandlerContentSetting';
+    optionalSiteDetailsContentSettingsTypes[settings.ContentSettingsTypes
+                                                .SERIAL_PORTS] =
+        'enableExperimentalWebPlatformFeatures';
+    optionalSiteDetailsContentSettingsTypes[settings.ContentSettingsTypes
+                                                .BLUETOOTH_SCANNING] =
+        'enableBluetoothScanningContentSetting';
     browserProxy.setPrefs(prefs);
 
     // First, explicitly set all the optional settings to false.
@@ -174,15 +177,8 @@ suite('SiteDetails', function() {
     }
   });
 
-  test('usage heading shows when site settings enabled', function() {
+  test('usage heading shows properly', function() {
     browserProxy.setPrefs(prefs);
-    // Expect usage to be hidden when Site Settings is disabled.
-    loadTimeData.overrideValues({enableSiteSettings: false});
-    testElement = createSiteDetails('https://foo.com:443');
-    Polymer.dom.flush();
-    assert(!testElement.$$('#usage'));
-
-    loadTimeData.overrideValues({enableSiteSettings: true});
     testElement = createSiteDetails('https://foo.com:443');
     Polymer.dom.flush();
     assert(!!testElement.$$('#usage'));
@@ -204,7 +200,6 @@ suite('SiteDetails', function() {
   test('storage gets trashed properly', function() {
     const origin = 'https://foo.com:443';
     browserProxy.setPrefs(prefs);
-    loadTimeData.overrideValues({enableSiteSettings: true});
     testElement = createSiteDetails(origin);
 
     // Remove the current website-usage-private-api element.
@@ -228,7 +223,7 @@ suite('SiteDetails', function() {
     const api =
         document.createElement('mock-website-usage-private-api-storage');
     testElement.$.usageApi = api;
-    Polymer.dom(parent).appendChild(api);
+    parent.appendChild(api);
     Polymer.dom.flush();
 
     // Call onOriginChanged_() manually to simulate a new navigation.
@@ -248,7 +243,6 @@ suite('SiteDetails', function() {
   test('cookies gets deleted properly', function() {
     const origin = 'https://foo.com:443';
     browserProxy.setPrefs(prefs);
-    loadTimeData.overrideValues({enableSiteSettings: true});
     testElement = createSiteDetails(origin);
 
     // Remove the current website-usage-private-api element.
@@ -272,7 +266,7 @@ suite('SiteDetails', function() {
     const api =
         document.createElement('mock-website-usage-private-api-cookies');
     testElement.$.usageApi = api;
-    Polymer.dom(parent).appendChild(api);
+    parent.appendChild(api);
     Polymer.dom.flush();
 
     // Call onOriginChanged_() manually to simulate a new navigation.
@@ -293,7 +287,6 @@ suite('SiteDetails', function() {
     browserProxy.setPrefs(prefs);
     // Make sure all the possible content settings are shown for this test.
     loadTimeData.overrideValues({enableSafeBrowsingSubresourceFilter: true});
-    loadTimeData.overrideValues({enableClipboardContentSetting: true});
     loadTimeData.overrideValues({enableSensorsContentSetting: true});
     loadTimeData.overrideValues({enablePaymentHandlerContentSetting: true});
     testElement = createSiteDetails('https://foo.com:443');
@@ -375,7 +368,6 @@ suite('SiteDetails', function() {
 
   test('show confirmation dialog on clear storage', function() {
     browserProxy.setPrefs(prefs);
-    loadTimeData.overrideValues({enableSiteSettings: true});
     testElement = createSiteDetails('https://foo.com:443');
 
     // Give |testElement.storedData_| a non-empty value to make the clear
@@ -395,12 +387,12 @@ suite('SiteDetails', function() {
     });
     let api = document.createElement('mock1-website-usage-private-api');
     testElement.$.usageApi = api;
-    Polymer.dom(parent).appendChild(api);
+    parent.appendChild(api);
     Polymer.dom.flush();
 
     // Check both cancelling and accepting the dialog closes it.
     ['cancel-button', 'action-button'].forEach(buttonType => {
-      testElement.$$('#usage paper-button').click();
+      testElement.$$('#usage cr-button').click();
       assertTrue(testElement.$.confirmClearStorage.open);
       const actionButtonList =
           testElement.$.confirmClearStorage.getElementsByClassName(buttonType);
@@ -471,7 +463,6 @@ suite('SiteDetails', function() {
 
     settings.navigateTo(settings.routes.SITE_SETTINGS);
 
-    loadTimeData.overrideValues({enableSiteSettings: false});
     testElement = createSiteDetails(invalid_url);
     assertEquals(
         settings.routes.SITE_SETTINGS_SITE_DETAILS.path,
@@ -493,7 +484,6 @@ suite('SiteDetails', function() {
   test('call fetch block autoplay status', function() {
     const origin = 'https://foo.com:443';
     browserProxy.setPrefs(prefs);
-    loadTimeData.overrideValues({enableSiteSettings: true});
     testElement = createSiteDetails(origin);
     return browserProxy.whenCalled('fetchBlockAutoplayStatus');
   });

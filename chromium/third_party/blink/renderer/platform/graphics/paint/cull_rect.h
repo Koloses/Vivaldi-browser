@@ -7,7 +7,7 @@
 
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 #include <limits>
@@ -33,6 +33,7 @@ class PLATFORM_EXPORT CullRect {
 
   bool Intersects(const IntRect&) const;
   bool Intersects(const LayoutRect&) const;
+  bool Intersects(const LayoutRect&, const LayoutPoint& offset) const;
   bool IntersectsTransformed(const AffineTransform&, const FloatRect&) const;
   bool IntersectsHorizontalRange(LayoutUnit lo, LayoutUnit hi) const;
   bool IntersectsVerticalRange(LayoutUnit lo, LayoutUnit hi) const;

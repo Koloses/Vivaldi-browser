@@ -24,8 +24,9 @@ const service_manager::Manifest& GetNaClBrokerManifest() {
                             std::set<const char*>{
                                 "IPC.mojom.ChannelBootstrap",
                                 "content.mojom.Child",
-                                "content.mojom.ChildControl",
+                                "content.mojom.ChildProcess",
                                 "content.mojom.ChildHistogramFetcherFactory",
+                                "content.mojom.ResourceUsageReporter",
                             })
 
           .Build()};

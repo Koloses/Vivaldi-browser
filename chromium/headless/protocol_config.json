@@ -39,5 +39,13 @@
         "string_header": "headless/lib/browser/protocol/base_string_adapter.h",
         "export_macro": "HEADLESS_EXPORT",
         "export_header": "headless/public/headless_export.h"
+    },
+
+    "encoding_lib": {
+        "namespace": "inspector_protocol_encoding"
+    },
+
+    "bindings_lib": {
+        "namespace": "inspector_protocol_bindings"
     }
 }

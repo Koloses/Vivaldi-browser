@@ -101,21 +101,18 @@ BrowserRootView::DropInfo::~DropInfo() {
 }
 
 // static
-const char BrowserRootView::kViewClassName[] =
-    "browser/ui/views/frame/BrowserRootView";
+const char BrowserRootView::kViewClassName[] = "BrowserRootView";
 
 BrowserRootView::BrowserRootView(BrowserView* browser_view,
                                  views::Widget* widget)
-    : views::internal::RootView(widget),
-      browser_view_(browser_view),
-      weak_ptr_factory_(this) {}
+    : views::internal::RootView(widget), browser_view_(browser_view) {}
 
 BrowserRootView::~BrowserRootView() = default;
 
 bool BrowserRootView::GetDropFormats(
     int* formats,
     std::set<ui::ClipboardFormatType>* format_types) {
-  if (tabstrip()->visible() || toolbar()->visible()) {
+  if (tabstrip()->GetVisible() || toolbar()->GetVisible()) {
     *formats = ui::OSExchangeData::URL | ui::OSExchangeData::STRING;
     return true;
   }
@@ -131,7 +128,7 @@ bool BrowserRootView::CanDrop(const ui::OSExchangeData& data) {
   if (!browser_view_->IsBrowserTypeNormal())
     return false;
 
-  if (!tabstrip()->visible() && !toolbar()->visible())
+  if (!tabstrip()->GetVisible() && !toolbar()->GetVisible())
     return false;
 
   // If there is a URL, we'll allow the drop.
@@ -330,7 +327,7 @@ void BrowserRootView::PaintChildren(const views::PaintInfo& paint_info) {
     int active_tab_index = tabstrip()->controller()->GetActiveIndex();
     if (active_tab_index != ui::ListSelectionModel::kUnselectedIndex) {
       Tab* active_tab = tabstrip()->tab_at(active_tab_index);
-      if (active_tab && active_tab->visible()) {
+      if (active_tab && active_tab->GetVisible()) {
         gfx::RectF bounds(active_tab->GetMirroredBounds());
         ConvertRectToTarget(tabstrip(), this, &bounds);
         canvas->ClipRect(bounds, SkClipOp::kDifference);
@@ -362,7 +359,7 @@ void BrowserRootView::OnEventProcessingStarted(ui::Event* event) {
 BrowserRootView::DropTarget* BrowserRootView::GetDropTarget(
     const ui::DropTargetEvent& event) {
   // See if we should drop links onto tabstrip first.
-  if (tabstrip()->visible()) {
+  if (tabstrip()->GetVisible()) {
     // Allow the drop as long as the mouse is over tabstrip or vertically
     // before it.
     gfx::Point tabstrip_loc_in_host;

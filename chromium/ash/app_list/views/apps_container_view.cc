@@ -71,8 +71,9 @@ AppsContainerView::AppsContainerView(ContentsView* contents_view,
   AddChildView(apps_grid_view_);
 
   // Page switcher should be initialized after AppsGridView.
-  page_switcher_ = new PageSwitcher(apps_grid_view_->pagination_model(),
-                                    true /* vertical */);
+  page_switcher_ =
+      new PageSwitcher(apps_grid_view_->pagination_model(), true /* vertical */,
+                       contents_view_->app_list_view()->is_tablet_mode());
   AddChildView(page_switcher_);
 
   app_list_folder_view_ = new AppListFolderView(this, model, contents_view_);
@@ -103,14 +104,20 @@ void AppsContainerView::ShowActiveFolder(AppListFolderItem* folder_item) {
 
   SetShowState(SHOW_ACTIVE_FOLDER, false);
 
-  // Avoid announcing search box focus since it is overlapped with opening
-  // folder alert.
-  auto* search_box = contents_view_->GetSearchBoxView()->search_box();
-  search_box->GetViewAccessibility().OverrideIsIgnored(true);
-
+  // If there is no selected view in the root grid when a folder is opened,
+  // silently focus the first item in the folder to avoid showing the selection
+  // highlight or announcing to A11y, but still ensuring the arrow keys navigate
+  // from the first item.
+  AppListItemView* first_item_view_in_folder_grid =
+      app_list_folder_view_->items_grid_view()->view_model()->view_at(0);
+  if (!apps_grid_view()->has_selected_view()) {
+    first_item_view_in_folder_grid->SilentlyRequestFocus();
+  } else {
+    first_item_view_in_folder_grid->RequestFocus();
+  }
   // Disable all the items behind the folder so that they will not be reached
   // during focus traversal.
-  search_box->RequestFocus();
+
   DisableFocusForShowingActiveFolder(true);
 }
 
@@ -123,6 +130,7 @@ void AppsContainerView::ShowApps(AppListFolderItem* folder_item) {
 }
 
 void AppsContainerView::ResetForShowApps() {
+  UpdateSuggestionChips();
   SetShowState(SHOW_APPS, false);
   DisableFocusForShowingActiveFolder(false);
 }
@@ -151,19 +159,21 @@ void AppsContainerView::ReparentDragEnded() {
   show_state_ = AppsContainerView::SHOW_APPS;
 }
 
-void AppsContainerView::UpdateControlVisibility(AppListViewState app_list_state,
-                                                bool is_in_drag) {
+void AppsContainerView::UpdateControlVisibility(
+    ash::AppListViewState app_list_state,
+    bool is_in_drag) {
   apps_grid_view_->UpdateControlVisibility(app_list_state, is_in_drag);
-  page_switcher_->SetVisible(
-      app_list_state == AppListViewState::FULLSCREEN_ALL_APPS || is_in_drag);
+  page_switcher_->SetVisible(app_list_state ==
+                                 ash::AppListViewState::kFullscreenAllApps ||
+                             is_in_drag);
 
   // Ignore button press during dragging to avoid app list item views' opacity
   // being set to wrong value.
   page_switcher_->set_ignore_button_press(is_in_drag);
 
   suggestion_chip_container_view_->SetVisible(
-      app_list_state == AppListViewState::FULLSCREEN_ALL_APPS ||
-      app_list_state == AppListViewState::PEEKING || is_in_drag);
+      app_list_state == ash::AppListViewState::kFullscreenAllApps ||
+      app_list_state == ash::AppListViewState::kPeeking || is_in_drag);
 }
 
 void AppsContainerView::UpdateYPositionAndOpacity() {
@@ -174,7 +184,7 @@ void AppsContainerView::UpdateYPositionAndOpacity() {
   AppListView* app_list_view = contents_view_->app_list_view();
   bool should_restore_opacity =
       !app_list_view->is_in_drag() &&
-      (app_list_view->app_list_state() != AppListViewState::CLOSED);
+      (app_list_view->app_list_state() != ash::AppListViewState::kClosed);
   int screen_bottom = app_list_view->GetScreenBottom();
   gfx::Rect switcher_bounds = page_switcher_->GetBoundsInScreen();
   float centerline_above_work_area =
@@ -215,6 +225,7 @@ void AppsContainerView::OnTabletModeChanged(bool started) {
   suggestion_chip_container_view_->OnTabletModeChanged(started);
   apps_grid_view_->OnTabletModeChanged(started);
   app_list_folder_view_->OnTabletModeChanged(started);
+  page_switcher_->set_is_tablet_mode(started);
 }
 
 void AppsContainerView::Layout() {
@@ -324,8 +335,9 @@ const char* AppsContainerView::GetClassName() const {
 void AppsContainerView::OnGestureEvent(ui::GestureEvent* event) {
   // Ignore tap/long-press, allow those to pass to the ancestor view.
   if (event->type() == ui::ET_GESTURE_TAP ||
-      event->type() == ui::ET_GESTURE_LONG_PRESS)
+      event->type() == ui::ET_GESTURE_LONG_PRESS) {
     return;
+  }
 
   // Will forward events to |apps_grid_view_| if they occur in the same y-region
   if (event->type() == ui::ET_GESTURE_SCROLL_BEGIN &&
@@ -440,6 +452,7 @@ void AppsContainerView::SetShowState(ShowState show_state,
 
   switch (show_state_) {
     case SHOW_APPS:
+      page_switcher_->set_can_process_events_within_subtree(true);
       folder_background_view_->SetVisible(false);
       apps_grid_view_->ResetForShowApps();
       if (show_apps_with_animation)
@@ -448,10 +461,12 @@ void AppsContainerView::SetShowState(ShowState show_state,
         app_list_folder_view_->HideViewImmediately();
       break;
     case SHOW_ACTIVE_FOLDER:
+      page_switcher_->set_can_process_events_within_subtree(false);
       folder_background_view_->SetVisible(true);
       app_list_folder_view_->ScheduleShowHideAnimation(true, false);
       break;
     case SHOW_ITEM_REPARENT:
+      page_switcher_->set_can_process_events_within_subtree(true);
       folder_background_view_->SetVisible(false);
       app_list_folder_view_->ScheduleShowHideAnimation(false, true);
       break;

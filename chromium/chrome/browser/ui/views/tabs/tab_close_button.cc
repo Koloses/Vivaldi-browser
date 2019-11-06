@@ -8,7 +8,7 @@
 #include <memory>
 #include <vector>
 
-#include "base/hash.h"
+#include "base/hash/hash.h"
 #include "base/no_destructor.h"
 #include "base/stl_util.h"
 #include "chrome/app/vector_icons/vector_icons.h"
@@ -111,7 +111,7 @@ void TabCloseButton::Layout() {
   ImageButton::Layout();
   if (focus_ring()) {
     SkPath path;
-    path.addOval(gfx::RectToSkRect(GetMirroredRect(GetContentsBounds())));
+    path.addOval(gfx::RectToSkRect(GetContentsBounds()));
     focus_ring()->SetPath(path);
   }
 }

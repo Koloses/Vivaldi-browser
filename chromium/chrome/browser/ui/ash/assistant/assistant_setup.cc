@@ -9,8 +9,6 @@
 
 #include "ash/public/cpp/notification_utils.h"
 #include "ash/public/cpp/vector_icons/vector_icons.h"
-#include "ash/public/interfaces/assistant_controller.mojom.h"
-#include "ash/public/interfaces/constants.mojom.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/metrics/histogram_macros.h"
@@ -20,10 +18,11 @@
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/ash/assistant/assistant_pref_util.h"
-#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "chrome/browser/ui/webui/chromeos/assistant_optin/assistant_optin_ui.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "chromeos/services/assistant/public/cpp/assistant_prefs.h"
 #include "chromeos/services/assistant/public/mojom/constants.mojom.h"
 #include "chromeos/services/assistant/public/proto/settings_ui.pb.h"
 #include "components/arc/arc_prefs.h"
@@ -40,7 +39,6 @@ using chromeos::assistant::ConsentFlowUi;
 namespace {
 
 constexpr char kAssistantDisplaySource[] = "Assistant";
-constexpr char kAssistantSubPage[] = "googleAssistant";
 constexpr char kHotwordNotificationId[] = "assistant/hotword";
 constexpr char kNotifierAssistant[] = "assistant";
 
@@ -71,8 +69,8 @@ class AssistantHotwordNotificationDelegate
 
   void HandleHotwordEnableNotificationResult(bool enable) {
     if (enable) {
-      chrome::ShowSettingsSubPageForProfile(
-          ProfileManager::GetActiveUserProfile(), kAssistantSubPage);
+      chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
+          ProfileManager::GetActiveUserProfile(), chrome::kAssistantSubPage);
     }
     UMA_HISTOGRAM_BOOLEAN("Assistant.HotwordEnableNotification", enable);
   }
@@ -85,14 +83,7 @@ class AssistantHotwordNotificationDelegate
 }  // namespace
 
 AssistantSetup::AssistantSetup(service_manager::Connector* connector)
-    : connector_(connector), binding_(this), weak_factory_(this) {
-  // Bind to the AssistantSetupController in ash.
-  ash::mojom::AssistantSetupControllerPtr setup_controller;
-  connector_->BindInterface(ash::mojom::kServiceName, &setup_controller);
-  ash::mojom::AssistantSetupPtr ptr;
-  binding_.Bind(mojo::MakeRequest(&ptr));
-  setup_controller->SetAssistantSetup(std::move(ptr));
-
+    : connector_(connector), weak_factory_(this) {
   arc::VoiceInteractionControllerClient::Get()->AddObserver(this);
 }
 
@@ -101,13 +92,8 @@ AssistantSetup::~AssistantSetup() {
 }
 
 void AssistantSetup::StartAssistantOptInFlow(
-    ash::mojom::FlowType type,
+    ash::FlowType type,
     StartAssistantOptInFlowCallback callback) {
-  if (chromeos::AssistantOptInDialog::IsActive()) {
-    std::move(callback).Run(false);
-    return;
-  }
-
   chromeos::AssistantOptInDialog::Show(type, std::move(callback));
 }
 
@@ -151,7 +137,8 @@ void AssistantSetup::OnStateChanged(ash::mojom::VoiceInteractionState state) {
       message_center::SystemNotificationWarningLevel::NORMAL);
 
   NotificationDisplayService::GetForProfile(profile)->Display(
-      NotificationHandler::Type::TRANSIENT, *notification);
+      NotificationHandler::Type::TRANSIENT, *notification,
+      /*metadata=*/nullptr);
 }
 
 void AssistantSetup::SyncActivityControlState() {
@@ -189,25 +176,28 @@ void AssistantSetup::OnGetSettingsResponse(const std::string& settings) {
     case ConsentFlowUi::ASK_FOR_CONSENT:
       if (consent_ui.has_activity_control_ui() &&
           consent_ui.activity_control_ui().setting_zippy().size()) {
-        assistant::prefs::SetConsentStatus(
-            prefs, ash::mojom::ConsentStatus::kNotFound);
+        prefs->SetInteger(chromeos::assistant::prefs::kAssistantConsentStatus,
+                          chromeos::assistant::prefs::ConsentStatus::kNotFound);
       } else {
-        assistant::prefs::SetConsentStatus(
-            prefs, ash::mojom::ConsentStatus::kActivityControlAccepted);
+        prefs->SetInteger(chromeos::assistant::prefs::kAssistantConsentStatus,
+                          chromeos::assistant::prefs::ConsentStatus::
+                              kActivityControlAccepted);
       }
       break;
     case ConsentFlowUi::ERROR_ACCOUNT:
-      assistant::prefs::SetConsentStatus(
-          prefs, ash::mojom::ConsentStatus::kUnauthorized);
+      prefs->SetInteger(
+          chromeos::assistant::prefs::kAssistantConsentStatus,
+          chromeos::assistant::prefs::ConsentStatus::kUnauthorized);
       break;
     case ConsentFlowUi::ALREADY_CONSENTED:
-      assistant::prefs::SetConsentStatus(
-          prefs, ash::mojom::ConsentStatus::kActivityControlAccepted);
+      prefs->SetInteger(
+          chromeos::assistant::prefs::kAssistantConsentStatus,
+          chromeos::assistant::prefs::ConsentStatus::kActivityControlAccepted);
       break;
     case ConsentFlowUi::UNSPECIFIED:
     case ConsentFlowUi::ERROR:
-      assistant::prefs::SetConsentStatus(prefs,
-                                         ash::mojom::ConsentStatus::kUnknown);
+      prefs->SetInteger(chromeos::assistant::prefs::kAssistantConsentStatus,
+                        chromeos::assistant::prefs::ConsentStatus::kUnknown);
       LOG(ERROR) << "Invalid activity control consent status.";
   }
 }
@@ -216,11 +206,11 @@ void AssistantSetup::MaybeStartAssistantOptInFlow() {
   auto* pref_service = ProfileManager::GetActiveUserProfile()->GetPrefs();
   DCHECK(pref_service);
   if (!pref_service->GetUserPrefValue(
-          assistant::prefs::kAssistantConsentStatus)) {
+          chromeos::assistant::prefs::kAssistantConsentStatus)) {
     base::SequencedTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(&AssistantSetup::StartAssistantOptInFlow,
-                                  weak_factory_.GetWeakPtr(),
-                                  ash::mojom::FlowType::CONSENT_FLOW,
-                                  base::DoNothing::Once<bool>()));
+        FROM_HERE,
+        base::BindOnce(&AssistantSetup::StartAssistantOptInFlow,
+                       weak_factory_.GetWeakPtr(), ash::FlowType::kConsentFlow,
+                       base::DoNothing::Once<bool>()));
   }
 }

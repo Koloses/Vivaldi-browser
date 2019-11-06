@@ -21,6 +21,7 @@
 #include "cc/layers/layer_collections.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/layers/texture_layer.h"
+#include "chrome/android/chrome_jni_headers/CompositorView_jni.h"
 #include "chrome/browser/android/compositor/layer/toolbar_layer.h"
 #include "chrome/browser/android/compositor/layer_title_cache.h"
 #include "chrome/browser/android/compositor/scene_layer/scene_layer.h"
@@ -29,7 +30,6 @@
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/process_type.h"
-#include "jni/CompositorView_jni.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/android/resources/resource_manager.h"
 #include "ui/android/resources/ui_resource_provider.h"
@@ -92,11 +92,14 @@ CompositorView::CompositorView(JNIEnv* env,
   root_layer_->SetIsDrawable(true);
   root_layer_->SetBackgroundColor(SK_ColorWHITE);
 
-  surface_control_feature_checker_ = content::GpuFeatureChecker::Create(
+  // It is safe to not keep a ref on the feature checker because it adds one
+  // internally in CheckGpuFeatureAvailability and unrefs after the callback is
+  // dispatched.
+  auto surface_control_feature_checker = content::GpuFeatureChecker::Create(
       gpu::GpuFeatureType::GPU_FEATURE_TYPE_ANDROID_SURFACE_CONTROL,
       base::Bind(&CompositorView::OnSurfaceControlFeatureStatusUpdate,
                  weak_factory_.GetWeakPtr()));
-  surface_control_feature_checker_->CheckGpuFeatureAvailability();
+  surface_control_feature_checker->CheckGpuFeatureAvailability();
 }
 
 CompositorView::~CompositorView() {
@@ -155,8 +158,6 @@ void CompositorView::OnSurfaceControlFeatureStatusUpdate(bool available) {
     JNIEnv* env = base::android::AttachCurrentThread();
     Java_CompositorView_notifyWillUseSurfaceControl(env, obj_);
   }
-
-  surface_control_feature_checker_.reset();
 }
 
 void CompositorView::SurfaceCreated(JNIEnv* env,
@@ -177,12 +178,12 @@ void CompositorView::SurfaceChanged(JNIEnv* env,
                                     jint format,
                                     jint width,
                                     jint height,
-                                    bool backed_by_surface_texture,
+                                    bool can_be_used_with_surface_control,
                                     const JavaParamRef<jobject>& surface) {
   DCHECK(surface);
   if (current_surface_format_ != format) {
     current_surface_format_ = format;
-    compositor_->SetSurface(surface, backed_by_surface_texture);
+    compositor_->SetSurface(surface, can_be_used_with_surface_control);
   }
   gfx::Size size = gfx::Size(width, height);
   compositor_->SetWindowBounds(size);
@@ -294,6 +295,18 @@ void CompositorView::SetCompositorWindow(
   ui::WindowAndroid* wa =
       ui::WindowAndroid::FromJavaWindowAndroid(window_android);
   compositor_->SetRootWindow(wa);
+}
+
+void CompositorView::CacheBackBufferForCurrentSurface(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& object) {
+  compositor_->CacheBackBufferForCurrentSurface();
+}
+
+void CompositorView::EvictCachedBackBuffer(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& object) {
+  compositor_->EvictCachedBackBuffer();
 }
 
 }  // namespace android

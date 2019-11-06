@@ -12,8 +12,8 @@
 #include "ash/ash_export.h"
 #include "ash/display/display_configuration_controller.h"
 #include "ash/display/window_tree_host_manager.h"
-#include "ash/public/interfaces/ash_window_manager.mojom.h"
-#include "ash/wm/tablet_mode/tablet_mode_observer.h"
+#include "ash/public/cpp/tablet_mode_observer.h"
+#include "ash/shell_observer.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "ui/aura/window_observer.h"
@@ -26,7 +26,17 @@ class Window;
 
 namespace ash {
 
-using OrientationLockType = mojom::OrientationLockType;
+enum class OrientationLockType {
+  kAny,
+  kNatural,
+  kCurrent,
+  kPortrait,
+  kLandscape,
+  kPortraitPrimary,
+  kPortraitSecondary,
+  kLandscapePrimary,
+  kLandscapeSecondary,
+};
 
 // Test if the orientation lock type is primary/landscape/portrait.
 bool IsPrimaryOrientation(OrientationLockType type);
@@ -46,7 +56,8 @@ class ASH_EXPORT ScreenOrientationController
       public aura::WindowObserver,
       public AccelerometerReader::Observer,
       public WindowTreeHostManager::Observer,
-      public TabletModeObserver {
+      public TabletModeObserver,
+      public ShellObserver {
  public:
   // Observer that reports changes to the state of ScreenOrientationProvider's
   // rotation lock.
@@ -59,13 +70,12 @@ class ASH_EXPORT ScreenOrientationController
     virtual ~Observer() {}
   };
 
-  // Controls the behavior after lock is applied to the window (when
-  // the window becomes active window). |DisableSensor| disables
-  // the sensor based rotation and locks to the specific orientation.
-  // For example, PORTRAIT may rotate to PORTRAIT_PRIMARY or
-  // PORTRAIT_SECONDARY, and will allow rotate between these two.
-  // |DisableSensor| will lock the orientation to the one of them
-  // after locked to disalow the sensor basd rotation.
+  // Controls the behavior after lock is applied to the window (when the window
+  // becomes the active window). |DisableSensor| disables the sensor-based
+  // rotation and locks to the specific orientation. For example, PORTRAIT may
+  // rotate to PORTRAIT_PRIMARY or PORTRAIT_SECONDARY, and will allow rotation
+  // between these two. |DisableSensor| disallows the sensor-based rotation by
+  // locking the rotation to whichever specific orientation is applied.
   enum class LockCompletionBehavior {
     None,
     DisableSensor,
@@ -144,6 +154,10 @@ class ASH_EXPORT ScreenOrientationController
   void OnTabletModeEnding() override;
   void OnTabletModeEnded() override;
 
+  // ShellObserver:
+  void OnSplitViewModeStarted() override;
+  void OnSplitViewModeEnded() override;
+
  private:
   friend class ScreenOrientationControllerTestApi;
 
@@ -196,6 +210,10 @@ class ASH_EXPORT ScreenOrientationController
   // Determines the rotation lock, and orientation, for the currently active
   // window, and applies it. If there is none, rotation lock will be removed.
   void ApplyLockForActiveWindow();
+
+  // If there is a rotation lock that can be applied to window, applies it and
+  // returns true. Otherwise returns false.
+  bool ApplyLockForWindowIfPossible(const aura::Window* window);
 
   // Both |OrientationLockType::kLandscape| and
   // |OrientationLock::kPortrait| allow for rotation between the

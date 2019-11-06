@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,12 +49,6 @@ const CommandLinePrefStore::SwitchToPreferenceMapEntry
         {switches::kAuthAndroidNegotiateAccountType,
          prefs::kAuthAndroidNegotiateAccountType},
 #endif
-        {switches::kUnsafelyTreatInsecureOriginAsSecure,
-         prefs::kUnsafelyTreatInsecureOriginAsSecure},
-        // TODO(https://crbug.com/760761): This is not the ideal way to
-        // implement this. Refactor enterprise policy and command line handling
-        // so that this line isn't necessary, if possible.
-        {switches::kIsolateOrigins, prefs::kIsolateOrigins},
 #if defined(OS_CHROMEOS)
         {switches::kSchedulerConfiguration, prefs::kSchedulerConfiguration},
 #endif
@@ -86,7 +81,6 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
         {chromeos::switches::kEnableCastReceiver, prefs::kCastReceiverEnabled,
          true},
 #endif
-        {switches::kUnsafePacUrl, prefs::kPacHttpsUrlStrippingEnabled, false},
         {switches::kEnableLocalSyncBackend,
          syncer::prefs::kEnableLocalSyncBackend, true},
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
@@ -98,9 +92,7 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
 
 const CommandLinePrefStore::SwitchToPreferenceMapEntry
     ChromeCommandLinePrefStore::integer_switch_map_[] = {
-      { switches::kDiskCacheSize, prefs::kDiskCacheSize },
-      { switches::kMediaCacheSize, prefs::kMediaCacheSize },
-    };
+        {switches::kDiskCacheSize, prefs::kDiskCacheSize}};
 
 ChromeCommandLinePrefStore::ChromeCommandLinePrefStore(
     const base::CommandLine* command_line)

@@ -146,8 +146,7 @@ ResourceRequestDetector::ResourceRequestDetector(
     std::unique_ptr<IncidentReceiver> incident_receiver)
     : incident_receiver_(std::move(incident_receiver)),
       database_manager_(database_manager),
-      allow_null_profile_for_testing_(false),
-      weak_ptr_factory_(this) {}
+      allow_null_profile_for_testing_(false) {}
 
 ResourceRequestDetector::~ResourceRequestDetector() {
 }
@@ -158,9 +157,9 @@ void ResourceRequestDetector::ProcessResourceRequest(
   if (!request->url.SchemeIsHTTPOrHTTPS())
     return;
 
-  if (request->resource_type == content::RESOURCE_TYPE_SUB_FRAME ||
-      request->resource_type == content::RESOURCE_TYPE_SCRIPT ||
-      request->resource_type == content::RESOURCE_TYPE_OBJECT) {
+  if (request->resource_type == content::ResourceType::kSubFrame ||
+      request->resource_type == content::ResourceType::kScript ||
+      request->resource_type == content::ResourceType::kObject) {
     ResourceRequestDetectorClient::Start(
         request->url, database_manager_,
         base::BindOnce(&ResourceRequestDetector::ReportIncidentOnUIThread,

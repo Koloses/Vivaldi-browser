@@ -5,10 +5,10 @@
 #include "chrome/browser/chromeos/login/screens/assistant_optin_flow_screen.h"
 
 #include "chrome/browser/chromeos/assistant/assistant_util.h"
-#include "chrome/browser/chromeos/login/screens/assistant_optin_flow_screen_view.h"
-#include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
+#include "chrome/browser/chromeos/login/users/chrome_user_manager_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/webui/chromeos/login/assistant_optin_flow_screen_handler.h"
 #include "chromeos/assistant/buildflags.h"
 #include "chromeos/constants/chromeos_switches.h"
 
@@ -20,10 +20,9 @@ constexpr const char kFlowFinished[] = "flow-finished";
 }  // namespace
 
 AssistantOptInFlowScreen::AssistantOptInFlowScreen(
-    BaseScreenDelegate* base_screen_delegate,
     AssistantOptInFlowScreenView* view,
     const base::RepeatingClosure& exit_callback)
-    : BaseScreen(base_screen_delegate, OobeScreen::SCREEN_ASSISTANT_OPTIN_FLOW),
+    : BaseScreen(AssistantOptInFlowScreenView::kScreenId),
       view_(view),
       exit_callback_(exit_callback) {
   DCHECK(view_);
@@ -40,9 +39,14 @@ void AssistantOptInFlowScreen::Show() {
   if (!view_)
     return;
 
+  if (chrome_user_manager_util::IsPublicSessionOrEphemeralLogin()) {
+    exit_callback_.Run();
+    return;
+  }
+
 #if BUILDFLAG(ENABLE_CROS_ASSISTANT)
   if (chromeos::switches::IsAssistantEnabled() &&
-      assistant::IsAssistantAllowedForProfile(
+      ::assistant::IsAssistantAllowedForProfile(
           ProfileManager::GetActiveUserProfile()) ==
           ash::mojom::AssistantAllowedState::ALLOWED) {
     view_->Show();

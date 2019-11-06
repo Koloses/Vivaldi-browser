@@ -8,12 +8,12 @@
 #include <string>
 #include <utility>
 
-#include "android_webview/browser/aw_browser_context.h"
+#include "android_webview/browser/aw_browser_process.h"
 #include "android_webview/browser/aw_contents_client_bridge.h"
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/aw_resource_context.h"
 #include "android_webview/browser/net/aw_web_resource_request.h"
-#include "android_webview/browser/net_helpers.h"
+#include "android_webview/browser/network_service/net_helpers.h"
 #include "android_webview/browser/renderer_host/auto_login_parser.h"
 #include "android_webview/browser/safe_browsing/aw_safe_browsing_resource_throttle.h"
 #include "android_webview/common/url_constants.h"
@@ -21,7 +21,6 @@
 #include "base/task/post_task.h"
 #include "components/safe_browsing/android/safe_browsing_api_handler.h"
 #include "components/safe_browsing/features.h"
-#include "components/web_restrictions/browser/web_restrictions_resource_throttle.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_dispatcher_host.h"
@@ -113,7 +112,7 @@ class IoThreadClientThrottle : public content::ResourceThrottle {
   void WillStartRequest(bool* defer) override;
   void WillRedirectRequest(const net::RedirectInfo& redirect_info,
                            bool* defer) override;
-  const char* GetNameForLogging() const override;
+  const char* GetNameForLogging() override;
 
   void OnIoThreadClientReady(int new_render_process_id,
                              int new_render_frame_id);
@@ -144,7 +143,7 @@ IoThreadClientThrottle::~IoThreadClientThrottle() {
       RemovePendingThrottleOnIoThread(this);
 }
 
-const char* IoThreadClientThrottle::GetNameForLogging() const {
+const char* IoThreadClientThrottle::GetNameForLogging() {
   return "IoThreadClientThrottle";
 }
 
@@ -260,9 +259,9 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
       content::ResourceThrottle* throttle =
           MaybeCreateAwSafeBrowsingResourceThrottle(
               request, resource_type,
-              AwBrowserContext::GetDefault()->GetSafeBrowsingDBManager(),
-              AwBrowserContext::GetDefault()->GetSafeBrowsingUIManager(),
-              AwBrowserContext::GetDefault()
+              AwBrowserProcess::GetInstance()->GetSafeBrowsingDBManager(),
+              AwBrowserProcess::GetInstance()->GetSafeBrowsingUIManager(),
+              AwBrowserProcess::GetInstance()
                   ->GetSafeBrowsingWhitelistManager());
       if (throttle == nullptr) {
         // Should not happen
@@ -279,12 +278,6 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
   // however io_client may or may not be ready at the time depending on whether
   // webcontents is created.
   throttles->push_back(std::move(ioThreadThrottle));
-
-  bool is_main_frame = resource_type == content::RESOURCE_TYPE_MAIN_FRAME;
-  throttles->push_back(
-      std::make_unique<web_restrictions::WebRestrictionsResourceThrottle>(
-          AwBrowserContext::GetDefault()->GetWebRestrictionProvider(),
-          request->url(), is_main_frame));
 }
 
 void AwResourceDispatcherHostDelegate::RequestComplete(
@@ -359,7 +352,7 @@ void AwResourceDispatcherHostDelegate::OnResponseStarted(
     return;
   }
 
-  if (request_info->GetResourceType() == content::RESOURCE_TYPE_MAIN_FRAME) {
+  if (request_info->GetResourceType() == content::ResourceType::kMainFrame) {
     // Check for x-auto-login header.
     HeaderData header_data;
     if (ParserHeaderInResponse(request, ALLOW_ANY_REALM, &header_data)) {

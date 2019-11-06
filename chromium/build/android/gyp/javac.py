@@ -536,7 +536,7 @@ def main(argv):
     ])
 
   if options.chromium_code:
-    javac_cmd.extend(['-Xlint:unchecked', '-Werror'])
+    javac_cmd.extend(['-Werror'])
   else:
     # XDignore.symbol.file makes javac compile against rt.jar instead of
     # ct.sym. This means that using a java internal package/class will not
@@ -572,6 +572,7 @@ def main(argv):
   # they change.
   depfile_deps = [javac_path] + classpath_inputs + options.java_srcjars
   input_paths = depfile_deps + java_files
+  input_paths += [x[0] for x in options.additional_jar_files]
 
   output_paths = [
       options.jar_path,

@@ -36,7 +36,6 @@ class HttpResponseHeaders;
 
 namespace content {
 
-class NavigationData;
 class NavigationHandle;
 class RenderViewHost;
 class TestRenderViewHost;
@@ -68,7 +67,11 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   // WebContentsTester implementation.
   void CommitPendingNavigation() override;
   TestRenderFrameHost* GetPendingMainFrame() override;
-  void NavigateAndCommit(const GURL& url) override;
+
+  void NavigateAndCommit(
+      const GURL& url,
+      ui::PageTransition transition = ui::PAGE_TRANSITION_LINK) override;
+
   void NavigateAndFail(
       const GURL& url,
       int error_code,
@@ -88,15 +91,12 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
                                          bool was_within_same_document,
                                          int item_sequence_number,
                                          int document_sequence_number);
-  void SetNavigationData(
-      NavigationHandle* navigation_handle,
-      std::unique_ptr<NavigationData> navigation_data) override;
   void SetHttpResponseHeaders(
       NavigationHandle* navigation_handle,
       scoped_refptr<net::HttpResponseHeaders> response_headers) override;
   void SetOpener(WebContents* opener) override;
-  const std::string& GetSaveFrameHeaders() const override;
-  const base::string16& GetSuggestedFileName() const override;
+  const std::string& GetSaveFrameHeaders() override;
+  const base::string16& GetSuggestedFileName() override;
   bool HasPendingDownloadImage(const GURL& url) override;
   bool TestDidDownloadImage(
       const GURL& url,

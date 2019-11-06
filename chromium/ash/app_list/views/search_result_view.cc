@@ -17,8 +17,8 @@
 #include "ash/app_list/views/search_result_list_view.h"
 #include "ash/public/cpp/app_list/app_list_config.h"
 #include "ash/public/cpp/app_list/app_list_switches.h"
+#include "ash/public/cpp/app_list/app_list_types.h"
 #include "base/bind.h"
-#include "base/strings/utf_string_conversions.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/font.h"
@@ -27,7 +27,6 @@
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
-#include "ui/views/controls/progress_bar.h"
 
 namespace app_list {
 
@@ -66,23 +65,21 @@ SearchResultView::SearchResultView(SearchResultListView* list_view,
                                    AppListViewDelegate* view_delegate)
     : list_view_(list_view),
       view_delegate_(view_delegate),
-      icon_(new views::ImageView),
-      display_icon_(new views::ImageView),
-      badge_icon_(new views::ImageView),
-      actions_view_(new SearchResultActionsView(this)),
-      progress_bar_(new views::ProgressBar),
       weak_ptr_factory_(this) {
   SetFocusBehavior(FocusBehavior::ALWAYS);
+
+  icon_ = AddChildView(std::make_unique<views::ImageView>());
+  display_icon_ = AddChildView(std::make_unique<views::ImageView>());
+  badge_icon_ = AddChildView(std::make_unique<views::ImageView>());
+  auto* actions_view =
+      AddChildView(std::make_unique<SearchResultActionsView>(this));
+  set_actions_view(actions_view);
+
   icon_->set_can_process_events_within_subtree(false);
   display_icon_->set_can_process_events_within_subtree(false);
   SetDisplayIcon(gfx::ImageSkia());
   badge_icon_->set_can_process_events_within_subtree(false);
 
-  AddChildView(icon_);
-  AddChildView(display_icon_);
-  AddChildView(badge_icon_);
-  AddChildView(actions_view_);
-  AddChildView(progress_bar_);
   set_context_menu_controller(this);
   set_notify_enter_exit_on_child(true);
 }
@@ -95,13 +92,7 @@ void SearchResultView::OnResultChanged() {
   OnMetadataChanged();
   UpdateTitleText();
   UpdateDetailsText();
-  OnIsInstallingChanged();
-  OnPercentDownloadedChanged();
   SchedulePaint();
-}
-
-void SearchResultView::ClearSelectedAction() {
-  actions_view_->SetSelectedAction(-1);
 }
 
 void SearchResultView::UpdateTitleText() {
@@ -120,22 +111,6 @@ void SearchResultView::UpdateDetailsText() {
     CreateDetailsRenderText();
 
   UpdateAccessibleName();
-}
-
-base::string16 SearchResultView::ComputeAccessibleName() const {
-  if (!result())
-    return base::string16();
-
-  base::string16 accessible_name = result()->title();
-  if (!result()->title().empty() && !result()->details().empty())
-    accessible_name += base::ASCIIToUTF16(", ");
-  accessible_name += result()->details();
-
-  return accessible_name;
-}
-
-void SearchResultView::UpdateAccessibleName() {
-  SetAccessibleName(ComputeAccessibleName());
 }
 
 void SearchResultView::CreateTitleRenderText() {
@@ -190,7 +165,7 @@ void SearchResultView::OnQueryRemovalAccepted(bool accepted, int event_flags) {
 
   if (confirm_remove_by_long_press_) {
     confirm_remove_by_long_press_ = false;
-    SetBackgroundHighlighted(false);
+    SetSelected(false, base::nullopt);
   }
 
   RecordZeroStateSearchResultRemovalHistogram(
@@ -238,54 +213,43 @@ void SearchResultView::Layout() {
   const int max_actions_width =
       (rect.right() - kActionButtonRightMargin - icon_bounds.right()) / 2;
   int actions_width =
-      std::min(max_actions_width, actions_view_->GetPreferredSize().width());
+      std::min(max_actions_width, actions_view()->GetPreferredSize().width());
 
   gfx::Rect actions_bounds(rect);
   actions_bounds.set_x(rect.right() - kActionButtonRightMargin - actions_width);
   actions_bounds.set_width(actions_width);
-  actions_view_->SetBoundsRect(actions_bounds);
-
-  const int progress_width = rect.width() / 5;
-  const int progress_height = progress_bar_->GetPreferredSize().height();
-  const gfx::Rect progress_bounds(
-      rect.right() - kActionButtonRightMargin - progress_width,
-      rect.y() + (rect.height() - progress_height) / 2, progress_width,
-      progress_height);
-  progress_bar_->SetBoundsRect(progress_bounds);
+  actions_view()->SetBoundsRect(actions_bounds);
 }
 
 bool SearchResultView::OnKeyPressed(const ui::KeyEvent& event) {
-  // |result()| could be NULL when result list is changing.
+  // result() could be null when result list is changing.
   if (!result())
     return false;
 
   switch (event.key_code()) {
-    case ui::VKEY_RETURN: {
-      int selected = actions_view_->selected_action();
-      if (actions_view_->IsValidActionIndex(selected)) {
-        OnSearchResultActionActivated(selected, event.flags());
+    case ui::VKEY_RETURN:
+      if (actions_view()->HasSelectedAction()) {
+        OnSearchResultActionActivated(static_cast<ash::OmniBoxZeroStateAction>(
+                                          actions_view()->GetSelectedAction()),
+                                      event.flags());
       } else {
         list_view_->SearchResultActivated(this, event.flags());
       }
       return true;
-    }
     case ui::VKEY_UP:
-    case ui::VKEY_DOWN: {
-      if (actions_view_->has_children()) {
-        return list_view_->HandleVerticalFocusMovement(
-            this, event.key_code() == ui::VKEY_UP);
-      }
-      break;
-    }
+    case ui::VKEY_DOWN:
+      return !actions_view()->children().empty() &&
+             list_view_->HandleVerticalFocusMovement(
+                 this, event.key_code() == ui::VKEY_UP);
+    case ui::VKEY_DELETE:
+    case ui::VKEY_BROWSER_BACK:
+      // Allows alt+(back or delete) to trigger the 'remove result' dialog.
+      OnSearchResultActionActivated(
+          ash::OmniBoxZeroStateAction::kRemoveSuggestion, event.flags());
+      return true;
     default:
-      break;
+      return false;
   }
-
-  return false;
-}
-
-void SearchResultView::ChildPreferredSizeChanged(views::View* child) {
-  Layout();
 }
 
 void SearchResultView::PaintButtonContents(gfx::Canvas* canvas) {
@@ -296,15 +260,14 @@ void SearchResultView::PaintButtonContents(gfx::Canvas* canvas) {
   gfx::Rect content_rect(rect);
   gfx::Rect text_bounds(rect);
   text_bounds.set_x(kPreferredIconViewWidth);
-  if (actions_view_->visible()) {
+  if (actions_view()->GetVisible()) {
     text_bounds.set_width(
         rect.width() - kPreferredIconViewWidth - kTextTrailPadding -
-        actions_view_->bounds().width() -
-        (actions_view_->has_children() ? kActionButtonRightMargin : 0));
+        actions_view()->bounds().width() -
+        (actions_view()->children().empty() ? 0 : kActionButtonRightMargin));
   } else {
     text_bounds.set_width(rect.width() - kPreferredIconViewWidth -
-                          kTextTrailPadding - progress_bar_->bounds().width() -
-                          kActionButtonRightMargin);
+                          kTextTrailPadding - kActionButtonRightMargin);
   }
   text_bounds.set_x(
       GetMirroredXWithWidthInView(text_bounds.x(), text_bounds.width()));
@@ -316,8 +279,9 @@ void SearchResultView::PaintButtonContents(gfx::Canvas* canvas) {
 
   // Possibly call FillRect a second time (these colours are partially
   // transparent, so the previous FillRect is not redundant).
-  if (background_highlighted())
+  if (selected() && !actions_view()->HasSelectedAction()) {
     canvas->FillRect(content_rect, kRowHighlightedColor);
+  }
 
   gfx::Rect border_bottom = gfx::SubtractRects(rect, content_rect);
   canvas->FillRect(border_bottom, kResultBorderColor);
@@ -348,27 +312,25 @@ void SearchResultView::PaintButtonContents(gfx::Canvas* canvas) {
 
 void SearchResultView::OnFocus() {
   ScrollRectToVisible(GetLocalBounds());
-  SetBackgroundHighlighted(true);
-  selected_ = true;
-  actions_view_->UpdateButtonsOnStateChanged();
+  SetSelected(true, base::nullopt);
+  actions_view()->UpdateButtonsOnStateChanged();
 }
 
 void SearchResultView::OnBlur() {
-  SetBackgroundHighlighted(false);
-  selected_ = false;
-  actions_view_->UpdateButtonsOnStateChanged();
+  SetSelected(false, base::nullopt);
+  actions_view()->UpdateButtonsOnStateChanged();
 }
 
 void SearchResultView::OnMouseEntered(const ui::MouseEvent& event) {
-  actions_view_->UpdateButtonsOnStateChanged();
+  actions_view()->UpdateButtonsOnStateChanged();
 }
 
 void SearchResultView::OnMouseExited(const ui::MouseEvent& event) {
-  actions_view_->UpdateButtonsOnStateChanged();
+  actions_view()->UpdateButtonsOnStateChanged();
 }
 
 void SearchResultView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  if (!visible())
+  if (!GetVisible())
     return;
 
   // This is a work around to deal with the nested button case(append and remove
@@ -389,11 +351,11 @@ void SearchResultView::VisibilityChanged(View* starting_from, bool is_visible) {
 void SearchResultView::OnGestureEvent(ui::GestureEvent* event) {
   switch (event->type()) {
     case ui::ET_GESTURE_LONG_PRESS:
-      if (actions_view_->IsValidActionIndex(
+      if (actions_view()->IsValidActionIndex(
               ash::OmniBoxZeroStateAction::kRemoveSuggestion)) {
         ScrollRectToVisible(GetLocalBounds());
         NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
-        SetBackgroundHighlighted(true);
+        SetSelected(true, base::nullopt);
         confirm_remove_by_long_press_ = true;
         OnSearchResultActionActivated(
             ash::OmniBoxZeroStateAction::kRemoveSuggestion, event->flags());
@@ -436,9 +398,9 @@ void SearchResultView::OnMetadataChanged() {
     badge_icon_->SetVisible(true);
   }
 
-  // Updates |actions_view_|.
-  actions_view_->SetActions(result() ? result()->actions()
-                                     : SearchResult::Actions());
+  // Updates |actions_view()|.
+  actions_view()->SetActions(result() ? result()->actions()
+                                      : SearchResult::Actions());
 }
 
 void SearchResultView::SetIconImage(const gfx::ImageSkia& source,
@@ -449,21 +411,6 @@ void SearchResultView::SetIconImage(const gfx::ImageSkia& source,
       source, skia::ImageOperations::RESIZE_BEST,
       gfx::Size(icon_dimension, icon_dimension));
   icon->SetImage(image);
-}
-
-void SearchResultView::OnIsInstallingChanged() {
-  const bool is_installing = result() && result()->is_installing();
-  actions_view_->SetVisible(!is_installing);
-  progress_bar_->SetVisible(is_installing);
-}
-
-void SearchResultView::OnPercentDownloadedChanged() {
-  progress_bar_->SetValue(result() ? result()->percent_downloaded() / 100.0
-                                   : 0);
-}
-
-void SearchResultView::OnItemInstalled() {
-  list_view_->OnSearchResultInstalled(this);
 }
 
 void SearchResultView::OnSearchResultActionActivated(size_t index,
@@ -482,6 +429,7 @@ void SearchResultView::OnSearchResultActionActivated(size_t index,
       RecordZeroStateSearchResultUserActionHistogram(
           ZeroStateSearchResultUserActionType::kRemoveResult);
       RemoveQueryConfirmationDialog* dialog = new RemoveQueryConfirmationDialog(
+          result()->title(),
           base::BindOnce(&SearchResultView::OnQueryRemovalAccepted,
                          weak_ptr_factory_.GetWeakPtr()),
           event_flags, list_view_->app_list_main_view()->contents_view());
@@ -496,8 +444,21 @@ void SearchResultView::OnSearchResultActionActivated(size_t index,
   }
 }
 
+void SearchResultView::OnSearchResultActionsUnSelected() {
+  // If the selection has changed to default result action, announce the
+  // selection change to a11y stack.
+  if (selected())
+    NotifyAccessibilityEvent(ax::mojom::Event::kSelection, true);
+}
+
 bool SearchResultView::IsSearchResultHoveredOrSelected() {
   return IsMouseHovered() || selected();
+}
+
+void SearchResultView::OnMenuClosed() {
+  // Release menu since its menu model delegate (AppContextMenu) could be
+  // released as a result of menu command execution.
+  context_menu_.reset();
 }
 
 void SearchResultView::ShowContextMenuForViewImpl(
@@ -518,24 +479,25 @@ void SearchResultView::OnGetContextMenu(
     views::View* source,
     const gfx::Point& point,
     ui::MenuSourceType source_type,
-    std::vector<ash::mojom::MenuItemPtr> menu) {
-  if (menu.empty() || context_menu_->IsShowingMenu())
+    std::unique_ptr<ui::SimpleMenuModel> menu_model) {
+  if (!menu_model || (context_menu_ && context_menu_->IsShowingMenu()))
     return;
 
+  AppLaunchedMetricParams metric_params = {
+      ash::AppListLaunchedFrom::kLaunchedFromSearchBox,
+      ash::AppListLaunchType::kSearchResult};
+  view_delegate_->GetAppLaunchedMetricParams(&metric_params);
+
   context_menu_ = std::make_unique<AppListMenuModelAdapter>(
-      std::string(), this, source_type, this,
-      AppListMenuModelAdapter::SEARCH_RESULT, base::OnceClosure());
-  context_menu_->Build(std::move(menu));
-  context_menu_->Run(gfx::Rect(point, gfx::Size()), views::MENU_ANCHOR_TOPLEFT,
+      std::string(), std::move(menu_model), GetWidget(), source_type,
+      metric_params, AppListMenuModelAdapter::SEARCH_RESULT,
+      base::BindOnce(&SearchResultView::OnMenuClosed,
+                     weak_ptr_factory_.GetWeakPtr()),
+      view_delegate_->GetSearchModel()->tablet_mode());
+  context_menu_->Run(gfx::Rect(point, gfx::Size()),
+                     views::MenuAnchorPosition::kTopLeft,
                      views::MenuRunner::HAS_MNEMONICS);
   source->RequestFocus();
-}
-
-void SearchResultView::ExecuteCommand(int command_id, int event_flags) {
-  if (result()) {
-    view_delegate_->SearchResultContextMenuItemSelected(
-        result()->id(), command_id, event_flags);
-  }
 }
 
 void SearchResultView::SetDisplayIcon(const gfx::ImageSkia& source) {

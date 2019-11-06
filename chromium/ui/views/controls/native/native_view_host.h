@@ -28,8 +28,7 @@ extern const char kWidgetNativeViewHostKey[];
 // the platform-specific work of manipulating the underlying OS widget type.
 class VIEWS_EXPORT NativeViewHost : public View {
  public:
-  // The NativeViewHost's class name.
-  static const char kViewClassName[];
+  METADATA_HEADER(NativeViewHost);
 
   NativeViewHost();
   ~NativeViewHost() override;
@@ -86,17 +85,6 @@ class VIEWS_EXPORT NativeViewHost : public View {
   void set_fast_resize(bool fast_resize) { fast_resize_ = fast_resize; }
   bool fast_resize() const { return fast_resize_; }
 
-  // Sets the color to paint the background during a resize that involves a
-  // clip. This is white by default.
-  void set_resize_background_color(SkColor resize_background_color) {
-    resize_background_color_ = resize_background_color;
-  }
-
-  // Value of fast_resize() the last time Layout() was invoked.
-  bool fast_resize_at_last_layout() const {
-    return fast_resize_at_last_layout_;
-  }
-
   gfx::NativeView native_view() const { return native_view_; }
 
   void NativeViewDestroyed();
@@ -115,7 +103,6 @@ class VIEWS_EXPORT NativeViewHost : public View {
   void OnVisibleBoundsChanged() override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
-  const char* GetClassName() const override;
 
  private:
   friend class test::NativeViewHostTestBase;
@@ -130,7 +117,7 @@ class VIEWS_EXPORT NativeViewHost : public View {
   void ClearFocus();
 
   // The attached native view. There is exactly one native_view_ attached.
-  gfx::NativeView native_view_;
+  gfx::NativeView native_view_ = nullptr;
 
   // A platform-specific wrapper that does the OS-level manipulation of the
   // attached gfx::NativeView.
@@ -142,13 +129,7 @@ class VIEWS_EXPORT NativeViewHost : public View {
 
   // True if the native view is being resized using the fast method described
   // in the setter/accessor above.
-  bool fast_resize_;
-
-  // Value of |fast_resize_| during the last call to Layout.
-  bool fast_resize_at_last_layout_;
-
-  // Color to paint in the background while resizing.
-  SkColor resize_background_color_;
+  bool fast_resize_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(NativeViewHost);
 };

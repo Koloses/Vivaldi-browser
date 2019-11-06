@@ -18,12 +18,11 @@
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/payments/payment_method_data.h"
 #include "third_party/blink/renderer/modules/payments/payment_options.h"
+#include "third_party/blink/renderer/modules/payments/payment_request_delegate.h"
 #include "third_party/blink/renderer/modules/payments/payment_state_resolver.h"
-#include "third_party/blink/renderer/modules/payments/payment_updater.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/wtf/compiler.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -33,6 +32,7 @@ class ExceptionState;
 class ExecutionContext;
 class PaymentAddress;
 class PaymentDetailsInit;
+class PaymentRequestUpdateEvent;
 class PaymentResponse;
 class ScriptPromiseResolver;
 class ScriptState;
@@ -41,7 +41,7 @@ class MODULES_EXPORT PaymentRequest final
     : public EventTargetWithInlineData,
       public payments::mojom::blink::PaymentRequestClient,
       public PaymentStateResolver,
-      public PaymentUpdater,
+      public PaymentRequestDelegate,
       public ContextLifecycleObserver,
       public ActiveScriptWrappable<PaymentRequest> {
   DEFINE_WRAPPERTYPEINFO();
@@ -67,6 +67,7 @@ class MODULES_EXPORT PaymentRequest final
   ~PaymentRequest() override;
 
   ScriptPromise show(ScriptState*);
+  ScriptPromise show(ScriptState*, ScriptPromise details_promise);
   ScriptPromise abort(ScriptState*);
 
   const String& id() const { return id_; }
@@ -92,34 +93,40 @@ class MODULES_EXPORT PaymentRequest final
   ScriptPromise Complete(ScriptState*, PaymentComplete result) override;
   ScriptPromise Retry(ScriptState*, const PaymentValidationErrors*) override;
 
-  // PaymentUpdater:
+  // PaymentRequestDelegate:
   void OnUpdatePaymentDetails(const ScriptValue& details_script_value) override;
   void OnUpdatePaymentDetailsFailure(const String& error) override;
+  bool IsInteractive() const override;
 
   void Trace(blink::Visitor*) override;
 
   void OnCompleteTimeoutForTesting();
+  void OnUpdatePaymentDetailsTimeoutForTesting();
 
   enum {
     // Implementation defined constants controlling the allowed list length
     kMaxListSize = 1024,
-    // ... and string length
+    // ... and string length.
     kMaxStringLength = 1024,
-    // ... and JSON length.
-    kMaxJSONStringLength = 1048576
   };
 
  private:
+  // Called when the renderer loses the IPC connection to the browser.
+  void OnConnectionError();
+
   // LifecycleObserver:
   void ContextDestroyed(ExecutionContext*) override;
 
   // payments::mojom::blink::PaymentRequestClient:
+  void OnPaymentMethodChange(const String& method_name,
+                             const String& stringified_details) override;
   void OnShippingAddressChange(
       payments::mojom::blink::PaymentAddressPtr) override;
   void OnShippingOptionChange(const String& shipping_option_id) override;
   void OnPayerDetailChange(payments::mojom::blink::PayerDetailPtr) override;
   void OnPaymentResponse(payments::mojom::blink::PaymentResponsePtr) override;
-  void OnError(payments::mojom::blink::PaymentErrorReason) override;
+  void OnError(payments::mojom::blink::PaymentErrorReason,
+               const String& error_message) override;
   void OnComplete() override;
   void OnAbort(bool aborted_successfully) override;
   void OnCanMakePayment(
@@ -129,6 +136,7 @@ class MODULES_EXPORT PaymentRequest final
   void WarnNoFavicon() override;
 
   void OnCompleteTimeout(TimerBase*);
+  void OnUpdatePaymentDetailsTimeout(TimerBase*);
 
   // Clears the promise resolvers and closes the Mojo connection.
   void ClearResolversAndCloseMojoConnection();
@@ -138,6 +146,11 @@ class MODULES_EXPORT PaymentRequest final
   // The pending promise can be [[acceptPromise]] or [[retryPromise]] in the
   // spec.
   ScriptPromiseResolver* GetPendingAcceptPromiseResolver() const;
+
+  // Implements the PaymentRequest updated algorithm.
+  // https://w3c.github.io/payment-request/#paymentrequest-updated-algorithm
+  void DispatchPaymentRequestUpdateEvent(EventTarget* event_target,
+                                         PaymentRequestUpdateEvent* event);
 
   Member<const PaymentOptions> options_;
   Member<PaymentAddress> shipping_address_;
@@ -155,6 +168,8 @@ class MODULES_EXPORT PaymentRequest final
   payments::mojom::blink::PaymentRequestPtr payment_provider_;
   mojo::Binding<payments::mojom::blink::PaymentRequestClient> client_binding_;
   TaskRunnerTimer<PaymentRequest> complete_timer_;
+  TaskRunnerTimer<PaymentRequest> update_payment_details_timer_;
+  bool is_waiting_for_show_promise_to_resolve_;
 
   DISALLOW_COPY_AND_ASSIGN(PaymentRequest);
 };

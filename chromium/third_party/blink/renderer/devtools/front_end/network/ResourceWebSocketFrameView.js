@@ -46,7 +46,7 @@ Network.ResourceWebSocketFrameView = class extends UI.VBox {
     this._dataGrid = new DataGrid.SortableDataGrid(columns);
     this._dataGrid.setRowContextMenuCallback(onRowContextMenu.bind(this));
     this._dataGrid.setStickToBottom(true);
-    this._dataGrid.setCellClass('websocket-frame-view-td');
+    this._dataGrid.setStriped(true);
     this._timeComparator =
         /** @type {function(!Network.ResourceWebSocketFrameNode, !Network.ResourceWebSocketFrameNode):number} */ (
             Network.ResourceWebSocketFrameNodeTimeComparator);
@@ -115,9 +115,10 @@ Network.ResourceWebSocketFrameView = class extends UI.VBox {
    * @return {string}
    */
   static opCodeDescription(opCode, mask) {
-    const rawDescription = Network.ResourceWebSocketFrameView.opCodeDescriptions[opCode] || '';
-    const localizedDescription = Common.UIString(rawDescription);
-    return Common.UIString('%s (Opcode %d%s)', localizedDescription, opCode, (mask ? ', mask' : ''));
+    const localizedDescription = Network.ResourceWebSocketFrameView.opCodeDescriptions[opCode] || '';
+    if (mask)
+      return ls`${localizedDescription} (Opcode ${opCode}, mask)`;
+    return ls`${localizedDescription} (Opcode ${opCode})`;
   }
 
   /**
@@ -230,12 +231,12 @@ Network.ResourceWebSocketFrameView.OpCodes = {
 Network.ResourceWebSocketFrameView.opCodeDescriptions = (function() {
   const opCodes = Network.ResourceWebSocketFrameView.OpCodes;
   const map = [];
-  map[opCodes.ContinuationFrame] = 'Continuation Frame';
-  map[opCodes.TextFrame] = 'Text Message';
-  map[opCodes.BinaryFrame] = 'Binary Message';
-  map[opCodes.ContinuationFrame] = 'Connection Close Message';
-  map[opCodes.PingFrame] = 'Ping Message';
-  map[opCodes.PongFrame] = 'Pong Message';
+  map[opCodes.ContinuationFrame] = ls`Continuation Frame`;
+  map[opCodes.TextFrame] = ls`Text Message`;
+  map[opCodes.BinaryFrame] = ls`Binary Message`;
+  map[opCodes.ContinuationFrame] = ls`Connection Close Message`;
+  map[opCodes.PingFrame] = ls`Ping Message`;
+  map[opCodes.PongFrame] = ls`Pong Message`;
   return map;
 })();
 
@@ -267,12 +268,16 @@ Network.ResourceWebSocketFrameNode = class extends DataGrid.SortableDataGridNode
     let description = Network.ResourceWebSocketFrameView.opCodeDescription(frame.opCode, frame.mask);
     const isTextFrame = frame.opCode === Network.ResourceWebSocketFrameView.OpCodes.TextFrame;
 
-    if (isTextFrame) {
+    if (frame.type === SDK.NetworkRequest.WebSocketFrameType.Error) {
+      description = dataText;
+      length = ls`N/A`;
+
+    } else if (isTextFrame) {
       description = dataText;
 
     } else if (frame.opCode === Network.ResourceWebSocketFrameView.OpCodes.BinaryFrame) {
       length = Number.bytesToString(base64ToSize(frame.text));
-      description = 'Binary Message';
+      description = Network.ResourceWebSocketFrameView.opCodeDescriptions[frame.opCode];
 
     } else {
       dataText = description;
@@ -297,7 +302,6 @@ Network.ResourceWebSocketFrameNode = class extends DataGrid.SortableDataGridNode
         'websocket-frame-view-row-send', this._frame.type === SDK.NetworkRequest.WebSocketFrameType.Send);
     element.classList.toggle(
         'websocket-frame-view-row-receive', this._frame.type === SDK.NetworkRequest.WebSocketFrameType.Receive);
-    element.classList.toggle('websocket-frame-view-row-opcode', !this._isTextFrame);
     super.createCells(element);
   }
 
@@ -327,7 +331,7 @@ Network.ResourceWebSocketFrameNode = class extends DataGrid.SortableDataGridNode
    * @return {?Network.BinaryResourceView}
    */
   binaryView() {
-    if (this._isTextFrame)
+    if (this._isTextFrame || this._frame.type === SDK.NetworkRequest.WebSocketFrameType.Error)
       return null;
 
     if (!this._binaryView)

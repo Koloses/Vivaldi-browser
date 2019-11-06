@@ -97,7 +97,7 @@ class ResponseBodyLoader::DelegatingBytesConsumer final
       return {};
     }
     auto handle = bytes_consumer_->DrainAsDataPipe();
-    if (handle) {
+    if (handle && bytes_consumer_->GetPublicState() == PublicState::kClosed) {
       HandleResult(Result::kDone);
     }
     return handle;
@@ -379,7 +379,6 @@ void ResponseBodyLoader::Start() {
 }
 
 void ResponseBodyLoader::Abort() {
-  DCHECK(!suspended_);
   if (aborted_)
     return;
 
@@ -432,6 +431,8 @@ void ResponseBodyLoader::OnStateChange() {
   if (!started_)
     return;
 
+  TRACE_EVENT0("blink", "ResponseBodyLoader::OnStateChange");
+
   size_t num_bytes_consumed = 0;
 
   while (!aborted_ && !suspended_) {
@@ -450,6 +451,8 @@ void ResponseBodyLoader::OnStateChange() {
     if (result == BytesConsumer::Result::kShouldWait)
       return;
     if (result == BytesConsumer::Result::kOk) {
+      TRACE_EVENT1("blink", "ResponseBodyLoader::OnStateChange", "available",
+                   available);
       in_two_phase_read_ = true;
 
       available =

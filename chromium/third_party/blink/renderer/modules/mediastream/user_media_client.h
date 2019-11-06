@@ -37,7 +37,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/modules/mediastream/user_media_client.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -51,9 +51,7 @@ class MODULES_EXPORT UserMediaClient {
   USING_FAST_MALLOC(UserMediaClient);
 
  public:
-  static std::unique_ptr<UserMediaClient> Create(WebUserMediaClient* client) {
-    return base::WrapUnique(new UserMediaClient(client));
-  }
+  explicit UserMediaClient(WebUserMediaClient*);
 
   void RequestUserMedia(UserMediaRequest*);
   void CancelUserMediaRequest(UserMediaRequest*);
@@ -62,8 +60,6 @@ class MODULES_EXPORT UserMediaClient {
   bool IsCapturing();
 
  private:
-  explicit UserMediaClient(WebUserMediaClient*);
-
   WebUserMediaClient* client_;
 };
 

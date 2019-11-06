@@ -13,8 +13,9 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chrome/browser/extensions/system_display/display_info_provider.h"
 #include "chrome/browser/ui/ash/tablet_mode_client.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "extensions/common/api/system_display.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/display/display.h"
@@ -376,6 +377,7 @@ void DisplayInfoProviderChromeOS::SetDisplayProperties(
 
   cros_display_config_->SetDisplayProperties(
       display_id_str, std::move(config_properties),
+      ash::mojom::DisplayConfigSource::kUser,
       base::BindOnce(
           [](ErrorCallback callback, ash::mojom::DisplayConfigResult result) {
             std::move(callback).Run(GetStringResult(result));
@@ -620,13 +622,9 @@ void DisplayInfoProviderChromeOS::OnTabletModeToggled(bool enabled) {
   DispatchOnDisplayChangedEvent();
 }
 
-// static
-DisplayInfoProvider* DisplayInfoProvider::Create() {
-  std::unique_ptr<service_manager::Connector> connector =
-      content::ServiceManagerConnection::GetForProcess()
-          ->GetConnector()
-          ->Clone();
-  return new DisplayInfoProviderChromeOS(connector.get());
+std::unique_ptr<DisplayInfoProvider> CreateChromeDisplayInfoProvider() {
+  return std::make_unique<DisplayInfoProviderChromeOS>(
+      content::GetSystemConnector());
 }
 
 }  // namespace extensions

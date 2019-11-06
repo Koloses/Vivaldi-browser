@@ -8,7 +8,6 @@
 #include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
@@ -26,8 +25,6 @@ class IntersectionObserverController
   USING_GARBAGE_COLLECTED_MIXIN(IntersectionObserverController);
 
  public:
-  static IntersectionObserverController* Create(Document*);
-
   explicit IntersectionObserverController(Document*);
   virtual ~IntersectionObserverController();
 
@@ -48,6 +45,7 @@ class IntersectionObserverController
   // observers for which observer->trackVisibility() is true.
   void AddTrackedTarget(Element&, bool);
   void RemoveTrackedTarget(Element&);
+  bool NeedsOcclusionTracking() const { return needs_occlusion_tracking_; }
 
   void Trace(blink::Visitor*) override;
   const char* NameInHeapSnapshot() const override {
@@ -66,12 +64,14 @@ class IntersectionObserverController
   HeapHashSet<WeakMember<Element>> tracked_observation_targets_;
   // IntersectionObservers for which this is the execution context of the
   // callback.
-  HeapHashSet<TraceWrapperMember<IntersectionObserver>>
-      pending_intersection_observers_;
+  HeapHashSet<Member<IntersectionObserver>> pending_intersection_observers_;
   // TODO(https://crbug.com/796145): Remove this hack once on-stack objects
   // get supported by either of wrapper-tracing or unified GC.
-  HeapVector<TraceWrapperMember<IntersectionObserver>>
+  HeapVector<Member<IntersectionObserver>>
       intersection_observers_being_invoked_;
+  // This is 'true' if any tracked observation target is being tracked by an
+  // observer for which observer->trackVisibility() is true.
+  bool needs_occlusion_tracking_;
 };
 
 }  // namespace blink

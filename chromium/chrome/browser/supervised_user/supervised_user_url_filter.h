@@ -23,6 +23,10 @@
 class GURL;
 class SupervisedUserBlacklist;
 
+namespace signin {
+class IdentityManager;
+}
+
 namespace base {
 class TaskRunner;
 }
@@ -152,7 +156,8 @@ class SupervisedUserURLFilter {
 
   // Initializes the experimental asynchronous checker.
   void InitAsyncURLChecker(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      signin::IdentityManager* identity_manager);
 
   // Clears any asynchronous checker.
   void ClearAsyncURLChecker();
@@ -210,7 +215,7 @@ class SupervisedUserURLFilter {
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  base::WeakPtrFactory<SupervisedUserURLFilter> weak_ptr_factory_;
+  base::WeakPtrFactory<SupervisedUserURLFilter> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SupervisedUserURLFilter);
 };

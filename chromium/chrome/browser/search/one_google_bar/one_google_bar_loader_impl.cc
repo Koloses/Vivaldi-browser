@@ -12,15 +12,14 @@
 #include "base/json/json_writer.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/search/one_google_bar/one_google_bar_data.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/google/core/browser/google_url_tracker.h"
 #include "components/google/core/common/google_util.h"
-#include "components/signin/core/browser/chrome_connected_header_helper.h"
-#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/variations/net/variations_http_headers.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "net/base/load_flags.h"
 #include "net/base/url_util.h"
 #include "net/http/http_status_code.h"
@@ -30,6 +29,11 @@
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "url/gurl.h"
+
+#if defined(OS_CHROMEOS)
+#include "components/signin/core/browser/chrome_connected_header_helper.h"
+#include "components/signin/core/browser/signin_header_helper.h"
+#endif
 
 namespace {
 
@@ -99,6 +103,12 @@ base::Optional<OneGoogleBarData> JsonToOGBData(const base::Value& value) {
     return base::nullopt;
   }
 
+  const base::Value* language = nullptr;
+  std::string language_code;
+  if (update->Get("language_code", &language)) {
+    language_code = language->GetString();
+  }
+
   const base::DictionaryValue* one_google_bar = nullptr;
   if (!update->GetDictionary("ogb", &one_google_bar)) {
     DVLOG(1) << "Parse error: no ogb";
@@ -106,6 +116,7 @@ base::Optional<OneGoogleBarData> JsonToOGBData(const base::Value& value) {
   }
 
   OneGoogleBarData result;
+  result.language_code = language_code;
 
   if (!safe_html::GetHtml(*one_google_bar, "html", &result.bar_html)) {
     DVLOG(1) << "Parse error: no html";
@@ -233,7 +244,7 @@ void OneGoogleBarLoaderImpl::AuthenticatedURLLoader::Start() {
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = api_url_;
-  resource_request->load_flags = net::LOAD_DO_NOT_SEND_AUTH_DATA;
+  resource_request->allow_credentials = true;
   SetRequestHeaders(resource_request.get());
   resource_request->request_initiator =
       url::Origin::Create(GURL(chrome::kChromeUINewTabURL));
@@ -261,8 +272,8 @@ OneGoogleBarLoaderImpl::OneGoogleBarLoaderImpl(
     : url_loader_factory_(url_loader_factory),
       google_url_tracker_(google_url_tracker),
       application_locale_(application_locale),
-      account_consistency_mirror_required_(account_consistency_mirror_required),
-      weak_ptr_factory_(this) {}
+      account_consistency_mirror_required_(
+          account_consistency_mirror_required) {}
 
 OneGoogleBarLoaderImpl::~OneGoogleBarLoaderImpl() = default;
 
@@ -327,16 +338,15 @@ void OneGoogleBarLoaderImpl::LoadDone(
   }
 
   data_decoder::SafeJsonParser::Parse(
-      content::ServiceManagerConnection::GetForProcess()->GetConnector(),
-      response,
-      base::BindRepeating(&OneGoogleBarLoaderImpl::JsonParsed,
-                          weak_ptr_factory_.GetWeakPtr()),
-      base::BindRepeating(&OneGoogleBarLoaderImpl::JsonParseFailed,
-                          weak_ptr_factory_.GetWeakPtr()));
+      content::GetSystemConnector(), response,
+      base::BindOnce(&OneGoogleBarLoaderImpl::JsonParsed,
+                     weak_ptr_factory_.GetWeakPtr()),
+      base::BindOnce(&OneGoogleBarLoaderImpl::JsonParseFailed,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
-void OneGoogleBarLoaderImpl::JsonParsed(std::unique_ptr<base::Value> value) {
-  base::Optional<OneGoogleBarData> result = JsonToOGBData(*value);
+void OneGoogleBarLoaderImpl::JsonParsed(base::Value value) {
+  base::Optional<OneGoogleBarData> result = JsonToOGBData(value);
   Respond(result.has_value() ? Status::OK : Status::FATAL_ERROR, result);
 }
 

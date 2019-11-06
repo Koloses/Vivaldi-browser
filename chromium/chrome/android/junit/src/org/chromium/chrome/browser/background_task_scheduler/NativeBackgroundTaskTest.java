@@ -26,9 +26,9 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.library_loader.LoaderErrors;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.test.BaseRobolectricTestRunner;
@@ -74,16 +74,33 @@ public class NativeBackgroundTaskTest {
         public void startBrowserProcessesSync(boolean singleProcess) throws ProcessInitException {}
 
         @Override
-        public boolean isStartupSuccessfullyCompleted() {
+        public boolean isFullBrowserStarted() {
             mCallCount++;
             return mStartupSucceeded;
+        }
+
+        @Override
+        public boolean isNativeStarted() {
+            return mStartupSucceeded;
+        }
+
+        @Override
+        public boolean isRunningInServiceManagerMode() {
+            return false;
         }
 
         @Override
         public void addStartupCompletedObserver(StartupCallback callback) {}
 
         @Override
-        public void initChromiumBrowserProcessForTests() {}
+        public void setContentMainCallbackForTests(Runnable r) {}
+
+        @Override
+        public int getStartupMode(boolean startServiceManagerOnly) {
+            assertFalse(isNativeStarted());
+            return 0 /*ServicificationStartupUma.ServicificationStartup.CHROME_COLD*/;
+        }
+
         public void setIsStartupSuccessfullyCompleted(boolean flag) {
             mStartupSucceeded = flag;
         }
@@ -157,7 +174,7 @@ public class NativeBackgroundTaskTest {
         @Override
         protected void onStartTaskWithNative(
                 Context context, TaskParameters taskParameters, TaskFinishedCallback callback) {
-            assertEquals(RuntimeEnvironment.application, context);
+            assertEquals(ContextUtils.getApplicationContext(), context);
             assertEquals(getTaskParameters(), taskParameters);
             mWasOnStartTaskWithNativeCalled = true;
             mStartWithNativeLatch.countDown();
@@ -283,8 +300,8 @@ public class NativeBackgroundTaskTest {
     @Feature("BackgroundTaskScheduler")
     public void testOnStartTask_Done_BeforeNativeLoaded() {
         mTask.setStartTaskBeforeNativeResult(NativeBackgroundTask.StartBeforeNativeResult.DONE);
-        assertFalse(
-                mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback));
+        assertFalse(mTask.onStartTask(
+                ContextUtils.getApplicationContext(), getTaskParameters(), mCallback));
 
         assertEquals(0, mBrowserStartupController.completedCallCount());
         verifyStartupCalls(0, 0);
@@ -297,8 +314,8 @@ public class NativeBackgroundTaskTest {
     public void testOnStartTask_Reschedule_BeforeNativeLoaded() {
         mTask.setStartTaskBeforeNativeResult(
                 NativeBackgroundTask.StartBeforeNativeResult.RESCHEDULE);
-        assertTrue(
-                mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback));
+        assertTrue(mTask.onStartTask(
+                ContextUtils.getApplicationContext(), getTaskParameters(), mCallback));
 
         assertTrue(mCallback.waitOnCallback());
         assertEquals(0, mBrowserStartupController.completedCallCount());
@@ -312,7 +329,7 @@ public class NativeBackgroundTaskTest {
     @Feature("BackgroundTaskScheduler")
     public void testOnStartTask_NativeAlreadyLoaded() {
         mBrowserStartupController.setIsStartupSuccessfullyCompleted(true);
-        mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback);
+        mTask.onStartTask(ContextUtils.getApplicationContext(), getTaskParameters(), mCallback);
 
         assertTrue(mTask.waitOnStartWithNativeCallback());
         assertEquals(1, mBrowserStartupController.completedCallCount());
@@ -326,7 +343,7 @@ public class NativeBackgroundTaskTest {
     public void testOnStartTask_NativeInitialization_Success() {
         mBrowserStartupController.setIsStartupSuccessfullyCompleted(false);
         setUpChromeBrowserInitializer(InitializerSetup.SUCCESS);
-        mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback);
+        mTask.onStartTask(ContextUtils.getApplicationContext(), getTaskParameters(), mCallback);
 
         assertTrue(mTask.waitOnStartWithNativeCallback());
         assertEquals(1, mBrowserStartupController.completedCallCount());
@@ -340,7 +357,7 @@ public class NativeBackgroundTaskTest {
     public void testOnStartTask_NativeInitialization_Failure() {
         mBrowserStartupController.setIsStartupSuccessfullyCompleted(false);
         setUpChromeBrowserInitializer(InitializerSetup.FAILURE);
-        mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback);
+        mTask.onStartTask(ContextUtils.getApplicationContext(), getTaskParameters(), mCallback);
 
         assertTrue(mCallback.waitOnCallback());
         assertEquals(1, mBrowserStartupController.completedCallCount());
@@ -355,7 +372,7 @@ public class NativeBackgroundTaskTest {
     public void testOnStartTask_NativeInitialization_Throws() {
         mBrowserStartupController.setIsStartupSuccessfullyCompleted(false);
         setUpChromeBrowserInitializer(InitializerSetup.EXCEPTION);
-        mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback);
+        mTask.onStartTask(ContextUtils.getApplicationContext(), getTaskParameters(), mCallback);
 
         assertTrue(mCallback.waitOnCallback());
         assertEquals(1, mBrowserStartupController.completedCallCount());
@@ -369,10 +386,10 @@ public class NativeBackgroundTaskTest {
     @Feature("BackgroundTaskScheduler")
     public void testOnStopTask_BeforeNativeLoaded_NeedsRescheduling() {
         mBrowserStartupController.setIsStartupSuccessfullyCompleted(false);
-        mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback);
+        mTask.onStartTask(ContextUtils.getApplicationContext(), getTaskParameters(), mCallback);
         mTask.setNeedsReschedulingAfterStop(true);
 
-        assertTrue(mTask.onStopTask(RuntimeEnvironment.application, getTaskParameters()));
+        assertTrue(mTask.onStopTask(ContextUtils.getApplicationContext(), getTaskParameters()));
         assertTrue(mTask.wasOnStopTaskBeforeNativeLoadedCalled());
         assertFalse(mTask.wasOnStopTaskWithNativeCalled());
     }
@@ -381,10 +398,10 @@ public class NativeBackgroundTaskTest {
     @Feature("BackgroundTaskScheduler")
     public void testOnStopTask_BeforeNativeLoaded_DoesntNeedRescheduling() {
         mBrowserStartupController.setIsStartupSuccessfullyCompleted(false);
-        mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback);
+        mTask.onStartTask(ContextUtils.getApplicationContext(), getTaskParameters(), mCallback);
         mTask.setNeedsReschedulingAfterStop(false);
 
-        assertFalse(mTask.onStopTask(RuntimeEnvironment.application, getTaskParameters()));
+        assertFalse(mTask.onStopTask(ContextUtils.getApplicationContext(), getTaskParameters()));
         assertTrue(mTask.wasOnStopTaskBeforeNativeLoadedCalled());
         assertFalse(mTask.wasOnStopTaskWithNativeCalled());
     }
@@ -393,10 +410,10 @@ public class NativeBackgroundTaskTest {
     @Feature("BackgroundTaskScheduler")
     public void testOnStopTask_NativeLoaded_NeedsRescheduling() {
         mBrowserStartupController.setIsStartupSuccessfullyCompleted(true);
-        mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback);
+        mTask.onStartTask(ContextUtils.getApplicationContext(), getTaskParameters(), mCallback);
         mTask.setNeedsReschedulingAfterStop(true);
 
-        assertTrue(mTask.onStopTask(RuntimeEnvironment.application, getTaskParameters()));
+        assertTrue(mTask.onStopTask(ContextUtils.getApplicationContext(), getTaskParameters()));
         assertFalse(mTask.wasOnStopTaskBeforeNativeLoadedCalled());
         assertTrue(mTask.wasOnStopTaskWithNativeCalled());
     }
@@ -405,10 +422,10 @@ public class NativeBackgroundTaskTest {
     @Feature("BackgroundTaskScheduler")
     public void testOnStopTask_NativeLoaded_DoesntNeedRescheduling() {
         mBrowserStartupController.setIsStartupSuccessfullyCompleted(true);
-        mTask.onStartTask(RuntimeEnvironment.application, getTaskParameters(), mCallback);
+        mTask.onStartTask(ContextUtils.getApplicationContext(), getTaskParameters(), mCallback);
         mTask.setNeedsReschedulingAfterStop(false);
 
-        assertFalse(mTask.onStopTask(RuntimeEnvironment.application, getTaskParameters()));
+        assertFalse(mTask.onStopTask(ContextUtils.getApplicationContext(), getTaskParameters()));
         assertFalse(mTask.wasOnStopTaskBeforeNativeLoadedCalled());
         assertTrue(mTask.wasOnStopTaskWithNativeCalled());
     }

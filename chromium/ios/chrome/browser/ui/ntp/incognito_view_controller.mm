@@ -35,9 +35,8 @@
 }
 
 - (void)viewDidLoad {
-  self.incognitoView = [[IncognitoView alloc]
-          initWithFrame:[UIApplication sharedApplication].keyWindow.bounds
-      urlLoadingService:_urlLoadingService];
+  self.incognitoView = [[IncognitoView alloc] initWithFrame:self.view.bounds
+                                          urlLoadingService:_urlLoadingService];
   [self.incognitoView setAutoresizingMask:UIViewAutoresizingFlexibleHeight |
                                           UIViewAutoresizingFlexibleWidth];
 
@@ -49,39 +48,6 @@
 
 - (void)dealloc {
   [_incognitoView setDelegate:nil];
-}
-
-#pragma mark - CRWNativeContent
-
-- (void)wasShown {
-}
-
-- (void)reload {
-}
-
-- (void)wasHidden {
-}
-
-- (UIEdgeInsets)contentInset {
-  return UIEdgeInsetsZero;
-}
-
-- (CGPoint)contentOffset {
-  return CGPointZero;
-}
-
-- (void)dismissModals {
-}
-
-- (void)willUpdateSnapshot {
-}
-
-- (const GURL&)url {
-  return GURL::EmptyGURL();
-}
-
-- (BOOL)isViewAlive {
-  return YES;
 }
 
 @end

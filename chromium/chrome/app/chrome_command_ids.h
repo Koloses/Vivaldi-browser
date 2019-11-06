@@ -91,8 +91,11 @@
 #define IDC_WINDOW_MUTE_SITE            35012
 #define IDC_WINDOW_PIN_TAB              35013
 #define IDC_MIGRATE_LOCAL_CREDIT_CARD_FOR_PAGE 35014
-#define IDC_SEND_TO_MY_DEVICES          35015
+#define IDC_SEND_TAB_TO_SELF            35015
 #define IDC_FOCUS_THIS_TAB              35016
+#define IDC_CONTENT_LINK_SEND_TAB_TO_SELF 35017
+#define IDC_SEND_TAB_TO_SELF_SINGLE_TARGET  35018
+#define IDC_CONTENT_LINK_SEND_TAB_TO_SELF_SINGLE_TARGET  35019
 
 // Clipboard commands
 #define IDC_CUT                         36000
@@ -104,6 +107,7 @@
 #define IDC_FIND                        37000
 #define IDC_FIND_NEXT                   37001
 #define IDC_FIND_PREVIOUS               37002
+#define IDC_CLOSE_FIND_OR_STOP          37003
 #define IDC_FIND_MENU                   37100
 
 // Zoom
@@ -325,6 +329,9 @@
 #define IDC_BOOKMARK_BAR_UNDO 51012
 #define IDC_BOOKMARK_BAR_REDO 51013
 #define IDC_BOOKMARK_BAR_SHOW_MANAGED_BOOKMARKS 51014
+// Context menu items for Sharing
+#define IDC_CONTENT_CONTEXT_SHARING_CLICK_TO_CALL_SINGLE_DEVICE 51030
+#define IDC_CONTENT_CONTEXT_SHARING_CLICK_TO_CALL_MULTIPLE_DEVICES 51031
 
 // Context menu items in the status tray
 #define IDC_STATUS_TRAY_KEEP_CHROME_RUNNING_IN_BACKGROUND 51100

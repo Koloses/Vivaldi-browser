@@ -34,6 +34,8 @@ class WebrtcTransport : public Transport {
  public:
   class EventHandler {
    public:
+    virtual ~EventHandler() = default;
+
     // Called after |peer_connection| has been created but before handshake. The
     // handler should create data channels and media streams. Renegotiation will
     // be required in two cases after this method returns:
@@ -58,9 +60,6 @@ class WebrtcTransport : public Transport {
         scoped_refptr<webrtc::MediaStreamInterface> stream) = 0;
     virtual void OnWebrtcTransportMediaStreamRemoved(
         scoped_refptr<webrtc::MediaStreamInterface> stream) = 0;
-
-   protected:
-    virtual ~EventHandler() {}
   };
 
   WebrtcTransport(rtc::Thread* worker_thread,
@@ -88,15 +87,13 @@ class WebrtcTransport : public Transport {
 
   void ApplySessionOptions(const SessionOptions& options);
 
-  // Called when a new AudioSender has been created from
-  // PeerConnection::AddTrack().
-  void OnAudioSenderCreated(
-      rtc::scoped_refptr<webrtc::RtpSenderInterface> sender);
+  // Called when a new audio transceiver has been created by the PeerConnection.
+  void OnAudioTransceiverCreated(
+      rtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver);
 
-  // Called when a new VideoSender has been created from
-  // PeerConnection::AddTrack().
-  void OnVideoSenderCreated(
-      rtc::scoped_refptr<webrtc::RtpSenderInterface> sender);
+  // Called when a new video transceiver has been created by the PeerConnection.
+  void OnVideoTransceiverCreated(
+      rtc::scoped_refptr<webrtc::RtpTransceiverInterface> transceiver);
 
  private:
   // PeerConnectionWrapper is responsible for PeerConnection creation,
@@ -184,6 +181,8 @@ class WebrtcTransport : public Transport {
       pending_incoming_candidates_;
 
   std::string preferred_video_codec_;
+
+  rtc::scoped_refptr<webrtc::RtpTransceiverInterface> video_transceiver_;
 
   base::WeakPtrFactory<WebrtcTransport> weak_factory_;
 

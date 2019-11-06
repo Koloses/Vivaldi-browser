@@ -87,11 +87,10 @@ public final class BrowsingDataBridge {
      * @param listener A listener to call back when the clearing is finished.
      * @param dataTypes An array of browsing data types to delete, represented as values from
      *                  the shared enum {@link BrowsingDataType}.
-     * @param timePeriod The time period for which to delete the data, represented as a value from
-     *                   the shared enum {@link TimePeriod}.
+     * @param timePeriod The time period for which to delete the data.
      */
     public void clearBrowsingData(
-            OnClearBrowsingDataListener listener, int[] dataTypes, int timePeriod) {
+            OnClearBrowsingDataListener listener, int[] dataTypes, @TimePeriod int timePeriod) {
         clearBrowsingDataExcludingDomains(listener, dataTypes, timePeriod, new String[0],
                 new int[0], new String[0], new int[0]);
     }
@@ -104,8 +103,7 @@ public final class BrowsingDataBridge {
      * @param listener A listener to call back when the clearing is finished.
      * @param dataTypes An array of browsing data types to delete, represented as values from
      *                  the shared enum {@link BrowsingDataType}.
-     * @param timePeriod The time period for which to delete the data, represented as a value from
-     *                   the shared enum {@link TimePeriod}.
+     * @param timePeriod The time period for which to delete the data.
      * @param blacklistDomains A list of registerable domains that we don't clear data for.
      * @param blacklistedDomainReasons A list of the reason metadata for the blacklisted domains.
      * @param ignoredDomains A list of ignored domains that the user chose to not blacklist. We use
@@ -113,12 +111,26 @@ public final class BrowsingDataBridge {
      * @param ignoredDomainReasons A list of reason metadata for the ignored domains.
      */
     public void clearBrowsingDataExcludingDomains(OnClearBrowsingDataListener listener,
-            int[] dataTypes, int timePeriod, String[] blacklistDomains,
+            int[] dataTypes, @TimePeriod int timePeriod, String[] blacklistDomains,
             int[] blacklistedDomainReasons, String[] ignoredDomains, int[] ignoredDomainReasons) {
         assert mClearBrowsingDataListener == null;
         mClearBrowsingDataListener = listener;
         nativeClearBrowsingData(getProfile(), dataTypes, timePeriod, blacklistDomains,
                 blacklistedDomainReasons, ignoredDomains, ignoredDomainReasons);
+    }
+
+    /**
+     * This method tests clearing of specified types of browsing data for incognito profile.
+     * @param dataTypes An array of browsing data types to delete, represented as values from
+     *                  the shared enum {@link BrowsingDataType}.
+     * @param timePeriod The time period for which to delete the data.
+     */
+    public void clearBrowsingDataIncognitoForTesting(
+            OnClearBrowsingDataListener listener, int[] dataTypes, @TimePeriod int timePeriod) {
+        assert mClearBrowsingDataListener == null;
+        mClearBrowsingDataListener = listener;
+        nativeClearBrowsingData(getProfile().getOffTheRecordProfile(), dataTypes, timePeriod,
+                new String[0], new int[0], new String[0], new int[0]);
     }
 
     /**

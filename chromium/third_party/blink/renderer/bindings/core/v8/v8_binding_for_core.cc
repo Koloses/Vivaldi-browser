@@ -48,6 +48,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
@@ -61,11 +62,11 @@
 #include "third_party/blink/renderer/platform/bindings/v8_binding_macros.h"
 #include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
+#include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
-#include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
@@ -620,8 +621,8 @@ XPathNSResolver* ToXPathNSResolver(ScriptState* script_state,
   if (V8XPathNSResolver::HasInstance(value, script_state->GetIsolate())) {
     resolver = V8XPathNSResolver::ToImpl(v8::Local<v8::Object>::Cast(value));
   } else if (value->IsObject()) {
-    resolver =
-        V8CustomXPathNSResolver::Create(script_state, value.As<v8::Object>());
+    resolver = MakeGarbageCollected<V8CustomXPathNSResolver>(
+        script_state, value.As<v8::Object>());
   }
   return resolver;
 }
@@ -924,6 +925,16 @@ Vector<String> GetOwnPropertyNames(v8::Isolate* isolate,
 
   return NativeValueTraits<IDLSequence<IDLString>>::NativeValue(
       isolate, property_names, exception_state);
+}
+
+v8::MicrotaskQueue* ToMicrotaskQueue(ExecutionContext* execution_context) {
+  if (!execution_context)
+    return nullptr;
+  return execution_context->GetMicrotaskQueue();
+}
+
+v8::MicrotaskQueue* ToMicrotaskQueue(ScriptState* script_state) {
+  return ToMicrotaskQueue(ExecutionContext::From(script_state));
 }
 
 }  // namespace blink

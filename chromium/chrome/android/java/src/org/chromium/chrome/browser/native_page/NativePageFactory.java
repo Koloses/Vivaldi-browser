@@ -8,24 +8,28 @@ import android.net.Uri;
 import android.support.annotation.IntDef;
 
 import org.chromium.base.VisibleForTesting;
+import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.TabLoadStatus;
-import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.bookmarks.BookmarkPage;
 import org.chromium.chrome.browser.download.DownloadPage;
 import org.chromium.chrome.browser.explore_sites.ExploreSitesPage;
 import org.chromium.chrome.browser.feed.FeedNewTabPage;
+import org.chromium.chrome.browser.gesturenav.HistoryNavigationDelegate;
 import org.chromium.chrome.browser.history.HistoryPage;
+import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.ntp.IncognitoNewTabPage;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.ntp.RecentTabsManager;
 import org.chromium.chrome.browser.ntp.RecentTabsPage;
+import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.touchless.TouchlessDelegate;
 import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.util.UrlConstants;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.lang.annotation.Retention;
@@ -41,6 +45,10 @@ public class NativePageFactory {
     static class NativePageBuilder {
         protected NativePage buildNewTabPage(ChromeActivity activity, Tab tab,
                 TabModelSelector tabModelSelector) {
+            ActivityTabProvider activityTabProvider = activity.getActivityTabProvider();
+            ActivityLifecycleDispatcher activityLifecycleDispatcher =
+                    activity.getLifecycleDispatcher();
+
             if (tab.isIncognito()) {
                 return new IncognitoNewTabPage(activity, new TabShim(tab));
             }
@@ -50,10 +58,13 @@ public class NativePageFactory {
             }
 
             if (ChromeFeatureList.isEnabled(ChromeFeatureList.INTEREST_FEED_CONTENT_SUGGESTIONS)) {
-                return new FeedNewTabPage(activity, new TabShim(tab), tabModelSelector);
+                return new FeedNewTabPage(activity, new TabShim(tab), tabModelSelector,
+                        IdentityServicesProvider.getSigninManager(), activityTabProvider,
+                        activityLifecycleDispatcher);
             }
 
-            return new NewTabPage(activity, new TabShim(tab), tabModelSelector);
+            return new NewTabPage(activity, new TabShim(tab), tabModelSelector, activityTabProvider,
+                    activityLifecycleDispatcher);
         }
 
         protected NativePage buildBookmarksPage(ChromeActivity activity, Tab tab) {
@@ -65,6 +76,10 @@ public class NativePageFactory {
         }
 
         protected NativePage buildExploreSitesPage(ChromeActivity activity, Tab tab) {
+            if (FeatureUtilities.isNoTouchModeEnabled()) {
+                return TouchlessDelegate.createTouchlessExploreSitesPage(
+                        activity, new TabShim(tab));
+            }
             return new ExploreSitesPage(activity, new TabShim(tab));
         }
 
@@ -75,7 +90,7 @@ public class NativePageFactory {
         protected NativePage buildRecentTabsPage(ChromeActivity activity, Tab tab) {
             RecentTabsManager recentTabsManager =
                     new RecentTabsManager(tab, tab.getProfile(), activity);
-            return new RecentTabsPage(activity, recentTabsManager);
+            return new RecentTabsPage(activity, recentTabsManager, new TabShim(tab));
         }
     }
 
@@ -118,7 +133,7 @@ public class NativePageFactory {
             return NativePageType.HISTORY;
         } else if (UrlConstants.RECENT_TABS_HOST.equals(host) && !isIncognito) {
             return NativePageType.RECENT_TABS;
-        } else if (UrlConstants.EXPLORE_HOST.equals(host)) {
+        } else if (ExploreSitesPage.isExploreSitesHost(host)) {
             return NativePageType.EXPLORE;
         } else {
             return NativePageType.NONE;
@@ -133,20 +148,17 @@ public class NativePageFactory {
      * @param url The URL to be handled.
      * @param candidatePage A NativePage to be reused if it matches the url, or null.
      * @param tab The Tab that will show the page.
-     * @param tabModelSelector The TabModelSelector containing the tab.
      * @param activity The activity used to create the views for the page.
      * @return A NativePage showing the specified url or null.
      */
-    public static NativePage createNativePageForURL(String url, NativePage candidatePage,
-            Tab tab, TabModelSelector tabModelSelector, ChromeActivity activity) {
-        return createNativePageForURL(url, candidatePage, tab, tabModelSelector, activity,
-                tab.isIncognito());
+    public static NativePage createNativePageForURL(
+            String url, NativePage candidatePage, Tab tab, ChromeActivity activity) {
+        return createNativePageForURL(url, candidatePage, tab, activity, tab.isIncognito());
     }
 
     @VisibleForTesting
-    static NativePage createNativePageForURL(String url, NativePage candidatePage,
-            Tab tab, TabModelSelector tabModelSelector, ChromeActivity activity,
-            boolean isIncognito) {
+    static NativePage createNativePageForURL(String url, NativePage candidatePage, Tab tab,
+            ChromeActivity activity, boolean isIncognito) {
         NativePage page;
 
         switch (nativePageType(url, candidatePage, isIncognito)) {
@@ -156,7 +168,8 @@ public class NativePageFactory {
                 page = candidatePage;
                 break;
             case NativePageType.NTP:
-                page = sNativePageBuilder.buildNewTabPage(activity, tab, tabModelSelector);
+                page = sNativePageBuilder.buildNewTabPage(
+                        activity, tab, TabModelSelector.from(tab));
                 break;
             case NativePageType.BOOKMARKS:
                 page = sNativePageBuilder.buildBookmarksPage(activity, tab);
@@ -209,7 +222,7 @@ public class NativePageFactory {
         @Override
         public int loadUrl(LoadUrlParams urlParams, boolean incognito) {
             if (incognito && !mTab.isIncognito()) {
-                mTab.getTabModelSelector().openNewTab(urlParams,
+                TabModelSelector.from(mTab).openNewTab(urlParams,
                         TabLaunchType.FROM_LONGPRESS_FOREGROUND, mTab,
                         /* incognito = */ true);
                 return TabLoadStatus.DEFAULT_PAGE_LOAD;
@@ -235,7 +248,12 @@ public class NativePageFactory {
 
         @Override
         public boolean isVisible() {
-            return mTab == mTab.getTabModelSelector().getCurrentTab();
+            return mTab == TabModelSelector.from(mTab).getCurrentTab();
+        }
+
+        @Override
+        public HistoryNavigationDelegate createHistoryNavigationDelegate() {
+            return HistoryNavigationDelegate.createForNativePage(mTab);
         }
     }
 }

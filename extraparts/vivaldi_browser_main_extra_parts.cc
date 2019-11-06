@@ -6,11 +6,16 @@
 
 #include "app/vivaldi_apptools.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
+#include "base/path_service.h"
+#include "browser/stats_reporter.h"
 #include "calendar/calendar_model_loaded_observer.h"
 #include "calendar/calendar_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/adverse_adblocking/adverse_ad_filter_list_factory.h"
 #include "components/datasource/vivaldi_data_source_api.h"
 #include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/translate_language_list.h"
@@ -24,8 +29,8 @@
 #include "notes/notes_model_loaded_observer.h"
 #include "notes/notesnode.h"
 #include "ui/lazy_load_service_factory.h"
-#include "vivaldi/prefs/vivaldi_gen_prefs.h"
 #include "vivaldi/prefs/vivaldi_gen_pref_enums.h"
+#include "vivaldi/prefs/vivaldi_gen_prefs.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "extensions/api/bookmark_context_menu/bookmark_context_menu_api.h"
@@ -49,15 +54,49 @@
 #include "ui/devtools/devtools_connector.h"
 #endif
 
+#if defined(OS_LINUX)
+#include "base/environment.h"
+#include "base/nix/xdg_util.h"
+#endif
+
 VivaldiBrowserMainExtraParts::VivaldiBrowserMainExtraParts() {}
 
 VivaldiBrowserMainExtraParts::~VivaldiBrowserMainExtraParts() {}
 
 // Overridden from ChromeBrowserMainExtraParts:
 void VivaldiBrowserMainExtraParts::PostEarlyInitialization() {
+  stats_reporter_ = vivaldi::StatsReporter::CreateInstance();
   // base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (vivaldi::IsVivaldiRunning()) {
-    // Options to be set when Vivaldi is running, but not during unit tests
+// Options to be set when Vivaldi is running, but not during unit tests
+#if defined(OS_LINUX) || defined(OS_MACOSX)
+    base::FilePath messaging(
+      // Hardcoded from chromium/chrome/common/chrome_paths.cc
+#if defined(OS_MACOSX)
+      FILE_PATH_LITERAL("/Library/Google/Chrome/NativeMessagingHosts")
+#else   // OS_MACOSX
+      FILE_PATH_LITERAL("/etc/opt/chrome/native-messaging-hosts")
+#endif  // OS_MACOSX
+    );
+    base::PathService::Override(chrome::DIR_NATIVE_MESSAGING, messaging);
+#endif
+#if defined(OS_LINUX)
+    {
+      base::FilePath cur;
+      std::unique_ptr<base::Environment> env(base::Environment::Create());
+      cur = base::nix::GetXDGDirectory(
+          env.get(), base::nix::kXdgConfigHomeEnvVar, base::nix:: kDotConfigDir);
+      cur = cur.Append("google-chrome");
+      cur = cur.Append(FILE_PATH_LITERAL("PepperFlash"));
+      cur = cur.Append(FILE_PATH_LITERAL("latest-component-updated-flash"));
+
+      base::PathService::Override(chrome::FILE_COMPONENT_FLASH_HINT, cur);
+    }
+    base::FilePath pepper(
+        FILE_PATH_LITERAL("/usr/lib/adobe-flashplugin/libpepflashplayer.so"));
+    base::PathService::Override(chrome::FILE_PEPPER_FLASH_SYSTEM_PLUGIN,
+                                pepper);
+#endif
   }
 }
 
@@ -76,7 +115,7 @@ void VivaldiBrowserMainExtraParts::
   extensions::TabsPrivateAPI::GetFactoryInstance();
   extensions::SyncAPI::GetFactoryInstance();
   extensions::VivaldiAccountAPI::GetFactoryInstance();
-  extensions::VivaldiDataSourcesAPI::GetFactoryInstance();
+  extensions::VivaldiDataSourcesAPI::InitFactory();
   extensions::VivaldiExtensionInit::GetFactoryInstance();
   extensions::VivaldiPrefsApiNotificationFactory::GetInstance();
   extensions::VivaldiRuntimeFeaturesFactory::GetInstance();
@@ -85,6 +124,7 @@ void VivaldiBrowserMainExtraParts::
   extensions::ZoomAPI::GetFactoryInstance();
   extensions::HistoryPrivateAPI::GetFactoryInstance();
 #endif
+  VivaldiAdverseAdFilterListFactory::GetFactoryInstance();
 }
 
 void VivaldiBrowserMainExtraParts::PreProfileInit() {
@@ -120,7 +160,8 @@ void VivaldiBrowserMainExtraParts::PostProfileInit(Profile* profile) {
         base::CommandLine::ForCurrentProcess(),
         switches::kDisableSmoothScrolling);
   }
-  int spatnav = pref_service->GetInteger(vivaldiprefs::kWebpagesSpatialNavigationMethod);
+  int spatnav =
+      pref_service->GetInteger(vivaldiprefs::kWebpagesSpatialNavigationMethod);
   if (spatnav ==
       static_cast<int>(
           vivaldiprefs::WebpagesSpatialNavigationMethodValues::BLINK)) {

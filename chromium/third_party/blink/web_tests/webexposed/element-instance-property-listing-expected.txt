@@ -105,7 +105,10 @@ namespace http://www.w3.org/1999/xhtml
     property dataset
     property dir
     property dispatchEvent
+    property displayLock
     property draggable
+    property elementTiming
+    property enterKeyHint
     property firstChild
     property firstElementChild
     property focus
@@ -166,6 +169,7 @@ namespace http://www.w3.org/1999/xhtml
     property onabort
     property onactivateinvisible
     property onauxclick
+    property onbeforeactivate
     property onbeforecopy
     property onbeforecut
     property onbeforepaste
@@ -227,7 +231,7 @@ namespace http://www.w3.org/1999/xhtml
     property onpointermove
     property onpointerout
     property onpointerover
-    property onpointerrawmove
+    property onpointerrawupdate
     property onpointerup
     property onprogress
     property onratechange
@@ -566,6 +570,7 @@ html element form
     property name
     property noValidate
     property reportValidity
+    property requestSubmit
     property reset
     property submit
     property target
@@ -636,6 +641,7 @@ html element iframe
     property frameBorder
     property getSVGDocument
     property height
+    property loading
     property longDesc
     property marginHeight
     property marginWidth
@@ -660,6 +666,7 @@ html element img
     property importance
     property intrinsicSize
     property isMap
+    property loading
     property longDesc
     property lowsrc
     property name
@@ -879,6 +886,10 @@ html element picture
 html element plaintext
 html element portal
     property activate
+    property onmessage
+    property onmessageerror
+    property postMessage
+    property referrerPolicy
     property src
 html element pre
     property width
@@ -1154,6 +1165,7 @@ html element video
     property play
     property playbackRate
     property played
+    property playsInline
     property poster
     property preload
     property readyState
@@ -1282,6 +1294,8 @@ namespace http://www.w3.org/2000/svg
     property createShadowRoot
     property dataset
     property dispatchEvent
+    property displayLock
+    property elementTiming
     property firstChild
     property firstElementChild
     property focus
@@ -1331,6 +1345,7 @@ namespace http://www.w3.org/2000/svg
     property onabort
     property onactivateinvisible
     property onauxclick
+    property onbeforeactivate
     property onbeforecopy
     property onbeforecut
     property onbeforepaste
@@ -1392,7 +1407,7 @@ namespace http://www.w3.org/2000/svg
     property onpointermove
     property onpointerout
     property onpointerover
-    property onpointerrawmove
+    property onpointerrawupdate
     property onpointerup
     property onprogress
     property onratechange

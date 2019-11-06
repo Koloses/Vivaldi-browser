@@ -12,10 +12,10 @@
 #include "base/test/scoped_task_environment.h"
 #include "chrome/browser/search/promos/promo_data.h"
 #include "components/google/core/browser/google_url_tracker.h"
+#include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_service_manager_context.h"
 #include "services/data_decoder/public/cpp/testing_json_parser.h"
-#include "services/identity/public/cpp/identity_test_environment.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_network_connection_tracker.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -109,7 +109,7 @@ TEST_F(PromoServiceTest, PromoDataNetworkError) {
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(service()->promo_data(), base::nullopt);
-  EXPECT_EQ(service()->promo_status(), Status::TRANSIENT_ERROR);
+  EXPECT_EQ(service()->promo_status(), PromoService::Status::TRANSIENT_ERROR);
 }
 
 TEST_F(PromoServiceTest, BadPromoResponse) {
@@ -122,7 +122,7 @@ TEST_F(PromoServiceTest, BadPromoResponse) {
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(service()->promo_data(), base::nullopt);
-  EXPECT_EQ(service()->promo_status(), Status::FATAL_ERROR);
+  EXPECT_EQ(service()->promo_status(), PromoService::Status::FATAL_ERROR);
 }
 
 TEST_F(PromoServiceTest, BadPromoResponseNoLogUrl) {
@@ -136,8 +136,23 @@ TEST_F(PromoServiceTest, BadPromoResponseNoLogUrl) {
   service()->Refresh();
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(service()->promo_data(), base::nullopt);
-  EXPECT_EQ(service()->promo_status(), Status::FATAL_ERROR);
+  PromoData data;
+  EXPECT_EQ(service()->promo_data(), data);
+  EXPECT_EQ(service()->promo_status(), PromoService::Status::OK_WITHOUT_PROMO);
+}
+
+TEST_F(PromoServiceTest, PromoResponseMissingData) {
+  SetUpResponseWithData(service()->GetLoadURLForTesting(),
+                        "{\"update\":{\"promos\":{}}}");
+
+  ASSERT_EQ(service()->promo_data(), base::nullopt);
+
+  service()->Refresh();
+  base::RunLoop().RunUntilIdle();
+
+  PromoData data;
+  EXPECT_EQ(service()->promo_data(), data);
+  EXPECT_EQ(service()->promo_status(), PromoService::Status::OK_WITHOUT_PROMO);
 }
 
 TEST_F(PromoServiceTest, GoodPromoResponse) {
@@ -156,5 +171,5 @@ TEST_F(PromoServiceTest, GoodPromoResponse) {
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(service()->promo_data(), promo);
-  EXPECT_EQ(service()->promo_status(), Status::OK);
+  EXPECT_EQ(service()->promo_status(), PromoService::Status::OK_WITH_PROMO);
 }

@@ -46,11 +46,10 @@
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
-#include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/skia/include/core/SkFontMgr.h"
@@ -219,7 +218,7 @@ class PLATFORM_EXPORT FontCache {
 #if defined(OS_LINUX)
   struct PlatformFallbackFont {
     String name;
-    CString filename;
+    std::string filename;
     int fontconfig_interface_id;
     int ttc_index;
     bool is_bold;
@@ -246,14 +245,22 @@ class PLATFORM_EXPORT FontCache {
   ~FontCache() = default;
 
  private:
+  // BCP47 list used when requesting fallback font for a character.
+  // inlineCapacity is set to 4: the array vector not need to hold more than 4
+  // elements.
+  using Bcp47Vector = WTF::Vector<const char*, 4>;
+
   scoped_refptr<SimpleFontData> PlatformFallbackFontForCharacter(
       const FontDescription&,
       UChar32,
       const SimpleFontData* font_data_to_substitute,
       FontFallbackPriority = FontFallbackPriority::kText);
   sk_sp<SkTypeface> CreateTypefaceFromUniqueName(
-      const FontFaceCreationParams& creation_params,
-      CString& name);
+      const FontFaceCreationParams& creation_params);
+
+  static Bcp47Vector GetBcp47LocaleForRequest(
+      const FontDescription& font_description,
+      FontFallbackPriority fallback_priority);
 
   friend class FontGlobalContext;
   FontCache();
@@ -290,17 +297,18 @@ class PLATFORM_EXPORT FontCache {
 
   sk_sp<SkTypeface> CreateTypeface(const FontDescription&,
                                    const FontFaceCreationParams&,
-                                   CString& name);
+                                   std::string& name);
 
-#if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_FUCHSIA)
+#if defined(OS_ANDROID) || defined(OS_LINUX)
   static AtomicString GetFamilyNameForCharacter(SkFontMgr*,
                                                 UChar32,
                                                 const FontDescription&,
                                                 FontFallbackPriority);
-#endif  // defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_FUCHSIA)
+#endif  // defined(OS_ANDROID) || defined(OS_LINUX)
 
-  scoped_refptr<SimpleFontData> FallbackOnStandardFontStyle(const FontDescription&,
-                                                     UChar32);
+  scoped_refptr<SimpleFontData> FallbackOnStandardFontStyle(
+      const FontDescription&,
+      UChar32);
 
   // Don't purge if this count is > 0;
   int purge_prevent_count_;
@@ -341,6 +349,15 @@ class PLATFORM_EXPORT FontCache {
 
   void PurgePlatformFontDataCache();
   void PurgeFallbackListShaperCache();
+
+  // A maximum float value to which we limit incoming font sizes. This is the
+  // smallest float so that multiplying it by
+  // FontCacheKey::PrecisionMultiplier() is still smaller than
+  // std::numeric_limits<unsigned>::max() - 1 in order to avoid hitting HashMap
+  // sentinel values (placed at std::numeric_limits<unsigned>::max() and
+  // std::numeric_limits<unsigned>::max() - 1) for SizedFontPlatformDataSet and
+  // FontPlatformDataCache.
+  const float font_size_limit_;
 
   friend class SimpleFontData;  // For fontDataFromFontPlatformData
   friend class FontFallbackList;

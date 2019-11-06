@@ -106,6 +106,10 @@ class DriveSearchContentScanner extends ContentScanner {
       }
       chrome.fileManagerPrivate.searchDrive(
           {query: this.query_, nextFeed: ''}, (entries, nextFeed) => {
+            if (chrome.runtime.lastError) {
+              console.error(chrome.runtime.lastError.message);
+            }
+
             if (this.cancelled_) {
               errorCallback(util.createDOMError(util.FileError.ABORT_ERR));
               return;
@@ -201,8 +205,10 @@ class DriveMetadataSearchContentScanner extends ContentScanner {
    */
   scan(entriesCallback, successCallback, errorCallback) {
     chrome.fileManagerPrivate.searchDriveMetadata(
-        {query: '', types: this.searchType_, maxResults: 100},
-        results => {
+        {query: '', types: this.searchType_, maxResults: 100}, results => {
+          if (chrome.runtime.lastError) {
+            console.error(chrome.runtime.lastError.message);
+          }
           if (this.cancelled_) {
             errorCallback(util.createDOMError(util.FileError.ABORT_ERR));
             return;
@@ -931,25 +937,26 @@ class DirectoryContents extends cr.EventTarget {
         }
 
         const chunk = entries.slice(i, i + MAX_CHUNK_SIZE);
-        prefetchMetadataQueue.run(((chunk, callbackInner) => {
-          this.prefetchMetadata(chunk, refresh, () => {
-            if (!prefetchMetadataQueue.isCancelled()) {
-              if (this.scanCancelled_) {
-                prefetchMetadataQueue.cancel();
-              }
-            }
+        prefetchMetadataQueue.run(
+            ((chunk, callbackInner) => {
+              this.prefetchMetadata(chunk, refresh, () => {
+                if (!prefetchMetadataQueue.isCancelled()) {
+                  if (this.scanCancelled_) {
+                    prefetchMetadataQueue.cancel();
+                  }
+                }
 
-            // Checks if this is the last task.
-            if (prefetchMetadataQueue.getWaitingTasksCount() === 0 &&
-                prefetchMetadataQueue.getRunningTasksCount() === 1) {
-              // |callbackOuter| in |finish| must be called before
-              // |callbackInner|, to prevent double-calling.
-              finish();
-            }
+                // Checks if this is the last task.
+                if (prefetchMetadataQueue.getWaitingTasksCount() === 0 &&
+                    prefetchMetadataQueue.getRunningTasksCount() === 1) {
+                  // |callbackOuter| in |finish| must be called before
+                  // |callbackInner|, to prevent double-calling.
+                  finish();
+                }
 
-            callbackInner();
-          });
-        }).bind(null, chunk));
+                callbackInner();
+              });
+            }).bind(null, chunk));
       }
     });
   }

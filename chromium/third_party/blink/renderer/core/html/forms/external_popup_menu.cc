@@ -99,10 +99,10 @@ bool ExternalPopupMenu::ShowInternal() {
     LayoutObject* layout_object = owner_element_->GetLayoutObject();
     if (!layout_object || !layout_object->IsBox())
       return false;
-    FloatQuad quad(ToLayoutBox(layout_object)
-                       ->LocalToAbsoluteQuad(FloatQuad(
-                           ToLayoutBox(layout_object)->BorderBoundingBox())));
-    IntRect rect(quad.EnclosingBoundingBox());
+    IntRect rect = EnclosingIntRect(
+        ToLayoutBox(layout_object)
+            ->LocalToAbsoluteRect(
+                ToLayoutBox(layout_object)->PhysicalBorderBoxRect()));
     IntRect rect_in_viewport = local_frame_->View()->FrameToViewport(rect);
     web_external_popup_menu_->Show(rect_in_viewport);
     return true;
@@ -123,7 +123,7 @@ void ExternalPopupMenu::Show() {
     synthetic_event_ = std::make_unique<WebMouseEvent>();
     *synthetic_event_ = *static_cast<const WebMouseEvent*>(current_event);
     synthetic_event_->SetType(WebInputEvent::kMouseUp);
-    dispatch_event_timer_.StartOneShot(TimeDelta(), FROM_HERE);
+    dispatch_event_timer_.StartOneShot(base::TimeDelta(), FROM_HERE);
     // FIXME: show() is asynchronous. If preparing a popup is slow and a
     // user released the mouse button before showing the popup, mouseup and
     // click events are correctly dispatched. Dispatching the synthetic

@@ -10,9 +10,9 @@
 #include "chrome/browser/chromeos/arc/accessibility/accessibility_node_info_data_wrapper.h"
 #include "chrome/browser/chromeos/arc/accessibility/accessibility_window_info_data_wrapper.h"
 #include "chrome/browser/chromeos/arc/accessibility/arc_accessibility_util.h"
-#include "chrome/browser/extensions/api/automation_internal/automation_event_router.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
+#include "extensions/browser/api/automation_internal/automation_event_router.h"
 #include "extensions/common/extension_messages.h"
 #include "ui/accessibility/platform/ax_android_constants.h"
 #include "ui/aura/window.h"
@@ -164,7 +164,10 @@ void AXTreeSourceArc::NotifyAccessibilityEvent(AXEventData* event_data) {
   if (focused_id_ < 0) {
     if (root_id_ >= 0) {
       ArcAccessibilityInfoData* root = GetRoot();
-      if (root->IsNode()) {
+      // TODO (sarakato): Add proper fix once cause of invalid node is known.
+      if (!IsValid(root)) {
+        return;
+      } else if (root->IsNode()) {
         focused_id_ = root_id_;
       } else {
         std::vector<ArcAccessibilityInfoData*> children;
@@ -306,6 +309,10 @@ ArcAccessibilityInfoData* AXTreeSourceArc::GetParent(
   return nullptr;
 }
 
+bool AXTreeSourceArc::IsIgnored(ArcAccessibilityInfoData* info_data) const {
+  return false;
+}
+
 bool AXTreeSourceArc::IsValid(ArcAccessibilityInfoData* info_data) const {
   return info_data;
 }
@@ -383,6 +390,10 @@ const gfx::Rect AXTreeSourceArc::GetBounds(ArcAccessibilityInfoData* info_data,
                                                    .y())));
   }
   return info_data_bounds;
+}
+
+void AXTreeSourceArc::InvalidateTree() {
+  current_tree_serializer_->Reset();
 }
 
 gfx::Rect AXTreeSourceArc::ComputeEnclosingBounds(

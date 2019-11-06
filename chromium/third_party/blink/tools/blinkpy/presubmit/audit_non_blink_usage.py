@@ -32,6 +32,9 @@ _CONFIG = [
             # //base constructs that are allowed everywhere
             'base::AdoptRef',
             'base::AutoReset',
+            'base::Contains',
+            'base::CreateSequencedTaskRunnerWithTraits',
+            'base::DefaultTickClock',
             'base::ElapsedTimer',
             'base::File',
             'base::FilePath',
@@ -40,28 +43,37 @@ _CONFIG = [
             'base::MakeRefCounted',
             'base::Optional',
             'base::OptionalOrNullptr',
+            'base::PlatformThread',
             'base::PlatformThreadId',
             'base::RefCountedData',
             'base::RunLoop',
-            'base::CreateSequencedTaskRunnerWithTraits',
             'base::ReadOnlySharedMemoryMapping',
             'base::ReadOnlySharedMemoryRegion',
+            'base::RepeatingTimer',
             'base::SequencedTaskRunner',
             'base::SingleThreadTaskRunner',
             'base::ScopedFD',
+            'base::ScopedClosureRunner',
             'base::SupportsWeakPtr',
             'base::SysInfo',
             'base::ThreadChecker',
+            'base::TickClock',
             'base::Time',
             'base::TimeDelta',
             'base::TimeTicks',
             'base::ThreadTicks',
+            'base::trace_event::MemoryAllocatorDump',
+            'base::trace_event::MemoryDumpArgs',
+            'base::trace_event::MemoryDumpManager',
+            'base::trace_event::MemoryDumpProvider',
+            'base::trace_event::ProcessMemoryDump',
             'base::UnguessableToken',
             'base::UnguessableTokenHash',
             'base::UnsafeSharedMemoryRegion',
             'base::WeakPtr',
             'base::WeakPtrFactory',
             'base::WritableSharedMemoryMapping',
+            'base::as_bytes',
             'base::in_place',
             'base::make_optional',
             'base::make_span',
@@ -70,6 +82,7 @@ _CONFIG = [
             'base::size',
             'base::span',
             'logging::GetVlogLevel',
+            'util::PassKey',
 
             # //base/observer_list.h.
             'base::ObserverList',
@@ -86,14 +99,26 @@ _CONFIG = [
             'base::RepeatingCallback',
             'base::RepeatingClosure',
 
+            # //base/mac/scoped_nsobject.h
+            'base::scoped_nsobject',
+
+            # //base/memory/scoped_policy.h
+            'base::scoped_policy::RETAIN',
+
             # //base/memory/ptr_util.h.
             'base::WrapUnique',
 
             # //base/allocator/partition_allocator/oom_callback.h.
             'base::SetPartitionAllocOomCallback',
 
+            # //base/containers/adapters.h
+            'base::Reversed',
+
             # //base/metrics/histogram_functions.h
             'base::UmaHistogram.+',
+
+            # //base/metrics/histogram.h
+            'base::LinearHistogram',
 
             # //base/metrics/field_trial_params.h.
             'base::GetFieldTrialParamValueByFeature',
@@ -139,6 +164,11 @@ _CONFIG = [
             'base::CheckOr',
             'base::CheckXor',
 
+            # //base/numerics/clamped_math.h.
+            'base::ClampAdd',
+            'base::ClampSub',
+            'base::MakeClampedNum',
+
             # Debugging helpers from //base/debug are allowed everywhere.
             'base::debug::.+',
 
@@ -164,6 +194,7 @@ _CONFIG = [
             'base::RandGenerator',
             'base::RandDouble',
             'base::RandBytes',
+            'base::RandBytesAsString',
 
             # Feature list checking.
             'base::Feature.*',
@@ -177,15 +208,22 @@ _CONFIG = [
             # For MessageLoop::TaskObserver.
             'base::PendingTask',
 
+            # Time
+            'base::Clock',
+            'base::DefaultClock',
+            'base::DefaultTickClock',
+            'base::TestMockTimeTaskRunner',
+            'base::TickClock',
+
             # cc painting types.
             'cc::PaintCanvas',
             'cc::PaintFlags',
-            'cc::NodeHolder',
-            'cc::TextHolder',
+            'cc::NodeId',
 
             # Chromium geometry types.
             'gfx::Point',
             'gfx::Point3F',
+            'gfx::Quaternion',
             'gfx::Rect',
             'gfx::RectF',
             'gfx::RRectF',
@@ -233,8 +271,16 @@ _CONFIG = [
             # Animation
             'cc::AnimationHost',
 
+            # UMA Enums
+            'cc::PaintHoldingCommitTrigger',
+
             # Scrolling
+            'cc::kManipulationInfoHasPinchZoomed',
+            'cc::kManipulationInfoHasScrolledByPrecisionTouchPad',
+            'cc::kManipulationInfoHasScrolledByTouch',
+            'cc::kManipulationInfoHasScrolledByWheel',
             'cc::MainThreadScrollingReason',
+            'cc::ManipulationInfo',
             'cc::ScrollSnapAlign',
             'cc::ScrollSnapType',
             'cc::ScrollOffsetAnimationCurve',
@@ -249,6 +295,7 @@ _CONFIG = [
             'cc::SnapStrictness',
             'gfx::RectToSkRect',
             'gfx::ScrollOffset',
+            'ui::input_types::ScrollGranularity',
 
             # Standalone utility libraries that only depend on //base
             'skia::.+',
@@ -269,6 +316,7 @@ _CONFIG = [
             'inspector_async_task::.+',
             'inspector_set_layer_tree_id::.+',
             'inspector_tracing_started_in_frame::.+',
+            'layered_api::.+',
             'layout_invalidation_reason::.+',
             'media_constraints_impl::.+',
             'media_element_parser_helpers::.+',
@@ -297,6 +345,7 @@ _CONFIG = [
             'testing::.+',  # googlemock / googletest
             'v8::.+',
             'v8_inspector::.+',
+            'inspector_protocol_encoding::.+',
 
             # Inspector instrumentation and protocol
             'probe::.+',
@@ -346,16 +395,34 @@ _CONFIG = [
             # Permit using crash keys inside Blink without jumping through
             # hoops.
             'crash_reporter::.*CrashKey.*',
+
+            # Useful for platform-specific code.
+            'base::mac::(CFToNSCast|NSToCFCast)',
+            'base::mac::Is(AtMost|AtLeast)?OS.+',
+            'base::(scoped_nsobject|ScopedCFTypeRef)',
         ],
         'disallowed': [
-            '.+',
             ('base::Bind(|Once|Repeating)',
              'Use WTF::Bind or WTF::BindRepeating.'),
+            ('std::(deque|map|multimap|set|vector|unordered_set|unordered_map)',
+             'Use WTF containers like WTF::Deque, WTF::HashMap, WTF::HashSet or WTF::Vector instead of the banned std containers. '
+             'However, it is fine to use std containers at the boundary layer between Blink and Chromium. '
+             'If you are in this case, you can use --bypass-hooks option to avoid the presubmit check when uploading your CL.'),
         ],
     },
     {
         'paths': ['third_party/blink/renderer/bindings/'],
         'allowed': ['gin::.+'],
+    },
+    {
+        'paths': ['third_party/blink/renderer/bindings/core/v8/script_streamer.cc'],
+        'allowed': [
+            # For the script streaming to be able to block when reading from a
+            # mojo datapipe.
+            'base::ScopedAllowBaseSyncPrimitives',
+            'base::ScopedBlockingCall',
+            'base::BlockingType',
+        ],
     },
     {
         'paths': ['third_party/blink/renderer/bindings/core/v8/v8_gc_for_context_dispose.cc'],
@@ -368,6 +435,12 @@ _CONFIG = [
         'paths': ['third_party/blink/renderer/controller/oom_intervention_impl.cc'],
         'allowed': [
             'base::BindOnce',
+        ],
+    },
+    {
+        'paths': ['third_party/blink/renderer/controller/user_level_memory_pressure_signal_generator.cc'],
+        'allowed': [
+            'base::MemoryPressureListener',
         ],
     },
     {
@@ -395,6 +468,12 @@ _CONFIG = [
         ],
     },
     {
+        'paths': ['third_party/blink/renderer/core/editing/ime'],
+        'allowed': [
+            'ui::TextInputAction',
+        ],
+    },
+    {
         'paths': ['third_party/blink/renderer/core/fetch/data_consumer_handle_test_util.cc'],
         'allowed': [
             # The existing code already contains gin::IsolateHolder.
@@ -405,6 +484,13 @@ _CONFIG = [
         'paths': ['third_party/blink/renderer/core/fileapi/file_reader_loader.cc'],
         'allowed': [
             'net::ERR_FILE_NOT_FOUND',
+        ],
+    },
+    {
+        'paths': ['third_party/blink/renderer/core/loader/alternate_signed_exchange_resource_info.cc'],
+        'allowed': [
+            # Used by SignedExchangeRequestMatcher in //third_party/blink/common.
+            'net::HttpRequestHeaders',
         ],
     },
     {
@@ -457,6 +543,14 @@ _CONFIG = [
         ],
     },
     {
+        'paths': ['third_party/blink/renderer/core/inspector'],
+        'allowed': [
+            # Devtools binary protocol uses std::vector<uint8_t> for serialized
+            # objects.
+            'std::vector',
+        ],
+    },
+    {
         'paths': ['third_party/blink/renderer/core/inspector/inspector_performance_agent.cc'],
         'allowed': [
             'base::subtle::TimeTicksNowIgnoringOverride',
@@ -467,6 +561,7 @@ _CONFIG = [
             'third_party/blink/renderer/modules/device_orientation/',
             'third_party/blink/renderer/modules/gamepad/',
             'third_party/blink/renderer/modules/sensor/',
+            'third_party/blink/renderer/modules/xr/',
         ],
         'allowed': [
             'base::subtle::Atomic32',
@@ -483,10 +578,36 @@ _CONFIG = [
         # The modules listed above need access to the following GL drawing and
         # display-related types.
         'allowed': [
+            'base::MRUCache',
             'gpu::gles2::GLES2Interface',
             'gpu::MailboxHolder',
             'display::Display',
         ],
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/encryptedmedia/',
+        ],
+        'allowed': [
+            'media::.+',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/imagecapture/',
+        ],
+        'allowed': [
+            'media::.+',
+            'libyuv::.+',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/media/',
+        ],
+        'allowed': [
+            'media::.+',
+        ]
     },
     {
         'paths': [
@@ -498,10 +619,62 @@ _CONFIG = [
     },
     {
         'paths': [
+            'third_party/blink/renderer/modules/media_capabilities/media_capabilities_fuzzer.cc',
+        ],
+        'allowed': [
+            'mc_fuzzer::.+',
+            'google::protobuf::RepeatedField',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/mediacapturefromelement/',
+        ],
+        'allowed': [
+            'media::.+',
+            'libyuv::.+',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/modules/mediarecorder/',
+        ],
+        'allowed': [
+            'base::data',
+            # TODO(crbug.com/960665): Remove it once it is replaced with a WTF equivalent.
+            'base::queue',
+
+            'base::SharedMemory',
+            'base::StringPiece',
+            'base::ThreadTaskRunnerHandle',
+            'media::.+',
+            'libopus::.+',
+            'libyuv::.+',
+            'video_track_recorder::.+',
+        ]
+    },
+    {
+        'paths': [
             'third_party/blink/renderer/modules/mediastream/',
         ],
         'allowed': [
             'media::.+',
+            'base::AutoLock',
+            'base::Hash',
+            'base::Lock',
+            'base::TaskRunner',
+            # TODO(crbug.com/704136): Switch to using frame-based task runners.
+            'base::ThreadTaskRunnerHandle',
+            'cc::SkiaPaintCanvas',
+            'cc::UpdateSubmissionStateCB',
+            'cc::VideoFrameProvider',
+            'cc::VideoLayer',
+            'gpu::gles2::GLES2Interface',
+            'libyuv::.+',
+            'viz::.+',
+            'webrtc::AudioTrackInterface',
+            'webrtc::VideoTrackInterface',
+            'webrtc::MediaStreamTrackInterface',
         ]
     },
     {
@@ -524,13 +697,30 @@ _CONFIG = [
     },
     {
         'paths': [
+            'third_party/blink/renderer/modules/webrtc/',
+        ],
+        'allowed': [
+            'base::AutoLock',
+            'base::Erase',
+            'base::StringPrintf',
+            'media::.+',
+            'rtc::scoped_refptr',
+            'webrtc::AudioSourceInterface',
+        ]
+    },
+    {
+        'paths': [
             'third_party/blink/renderer/platform/',
         ],
-        # Suppress almost all checks on platform since code in this directory
-        # is meant to be a bridge between Blink and non-Blink code. However,
+        # Suppress almost all checks on platform since code in this directory is
+        # meant to be a bridge between Blink and non-Blink code. However,
         # base::RefCounted should still be explicitly blocked, since
-        # WTF::RefCounted should be used instead.
-        'allowed': ['(?!base::RefCounted).+'],
+        # WTF::RefCounted should be used instead. base::RefCountedThreadSafe is
+        # still needed for cross_thread_copier.h though.
+        'allowed': [
+            'base::RefCountedThreadSafe',
+            '(?!base::RefCounted).+'
+        ],
     },
     {
         'paths': [
@@ -559,6 +749,7 @@ _CONFIG = [
         ],
         'allowed': [
             'cc::AnimationOptions',
+            'cc::AnimationEffectTimings',
         ],
     },
     {
@@ -602,6 +793,7 @@ _CONFIG = [
         ],
         'allowed': [
             'cricket::.*',
+            'media::.+',
             'rtc::.+',
             'webrtc::.+',
             'quic::.+',
@@ -621,6 +813,17 @@ _CONFIG = [
             'base::OnTaskRunnerDeleter',
             'sigslot::.+',
         ],
+    },
+    {
+        'paths': ['third_party/blink/renderer/modules/manifest/'],
+        'allowed': [
+            'base::NullableString16',
+            'net::ParseMimeTypeWithoutParameter',
+        ],
+    },
+    {
+        'paths': ['third_party/blink/renderer/core/fetch/fetch_request_data.cc'],
+        'allowed': ['net::RequestPriority'],
     }
 ]
 
@@ -704,10 +907,10 @@ def _find_matching_entries(path):
 def _check_entries_for_identifier(entries, identifier):
     """Check if an identifier is allowed"""
     for entry in entries:
-        if entry['allowed'].match(identifier):
-            return True
         if entry['disallowed'].match(identifier):
             return False
+        if entry['allowed'].match(identifier):
+            return True
     # Disallow by default.
     return False
 
@@ -743,7 +946,7 @@ def check(path, contents):
     # Because Windows.
     path = path.replace('\\', '/')
     basename, ext = os.path.splitext(path)
-    # Only check code. Ignore tests.
+    # Only check code. Ignore tests and fuzzers.
     # TODO(tkent): Remove 'Test' after the great mv.
     if (ext not in ('.cc', '.cpp', '.h', '.mm')
             or path.find('/testing/') >= 0
@@ -751,7 +954,8 @@ def check(path, contents):
             or basename.endswith('Test')
             or basename.endswith('_test')
             or basename.endswith('_test_helpers')
-            or basename.endswith('_unittest')):
+            or basename.endswith('_unittest')
+            or basename.endswith('_fuzzer')):
         return results
     entries = _find_matching_entries(path)
     if not entries:

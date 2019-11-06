@@ -9,7 +9,6 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/optional.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
-#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_response.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
@@ -25,7 +24,6 @@
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
 #include "third_party/blink/renderer/core/fetch/response_init.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
@@ -33,6 +31,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/cors/cors.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_utils.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
@@ -56,7 +55,7 @@ FetchResponseData* FilterResponseData(
     case network::mojom::FetchResponseType::kCors: {
       WebHTTPHeaderSet header_names;
       for (const auto& header : headers)
-        header_names.insert(header.Ascii().data());
+        header_names.insert(header.Ascii());
       return response->CreateCorsFilteredResponse(header_names);
       break;
     }
@@ -103,7 +102,7 @@ FetchResponseData* CreateFetchResponseDataFromFetchAPIResponse(
   // construction.  We should plumb the value through the cache_storage
   // persistence layer and include the explicit mime type in FetchAPIResponse
   // to set here. See: crbug.com/938939
-  response->SetMIMEType(response->HeaderList()->ExtractMIMEType());
+  response->SetMimeType(response->HeaderList()->ExtractMIMEType());
 
   if (fetch_api_response.blob) {
     response->ReplaceBodyStreamBuffer(MakeGarbageCollected<BodyStreamBuffer>(
@@ -318,7 +317,7 @@ Response* Response::Create(ScriptState* script_state,
 
   // "9. Set |r|'s MIME type to the result of extracting a MIME type
   // from |r|'s response's header list."
-  r->response_->SetMIMEType(r->response_->HeaderList()->ExtractMIMEType());
+  r->response_->SetMimeType(r->response_->HeaderList()->ExtractMIMEType());
 
   // "10. Set |r|'s response’s HTTPS state to current settings object's"
   // HTTPS state."
@@ -462,11 +461,6 @@ bool Response::HasPendingActivity() const {
   if (InternalBodyBuffer()->HasPendingActivity())
     return true;
   return Body::HasPendingActivity();
-}
-
-void Response::PopulateWebServiceWorkerResponse(
-    WebServiceWorkerResponse& response) {
-  response_->PopulateWebServiceWorkerResponse(response);
 }
 
 mojom::blink::FetchAPIResponsePtr Response::PopulateFetchAPIResponse() {

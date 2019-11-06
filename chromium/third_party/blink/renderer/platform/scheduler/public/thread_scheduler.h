@@ -16,10 +16,16 @@
 #include "third_party/blink/renderer/platform/scheduler/public/pending_user_input_type.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 
+namespace v8 {
+class Isolate;
+}
+
 namespace blink {
 namespace scheduler {
 class NonMainThreadSchedulerImpl;
 }
+
+class RAILModeObserver;
 
 // This class is used to submit tasks and pass other information from Blink to
 // the platform's scheduler.
@@ -59,6 +65,12 @@ class PLATFORM_EXPORT ThreadScheduler {
   // Takes ownership of |IdleTask|. Can be called from any thread.
   virtual void PostIdleTask(const base::Location&, Thread::IdleTask) = 0;
 
+  // As above, except that the task is guaranteed to not run before |delay|.
+  // Takes ownership of |IdleTask|. Can be called from any thread.
+  virtual void PostDelayedIdleTask(const base::Location&,
+                                   base::TimeDelta delay,
+                                   Thread::IdleTask) = 0;
+
   // Like postIdleTask but guarantees that the posted task will not run
   // nested within an already-running task. Posting an idle task as
   // non-nestable may not affect when the task gets run, or it could
@@ -67,8 +79,9 @@ class PLATFORM_EXPORT ThreadScheduler {
   virtual void PostNonNestableIdleTask(const base::Location&,
                                        Thread::IdleTask) = 0;
 
-  virtual void AddRAILModeObserver(
-      scheduler::WebRAILModeObserver* observer) = 0;
+  virtual void AddRAILModeObserver(RAILModeObserver* observer) = 0;
+
+  virtual void RemoveRAILModeObserver(RAILModeObserver const* observer) = 0;
 
   // Returns a task runner for kV8 tasks. Can be called from any thread.
   virtual scoped_refptr<base::SingleThreadTaskRunner> V8TaskRunner() = 0;
@@ -116,6 +129,12 @@ class PLATFORM_EXPORT ThreadScheduler {
   virtual scheduler::PendingUserInputInfo GetPendingUserInputInfo() const {
     return scheduler::PendingUserInputInfo();
   }
+
+  // Associates |isolate| to the scheduler.
+  virtual void SetV8Isolate(v8::Isolate* isolate) = 0;
+
+  virtual void OnSafepointEntered() {}
+  virtual void OnSafepointExited() {}
 
   // Test helpers.
 

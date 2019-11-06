@@ -30,11 +30,11 @@ namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
-namespace translate {
+namespace language {
+class LanguagePrefs;
+}
 
-// Enables or disables the regional locales as valid selection for the display
-// UI.
-extern const base::Feature kRegionalLocalesAsDisplayUI;
+namespace translate {
 
 // Enables or disables using the most recent target language as the default
 // target language option.
@@ -43,11 +43,8 @@ extern const base::Feature kTranslateRecentTarget;
 // Enable or disable the Translate popup altogether.
 extern const base::Feature kTranslateUI;
 
-// Enable the "Translate" item in the overflow menu on Android.
-extern const base::Feature kTranslateAndroidManualTrigger;
-
-// Enables the new compact Translate infobar on iOS.
-extern const base::Feature kCompactTranslateInfobarIOS;
+// Enable the "Translate" item in the overflow menu on Mobile.
+extern const base::Feature kTranslateMobileManualTrigger;
 
 // Minimum number of times the user must accept a translation before we show
 // a shortcut to the "Always Translate" functionality.
@@ -135,7 +132,6 @@ class TranslatePrefs {
   static const char kPrefTranslateDeniedCount[];
   static const char kPrefTranslateIgnoredCount[];
   static const char kPrefTranslateAcceptedCount[];
-  static const char kPrefTranslateBlockedLanguages[];
   static const char kPrefTranslateLastDeniedTimeForLanguage[];
   static const char kPrefTranslateTooOftenDeniedForLanguage[];
   static const char kPrefTranslateRecentTarget[];
@@ -164,6 +160,8 @@ class TranslatePrefs {
   TranslatePrefs(PrefService* user_prefs,
                  const char* accept_languages_pref,
                  const char* preferred_languages_pref);
+
+  ~TranslatePrefs();
 
   // Checks if the "offer translate" (i.e. automatic translate bubble) feature
   // is enabled.
@@ -349,16 +347,7 @@ class TranslatePrefs {
   // Updates the language list of the language settings.
   void UpdateLanguageList(const std::vector<std::string>& languages);
 
-  // Will return true if at least one language has been blocked.
-  bool HasBlockedLanguages() const;
-
-  // Merges two language sets to migrate to the language setting UI.
-  static void CreateBlockedLanguages(
-      std::vector<std::string>* blocked_languages,
-      const std::vector<std::string>& blacklisted_languages,
-      const std::vector<std::string>& accept_languages);
-
-  void ClearBlockedLanguages();
+  void ResetBlockedLanguagesToDefault();
   void ClearBlacklistedSites();
   void ClearWhitelistedLanguagePairs();
 
@@ -402,6 +391,8 @@ class TranslatePrefs {
   PrefService* prefs_;  // Weak.
 
   std::string country_;  // The country the app runs in.
+
+  std::unique_ptr<language::LanguagePrefs> language_prefs_;
 
   DISALLOW_COPY_AND_ASSIGN(TranslatePrefs);
 };

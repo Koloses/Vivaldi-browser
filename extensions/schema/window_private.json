@@ -164,18 +164,6 @@
             "name": "state",
             "$ref": "WindowState",
             "description": "The state to set the window to."
-          },
-          {
-            "type": "function",
-            "name": "callback",
-            "optional": true,
-            "parameters": [
-              {
-                "name": "success",
-                "type": "boolean",
-                "description": "true if successful, false otherwise."
-              }
-            ]
           }
         ]
       }
@@ -313,6 +301,21 @@
           {
             "type": "integer",
             "name": "windowId"
+          }
+        ]
+      },
+      {
+        "name": "onActiveTabStatusText",
+        "type": "function",
+        "description": "Fired when the active tab has new loadstate text. Will reset to <empty> string",
+        "parameters": [
+          {
+            "type": "integer",
+            "name": "windowId"
+          },
+          {
+            "type": "string",
+            "name": "statusText"
           }
         ]
       }

@@ -31,14 +31,14 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_MEDIA_PLAYER_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_MEDIA_PLAYER_H_
 
-#include "base/optional.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "components/viz/common/surfaces/surface_id.h"
-#include "third_party/blink/public/platform/web_callbacks.h"
 #include "third_party/blink/public/platform/web_content_decryption_module.h"
 #include "third_party/blink/public/platform/web_media_source.h"
 #include "third_party/blink/public/platform/web_set_sink_id_callbacks.h"
 #include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/public/platform/webaudiosourceprovider_impl.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace cc {
@@ -54,7 +54,6 @@ class GLES2Interface;
 
 namespace blink {
 
-class WebAudioSourceProvider;
 class WebContentDecryptionModule;
 class WebMediaPlayerSource;
 class WebString;
@@ -165,8 +164,8 @@ class WebMediaPlayer {
   virtual WebTimeRanges Seekable() const = 0;
 
   // Attempts to switch the audio output device.
-  virtual void SetSinkId(const WebString& sink_id,
-                         std::unique_ptr<WebSetSinkIdCallbacks>) = 0;
+  virtual void SetSinkId(const WebString& sing_id,
+                         WebSetSinkIdCompleteCallback) = 0;
 
   // True if the loaded media has a playable video/audio track.
   virtual bool HasVideo() const = 0;
@@ -214,6 +213,10 @@ class WebMediaPlayer {
   virtual unsigned CorruptedFrameCount() const { return 0; }
   virtual uint64_t AudioDecodedByteCount() const = 0;
   virtual uint64_t VideoDecodedByteCount() const = 0;
+
+  // Returns true if the player has a frame available for presentation. Usually
+  // this just means the first frame has been delivered.
+  virtual bool HasAvailableVideoFrame() const = 0;
 
   // |already_uploaded_id| indicates the unique_id of the frame last uploaded
   //   to this destination. It should only be set by the caller if the contents
@@ -326,7 +329,20 @@ class WebMediaPlayer {
     return false;
   }
 
-  virtual WebAudioSourceProvider* GetAudioSourceProvider() { return nullptr; }
+  // Share video frame texture to |texture|. If the sharing is impossible or
+  // fails, it returns false.
+  virtual bool PrepareVideoFrameForWebGL(
+      gpu::gles2::GLES2Interface* gl,
+      unsigned target,
+      unsigned texture,
+      int already_uploaded_id = -1,
+      WebMediaPlayer::VideoFrameUploadMetadata* out_metadata = nullptr) {
+    return false;
+  }
+
+  virtual scoped_refptr<WebAudioSourceProviderImpl> GetAudioSourceProvider() {
+    return nullptr;
+  }
 
   virtual void SetContentDecryptionModule(
       WebContentDecryptionModule* cdm,
@@ -408,6 +424,8 @@ class WebMediaPlayer {
   virtual base::Optional<viz::SurfaceId> GetSurfaceId() {
     return base::nullopt;
   }
+
+  virtual base::WeakPtr<WebMediaPlayer> AsWeakPtr() = 0;
 };
 
 }  // namespace blink

@@ -62,6 +62,11 @@ v8::Maybe<void> V8VoidCallbackFunctionTestInterfaceSequenceArg::Invoke(bindings:
   v8::Context::BackupIncumbentScope backup_incumbent_scope(
       IncumbentScriptState()->GetContext());
 
+  if (UNLIKELY(ScriptForbiddenScope::IsScriptForbidden())) {
+    ScriptForbiddenScope::ThrowScriptForbiddenException(GetIsolate());
+    return v8::Nothing<void>();
+  }
+
   v8::Local<v8::Function> function;
   // callback function's invoke:
   // step 4. If ! IsCallable(F) is false:
@@ -117,16 +122,6 @@ void V8VoidCallbackFunctionTestInterfaceSequenceArg::InvokeAndReportException(bi
       Invoke(callback_this_value, arg);
   // An exception if any is killed with the v8::TryCatch above.
   ALLOW_UNUSED_LOCAL(maybe_result);
-}
-
-v8::Maybe<void> V8PersistentCallbackFunction<V8VoidCallbackFunctionTestInterfaceSequenceArg>::Invoke(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, const HeapVector<Member<TestInterfaceImplementation>>& arg) {
-  return Proxy()->Invoke(
-      callback_this_value, arg);
-}
-
-void V8PersistentCallbackFunction<V8VoidCallbackFunctionTestInterfaceSequenceArg>::InvokeAndReportException(bindings::V8ValueOrScriptWrappableAdapter callback_this_value, const HeapVector<Member<TestInterfaceImplementation>>& arg) {
-  Proxy()->InvokeAndReportException(
-      callback_this_value, arg);
 }
 
 }  // namespace blink

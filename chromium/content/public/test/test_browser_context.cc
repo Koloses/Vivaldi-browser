@@ -9,7 +9,7 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "base/task/task_scheduler/task_scheduler.h"
+#include "base/task/thread_pool/thread_pool.h"
 #include "base/test/null_task_runner.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/permission_controller_delegate.h"
@@ -72,12 +72,12 @@ TestBrowserContext::~TestBrowserContext() {
   NotifyWillBeDestroyed(this);
   ShutdownStoragePartitions();
 
-  // disk_cache::SimpleBackendImpl performs all disk IO on the TaskScheduler
+  // disk_cache::SimpleBackendImpl performs all disk IO on the ThreadPool
   // threads. The cache is initialized in the directory owned by
   // |browser_context_dir_| and so ScopedTempDir destructor may race with cache
   // IO (see https://crbug.com/910029 for example). Let all pending IO
   // operations finish before destroying |browser_context_dir_|.
-  base::TaskScheduler::GetInstance()->FlushForTesting();
+  base::ThreadPoolInstance::Get()->FlushForTesting();
 }
 
 base::FilePath TestBrowserContext::TakePath() {
@@ -101,7 +101,7 @@ net::URLRequestContextGetter* TestBrowserContext::GetRequestContext() {
   return request_context_.get();
 }
 
-base::FilePath TestBrowserContext::GetPath() const {
+base::FilePath TestBrowserContext::GetPath() {
   return browser_context_dir_.GetPath();
 }
 
@@ -112,7 +112,7 @@ std::unique_ptr<ZoomLevelDelegate> TestBrowserContext::CreateZoomLevelDelegate(
 }
 #endif  // !defined(OS_ANDROID)
 
-bool TestBrowserContext::IsOffTheRecord() const {
+bool TestBrowserContext::IsOffTheRecord() {
   return is_off_the_record_;
 }
 
@@ -179,26 +179,7 @@ net::URLRequestContextGetter* TestBrowserContext::CreateRequestContext(
   return GetRequestContext();
 }
 
-net::URLRequestContextGetter*
-TestBrowserContext::CreateRequestContextForStoragePartition(
-    const base::FilePath& partition_path,
-    bool in_memory,
-    ProtocolHandlerMap* protocol_handlers,
-    URLRequestInterceptorScopedVector request_interceptors) {
-  request_interceptors_ = std::move(request_interceptors);
-  // Simply returns the same RequestContext since no tests is relying on the
-  // expected behavior.
-  return GetRequestContext();
-}
-
 net::URLRequestContextGetter* TestBrowserContext::CreateMediaRequestContext() {
-  return nullptr;
-}
-
-net::URLRequestContextGetter*
-TestBrowserContext::CreateMediaRequestContextForStoragePartition(
-    const base::FilePath& partition_path,
-    bool in_memory) {
   return nullptr;
 }
 

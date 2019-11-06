@@ -27,12 +27,12 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
-#include "device/usb/public/cpp/fake_usb_device.h"
-#include "device/usb/public/cpp/fake_usb_device_info.h"
-#include "device/usb/public/cpp/fake_usb_device_manager.h"
-#include "device/usb/public/mojom/device.mojom.h"
-#include "device/usb/public/mojom/device_enumeration_options.mojom.h"
-#include "device/usb/public/mojom/device_manager.mojom.h"
+#include "services/device/public/cpp/test/fake_usb_device.h"
+#include "services/device/public/cpp/test/fake_usb_device_info.h"
+#include "services/device/public/cpp/test/fake_usb_device_manager.h"
+#include "services/device/public/mojom/usb_device.mojom.h"
+#include "services/device/public/mojom/usb_enumeration_options.mojom.h"
+#include "services/device/public/mojom/usb_manager.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
@@ -98,20 +98,30 @@ UsbConfigurationInfoPtr ConstructAndroidConfig(uint8_t class_code,
                                                uint8_t subclass_code,
                                                uint8_t protocol_code) {
   std::vector<UsbEndpointInfoPtr> endpoints;
-  endpoints.push_back(UsbEndpointInfo::New(
-      /*endpoint_number=*/0x01, UsbTransferDirection::INBOUND,
-      UsbTransferType::BULK,
-      /*packet_size=*/512));
-  endpoints.push_back(UsbEndpointInfo::New(
-      /*endpoint_number=*/0x01, UsbTransferDirection::OUTBOUND,
-      UsbTransferType::BULK,
-      /*packet_size=*/512));
+  auto endpoint_1 = UsbEndpointInfo::New();
+  endpoint_1->endpoint_number = 0x01;
+  endpoint_1->direction = UsbTransferDirection::INBOUND;
+  endpoint_1->type = UsbTransferType::BULK;
+  endpoint_1->packet_size = 512;
+  endpoints.push_back(std::move(endpoint_1));
+
+  auto endpoint_2 = UsbEndpointInfo::New();
+  endpoint_2->endpoint_number = 0x01;
+  endpoint_2->direction = UsbTransferDirection::OUTBOUND;
+  endpoint_2->type = UsbTransferType::BULK;
+  endpoint_2->packet_size = 512;
+  endpoints.push_back(std::move(endpoint_2));
+
+  auto alternate = UsbAlternateInterfaceInfo::New();
+  alternate->alternate_setting = 0;
+  alternate->class_code = class_code;
+  alternate->subclass_code = subclass_code;
+  alternate->protocol_code = protocol_code;
+  alternate->endpoints = std::move(endpoints);
 
   auto interface = UsbInterfaceInfo::New();
   interface->interface_number = 0;
-  interface->alternates.push_back(UsbAlternateInterfaceInfo::New(
-      /*alternate_setting=*/0, class_code, subclass_code, protocol_code,
-      /*interface_name=*/base::nullopt, std::move(endpoints)));
+  interface->alternates.push_back(std::move(alternate));
 
   auto config = UsbConfigurationInfo::New();
   config->configuration_value = kAndroidConfigValue;
@@ -413,7 +423,7 @@ class FakeAndroidUsbManager : public FakeUsbDeviceManager {
   void GetDevice(const std::string& guid,
                  device::mojom::UsbDeviceRequest device_request,
                  device::mojom::UsbDeviceClientPtr device_client) override {
-    DCHECK(base::ContainsKey(devices(), guid));
+    DCHECK(base::Contains(devices(), guid));
     FakeAndroidUsbDevice::Create(devices()[guid], std::move(device_request),
                                  std::move(device_client));
   }

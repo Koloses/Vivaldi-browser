@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "components/viz/common/resources/resource_format.h"
+#include "gpu/command_buffer/client/interface_base.h"
 #include "gpu/command_buffer/common/sync_token.h"
 
 namespace cc {
@@ -35,7 +36,7 @@ namespace raster {
 
 enum RasterTexStorageFlags { kNone = 0, kOverlay = (1 << 0) };
 
-class RasterInterface {
+class RasterInterface : public InterfaceBase {
  public:
   RasterInterface() {}
   virtual ~RasterInterface() {}
@@ -56,7 +57,9 @@ class RasterInterface {
                                    const gfx::ColorSpace& color_space,
                                    const GLbyte* mailbox) = 0;
 
-  static constexpr size_t kDefaultMaxOpSizeHint = 512 * 1024;
+  // Heuristic decided on UMA data. This covers 85% of the cases where we need
+  // to serialize ops > 512k.
+  static constexpr size_t kDefaultMaxOpSizeHint = 600 * 1024;
   virtual void RasterCHROMIUM(const cc::DisplayItemList* list,
                               cc::ImageProvider* provider,
                               const gfx::Size& content_size,
@@ -67,15 +70,10 @@ class RasterInterface {
                               bool requires_clear,
                               size_t* max_op_size_hint) = 0;
 
-  // Determines if an encoded image can be decoded using hardware decode
-  // acceleration. If this method returns true, then the client can be confident
-  // that a call to ScheduleImageDecode() will succeed.
-  virtual bool CanDecodeWithHardwareAcceleration(
-      base::span<const uint8_t> encoded_data) = 0;
-
   // Schedules a hardware-accelerated image decode and a sync token that's
   // released when the image decode is complete. If the decode could not be
-  // scheduled, an empty sync token is returned.
+  // scheduled, an empty sync token is returned. This method should only be
+  // called if ContextSupport::CanDecodeWithHardwareAcceleration() returns true.
   virtual SyncToken ScheduleImageDecode(
       base::span<const uint8_t> encoded_data,
       const gfx::Size& output_size,

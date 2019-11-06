@@ -84,9 +84,6 @@ bool StructTraits<blink::mojom::ManifestDataView, ::blink::Manifest>::Read(
   if (data.has_background_color())
     out->background_color = data.background_color();
 
-  if (!data.ReadSplashScreenUrl(&out->splash_screen_url))
-    return false;
-
   if (!data.ReadDisplay(&out->display))
     return false;
 
@@ -199,6 +196,16 @@ bool StructTraits<blink::mojom::ManifestShareTargetDataView,
     return false;
 
   return data.ReadParams(&out->params);
+}
+
+bool StructTraits<blink::mojom::ManifestFileHandlerDataView,
+                  ::blink::Manifest::FileHandler>::
+    Read(blink::mojom::ManifestFileHandlerDataView data,
+         ::blink::Manifest::FileHandler* out) {
+  if (!data.ReadAction(&out->action))
+    return false;
+
+  return data.ReadFiles(&out->files);
 }
 
 }  // namespace mojo

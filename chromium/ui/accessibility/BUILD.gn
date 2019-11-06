@@ -39,6 +39,11 @@ jumbo_component("accessibility") {
     "ax_action_data.h",
     "ax_action_handler.cc",
     "ax_action_handler.h",
+    "ax_action_target.h",
+    "ax_active_popup.cc",
+    "ax_active_popup.h",
+    "ax_clipping_behavior.h",
+    "ax_coordinate_system.h",
     "ax_enum_util.cc",
     "ax_enum_util.h",
     "ax_event.cc",
@@ -47,7 +52,8 @@ jumbo_component("accessibility") {
     "ax_event_generator.cc",
     "ax_event_generator.h",
     "ax_export.h",
-    "ax_language_info.h",
+    "ax_language_detection.cc",
+    "ax_language_detection.h",
     "ax_mode.cc",
     "ax_mode.h",
     "ax_mode_observer.h",
@@ -57,6 +63,9 @@ jumbo_component("accessibility") {
     "ax_node_data.h",
     "ax_node_position.cc",
     "ax_node_position.h",
+    "ax_node_text_styles.cc",
+    "ax_node_text_styles.h",
+    "ax_offscreen_result.h",
     "ax_position.h",
     "ax_range.h",
     "ax_relative_bounds.cc",
@@ -67,6 +76,8 @@ jumbo_component("accessibility") {
     "ax_serializable_tree.h",
     "ax_table_info.cc",
     "ax_table_info.h",
+    "ax_text_boundary.cc",
+    "ax_text_boundary.h",
     "ax_text_utils.cc",
     "ax_text_utils.h",
     "ax_tree.cc",
@@ -89,6 +100,8 @@ jumbo_component("accessibility") {
     "ax_tree_source.h",
     "ax_tree_source_checker.h",
     "ax_tree_update.h",
+    "null_ax_action_target.cc",
+    "null_ax_action_target.h",
     "platform/ax_android_constants.cc",
     "platform/ax_android_constants.h",
     "platform/ax_platform_node.cc",
@@ -98,6 +111,8 @@ jumbo_component("accessibility") {
     "platform/ax_platform_node_delegate.h",
     "platform/ax_platform_node_delegate_base.cc",
     "platform/ax_platform_node_delegate_base.h",
+    "platform/ax_platform_node_delegate_utils_win.cc",
+    "platform/ax_platform_node_delegate_utils_win.h",
     "platform/ax_platform_node_test_helper.cc",
     "platform/ax_platform_node_test_helper.h",
     "platform/ax_unique_id.cc",
@@ -108,10 +123,13 @@ jumbo_component("accessibility") {
 
   if (has_native_accessibility) {
     sources += [
+      "platform/ax_fragment_root_delegate_win.h",
       "platform/ax_fragment_root_win.cc",
       "platform/ax_fragment_root_win.h",
       "platform/ax_platform_node_mac.h",
       "platform/ax_platform_node_mac.mm",
+      "platform/ax_platform_node_textchildprovider_win.cc",
+      "platform/ax_platform_node_textchildprovider_win.h",
       "platform/ax_platform_node_textprovider_win.cc",
       "platform/ax_platform_node_textprovider_win.h",
       "platform/ax_platform_node_textrangeprovider_win.cc",
@@ -120,12 +138,18 @@ jumbo_component("accessibility") {
       "platform/ax_platform_node_win.h",
       "platform/ax_platform_relation_win.cc",
       "platform/ax_platform_relation_win.h",
+      "platform/ax_platform_text_boundary.cc",
+      "platform/ax_platform_text_boundary.h",
       "platform/ax_system_caret_win.cc",
       "platform/ax_system_caret_win.h",
     ]
   }
 
   defines = [ "ACCESSIBILITY_IMPLEMENTATION" ]
+
+  deps = [
+    "//third_party/cld_3/src/src:cld_3",
+  ]
 
   public_deps = [
     ":ax_constants_mojo",
@@ -205,16 +229,11 @@ source_set("ax_assistant") {
 static_library("test_support") {
   testonly = true
   sources = [
+    "platform/test_ax_node_wrapper.cc",
+    "platform/test_ax_node_wrapper.h",
     "tree_generator.cc",
     "tree_generator.h",
   ]
-
-  if (is_win || use_atk) {
-    sources += [
-      "platform/test_ax_node_wrapper.cc",
-      "platform/test_ax_node_wrapper.h",
-    ]
-  }
 
   deps = [
     ":accessibility",
@@ -227,9 +246,11 @@ test("accessibility_unittests") {
     "ax_enum_util_unittest.cc",
     "ax_event_generator_unittest.cc",
     "ax_generated_tree_unittest.cc",
-    "ax_language_info_unittest.cc",
+    "ax_language_detection_unittest.cc",
     "ax_node_data_unittest.cc",
     "ax_node_position_unittest.cc",
+    "ax_range_unittest.cc",
+    "ax_role_properties_unittest.cc",
     "ax_table_info_unittest.cc",
     "ax_text_utils_unittest.cc",
     "ax_tree_combiner_unittest.cc",
@@ -242,7 +263,9 @@ test("accessibility_unittests") {
     "mojom/ax_tree_data_mojom_traits_unittest.cc",
     "mojom/ax_tree_id_mojom_traits_unittest.cc",
     "mojom/ax_tree_update_mojom_traits_unittest.cc",
+    "null_ax_action_target_unittest.cc",
     "platform/ax_fragment_root_win_unittest.cc",
+    "platform/ax_platform_node_textchildprovider_win_unittest.cc",
     "platform/ax_platform_node_textprovider_win_unittest.cc",
     "platform/ax_platform_node_textrangeprovider_win_unittest.cc",
     "platform/ax_platform_node_unittest.cc",
@@ -260,6 +283,7 @@ test("accessibility_unittests") {
     ":test_support",
     "//base",
     "//base/test:test_support",
+    "//ipc",
     "//mojo/core/embedder",
     "//mojo/core/test:test_support",
     "//mojo/public/cpp/test_support:test_utils",
@@ -275,7 +299,10 @@ test("accessibility_unittests") {
 
   if (is_win) {
     deps += [ "//third_party/iaccessible2" ]
-    libs = [ "oleacc.lib" ]
+    libs = [
+      "oleacc.lib",
+      "uiautomationcore.lib",
+    ]
   }
   if (use_atk) {
     sources += [
@@ -306,17 +333,4 @@ fuzzer_test("ax_table_fuzzer") {
   ]
 
   seed_corpus = "fuzz_corpus"
-}
-
-source_set("ax_host_manifest") {
-  sources = [
-    "ax_host_manifest.cc",
-    "ax_host_manifest.h",
-  ]
-
-  deps = [
-    "//base",
-    "//services/service_manager/public/cpp",
-    "//ui/accessibility/mojom",
-  ]
 }

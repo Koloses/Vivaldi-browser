@@ -64,7 +64,6 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
-#include "third_party/blink/renderer/platform/wtf/compiler.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -94,6 +93,12 @@ class WebSettingsImpl;
 class WebViewClient;
 class WebWidgetClient;
 
+struct WebTextAutosizerPageInfo;
+
+class VivaldiDoubleClickMenu;
+
+using PaintHoldingCommitTrigger = cc::PaintHoldingCommitTrigger;
+
 class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
                                       private WebWidget,
                                       public RefCounted<WebViewImpl>,
@@ -107,6 +112,11 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
   // Returns true if popup menus should be rendered by the browser, false if
   // they should be rendered by WebKit (which is the default).
   static bool UseExternalPopupMenus();
+
+  // Returns whether frames under this WebView are backed by a compositor. When
+  // false there may be no WebWidgetClient present. When true, there must be a
+  // WebWidgetClient while a local main frame is attached.
+  bool does_composite() const { return does_composite_; }
 
   // WebView methods:
   void DidAttachLocalMainFrame(WebWidgetClient*) override;
@@ -133,7 +143,7 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
   void FocusDocumentView(WebFrame*) override;
   void SetInitialFocus(bool reverse) override;
   void ClearFocusedElement() override;
-  void SmoothScroll(int target_x, int target_y, long duration_ms) override;
+  void SmoothScroll(int target_x, int target_y, uint64_t duration_ms) override;
   void AdvanceFocus(bool reverse) override;
   void AdvanceFocusAcrossFrames(WebFocusType,
                                 WebRemoteFrame* from,
@@ -154,6 +164,7 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
   void SetVisualViewportOffset(const WebFloatPoint&) override;
   WebFloatPoint VisualViewportOffset() const override;
   WebFloatSize VisualViewportSize() const override;
+  void ResizeVisualViewport(const WebSize&) override;
   void ResetScrollAndScaleState() override;
   void SetIgnoreViewportTagScaleLimits(bool) override;
   WebSize ContentsPreferredMinimumSize() override;
@@ -174,13 +185,9 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
   WebHitTestResult HitTestResultAt(const gfx::Point&) override;
   WebHitTestResult HitTestResultForTap(const gfx::Point&,
                                        const WebSize&) override;
-  unsigned long CreateUniqueIdentifierForRequest() override;
+  uint64_t CreateUniqueIdentifierForRequest() override;
   void EnableDeviceEmulation(const WebDeviceEmulationParams&) override;
   void DisableDeviceEmulation() override;
-  void SetSelectionColors(unsigned active_background_color,
-                          unsigned active_foreground_color,
-                          unsigned inactive_background_color,
-                          unsigned inactive_foreground_color) override;
   void PerformCustomContextMenuAction(unsigned action) override;
   void DidCloseContextMenu() override;
   void CancelPagePopup() override;
@@ -196,6 +203,8 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
   void SetBaseBackgroundColorOverride(SkColor) override;
   void ClearBaseBackgroundColorOverride() override;
   void SetInsidePortal(bool inside_portal) override;
+  void PaintContent(cc::PaintCanvas*, const gfx::Rect&) override;
+  void SetTextAutosizePageInfo(const WebTextAutosizerPageInfo&) override;
 
   void DidUpdateFullscreenSize();
 
@@ -209,7 +218,6 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
 
   void SetZoomFactorOverride(float);
   void SetCompositorDeviceScaleFactorOverride(float);
-  void SetDeviceEmulationTransform(const TransformationMatrix&);
   TransformationMatrix GetDeviceEmulationTransform() const;
 
   SkColor BackgroundColor() const;
@@ -362,8 +370,6 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
   // changed.
   void DidUpdateBrowserControls();
 
-  void SetOverscrollBehavior(const cc::OverscrollBehavior&);
-
   void ForceNextWebGLContextCreationToFail() override;
   void ForceNextDrawingBufferCreationToFail() override;
 
@@ -394,19 +400,16 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
       const IntRect& caret_bounds_in_document,
       bool zoom_into_legible_scale);
 
-  void StopDeferringMainFrameUpdate() {
-    scoped_defer_main_frame_update_.reset();
-  }
+  // Allows main frame updates to occur if they were previously blocked. They
+  // are blocked during loading a navigation, to allow Blink to proceed without
+  // being interrupted by useless work until enough progress is made that it
+  // desires composited output to be generated.
+  void StopDeferringMainFrameUpdate();
 
   // This function checks the element ids of ScrollableAreas only and returns
   // the equivalent DOM Node if such exists.
   Node* FindNodeFromScrollableCompositorElementId(
       cc::ElementId element_id) const;
-
-  void DeferMainFrameUpdateForTesting();
-
-  void StartDeferringCommits(base::TimeDelta timeout);
-  void StopDeferringCommits();
 
   // Vivaldi start
   void SetImagesEnabled(const bool images_enabled) override;
@@ -435,12 +438,15 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
   WidgetData& AsWidget() { return as_widget_; }
   const WidgetData& AsWidget() const { return as_widget_; }
 
+  // Called while the main LocalFrame is being detached. The MainFrameImpl() and
+  // WebWidgetClient are still valid until after this method is called.
+  void DidDetachLocalMainFrame();
+
   // WebWidget methods:
   void SetLayerTreeView(WebLayerTreeView*, cc::AnimationHost*) override;
   void Close() override;
   WebSize Size() override;
   void Resize(const WebSize&) override;
-  void ResizeVisualViewport(const WebSize&) override;
   void DidEnterFullscreen() override;
   void DidExitFullscreen() override;
   void SetSuppressFrameRequestsWorkaroundFor704763Only(bool) override;
@@ -449,23 +455,21 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
   void DidBeginFrame() override;
   void BeginRafAlignedInput() override;
   void EndRafAlignedInput() override;
+  void BeginUpdateLayers() override;
+  void EndUpdateLayers() override;
+  void BeginCommitCompositorFrame() override;
+  void EndCommitCompositorFrame() override;
   void RecordStartOfFrameMetrics() override;
   void RecordEndOfFrameMetrics(base::TimeTicks frame_begin_time) override;
   void UpdateLifecycle(LifecycleUpdate requested_update,
                        LifecycleUpdateReason reason) override;
-  void UpdateAllLifecyclePhasesAndCompositeForTesting(bool do_raster) override;
-  void RequestPresentationCallbackForTesting(
-      base::OnceClosure callback) override;
-  void PaintContent(cc::PaintCanvas*, const WebRect&) override;
-  void CompositeAndReadbackAsync(
-      base::OnceCallback<void(const SkBitmap&)> callback) override;
   void ThemeChanged() override;
   WebInputEventResult HandleInputEvent(const WebCoalescedInputEvent&) override;
   WebInputEventResult DispatchBufferedTouchEvents() override;
   void SetCursorVisibilityState(bool is_visible) override;
+  void OnFallbackCursorModeToggled(bool is_on) override;
   void ApplyViewportChanges(const ApplyViewportChangesArgs& args) override;
-  void RecordWheelAndTouchScrollingCount(bool has_scrolled_by_wheel,
-                                         bool has_scrolled_by_touch) override;
+  void RecordManipulationTypeCounts(cc::ManipulationInfo info) override;
   void SendOverscrollEventFromImplSide(
       const gfx::Vector2dF& overscroll_delta,
       cc::ElementId scroll_latched_element_id) override;
@@ -481,7 +485,9 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
   void ShowContextMenu(WebMenuSourceType) override;
   WebURL GetURLForDebugTrace() override;
 
-  void SetPageScaleFactorAndLocation(float, const FloatPoint&);
+  void SetPageScaleFactorAndLocation(float scale,
+                                     bool is_pinch_gesture_active,
+                                     const FloatPoint&);
   void PropagateZoomFactorToLocalFrameRoots(Frame*, float);
 
   float MaximumLegiblePageScale() const;
@@ -507,14 +513,15 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
               WebViewImpl* opener);
   ~WebViewImpl() override;
 
-  HitTestResult HitTestResultForRootFramePos(const LayoutPoint&);
+  HitTestResult HitTestResultForRootFramePos(const PhysicalOffset&);
 
   void ConfigureAutoResizeMode();
 
   void SetIsAcceleratedCompositingActive(bool);
   void DoComposite();
   void ReallocateRenderer();
-  void UpdateLayerTreeViewPageScale();
+
+  void SetDeviceEmulationTransform(const TransformationMatrix&);
   void UpdateDeviceEmulationTransform();
 
   // Helper function: Widens the width of |source| by the specified margins
@@ -698,8 +705,6 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
 
   FloatSize elastic_overscroll_;
 
-  bool needs_hover_update_at_begin_frame_ = false;
-
   Persistent<EventListener> popup_mouse_wheel_event_listener_;
 
   // The local root whose document has |popup_mouse_wheel_event_listener_|
@@ -715,7 +720,12 @@ class CORE_EXPORT WebViewImpl /*final*/ : public WebView,
 
   Persistent<ResizeViewportAnchor> resize_viewport_anchor_;
 
-  base::TimeTicks raf_aligned_input_start_time_;
+  // Set when a measurement begins, reset when the measurement is taken.
+  base::Optional<base::TimeTicks> raf_aligned_input_start_time_;
+  base::Optional<base::TimeTicks> update_layers_start_time_;
+  base::Optional<base::TimeTicks> commit_compositor_frame_start_time_;
+
+  std::unique_ptr<VivaldiDoubleClickMenu> vivaldi_double_click_menu_;
 };
 
 // We have no ways to check if the specified WebView is an instance of

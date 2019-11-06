@@ -25,7 +25,6 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
@@ -34,6 +33,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_executor.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -306,13 +306,13 @@ void StressTheCache(int iteration) {
 
   base::Thread cache_thread("CacheThread");
   if (!cache_thread.StartWithOptions(
-          base::Thread::Options(base::MessageLoop::TYPE_IO, 0)))
+          base::Thread::Options(base::MessagePump::Type::IO, 0)))
     return;
 
   g_data = new Data();
   g_data->iteration = iteration;
   g_data->cache = new disk_cache::BackendImpl(
-      path, mask, cache_thread.task_runner().get(), NULL);
+      path, mask, cache_thread.task_runner().get(), net::DISK_CACHE, nullptr);
   g_data->cache->SetMaxSize(cache_size);
   g_data->cache->SetFlags(disk_cache::kNoLoadProtection);
 
@@ -422,13 +422,14 @@ int main(int argc, const char* argv[]) {
 #else
   base::CommandLine::Init(argc, argv);
   logging::LoggingSettings settings;
-  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  settings.logging_dest =
+      logging::LOG_TO_SYSTEM_DEBUG_LOG | logging::LOG_TO_STDERR;
   logging::InitLogging(settings);
 #endif
 
   // Some time for the memory manager to flush stuff.
   base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(3));
-  base::MessageLoopForIO message_loop;
+  base::SingleThreadTaskExecutor io_task_executor(base::MessagePump::Type::IO);
 
   char* end;
   long int iteration = strtol(argv[1], &end, 0);

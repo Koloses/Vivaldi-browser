@@ -5,8 +5,6 @@
 package org.chromium.chrome.browser.init;
 
 import android.content.Intent;
-import android.os.Handler;
-import android.os.Looper;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
@@ -26,7 +24,6 @@ class NativeInitializationController {
     private static final String TAG = "NativeInitializationController";
 
     private final ChromeActivityNativeDelegate mActivityDelegate;
-    private final Handler mHandler;
 
     private boolean mOnStartPending;
     private boolean mOnResumePending;
@@ -60,7 +57,6 @@ class NativeInitializationController {
      * @param activityDelegate The activity delegate for the owning activity.
      */
     public NativeInitializationController(ChromeActivityNativeDelegate activityDelegate) {
-        mHandler = new Handler(Looper.getMainLooper());
         mActivityDelegate = activityDelegate;
     }
 
@@ -108,15 +104,8 @@ class NativeInitializationController {
             assert !mHasSignaledLibraryLoaded;
             mHasSignaledLibraryLoaded = true;
 
-            // Allow the UI thread to continue its initialization - so that this call back
-            // doesn't block priority work on the UI thread until it's idle.
-            mHandler.post(new Runnable() {
-                @Override
-                public void run() {
-                    if (mActivityDelegate.isActivityFinishingOrDestroyed()) return;
-                    mActivityDelegate.onCreateWithNative();
-                }
-            });
+            if (mActivityDelegate.isActivityFinishingOrDestroyed()) return;
+            mActivityDelegate.onCreateWithNative();
         }
     }
 
@@ -146,7 +135,7 @@ class NativeInitializationController {
             onResume();
         }
 
-        LibraryLoader.getInstance().onNativeInitializationComplete();
+        LibraryLoader.getInstance().onBrowserNativeInitializationComplete();
     }
 
     /**

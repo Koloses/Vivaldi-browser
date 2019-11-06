@@ -42,6 +42,7 @@ class TSFBridgeImpl : public TSFBridge {
   void RemoveFocusedClient(TextInputClient* client) override;
   void SetInputMethodDelegate(internal::InputMethodDelegate* delegate) override;
   void RemoveInputMethodDelegate() override;
+  bool IsInputLanguageCJK() override;
   Microsoft::WRL::ComPtr<ITfThreadMgr> GetThreadManager() override;
   TextInputClient* GetFocusedTextInputClient() const override;
 
@@ -332,6 +333,15 @@ void TSFBridgeImpl::RemoveInputMethodDelegate() {
   }
 }
 
+bool TSFBridgeImpl::IsInputLanguageCJK() {
+  // See the following article about how LANGID in HKL is determined.
+  // https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getkeyboardlayout
+  LANGID lang_locale =
+      PRIMARYLANGID(LOWORD(HandleToLong(GetKeyboardLayout(0))));
+  return lang_locale == LANG_CHINESE || lang_locale == LANG_JAPANESE ||
+         lang_locale == LANG_KOREAN;
+}
+
 TextInputClient* TSFBridgeImpl::GetFocusedTextInputClient() const {
   return client_;
 }
@@ -429,6 +439,8 @@ bool TSFBridgeImpl::InitializeDocumentMapInternal() {
     tsf_document_map_[input_type].text_store = text_store;
     tsf_document_map_[input_type].document_manager = document_manager;
     tsf_document_map_[input_type].cookie = cookie;
+    if (text_store)
+      text_store->OnContextInitialized(context.Get());
   }
   return true;
 }

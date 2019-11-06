@@ -12,7 +12,6 @@
 #include <ntsecapi.h>  // For LsaLookupAuthenticationPackage()
 #include <sddl.h>      // For ConvertSidToStringSid()
 #include <security.h>  // For NEGOSSP_NAME_A
-#include <shlobj.h>    // For SHGetKnownFolderPath()
 #include <wbemidl.h>
 
 #include <atlbase.h>
@@ -30,10 +29,12 @@
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
+#include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/current_module.h"
@@ -47,7 +48,6 @@
 namespace credential_provider {
 
 const wchar_t kDefaultProfilePictureFileExtension[] = L".jpg";
-const wchar_t kCredentialLogoPictureFileExtension[] = L".bmp";
 
 namespace {
 
@@ -580,6 +580,62 @@ HRESULT GetCommandLineForEntrypoint(HINSTANCE dll_handle,
   return hr;
 }
 
+HRESULT LookupLocalizedNameBySid(PSID sid, base::string16* localized_name) {
+  DCHECK(localized_name);
+  std::vector<wchar_t> localized_name_buffer;
+  DWORD group_name_size = 0;
+  std::vector<wchar_t> domain_buffer;
+  DWORD domain_size = 0;
+  SID_NAME_USE use;
+
+  // Get the localized name of the local users group. The function
+  // NetLocalGroupAddMembers only accepts the name of the group and it
+  // may be localized on the system.
+  if (!::LookupAccountSidW(nullptr, sid, nullptr, &group_name_size, nullptr,
+                           &domain_size, &use)) {
+    if (::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+      HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
+      LOGFN(ERROR) << "LookupAccountSidW hr=" << putHR(hr);
+      return hr;
+    }
+
+    localized_name_buffer.resize(group_name_size);
+    domain_buffer.resize(domain_size);
+    if (!::LookupAccountSidW(nullptr, sid, localized_name_buffer.data(),
+                             &group_name_size, domain_buffer.data(),
+                             &domain_size, &use)) {
+      HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
+      LOGFN(ERROR) << "LookupAccountSidW hr=" << putHR(hr);
+      return hr;
+    }
+  }
+
+  if (localized_name_buffer.empty()) {
+    LOGFN(ERROR) << "Empty localized name";
+    return E_UNEXPECTED;
+  }
+  *localized_name = base::string16(localized_name_buffer.data(),
+                                   localized_name_buffer.size() - 1);
+
+  return S_OK;
+}
+
+HRESULT LookupLocalizedNameForWellKnownSid(WELL_KNOWN_SID_TYPE sid_type,
+                                           base::string16* localized_name) {
+  BYTE well_known_sid[SECURITY_MAX_SID_SIZE];
+  DWORD size_local_users_group_sid = base::size(well_known_sid);
+
+  // Get the sid for the well known local users group.
+  if (!::CreateWellKnownSid(sid_type, nullptr, well_known_sid,
+                            &size_local_users_group_sid)) {
+    HRESULT hr = HRESULT_FROM_WIN32(::GetLastError());
+    LOGFN(ERROR) << "CreateWellKnownSid hr=" << putHR(hr);
+    return hr;
+  }
+
+  return LookupLocalizedNameBySid(well_known_sid, localized_name);
+}
+
 bool VerifyStartupSentinel() {
   // Always try to write to the startup sentinel file. If writing or opening
   // fails for any reason (file locked, no access etc) consider this a failure.
@@ -638,57 +694,80 @@ base::string16 GetStringResource(int base_message_id) {
   return localized_string;
 }
 
-HRESULT GetUserAccountPicturePath(const base::string16& sid,
-                                  base::FilePath* base_path) {
-  DCHECK(base_path);
-  base_path->clear();
-  LPWSTR path;
-  HRESULT hr = ::SHGetKnownFolderPath(FOLDERID_PublicUserTiles, 0, NULL, &path);
-  if (FAILED(hr)) {
-    LOGFN(ERROR) << "SHGetKnownFolderPath=" << putHR(hr);
-    return hr;
-  }
-  *base_path = base::FilePath(path).Append(sid);
-  ::CoTaskMemFree(path);
-  return S_OK;
-}
-
-base::FilePath GetUserSizedAccountPictureFilePath(
-    const base::FilePath& account_picture_path,
-    int size,
-    const base::string16& picture_extension) {
-  return account_picture_path.Append(base::StringPrintf(
-      L"GoogleAccountPicture_%i%ls", size, picture_extension.c_str()));
-}
-
 base::string16 GetSelectedLanguage() {
   return GetLanguageSelector().matched_candidate();
 }
 
-base::string16 GetDictString(const base::DictionaryValue* dict,
-                             const char* name) {
+void SecurelyClearDictionaryValue(base::Optional<base::Value>* value) {
+  SecurelyClearDictionaryValueWithKey(value, kKeyPassword);
+}
+
+void SecurelyClearDictionaryValueWithKey(base::Optional<base::Value>* value,
+                                         const std::string& password_key) {
+  if (!value || !(*value) || !((*value)->is_dict()))
+    return;
+
+  const std::string* password_value = (*value)->FindStringKey(password_key);
+  if (password_value) {
+    SecurelyClearString(*const_cast<std::string*>(password_value));
+  }
+
+  (*value).reset();
+}
+
+void SecurelyClearString(base::string16& str) {
+  SecurelyClearBuffer(const_cast<wchar_t*>(str.data()),
+                      str.size() * sizeof(decltype(str[0])));
+}
+
+void SecurelyClearString(std::string& str) {
+  SecurelyClearBuffer(const_cast<char*>(str.data()), str.size());
+}
+
+void SecurelyClearBuffer(void* buffer, size_t length) {
+  if (buffer)
+    ::RtlSecureZeroMemory(buffer, length);
+}
+
+std::string SearchForKeyInStringDictUTF8(
+    const std::string& json_string,
+    const std::initializer_list<base::StringPiece>& path) {
+  DCHECK(path.size() > 0);
+
+  base::Optional<base::Value> json_obj =
+      base::JSONReader::Read(json_string, base::JSON_ALLOW_TRAILING_COMMAS);
+  if (!json_obj || !json_obj->is_dict()) {
+    LOGFN(ERROR) << "base::JSONReader::Read failed to translate to JSON";
+    return std::string();
+  }
+  const std::string* value =
+      json_obj->FindStringPath(base::JoinString(path, "."));
+  return value ? *value : std::string();
+}
+
+base::string16 GetDictString(const base::Value& dict, const char* name) {
   DCHECK(name);
-  auto* value = dict->FindKey(name);
+  DCHECK(dict.is_dict());
+  auto* value = dict.FindKey(name);
   return value && value->is_string() ? base::UTF8ToUTF16(value->GetString())
                                      : base::string16();
 }
 
-base::string16 GetDictString(const std::unique_ptr<base::DictionaryValue>& dict,
+base::string16 GetDictString(const std::unique_ptr<base::Value>& dict,
                              const char* name) {
-  return GetDictString(dict.get(), name);
+  return GetDictString(*dict, name);
 }
 
-std::string GetDictStringUTF8(const base::DictionaryValue* dict,
-                              const char* name) {
+std::string GetDictStringUTF8(const base::Value& dict, const char* name) {
   DCHECK(name);
-  auto* value = dict->FindKey(name);
+  DCHECK(dict.is_dict());
+  auto* value = dict.FindKey(name);
   return value && value->is_string() ? value->GetString() : std::string();
 }
 
-std::string GetDictStringUTF8(
-    const std::unique_ptr<base::DictionaryValue>& dict,
-    const char* name) {
-  return GetDictStringUTF8(dict.get(), name);
+std::string GetDictStringUTF8(const std::unique_ptr<base::Value>& dict,
+                              const char* name) {
+  return GetDictStringUTF8(*dict, name);
 }
 
 base::FilePath::StringType GetInstallParentDirectoryName() {
@@ -701,7 +780,7 @@ base::FilePath::StringType GetInstallParentDirectoryName() {
 
 base::string16 GetWindowsVersion() {
   wchar_t release_id[32];
-  ULONG length = base::size(release_id) * sizeof(release_id[0]);
+  ULONG length = base::size(release_id);
   HRESULT hr =
       GetMachineRegString(L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
                           L"ReleaseId", release_id, &length);

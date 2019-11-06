@@ -46,21 +46,27 @@ namespace ios_web_view {
 
 WebViewURLRequestContextGetter::WebViewURLRequestContextGetter(
     const base::FilePath& base_path,
+    net::NetLog* net_log,
     const scoped_refptr<base::SingleThreadTaskRunner>& network_task_runner)
     : base_path_(base_path),
+      net_log_(net_log),
       network_task_runner_(network_task_runner),
       proxy_config_service_(
           new net::ProxyConfigServiceIOS(NO_TRAFFIC_ANNOTATION_YET)),
-      net_log_(new net::NetLog()) {}
+      is_shutting_down_(false) {}
 
 WebViewURLRequestContextGetter::~WebViewURLRequestContextGetter() = default;
 
 net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
   DCHECK(network_task_runner_->BelongsToCurrentThread());
 
+  if (is_shutting_down_) {
+    return nullptr;
+  }
+
   if (!url_request_context_) {
     url_request_context_.reset(new net::URLRequestContext());
-    url_request_context_->set_net_log(net_log_.get());
+    url_request_context_->set_net_log(net_log_);
     DCHECK(!network_delegate_.get());
     network_delegate_ = std::make_unique<WebViewNetworkDelegate>();
     url_request_context_->set_network_delegate(network_delegate_.get());
@@ -81,8 +87,7 @@ net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
                 {base::MayBlock(), base::TaskPriority::BEST_EFFORT}),
             true, nullptr);
     std::unique_ptr<net::CookieStoreIOS> cookie_store(
-        new net::CookieStoreIOSPersistent(persistent_store.get(),
-                                          net_log_.get()));
+        new net::CookieStoreIOSPersistent(persistent_store.get(), net_log_));
     storage_->set_cookie_store(std::move(cookie_store));
 
     web::WebClient* web_client = web::GetWebClient();
@@ -98,7 +103,8 @@ net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
             std::move(proxy_config_service_), url_request_context_->net_log()));
     storage_->set_ssl_config_service(
         std::make_unique<net::SSLConfigServiceDefaults>());
-    storage_->set_cert_verifier(net::CertVerifier::CreateDefault());
+    storage_->set_cert_verifier(
+        net::CertVerifier::CreateDefault(/*cert_net_fetcher=*/nullptr));
 
     storage_->set_transport_security_state(
         std::make_unique<net::TransportSecurityState>());
@@ -117,7 +123,7 @@ net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
             new net::HttpServerPropertiesImpl()));
 
     std::unique_ptr<net::HostResolver> host_resolver(
-        net::HostResolver::CreateDefaultResolver(
+        net::HostResolver::CreateStandaloneResolver(
             url_request_context_->net_log()));
     storage_->set_http_auth_handler_factory(
         net::HttpAuthHandlerFactory::CreateDefault());
@@ -171,6 +177,11 @@ net::URLRequestContext* WebViewURLRequestContextGetter::GetURLRequestContext() {
 scoped_refptr<base::SingleThreadTaskRunner>
 WebViewURLRequestContextGetter::GetNetworkTaskRunner() const {
   return network_task_runner_;
+}
+
+void WebViewURLRequestContextGetter::ShutDown() {
+  is_shutting_down_ = true;
+  net::URLRequestContextGetter::NotifyContextShuttingDown();
 }
 
 }  // namespace ios_web_view

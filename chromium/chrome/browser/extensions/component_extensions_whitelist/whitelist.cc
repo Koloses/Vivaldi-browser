@@ -16,9 +16,9 @@
 #include "printing/buildflags/buildflags.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/keyboard/ui/grit/keyboard_resources.h"
 #include "chrome/browser/chromeos/input_method/component_extension_ime_manager_impl.h"
 #include "ui/file_manager/grit/file_manager_resources.h"
-#include "ui/keyboard/grit/keyboard_resources.h"
 #endif
 
 #include "app/vivaldi_resources.h"
@@ -32,6 +32,7 @@ bool IsComponentExtensionWhitelisted(const std::string& extension_id) {
     extension_misc::kPdfExtensionId,
 #if defined(OS_CHROMEOS)
     extension_misc::kAssessmentAssistantExtensionId,
+    extension_misc::kAutoclickExtensionId,
     extension_misc::kChromeVoxExtensionId,
     extension_misc::kEspeakSpeechSynthesisExtensionId,
     extension_misc::kGoogleSpeechSynthesisExtensionId,
@@ -70,7 +71,6 @@ bool IsComponentExtensionWhitelisted(int manifest_resource_id) {
 #endif
     case IDR_CRYPTOTOKEN_MANIFEST:
     case IDR_FEEDBACK_MANIFEST:
-    case IDR_GAIA_AUTH_MANIFEST:
 #if BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
     case IDR_HANGOUT_SERVICES_MANIFEST:
 #endif
@@ -100,7 +100,6 @@ bool IsComponentExtensionWhitelisted(int manifest_resource_id) {
 #if defined(GOOGLE_CHROME_BUILD)
     case IDR_GENIUS_APP_MANIFEST:
     case IDR_HELP_MANIFEST:
-    case IDR_KIOSK_NEXT_HOME_MANIFEST:
     case IDR_QUICKOFFICE_MANIFEST:
 #endif  // defined(GOOGLE_CHROME_BUILD)
 #endif  // defined(OS_CHROMEOS)
@@ -114,5 +113,26 @@ bool IsComponentExtensionWhitelisted(int manifest_resource_id) {
   NOTREACHED();
   return false;
 }
+
+#if defined(OS_CHROMEOS)
+bool IsComponentExtensionWhitelistedForSignInProfile(
+    const std::string& extension_id) {
+  const char* const kAllowed[] = {
+      extension_misc::kAutoclickExtensionId,
+      extension_misc::kChromeVoxExtensionId,
+      extension_misc::kEspeakSpeechSynthesisExtensionId,
+      extension_misc::kGoogleSpeechSynthesisExtensionId,
+      extension_misc::kSelectToSpeakExtensionId,
+      extension_misc::kSwitchAccessExtensionId,
+  };
+
+  for (size_t i = 0; i < base::size(kAllowed); ++i) {
+    if (extension_id == kAllowed[i])
+      return true;
+  }
+
+  return false;
+}
+#endif
 
 }  // namespace extensions

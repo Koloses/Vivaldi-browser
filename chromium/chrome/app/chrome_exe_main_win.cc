@@ -15,6 +15,7 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/process/memory.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_split.h"
@@ -27,12 +28,12 @@
 #include "chrome/app/main_dll_loader_win.h"
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/browser/win/chrome_process_finder.h"
+#include "chrome/chrome_elf/chrome_elf_main.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/install_static/initialize_from_primary_module.h"
 #include "chrome/install_static/install_util.h"
 #include "chrome/install_static/user_data_dir.h"
-#include "chrome_elf/chrome_elf_main.h"
 #include "components/crash/content/app/crash_switches.h"
 #include "components/crash/content/app/crashpad.h"
 #include "components/crash/content/app/fallback_crash_handling_win.h"
@@ -176,6 +177,10 @@ int main() {
 #endif
   install_static::InitializeFromPrimaryModule();
   //SignalInitializeCrashReporting();  // moved after command line initi
+
+  // Done here to ensure that OOMs that happen early in process initialization
+  // are correctly signaled to the OS.
+  base::EnableTerminationOnOutOfMemory();
 
   // Initialize the CommandLine singleton from the environment.
   base::CommandLine::Init(0, nullptr);

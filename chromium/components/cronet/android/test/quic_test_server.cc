@@ -11,13 +11,13 @@
 #include "base/message_loop/message_loop.h"
 #include "base/test/test_support_android.h"
 #include "base/threading/thread.h"
+#include "components/cronet/android/cronet_tests_jni_headers/QuicTestServer_jni.h"
 #include "components/cronet/android/test/cronet_test_util.h"
-#include "jni/QuicTestServer_jni.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/quic/crypto/proof_source_chromium.h"
 #include "net/test/test_data_directory.h"
-#include "net/third_party/quic/tools/quic_memory_cache_backend.h"
+#include "net/third_party/quiche/src/quic/tools/quic_memory_cache_backend.h"
 #include "net/tools/quic/quic_simple_server.h"
 
 using base::android::JavaParamRef;

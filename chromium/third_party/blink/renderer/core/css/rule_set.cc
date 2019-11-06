@@ -30,6 +30,8 @@
 
 #include "third_party/blink/renderer/core/css/rule_set.h"
 
+#include <type_traits>
+
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
 #include "third_party/blink/renderer/core/css/css_selector_list.h"
@@ -43,7 +45,7 @@
 
 namespace blink {
 
-static inline PropertyWhitelistType DeterminePropertyWhitelistType(
+static inline ValidPropertyFilter DetermineValidPropertyFilter(
     const AddRuleFlags add_rule_flags,
     const CSSSelector& selector) {
   for (const CSSSelector* component = &selector; component;
@@ -51,11 +53,11 @@ static inline PropertyWhitelistType DeterminePropertyWhitelistType(
     if (component->GetPseudoType() == CSSSelector::kPseudoCue ||
         (component->Match() == CSSSelector::kPseudoElement &&
          component->Value() == TextTrackCue::CueShadowPseudoId()))
-      return kPropertyWhitelistCue;
+      return ValidPropertyFilter::kCue;
     if (component->GetPseudoType() == CSSSelector::kPseudoFirstLetter)
-      return kPropertyWhitelistFirstLetter;
+      return ValidPropertyFilter::kFirstLetter;
   }
-  return kPropertyWhitelistNone;
+  return ValidPropertyFilter::kNoFilter;
 }
 
 RuleData* RuleData::MaybeCreate(StyleRule* rule,
@@ -84,8 +86,9 @@ RuleData::RuleData(StyleRule* rule,
       link_match_type_(Selector().ComputeLinkMatchType(CSSSelector::kMatchAll)),
       has_document_security_origin_(add_rule_flags &
                                     kRuleHasDocumentSecurityOrigin),
-      property_whitelist_(
-          DeterminePropertyWhitelistType(add_rule_flags, Selector())),
+      valid_property_filter_(
+          static_cast<std::underlying_type_t<ValidPropertyFilter>>(
+              DetermineValidPropertyFilter(add_rule_flags, Selector()))),
       descendant_selector_identifier_hashes_() {
   SelectorFilter::CollectIdentifierHashes(
       Selector(), descendant_selector_identifier_hashes_,
@@ -284,6 +287,11 @@ void RuleSet::AddKeyframesRule(StyleRuleKeyframes* rule) {
   keyframes_rules_.push_back(rule);
 }
 
+void RuleSet::AddPropertyRule(StyleRuleProperty* rule) {
+  EnsurePendingRules();  // So that property_rules_.ShrinkToFit() gets called.
+  property_rules_.push_back(rule);
+}
+
 void RuleSet::AddChildRules(const HeapVector<Member<StyleRuleBase>>& rules,
                             const MediaQueryEvaluator& medium,
                             AddRuleFlags add_rule_flags) {
@@ -323,6 +331,8 @@ void RuleSet::AddChildRules(const HeapVector<Member<StyleRuleBase>>& rules,
       AddFontFeatureValuesRule(font_feature_values_rule);
     } else if (auto* keyframes_rule = DynamicTo<StyleRuleKeyframes>(rule)) {
       AddKeyframesRule(keyframes_rule);
+    } else if (auto* property_rule = DynamicTo<StyleRuleProperty>(rule)) {
+      AddPropertyRule(property_rule);
     } else if (auto* supports_rule = DynamicTo<StyleRuleSupports>(rule)) {
       if (supports_rule->ConditionIsSupported())
         AddChildRules(supports_rule->ChildRules(), medium, add_rule_flags);
@@ -399,6 +409,7 @@ void RuleSet::CompactRules() {
   font_face_rules_.ShrinkToFit();
   font_feature_values_rules_.ShrinkToFit();
   keyframes_rules_.ShrinkToFit();
+  property_rules_.ShrinkToFit();
   deep_combinator_or_shadow_pseudo_rules_.ShrinkToFit();
   part_pseudo_rules_.ShrinkToFit();
   content_pseudo_element_rules_.ShrinkToFit();
@@ -435,6 +446,7 @@ void RuleSet::Trace(blink::Visitor* visitor) {
   visitor->Trace(font_face_rules_);
   visitor->Trace(font_feature_values_rules_);
   visitor->Trace(keyframes_rules_);
+  visitor->Trace(property_rules_);
   visitor->Trace(deep_combinator_or_shadow_pseudo_rules_);
   visitor->Trace(part_pseudo_rules_);
   visitor->Trace(content_pseudo_element_rules_);

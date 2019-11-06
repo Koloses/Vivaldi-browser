@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "build/build_config.h"
 #include "content/public/common/service_names.mojom.h"
 #include "ipc/ipc.mojom.h"
 #include "mojo/core/embedder/scoped_ipc_support.h"
@@ -26,6 +27,10 @@
 #include "services/service_manager/embedder/descriptors.h"
 #endif
 
+#if defined(OS_MACOSX)
+#include "base/mac/mach_port_rendezvous.h"
+#endif
+
 namespace {
 
 mojo::IncomingInvitation EstablishMojoConnection() {
@@ -33,11 +38,17 @@ mojo::IncomingInvitation EstablishMojoConnection() {
 #if defined(OS_WIN)
   endpoint = mojo::PlatformChannel::RecoverPassedEndpointFromCommandLine(
       *base::CommandLine::ForCurrentProcess());
+#elif defined(OS_MACOSX)
+  auto* client = base::MachPortRendezvousClient::GetInstance();
+  if (client) {
+    endpoint = mojo::PlatformChannelEndpoint(
+        mojo::PlatformHandle(client->TakeReceiveRight('mojo')));
+  }
 #else
   endpoint = mojo::PlatformChannelEndpoint(mojo::PlatformHandle(
       base::ScopedFD(base::GlobalDescriptors::GetInstance()->Get(
           service_manager::kMojoIPCChannel))));
-#endif
+#endif  // !defined(OS_WIN)
   DCHECK(endpoint.is_valid());
   return mojo::IncomingInvitation::Accept(std::move(endpoint));
 }
@@ -69,7 +80,7 @@ class NaClService : public service_manager::Service {
   void OnBindInterface(const service_manager::BindSourceInfo& source_info,
                        const std::string& interface_name,
                        mojo::ScopedMessagePipeHandle interface_pipe) override {
-    if (source_info.identity.name() == content::mojom::kBrowserServiceName &&
+    if (source_info.identity.name() == content::mojom::kSystemServiceName &&
         interface_name == IPC::mojom::ChannelBootstrap::Name_ && !connected_) {
       connected_ = true;
       mojo::FuseInterface(

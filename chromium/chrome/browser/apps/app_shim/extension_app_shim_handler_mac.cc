@@ -13,11 +13,11 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/hash/sha1.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/macros.h"
-#include "base/sha1.h"
 #include "chrome/browser/apps/app_shim/app_shim_host_bootstrap_mac.h"
 #include "chrome/browser/apps/app_shim/app_shim_host_mac.h"
 #include "chrome/browser/apps/app_shim/app_shim_host_manager_mac.h"
@@ -229,6 +229,10 @@ class EnableViaPrompt : public ExtensionEnableFlowDelegate {
   DISALLOW_COPY_AND_ASSIGN(EnableViaPrompt);
 };
 
+bool UsesRemoteViews(const extensions::Extension* extension) {
+  return extension->is_hosted_app() && extension->from_bookmark();
+}
+
 }  // namespace
 
 namespace apps {
@@ -301,7 +305,7 @@ AppShimHost* ExtensionAppShimHandler::Delegate::CreateHost(
     Profile* profile,
     const extensions::Extension* extension) {
   return new AppShimHost(extension->id(), profile->GetPath(),
-                         extension->is_hosted_app());
+                         UsesRemoteViews(extension));
 }
 
 void ExtensionAppShimHandler::Delegate::EnableExtension(
@@ -320,12 +324,12 @@ void ExtensionAppShimHandler::Delegate::LaunchApp(
   if (extension->is_hosted_app()) {
     OpenApplication(CreateAppLaunchParamsUserContainer(
         profile, extension, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-        extensions::SOURCE_COMMAND_LINE));
+        extensions::AppLaunchSource::kSourceCommandLine));
     return;
   }
   if (files.empty()) {
-    apps::LaunchPlatformApp(
-        profile, extension, extensions::SOURCE_COMMAND_LINE);
+    apps::LaunchPlatformApp(profile, extension,
+                            extensions::AppLaunchSource::kSourceCommandLine);
   } else {
     for (std::vector<base::FilePath>::const_iterator it = files.begin();
          it != files.end(); ++it) {
@@ -340,7 +344,10 @@ void ExtensionAppShimHandler::Delegate::LaunchShim(
     bool recreate_shims,
     apps::ShimLaunchedCallback launched_callback,
     apps::ShimTerminatedCallback terminated_callback) {
-  if (recreate_shims) {
+  // Only force recreation of shims when RemoteViews is in use (that is, for
+  // PWAs). Otherwise, shims may be created unexpectedly.
+  // https://crbug.com/941160
+  if (recreate_shims && UsesRemoteViews(extension)) {
     // Load the resources needed to build the app shim (icons, etc), and then
     // recreate the shim and launch it.
     web_app::GetShortcutInfoForApp(
@@ -417,7 +424,8 @@ AppShimHost* ExtensionAppShimHandler::GetHostForBrowser(Browser* browser) {
 void ExtensionAppShimHandler::SetHostedAppHidden(Profile* profile,
                                                  const std::string& app_id,
                                                  bool hidden) {
-  const AppBrowserMap::iterator it = app_browser_windows_.find(app_id);
+  const AppBrowserMap::iterator it =
+      app_browser_windows_.find(std::make_pair(profile, app_id));
   if (it == app_browser_windows_.end())
     return;
 
@@ -480,7 +488,7 @@ void ExtensionAppShimHandler::QuitHostedAppForWindow(
   if (host)
     OnShimQuit(host);
   else
-    CloseBrowsersForApp(app_id);
+    CloseBrowsersForApp(profile, app_id);
 }
 
 void ExtensionAppShimHandler::HideAppForWindow(AppWindow* app_window) {
@@ -622,8 +630,10 @@ const Extension* ExtensionAppShimHandler::MaybeGetExtensionOrCloseHost(
   return extension;
 }
 
-void ExtensionAppShimHandler::CloseBrowsersForApp(const std::string& app_id) {
-  AppBrowserMap::iterator it = app_browser_windows_.find(app_id);
+void ExtensionAppShimHandler::CloseBrowsersForApp(Profile* profile,
+                                                  const std::string& app_id) {
+  AppBrowserMap::iterator it =
+      app_browser_windows_.find(std::make_pair(profile, app_id));
   if (it == app_browser_windows_.end())
     return;
 
@@ -743,7 +753,8 @@ void ExtensionAppShimHandler::OnShimFocus(
   bool windows_focused;
   const std::string& app_id = host->GetAppId();
   if (extension->is_hosted_app()) {
-    AppBrowserMap::iterator it = app_browser_windows_.find(app_id);
+    AppBrowserMap::iterator it =
+        app_browser_windows_.find(std::make_pair(profile, app_id));
     if (it == app_browser_windows_.end())
       return;
 
@@ -790,7 +801,7 @@ void ExtensionAppShimHandler::OnShimQuit(AppShimHost* host) {
     return;
 
   if (extension->is_hosted_app()) {
-    CloseBrowsersForApp(app_id);
+    CloseBrowsersForApp(profile, app_id);
   } else {
     const AppWindowList windows = delegate_->GetWindows(profile, app_id);
     for (AppWindowRegistry::const_iterator it = windows.begin();
@@ -848,7 +859,8 @@ void ExtensionAppShimHandler::Observe(
       if (!extension)
         return;
 
-      BrowserSet& browsers = app_browser_windows_[extension->id()];
+      BrowserSet& browsers = app_browser_windows_[std::make_pair(
+          browser->profile(), extension->id())];
       browsers.insert(browser);
       if (browsers.size() == 1)
         OnAppActivated(browser->profile(), extension->id());
@@ -907,7 +919,7 @@ void ExtensionAppShimHandler::OnBrowserRemoved(Browser* browser) {
   // |app_browser_windows_|.
   for (auto it = app_browser_windows_.begin(); it != app_browser_windows_.end();
        ++it) {
-    const std::string& extension_id = it->first;
+    const std::string& extension_id = it->first.second;
     BrowserSet& browsers = it->second;
     auto found = browsers.find(browser);
     if (found == browsers.end())

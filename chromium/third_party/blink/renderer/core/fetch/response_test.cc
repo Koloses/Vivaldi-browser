@@ -7,7 +7,6 @@
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
-#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_response.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/body_stream_buffer.h"
@@ -27,8 +26,7 @@ namespace blink {
 namespace {
 
 TEST(ServiceWorkerResponseTest, FromFetchResponseData) {
-  std::unique_ptr<DummyPageHolder> page =
-      DummyPageHolder::Create(IntSize(1, 1));
+  auto page = std::make_unique<DummyPageHolder>(IntSize(1, 1));
   const KURL url("http://www.response.com");
 
   FetchResponseData* fetch_response_data = FetchResponseData::Create();

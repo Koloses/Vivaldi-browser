@@ -10,7 +10,7 @@ set of primitives for communicating over Mojo message pipes. Combined with
 generated code from the
 [Mojom IDL and bindings generator](/mojo/public/tools/bindings/README.md), users
 can easily connect interface clients and implementations across arbitrary intra-
-and inter-process bounaries.
+and inter-process boundaries.
 
 This document provides a detailed guide to bindings API usage with example code
 snippets. For a detailed API references please consult the headers in
@@ -384,7 +384,7 @@ which case that endpoint won't get such a notification). If there are remaining
 incoming messages for an endpoint on disconnection, the connection error won't
 be triggered until the messages are drained.
 
-Pipe disconnecition may be caused by:
+Pipe disconnection may be caused by:
 * Mojo system-level causes: process terminated, resource exhausted, etc.
 * The bindings close the pipe due to a validation error when processing a
   received message.
@@ -603,7 +603,7 @@ roughly equivalent to a `std::unique_ptr` with some additional utility methods.
 This allows struct values to be nullable and struct types to be potentially
 self-referential.
 
-Every genereated struct class has a static `New()` method which returns a new
+Every generated struct class has a static `New()` method which returns a new
 `mojo::StructPtr<T>` wrapping a new instance of the class constructed by
 forwarding the arguments from `New`. For example:
 
@@ -657,7 +657,7 @@ Similarly to [structs](#Structs), tagged unions generate an identically named,
 representative C++ class which is typically wrapped in a `mojo::StructPtr<T>`.
 
 Unlike structs, all generated union fields are private and must be retrieved and
-manipulated using accessors. A field `foo` is accessible by `foo()` and
+manipulated using accessors. A field `foo` is accessible by `get_foo()` and
 settable by `set_foo()`. There is also a boolean `is_foo()` for each field which
 indicates whether the union is currently taking on the value of field `foo` in
 exclusion to all other union fields.
@@ -1742,7 +1742,7 @@ depend on `"//sample:mojom_blink"`.
 ## Versioning Considerations
 
 For general documentation of versioning in the Mojom IDL see
-[Versioning](/mojo/public/tools/bindings/README.md#Versiwoning).
+[Versioning](/mojo/public/tools/bindings/README.md#Versioning).
 
 This section briefly discusses some C++-specific considerations relevant to
 versioned Mojom types.
@@ -1797,6 +1797,6 @@ See [Converting Legacy Chrome IPC To Mojo](/docs/mojo_ipc_conversion.md).
 
 ### Additional Documentation
 
-[Calling Mojo From Blink](https://www.chromium.org/developers/design-documents/mojo/calling-mojo-from-blink)
-:    A brief overview of what it looks like to use Mojom C++ bindings from
-     within Blink code.
+[Calling Mojo From Blink](/docs/mojo_ipc_conversion.md#Blink_Specific-Advice):
+A brief overview of what it looks like to use Mojom C++ bindings from
+within Blink code.

@@ -124,6 +124,7 @@ class TaskGroup {
 #endif  // defined(OS_LINUX) || defined(OS_MACOSX)
 
   int idle_wakeups_per_second() const { return idle_wakeups_per_second_; }
+
  private:
   void RefreshGpuMemory(const gpu::VideoMemoryUsageStats& gpu_memory_stats);
 
@@ -215,7 +216,7 @@ class TaskGroup {
 
   // Always keep this the last member of this class so that it's the first to be
   // destroyed.
-  base::WeakPtrFactory<TaskGroup> weak_ptr_factory_;
+  base::WeakPtrFactory<TaskGroup> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(TaskGroup);
 };

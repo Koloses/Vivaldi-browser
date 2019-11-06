@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "components/autofill/core/browser/logging/log_manager.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
-#include "components/password_manager/core/browser/log_manager.h"
 #include "components/password_manager/core/browser/password_form_manager_for_ui.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
@@ -47,7 +47,7 @@ bool UpdateFormInVector(
   auto it = std::find_if(
       forms->begin(), forms->end(),
       [&updated_form](const std::unique_ptr<autofill::PasswordForm>& form) {
-        return ArePasswordFormUniqueKeyEqual(*form, updated_form);
+        return ArePasswordFormUniqueKeysEqual(*form, updated_form);
       });
   if (it != forms->end()) {
     **it = updated_form;
@@ -64,7 +64,7 @@ bool RemoveFormFromVector(
   auto it = std::find_if(
       forms->begin(), forms->end(),
       [&form_to_delete](const std::unique_ptr<autofill::PasswordForm>& form) {
-        return ArePasswordFormUniqueKeyEqual(*form, form_to_delete);
+        return ArePasswordFormUniqueKeysEqual(*form, form_to_delete);
       });
   if (it != forms->end()) {
     forms->erase(it);
@@ -88,7 +88,7 @@ void ManagePasswordsState::OnPendingPassword(
   form_manager_ = std::move(form_manager);
   local_credentials_forms_ =
       DeepCopyNonPSLMapToVector(form_manager_->GetBestMatches());
-  AppendDeepCopyVector(form_manager_->GetFormFetcher()->GetFederatedMatches(),
+  AppendDeepCopyVector(form_manager_->GetFederatedMatches(),
                        &local_credentials_forms_);
   origin_ = form_manager_->GetOrigin();
   SetState(password_manager::ui::PENDING_PASSWORD_STATE);
@@ -100,7 +100,7 @@ void ManagePasswordsState::OnUpdatePassword(
   form_manager_ = std::move(form_manager);
   local_credentials_forms_ =
       DeepCopyNonPSLMapToVector(form_manager_->GetBestMatches());
-  AppendDeepCopyVector(form_manager_->GetFormFetcher()->GetFederatedMatches(),
+  AppendDeepCopyVector(form_manager_->GetFederatedMatches(),
                        &local_credentials_forms_);
   origin_ = form_manager_->GetOrigin();
   SetState(password_manager::ui::PENDING_PASSWORD_UPDATE_STATE);
@@ -136,7 +136,7 @@ void ManagePasswordsState::OnAutomaticPasswordSave(
     local_credentials_forms_.push_back(
         std::make_unique<autofill::PasswordForm>(*form.second));
   }
-  AppendDeepCopyVector(form_manager_->GetFormFetcher()->GetFederatedMatches(),
+  AppendDeepCopyVector(form_manager_->GetFederatedMatches(),
                        &local_credentials_forms_);
   origin_ = form_manager_->GetOrigin();
   SetState(password_manager::ui::CONFIRMATION_STATE);

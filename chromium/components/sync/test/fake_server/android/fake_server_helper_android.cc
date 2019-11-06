@@ -19,9 +19,9 @@
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/test/fake_server/bookmark_entity_builder.h"
 #include "components/sync/test/fake_server/fake_server.h"
+#include "components/sync/test/fake_server/fake_server_jni/FakeServerHelper_jni.h"
 #include "components/sync/test/fake_server/fake_server_network_resources.h"
 #include "components/sync/test/fake_server/fake_server_verifier.h"
-#include "jni/FakeServerHelper_jni.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -91,9 +91,7 @@ jboolean FakeServerHelperAndroid::VerifySessions(
     jlong fake_server,
     const JavaParamRef<jobjectArray>& url_array) {
   std::multiset<std::string> tab_urls;
-  for (int i = 0; i < env->GetArrayLength(url_array); i++) {
-    base::android::ScopedJavaLocalRef<jstring> j_string(
-        env, static_cast<jstring>(env->GetObjectArrayElement(url_array, i)));
+  for (auto j_string : url_array.ReadElements<jstring>()) {
     tab_urls.insert(base::android::ConvertJavaStringToUTF8(env, j_string));
   }
   fake_server::SessionsHierarchy expected_sessions;
@@ -323,13 +321,12 @@ void FakeServerHelperAndroid::DeleteEntity(
     const JavaParamRef<jobject>& obj,
     jlong fake_server,
     const JavaParamRef<jstring>& id,
-    const base::android::JavaParamRef<jstring>& client_defined_unique_tag) {
+    const base::android::JavaParamRef<jstring>& client_tag_hash) {
   fake_server::FakeServer* fake_server_ptr =
       reinterpret_cast<fake_server::FakeServer*>(fake_server);
   std::string native_id = base::android::ConvertJavaStringToUTF8(env, id);
   fake_server_ptr->InjectEntity(syncer::PersistentTombstoneEntity::CreateNew(
-      native_id,
-      base::android::ConvertJavaStringToUTF8(env, client_defined_unique_tag)));
+      native_id, base::android::ConvertJavaStringToUTF8(env, client_tag_hash)));
 }
 
 void FakeServerHelperAndroid::ClearServerData(JNIEnv* env,

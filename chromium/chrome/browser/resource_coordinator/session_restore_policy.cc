@@ -96,12 +96,12 @@ class SysInfoDelegate : public SessionRestorePolicy::Delegate {
 SessionRestorePolicy::SessionRestorePolicy()
     : policy_enabled_(true),
       delegate_(SysInfoDelegate::Get()),
-      simultaneous_tab_loads_(CalculateSimultaneousTabLoads()),
-      weak_factory_(this) {}
+      simultaneous_tab_loads_(CalculateSimultaneousTabLoads()) {}
 
 SessionRestorePolicy::~SessionRestorePolicy() {
   // Record the number of tabs involved in the session restore that use
   // background communications mechanisms.
+  DCHECK_GE(tabs_used_in_bg_, tabs_used_in_bg_restored_);
   UMA_HISTOGRAM_COUNTS_100("SessionRestore.BackgroundUseCaseTabCount.Total",
                            tabs_used_in_bg_);
   UMA_HISTOGRAM_COUNTS_100("SessionRestore.BackgroundUseCaseTabCount.Restored",
@@ -109,7 +109,7 @@ SessionRestorePolicy::~SessionRestorePolicy() {
 }
 
 float SessionRestorePolicy::AddTabForScoring(content::WebContents* contents) {
-  DCHECK(!base::ContainsKey(tab_data_, contents));
+  DCHECK(!base::Contains(tab_data_, contents));
 
   // When the first tab is added keep track of a 'now' time. This ensures that
   // the scoring function returns consistent values over the lifetime of the
@@ -265,8 +265,7 @@ SessionRestorePolicy::SessionRestorePolicy(bool policy_enabled,
                                            const Delegate* delegate)
     : policy_enabled_(policy_enabled),
       delegate_(delegate),
-      simultaneous_tab_loads_(CalculateSimultaneousTabLoads()),
-      weak_factory_(this) {}
+      simultaneous_tab_loads_(CalculateSimultaneousTabLoads()) {}
 
 // static
 size_t SessionRestorePolicy::CalculateSimultaneousTabLoads(
@@ -307,7 +306,8 @@ size_t SessionRestorePolicy::CalculateSimultaneousTabLoads() const {
 
 // static
 void SessionRestorePolicy::SetUsedInBg(TabData* tab_data) {
-  static const SiteFeatureUsage kInUse = SiteFeatureUsage::kSiteFeatureInUse;
+  static const performance_manager::SiteFeatureUsage kInUse =
+      performance_manager::SiteFeatureUsage::kSiteFeatureInUse;
   auto& reader = tab_data->reader;
   DCHECK(reader->DataLoaded());
 
@@ -357,8 +357,10 @@ void SessionRestorePolicy::NotifyAllTabsScored() {
   // can be canceled as conditions change.
   if (notification_state_ != NotificationState::kEnRoute)
     return;
-  notify_tab_score_changed_callback_.Run(nullptr, 0.0);
   notification_state_ = NotificationState::kDelivered;
+  // This callback can indirectly cause our parent to release us, so make it the
+  // last thing we do to avoid a use after free. crbug.com/946863
+  notify_tab_score_changed_callback_.Run(nullptr, 0.0);
 }
 
 void SessionRestorePolicy::OnDataLoaded(content::WebContents* contents) {

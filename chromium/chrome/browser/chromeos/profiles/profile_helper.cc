@@ -27,17 +27,19 @@
 #include "chromeos/constants/chromeos_constants.h"
 #include "chromeos/constants/chromeos_switches.h"
 #include "components/account_id/account_id.h"
+#include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browsing_data_remover.h"
+#include "extensions/browser/pref_names.h"
 #include "extensions/common/constants.h"
 
 namespace chromeos {
 
 namespace {
 
-// As defined in /chromeos/dbus/cryptohome_client.cc.
+// As defined in /chromeos/dbus/cryptohome/cryptohome_client.cc.
 static const char kUserIdHashSuffix[] = "-hash";
 
 // The name for the lock screen app profile.
@@ -51,7 +53,7 @@ bool ShouldAddProfileDirPrefix(const std::string& user_id_hash) {
   // TestingProfile::kTestUserProfileDir needs to be dynamically calculated
   // based on whether multi profile is enabled or not.
   return user_id_hash != chrome::kLegacyProfileDir &&
-      user_id_hash != chrome::kTestUserProfileDir;
+         user_id_hash != chrome::kTestUserProfileDir;
 }
 
 void WrapAsBrowsersCloseCallback(const base::RepeatingClosure& callback,
@@ -87,8 +89,7 @@ bool ProfileHelper::always_return_primary_user_for_testing = false;
 // ProfileHelper, public
 
 ProfileHelper::ProfileHelper()
-    : browsing_data_remover_(nullptr), weak_factory_(this) {
-}
+    : browsing_data_remover_(nullptr), weak_factory_(this) {}
 
 ProfileHelper::~ProfileHelper() {
   // Checking whether UserManager is initialized covers case
@@ -116,11 +117,14 @@ Profile* ProfileHelper::GetProfileByUserIdHashForTest(
 // static
 base::FilePath ProfileHelper::GetProfilePathByUserIdHash(
     const std::string& user_id_hash) {
-  // Fails for KioskTest.InstallAndLaunchApp test - crbug.com/238985
-  // Will probably fail for Guest session / restart after a crash -
-  // crbug.com/238998
-  // TODO(nkostylev): Remove this check once these bugs are fixed.
-  DCHECK(!user_id_hash.empty());
+  // Fails if Chrome runs with "--login-manager", but not "--login-profile", and
+  // needs to restart. This might happen if you test Chrome OS on Linux and
+  // you start a guest session or Chrome crashes. Be sure to add
+  //   "--login-profile=user@example.com-hash"
+  // to the command line flags.
+  DCHECK(!user_id_hash.empty())
+      << "user_id_hash is empty, probably need to add "
+         "--login-profile=user@example.com-hash to command line parameters";
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   base::FilePath profile_path = profile_manager->user_data_dir();
 
@@ -140,8 +144,8 @@ base::FilePath ProfileHelper::GetSigninProfileDir() {
 // static
 Profile* ProfileHelper::GetSigninProfile() {
   ProfileManager* profile_manager = g_browser_process->profile_manager();
-  return profile_manager->GetProfile(GetSigninProfileDir())->
-      GetOffTheRecordProfile();
+  return profile_manager->GetProfile(GetSigninProfileDir())
+      ->GetOffTheRecordProfile();
 }
 
 // static
@@ -178,6 +182,25 @@ base::FilePath ProfileHelper::GetUserProfileDir(
 bool ProfileHelper::IsSigninProfile(const Profile* profile) {
   return profile &&
          profile->GetPath().BaseName().value() == chrome::kInitialProfile;
+}
+
+// static
+bool ProfileHelper::IsSigninProfileInitialized() {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  return profile_manager &&
+         profile_manager->GetProfileByPath(GetSigninProfileDir());
+}
+
+// static
+bool ProfileHelper::SigninProfileHasLoginScreenExtensions() {
+  DCHECK(IsSigninProfileInitialized());
+  const Profile* profile = GetSigninProfile();
+  const PrefService* prefs = profile->GetPrefs();
+  DCHECK(prefs->GetInitializationStatus() ==
+         PrefService::INITIALIZATION_STATUS_SUCCESS);
+  const base::DictionaryValue* pref_value =
+      prefs->GetDictionary(extensions::pref_names::kLoginScreenExtensions);
+  return !pref_value->DictEmpty();
 }
 
 // static
@@ -391,8 +414,7 @@ const user_manager::User* ProfileHelper::GetUserByProfile(
     const std::string& user_name = profile->GetProfileUserName();
     for (user_manager::UserList::const_iterator it =
              user_list_for_testing_.begin();
-         it != user_list_for_testing_.end();
-         ++it) {
+         it != user_list_for_testing_.end(); ++it) {
       if ((*it)->GetAccountId().GetUserEmail() == user_name)
         return *it;
     }
@@ -431,9 +453,8 @@ const user_manager::User* ProfileHelper::GetUserByProfile(
   // Many tests do not have their users registered with UserManager and
   // runs here. If |active_user_| matches |profile|, returns it.
   const user_manager::User* active_user = user_manager->GetActiveUser();
-  return active_user &&
-                 ProfileHelper::GetProfilePathByUserIdHash(
-                     active_user->username_hash()) == profile->GetPath()
+  return active_user && ProfileHelper::GetProfilePathByUserIdHash(
+                            active_user->username_hash()) == profile->GetPath()
              ? active_user
              : NULL;
 }
@@ -473,8 +494,8 @@ void ProfileHelper::OnSessionRestoreStateChanged(
       state == OAuth2LoginManager::SESSION_RESTORE_FAILED ||
       state == OAuth2LoginManager::SESSION_RESTORE_CONNECTION_FAILED) {
     chromeos::OAuth2LoginManager* login_manager =
-        chromeos::OAuth2LoginManagerFactory::GetInstance()->
-            GetForProfile(user_profile);
+        chromeos::OAuth2LoginManagerFactory::GetInstance()->GetForProfile(
+            user_profile);
     login_manager->RemoveObserver(this);
     ClearSigninProfile(base::Closure());
   }
@@ -540,7 +561,6 @@ void ProfileHelper::FlushProfile(Profile* profile) {
   excludes.push_back(base::FilePath(chrome::kPreferencesFilename));
   // Do not flush cache files.
   excludes.push_back(base::FilePath(chrome::kCacheDirname));
-  excludes.push_back(base::FilePath(chrome::kMediaCacheDirname));
   excludes.push_back(base::FilePath(FILE_PATH_LITERAL("GPUCache")));
   // Do not flush user Downloads.
   excludes.push_back(

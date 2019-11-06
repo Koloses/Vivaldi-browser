@@ -41,10 +41,11 @@ ppapi::PpapiPermissions GetNaClPermissions(
     uint32_t permission_bits,
     content::BrowserContext* browser_context,
     const GURL& document_url) {
-  // Don't grant any special permissions to NaCl plugins. We don't want
-  // a compromised renderer to be able to start a NaCl plugin with Dev or Flash
-  // permissions which may expand the surface area of the sandbox.
-  uint32_t nacl_permissions = ppapi::PERMISSION_NONE;
+  // Default permissions keep NaCl plugins backwards-compatible, but don't
+  // grant any other special permissions. We don't want a compromised renderer
+  // to be able to start a NaCl plugin with Dev or Flash permissions which may
+  // expand the surface area of the sandbox.
+  uint32_t nacl_permissions = ppapi::PERMISSION_DEFAULT;
   if (content::PluginService::GetInstance()->PpapiDevChannelSupported(
           browser_context, document_url))
     nacl_permissions |= ppapi::PERMISSION_DEV_CHANNEL;
@@ -81,8 +82,7 @@ NaClHostMessageFilter::NaClHostMessageFilter(
     : BrowserMessageFilter(NaClHostMsgStart),
       render_process_id_(render_process_id),
       off_the_record_(is_off_the_record),
-      profile_directory_(profile_directory),
-      weak_ptr_factory_(this) {}
+      profile_directory_(profile_directory) {}
 
 NaClHostMessageFilter::~NaClHostMessageFilter() {
 }

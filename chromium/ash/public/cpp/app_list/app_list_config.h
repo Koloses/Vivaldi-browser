@@ -31,6 +31,7 @@ class ASH_PUBLIC_EXPORT AppListConfig {
   int grid_icon_dimension() const { return grid_icon_dimension_; }
   int grid_icon_bottom_padding() const { return grid_icon_bottom_padding_; }
   int grid_title_top_padding() const { return grid_title_top_padding_; }
+  int grid_title_bottom_padding() const { return grid_title_bottom_padding_; }
   int grid_title_horizontal_padding() const {
     return grid_title_horizontal_padding_;
   }
@@ -73,6 +74,7 @@ class ASH_PUBLIC_EXPORT AppListConfig {
   int expand_arrow_tile_height() const { return expand_arrow_tile_height_; }
   int folder_bubble_radius() const { return folder_bubble_radius_; }
   int folder_bubble_y_offset() const { return folder_bubble_y_offset_; }
+  int folder_header_height() const { return folder_header_height_; }
   int folder_icon_dimension() const { return folder_icon_dimension_; }
   int folder_unclipped_icon_dimension() const {
     return folder_unclipped_icon_dimension_;
@@ -93,6 +95,7 @@ class ASH_PUBLIC_EXPORT AppListConfig {
     return grid_tile_spacing_in_folder_;
   }
   int shelf_height() const { return shelf_height_; }
+  int background_radius() const { return background_radius_; }
   int blur_radius() const { return blur_radius_; }
   SkColor contents_background_color() const {
     return contents_background_color_;
@@ -124,6 +127,8 @@ class ASH_PUBLIC_EXPORT AppListConfig {
     return search_result_title_font_style_;
   }
   int search_tile_height() const { return search_tile_height_; }
+
+  size_t max_search_result_tiles() const { return max_search_result_tiles_; }
 
   gfx::Size grid_icon_size() const {
     return gfx::Size(grid_icon_dimension_, grid_icon_dimension_);
@@ -190,8 +195,10 @@ class ASH_PUBLIC_EXPORT AppListConfig {
   // The icon bottom padding in tile views in apps grid view.
   const int grid_icon_bottom_padding_;
 
-  // The title top and horizontal padding in tile views in apps grid view.
+  // The title top, bottom and horizontal padding in tile views in apps grid
+  // view.
   const int grid_title_top_padding_;
+  const int grid_title_bottom_padding_;
   const int grid_title_horizontal_padding_;
 
   // The title width and color of tile views in apps grid view.
@@ -258,6 +265,9 @@ class ASH_PUBLIC_EXPORT AppListConfig {
   // The y offset of folder image bubble center.
   const int folder_bubble_y_offset_;
 
+  // The height of the in folder name and pagination buttons.
+  const int folder_header_height_;
+
   // The icon dimension of folder.
   const int folder_icon_dimension_;
 
@@ -294,6 +304,9 @@ class ASH_PUBLIC_EXPORT AppListConfig {
 
   // The height/width of the shelf from the bottom/side of the screen.
   const int shelf_height_;
+
+  // The background corner radius used for the app list.
+  const int background_radius_;
 
   // The blur radius used in the app list.
   const int blur_radius_;
@@ -350,6 +363,9 @@ class ASH_PUBLIC_EXPORT AppListConfig {
 
   // The height of tiles in search result.
   const int search_tile_height_ = 90;
+
+  // Max number of search result tiles in the launcher suggestion window.
+  const size_t max_search_result_tiles_ = 6;
 };
 
 }  // namespace app_list

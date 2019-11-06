@@ -151,10 +151,10 @@ const char* ProtoEnumToString(sync_pb::SyncEnums::Action action) {
                      UNKNOWN_ACTION);
   switch (action) {
     ENUM_CASE(sync_pb::SyncEnums, UPGRADE_CLIENT);
-    ENUM_CASE(sync_pb::SyncEnums, CLEAR_USER_DATA_AND_RESYNC);
-    ENUM_CASE(sync_pb::SyncEnums, ENABLE_SYNC_ON_ACCOUNT);
-    ENUM_CASE(sync_pb::SyncEnums, STOP_AND_RESTART_SYNC);
-    ENUM_CASE(sync_pb::SyncEnums, DISABLE_SYNC_ON_CLIENT);
+    ENUM_CASE(sync_pb::SyncEnums, DEPRECATED_CLEAR_USER_DATA_AND_RESYNC);
+    ENUM_CASE(sync_pb::SyncEnums, DEPRECATED_ENABLE_SYNC_ON_ACCOUNT);
+    ENUM_CASE(sync_pb::SyncEnums, DEPRECATED_STOP_AND_RESTART_SYNC);
+    ENUM_CASE(sync_pb::SyncEnums, DEPRECATED_DISABLE_SYNC_ON_CLIENT);
     ENUM_CASE(sync_pb::SyncEnums, UNKNOWN_ACTION);
   }
   NOTREACHED();
@@ -531,6 +531,91 @@ const char* ProtoEnumToString(
     ENUM_CASE(sync_pb::WalletMetadataSpecifics, UNKNOWN);
     ENUM_CASE(sync_pb::WalletMetadataSpecifics, CARD);
     ENUM_CASE(sync_pb::WalletMetadataSpecifics, ADDRESS);
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* ProtoEnumToString(
+    sync_pb::WifiConfigurationSpecificsData::SecurityType security_type) {
+  ASSERT_ENUM_BOUNDS(sync_pb::WifiConfigurationSpecificsData, SecurityType,
+                     SECURITY_TYPE_UNSPECIFIED, SECURITY_TYPE_PSK);
+  switch (security_type) {
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData,
+              SECURITY_TYPE_UNSPECIFIED);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData, SECURITY_TYPE_NONE);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData, SECURITY_TYPE_WEP);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData, SECURITY_TYPE_PSK);
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* ProtoEnumToString(
+    sync_pb::WifiConfigurationSpecificsData::AutomaticallyConnectOption
+        automatically_connect_option) {
+  ASSERT_ENUM_BOUNDS(
+      sync_pb::WifiConfigurationSpecificsData, AutomaticallyConnectOption,
+      AUTOMATICALLY_CONNECT_UNSPECIFIED, AUTOMATICALLY_CONNECT_ENABLED);
+  switch (automatically_connect_option) {
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData,
+              AUTOMATICALLY_CONNECT_UNSPECIFIED);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData,
+              AUTOMATICALLY_CONNECT_DISABLED);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData,
+              AUTOMATICALLY_CONNECT_ENABLED);
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* ProtoEnumToString(
+    sync_pb::WifiConfigurationSpecificsData::IsPreferredOption
+        is_preferred_option) {
+  ASSERT_ENUM_BOUNDS(sync_pb::WifiConfigurationSpecificsData, IsPreferredOption,
+                     IS_PREFERRED_UNSPECIFIED, IS_PREFERRED_ENABLED);
+  switch (is_preferred_option) {
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData,
+              IS_PREFERRED_UNSPECIFIED);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData, IS_PREFERRED_DISABLED);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData, IS_PREFERRED_ENABLED);
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* ProtoEnumToString(
+    sync_pb::WifiConfigurationSpecificsData::MeteredOption metered_option) {
+  ASSERT_ENUM_BOUNDS(sync_pb::WifiConfigurationSpecificsData, MeteredOption,
+                     METERED_OPTION_UNSPECIFIED, METERED_OPTION_AUTO);
+  switch (metered_option) {
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData,
+              METERED_OPTION_UNSPECIFIED);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData, METERED_OPTION_NO);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData, METERED_OPTION_YES);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData, METERED_OPTION_AUTO);
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* ProtoEnumToString(
+    sync_pb::WifiConfigurationSpecificsData::ProxyConfiguration::ProxyOption
+        proxy_option) {
+  ASSERT_ENUM_BOUNDS(
+      sync_pb::WifiConfigurationSpecificsData::ProxyConfiguration, ProxyOption,
+      PROXY_OPTION_UNSPECIFIED, PROXY_OPTION_MANUAL);
+  switch (proxy_option) {
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData::ProxyConfiguration,
+              PROXY_OPTION_UNSPECIFIED);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData::ProxyConfiguration,
+              PROXY_OPTION_DISABLED);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData::ProxyConfiguration,
+              PROXY_OPTION_AUTOMATIC);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData::ProxyConfiguration,
+              PROXY_OPTION_AUTODISCOVERY);
+    ENUM_CASE(sync_pb::WifiConfigurationSpecificsData::ProxyConfiguration,
+              PROXY_OPTION_MANUAL);
   }
   NOTREACHED();
   return "";

@@ -50,6 +50,7 @@ class CONTENT_EXPORT MojoAudioOutputIPC
       const base::Optional<base::UnguessableToken>& processing_id) override;
   void PlayStream() override;
   void PauseStream() override;
+  void FlushStream() override;
   void CloseStream() override;
   void SetVolume(double volume) override;
 
@@ -100,7 +101,7 @@ class CONTENT_EXPORT MojoAudioOutputIPC
 
   // To make sure we don't send an "authorization completed" callback for a
   // stream after it's closed, we use this weak factory.
-  base::WeakPtrFactory<MojoAudioOutputIPC> weak_factory_;
+  base::WeakPtrFactory<MojoAudioOutputIPC> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(MojoAudioOutputIPC);
 };

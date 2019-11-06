@@ -29,6 +29,8 @@
 #include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/browser/permissions/permission_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/serial/serial_chooser_context.h"
+#include "chrome/browser/serial/serial_chooser_context_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/page_info/page_info_infobar_delegate.h"
@@ -109,7 +111,8 @@ extensions::APIPermission::APIPermission::ID APIPermissionFromGroupName(
 
 // Asks the |profile| for hosted apps which have the |permission| set, and
 // adds their web extent and launch URL to the |exceptions| list.
-void AddExceptionsGrantedByHostedApps(content::BrowserContext* context,
+void AddExceptionsGrantedByHostedApps(
+    content::BrowserContext* context,
     extensions::APIPermission::APIPermission::ID permission,
     base::ListValue* exceptions) {
   const extensions::ExtensionSet& extensions =
@@ -125,8 +128,8 @@ void AddExceptionsGrantedByHostedApps(content::BrowserContext* context,
     for (auto pattern = web_extent.begin(); pattern != web_extent.end();
          ++pattern) {
       std::string url_pattern = pattern->GetAsString();
-      site_settings::AddExceptionForHostedApp(
-          url_pattern, *extension->get(), exceptions);
+      site_settings::AddExceptionForHostedApp(url_pattern, *extension->get(),
+                                              exceptions);
     }
     // Retrieve the launch URL.
     GURL launch_url =
@@ -134,8 +137,8 @@ void AddExceptionsGrantedByHostedApps(content::BrowserContext* context,
     // Skip adding the launch URL if it is part of the web extent.
     if (web_extent.MatchesURL(launch_url))
       continue;
-    site_settings::AddExceptionForHostedApp(
-        launch_url.spec(), *extension->get(), exceptions);
+    site_settings::AddExceptionForHostedApp(launch_url.spec(),
+                                            *extension->get(), exceptions);
   }
 }
 
@@ -207,8 +210,8 @@ void CreateOrAppendSiteGroupEntry(
 
 // Update the storage data in |origin_size_map|.
 void UpdateDataForOrigin(const GURL& url,
-                         const int size,
-                         std::map<std::string, int>* origin_size_map) {
+                         const int64_t size,
+                         std::map<std::string, int64_t>* origin_size_map) {
   if (size > 0)
     (*origin_size_map)[url.spec()] += size;
 }
@@ -248,7 +251,7 @@ void ConvertSiteGroupMapToListValue(
       origin_object.SetKey(kNumCookies, base::Value(0));
       origin_object.SetKey(
           kHasPermissionSettings,
-          base::Value(base::ContainsKey(origin_permission_set, origin)));
+          base::Value(base::Contains(origin_permission_set, origin)));
       origin_list.GetList().emplace_back(std::move(origin_object));
     }
     site_group.SetKey(kNumCookies, base::Value(0));
@@ -293,7 +296,7 @@ bool IsPatternValidForType(const std::string& pattern_string,
 
 void UpdateDataFromCookiesTree(
     std::map<std::string, std::set<std::string>>* all_sites_map,
-    std::map<std::string, int>* origin_size_map,
+    std::map<std::string, int64_t>* origin_size_map,
     const GURL& origin,
     int64_t size) {
   UpdateDataForOrigin(origin, size, origin_size_map);
@@ -318,7 +321,6 @@ SiteSettingsHandler::~SiteSettingsHandler() {
 }
 
 void SiteSettingsHandler::RegisterMessages() {
-
   web_ui()->RegisterMessageCallback(
       "fetchUsageTotal",
       base::BindRepeating(&SiteSettingsHandler::HandleFetchUsageTotal,
@@ -423,12 +425,10 @@ void SiteSettingsHandler::OnJavascriptAllowed() {
   if (profile_->HasOffTheRecordProfile())
     ObserveSourcesForProfile(profile_->GetOffTheRecordProfile());
 
-  notification_registrar_.Add(
-      this, chrome::NOTIFICATION_PROFILE_CREATED,
-      content::NotificationService::AllSources());
-  notification_registrar_.Add(
-      this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-      content::NotificationService::AllSources());
+  notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CREATED,
+                              content::NotificationService::AllSources());
+  notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
+                              content::NotificationService::AllSources());
 
   // Here we only subscribe to the HostZoomMap for the default storage partition
   // since we don't allow the user to manage the zoom levels for apps.
@@ -474,8 +474,7 @@ void SiteSettingsHandler::OnGetUsageInfo() {
   const CookieTreeNode* root = cookies_tree_model_->GetRoot();
   std::string usage_string = "";
   std::string cookie_string = "";
-  for (int i = 0; i < root->child_count(); ++i) {
-    const CookieTreeNode* site = root->GetChild(i);
+  for (const auto& site : root->children()) {
     std::string title = base::UTF16ToUTF8(site->GetTitle());
     if (title != usage_host_)
       continue;
@@ -532,16 +531,15 @@ void SiteSettingsHandler::OnContentSettingChanged(
   }
 }
 
-void SiteSettingsHandler::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
+void SiteSettingsHandler::Observe(int type,
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_PROFILE_DESTROYED: {
       Profile* profile = content::Source<Profile>(source).ptr();
       if (!profile_->IsSameProfile(profile))
         break;
-      SendIncognitoStatus(profile, /*was_destroyed=*/ true);
+      SendIncognitoStatus(profile, /*was_destroyed=*/true);
 
       if (profile->IsOffTheRecord())
         StopObservingSourcesForProfile(profile);
@@ -552,7 +550,7 @@ void SiteSettingsHandler::Observe(
       Profile* profile = content::Source<Profile>(source).ptr();
       if (!profile_->IsSameProfile(profile))
         break;
-      SendIncognitoStatus(profile, /*was_destroyed=*/ false);
+      SendIncognitoStatus(profile, /*was_destroyed=*/false);
 
       ObserveSourcesForProfile(profile);
       break;
@@ -580,8 +578,7 @@ void SiteSettingsHandler::OnZoomLevelChanged(
   SendZoomLevels();
 }
 
-void SiteSettingsHandler::HandleFetchUsageTotal(
-    const base::ListValue* args) {
+void SiteSettingsHandler::HandleFetchUsageTotal(const base::ListValue* args) {
   AllowJavascript();
   CHECK_EQ(1U, args->GetSize());
   std::string host;
@@ -596,8 +593,7 @@ void SiteSettingsHandler::HandleFetchUsageTotal(
   EnsureCookiesTreeModelCreated();
 }
 
-void SiteSettingsHandler::HandleClearUsage(
-    const base::ListValue* args) {
+void SiteSettingsHandler::HandleClearUsage(const base::ListValue* args) {
   CHECK_EQ(1U, args->GetSize());
   std::string origin;
   CHECK(args->GetString(0, &origin));
@@ -605,11 +601,9 @@ void SiteSettingsHandler::HandleClearUsage(
   if (!url.is_valid())
     return;
   AllowJavascript();
-  CookieTreeNode* parent = cookies_tree_model_->GetRoot();
-  for (int i = 0; i < parent->child_count(); ++i) {
-    CookieTreeNode* node = parent->GetChild(i);
+  for (const auto& node : cookies_tree_model_->GetRoot()->children()) {
     if (origin == node->GetDetailedInfo().origin.GetURL().spec()) {
-      cookies_tree_model_->DeleteCookieNode(node);
+      cookies_tree_model_->DeleteCookieNode(node.get());
       return;
     }
   }
@@ -762,7 +756,7 @@ void SiteSettingsHandler::HandleGetAllSites(const base::ListValue* args) {
 }
 
 base::Value SiteSettingsHandler::PopulateCookiesAndUsageData(Profile* profile) {
-  std::map<std::string, int> origin_size_map;
+  std::map<std::string, int64_t> origin_size_map;
   std::map<std::string, int> origin_cookie_map;
   base::Value list_value(base::Value::Type::LIST);
 
@@ -787,7 +781,7 @@ base::Value SiteSettingsHandler::PopulateCookiesAndUsageData(Profile* profile) {
       const std::string& origin = origin_info.FindKey("origin")->GetString();
       const auto& size_info_it = origin_size_map.find(origin);
       if (size_info_it != origin_size_map.end())
-        origin_info.SetKey("usage", base::Value(size_info_it->second));
+        origin_info.SetKey("usage", base::Value(double(size_info_it->second)));
       const auto& origin_cookie_num_it =
           origin_cookie_map.find(GURL(origin).host());
       if (origin_cookie_num_it != origin_cookie_map.end()) {
@@ -815,10 +809,10 @@ void SiteSettingsHandler::HandleGetFormattedBytes(const base::ListValue* args) {
   CHECK_EQ(2U, args->GetSize());
   const base::Value* callback_id;
   CHECK(args->Get(0, &callback_id));
-  int num_bytes;
-  CHECK(args->GetInteger(1, &num_bytes));
+  double num_bytes;
+  CHECK(args->GetDouble(1, &num_bytes));
 
-  const base::string16 string = ui::FormatBytes(num_bytes);
+  const base::string16 string = ui::FormatBytes(int64_t(num_bytes));
   ResolveJavascriptCallback(*callback_id, base::Value(string));
 }
 
@@ -839,7 +833,7 @@ void SiteSettingsHandler::HandleGetExceptionList(const base::ListValue* args) {
       HostContentSettingsMapFactory::GetForProfile(profile_);
   const auto* extension_registry = extensions::ExtensionRegistry::Get(profile_);
   AddExceptionsGrantedByHostedApps(profile_, APIPermissionFromGroupName(type),
-      exceptions.get());
+                                   exceptions.get());
   site_settings::GetExceptionsFromHostContentSettingsMap(
       map, content_type, extension_registry, web_ui(), /*incognito=*/false,
       /*filter=*/nullptr, exceptions.get());
@@ -873,10 +867,9 @@ void SiteSettingsHandler::HandleGetChooserExceptionList(
       site_settings::ChooserTypeFromGroupName(type);
   CHECK(chooser_type);
 
-  std::unique_ptr<base::ListValue> exceptions =
-      site_settings::GetChooserExceptionListFromProfile(profile_,
-                                                        *chooser_type);
-  ResolveJavascriptCallback(*callback_id, *exceptions.get());
+  base::Value exceptions = site_settings::GetChooserExceptionListFromProfile(
+      profile_, *chooser_type);
+  ResolveJavascriptCallback(*callback_id, std::move(exceptions));
 }
 
 void SiteSettingsHandler::HandleGetOriginPermissions(
@@ -1141,19 +1134,15 @@ void SiteSettingsHandler::HandleResetChooserExceptionForSite(
   GURL requesting_origin(origin_str);
   CHECK(requesting_origin.is_valid());
 
-  // An empty embedding origin means that the user exception object was granted
-  // for any embedding origin.
   std::string embedding_origin_str;
   CHECK(args->GetString(2, &embedding_origin_str));
   GURL embedding_origin(embedding_origin_str);
-  CHECK(embedding_origin.is_valid() || embedding_origin.is_empty());
-
-  const base::DictionaryValue* object = nullptr;
-  CHECK(args->GetDictionary(3, &object));
+  CHECK(embedding_origin.is_valid());
 
   ChooserContextBase* chooser_context = chooser_type->get_context(profile_);
-  chooser_context->RevokeObjectPermission(requesting_origin, embedding_origin,
-                                          *object);
+  chooser_context->RevokeObjectPermission(
+      url::Origin::Create(requesting_origin),
+      url::Origin::Create(embedding_origin), args->GetList()[3]);
 }
 
 void SiteSettingsHandler::HandleIsOriginValid(const base::ListValue* args) {
@@ -1192,18 +1181,19 @@ void SiteSettingsHandler::HandleIsPatternValidForType(
 void SiteSettingsHandler::HandleUpdateIncognitoStatus(
     const base::ListValue* args) {
   AllowJavascript();
-  SendIncognitoStatus(profile_, /*was_destroyed=*/ false);
+  SendIncognitoStatus(profile_, /*was_destroyed=*/false);
 }
 
-void SiteSettingsHandler::SendIncognitoStatus(
-    Profile* profile, bool was_destroyed) {
+void SiteSettingsHandler::SendIncognitoStatus(Profile* profile,
+                                              bool was_destroyed) {
   if (!IsJavascriptAllowed())
     return;
 
   // When an incognito profile is destroyed, it sends out the destruction
   // message before destroying, so HasOffTheRecordProfile for profile_ won't
   // return false until after the profile actually been destroyed.
-  bool incognito_enabled = profile_->HasOffTheRecordProfile() &&
+  bool incognito_enabled =
+      profile_->HasOffTheRecordProfile() &&
       !(was_destroyed && profile == profile_->GetOffTheRecordProfile());
 
   FireWebUIListener("onIncognitoStatusChanged", base::Value(incognito_enabled));
@@ -1301,7 +1291,7 @@ void SiteSettingsHandler::HandleRemoveZoomLevel(const base::ListValue* args) {
   CHECK(args->GetString(0, &origin));
 
   if (origin ==
-          l10n_util::GetStringUTF8(IDS_ZOOMLEVELS_CHROME_ERROR_PAGES_LABEL)) {
+      l10n_util::GetStringUTF8(IDS_ZOOMLEVELS_CHROME_ERROR_PAGES_LABEL)) {
     origin = content::kUnreachableWebDataURL;
   }
 
@@ -1370,6 +1360,10 @@ void SiteSettingsHandler::ObserveSourcesForProfile(Profile* profile) {
   auto* usb_context = UsbChooserContextFactory::GetForProfile(profile);
   if (!chooser_observer_.IsObserving(usb_context))
     chooser_observer_.Add(usb_context);
+
+  auto* serial_context = SerialChooserContextFactory::GetForProfile(profile);
+  if (!chooser_observer_.IsObserving(serial_context))
+    chooser_observer_.Add(serial_context);
 }
 
 void SiteSettingsHandler::StopObservingSourcesForProfile(Profile* profile) {
@@ -1380,17 +1374,21 @@ void SiteSettingsHandler::StopObservingSourcesForProfile(Profile* profile) {
   auto* usb_context = UsbChooserContextFactory::GetForProfile(profile);
   if (chooser_observer_.IsObserving(usb_context))
     chooser_observer_.Remove(usb_context);
+
+  auto* serial_context = SerialChooserContextFactory::GetForProfile(profile);
+  if (chooser_observer_.IsObserving(serial_context))
+    chooser_observer_.Remove(serial_context);
 }
 
 void SiteSettingsHandler::TreeNodesAdded(ui::TreeModel* model,
                                          ui::TreeModelNode* parent,
-                                         int start,
-                                         int count) {}
+                                         size_t start,
+                                         size_t count) {}
 
 void SiteSettingsHandler::TreeNodesRemoved(ui::TreeModel* model,
                                            ui::TreeModelNode* parent,
-                                           int start,
-                                           int count) {}
+                                           size_t start,
+                                           size_t count) {}
 
 void SiteSettingsHandler::TreeNodeChanged(ui::TreeModel* model,
                                           ui::TreeModelNode* node) {}
@@ -1409,12 +1407,10 @@ void SiteSettingsHandler::TreeModelEndBatch(CookiesTreeModel* model) {
 
 void SiteSettingsHandler::GetOriginStorage(
     std::map<std::string, std::set<std::string>>* all_sites_map,
-    std::map<std::string, int>* origin_size_map) {
+    std::map<std::string, int64_t>* origin_size_map) {
   CHECK(cookies_tree_model_.get());
 
-  const CookieTreeNode* root = cookies_tree_model_->GetRoot();
-  for (int i = 0; i < root->child_count(); ++i) {
-    const CookieTreeNode* site = root->GetChild(i);
+  for (const auto& site : cookies_tree_model_->GetRoot()->children()) {
     int64_t size = site->InclusiveSize();
     if (size == 0)
       continue;
@@ -1428,9 +1424,7 @@ void SiteSettingsHandler::GetOriginCookies(
     std::map<std::string, int>* origin_cookie_map) {
   CHECK(cookies_tree_model_.get());
   // Get sites that don't have data but have cookies.
-  const CookieTreeNode* root = cookies_tree_model_->GetRoot();
-  for (int i = 0; i < root->child_count(); ++i) {
-    const CookieTreeNode* site = root->GetChild(i);
+  for (const auto& site : cookies_tree_model_->GetRoot()->children()) {
     GURL url = site->GetDetailedInfo().origin.GetURL();
     (*origin_cookie_map)[url.host()] = site->NumberOfCookies();
     CreateOrAppendSiteGroupEntry(all_sites_map, url,
@@ -1449,18 +1443,16 @@ void SiteSettingsHandler::HandleClearEtldPlus1DataAndCookies(
 
   // Find all the nodes that contain the given etld+1.
   std::vector<CookieTreeNode*> nodes_to_delete;
-  for (int i = 0; i < parent->child_count(); ++i) {
-    CookieTreeNode* node = parent->GetChild(i);
+  for (const auto& node : parent->children()) {
     std::string cookie_node_etld_plus1 =
         net::registry_controlled_domains::GetDomainAndRegistry(
             base::UTF16ToUTF8(node->GetTitle()),
             net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
     if (etld_plus1_string == cookie_node_etld_plus1)
-      nodes_to_delete.push_back(node);
+      nodes_to_delete.push_back(node.get());
   }
-  for (auto* node : nodes_to_delete) {
+  for (auto* node : nodes_to_delete)
     cookies_tree_model_->DeleteCookieNode(node);
-  }
 
   LogAllSitesAction(AllSitesAction::kClearData);
 }

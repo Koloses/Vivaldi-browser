@@ -4,7 +4,10 @@
 
 package org.chromium.chrome.browser;
 
+import android.content.Context;
+
 import com.android.webview.chromium.MonochromeLibraryPreloader;
+import com.android.webview.chromium.WebViewApkApplication;
 
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
@@ -24,9 +27,12 @@ import org.chromium.content_public.browser.ChildProcessCreationParams;
  */
 public class MonochromeApplication extends ChromeApplication {
     @Override
-    public void onCreate() {
-        super.onCreate();
-        LibraryLoader.getInstance().setNativeLibraryPreloader(new MonochromeLibraryPreloader());
+    protected void attachBaseContext(Context context) {
+        super.attachBaseContext(context);
+        WebViewApkApplication.maybeInitProcessGlobals();
+        if (!LibraryLoader.getInstance().isLoadedByZygote()) {
+            LibraryLoader.getInstance().setNativeLibraryPreloader(new MonochromeLibraryPreloader());
+        }
         // ChildProcessCreationParams is only needed for browser process, though it is
         // created and set in all processes. We must set isExternalService to true for
         // Monochrome because Monochrome's renderer services are shared with WebView

@@ -7,6 +7,7 @@ from __future__ import print_function
 
 import argparse
 import logging
+import mimetypes
 import os
 import re
 import subprocess
@@ -35,12 +36,37 @@ LINK_CHROMIUMDASH = 'https://chromiumdash.appspot.com/commit/%s'
 CR_POSITION_RE = re.compile(r'^Cr-Commit-Position:.*\#(\d+)')
 BUCKET_COPY_RE = re.compile(r'^r(\d+)')
 
+WINDOWS_EXES = {
+  'git': 'git.bat',
+  'gsutil.py': 'gsutil.py.bat',
+}
+
+SUFFIX_TYPES = {
+  'js': 'application/javascript',
+  'css': 'text/css',
+  'html': 'text/html',
+}
+
 g_flags = None
+
+def binary_name(cmd):
+  """Finds the platform-appropriate name for an executable command."""
+
+  # On Windows, the "subprocess" execution requires a name with extension.
+  # Since we just need a couple of commands, use a simple replacement that
+  # work for Chromium build environments. This isn't a general solution.
+  if sys.platform != 'win32':
+    return cmd
+  if cmd in WINDOWS_EXES:
+    return WINDOWS_EXES[cmd]
+  raise Exeption('No known Windows executable for command "%s"' % cmd)
 
 def run_command(*args):
   """Runs a shell command and returns output."""
-  logging.debug('Executing: %s', args)
-  return subprocess.check_output(args)
+  platform_args = list(args)
+  platform_args[0] = binary_name(platform_args[0])
+  logging.debug('Executing: %s', platform_args)
+  return subprocess.check_output(platform_args)
 
 def run_readonly(*args):
   """Runs command expected to have no side effects, safe for dry runs."""
@@ -87,7 +113,7 @@ def get_commit_from_cr_position(position):
 def get_bucket_copies():
   """Retrieves list of test subdirectories from Cloud Storage"""
   copies = []
-  dirs = run_readonly('gsutil', 'ls', '-d', BUCKET)
+  dirs = run_readonly('gsutil.py', 'ls', '-d', BUCKET)
   strip_len = len(BUCKET) + 1
   for rev in dirs.splitlines():
     pos = rev[strip_len:]
@@ -104,8 +130,32 @@ def is_working_dir_clean():
 def write_to_bucket(cr_position):
   """Copies the test directory to Cloud Storage"""
   destination = BUCKET + '/r' + cr_position
-  run_modify('gsutil', '-m', 'rsync', '-x', 'media', '-r', './' + TEST_SUBDIR,
+  run_modify('gsutil.py', '-m', 'rsync', '-x', 'media', '-r', './' + TEST_SUBDIR,
           destination)
+
+  # The copy used mime types based on system-local mappings which may be
+  # misconfigured. Sanity check and fix if needed.
+  check_and_fix_content_types(destination)
+
+def direct_publish_samples(source, dest_subfolder):
+  destination = 'gs://chromium-webxr-samples' + '/' + dest_subfolder
+  run_modify('gsutil.py', '-m', 'rsync', '-x', 'media', '-r', './' + source,
+          destination)
+
+  # The copy used mime types based on system-local mappings which may be
+  # misconfigured. Sanity check and fix if needed.
+  check_and_fix_content_types(destination)
+
+def check_and_fix_content_types(destination):
+  mimetypes.init()
+  for suffix, content_type in SUFFIX_TYPES.iteritems():
+    configured_type = mimetypes.types_map.get('.' + suffix)
+    if configured_type != content_type:
+      logging.info('Fixing content type mismatch for .%s: found %s, '
+                   'expected %s.' % (suffix, configured_type, content_type))
+      run_modify('gsutil.py', '-m', 'setmeta', '-h',
+                 'Content-type:' + content_type,
+                 destination + '/**.' + suffix)
 
 def write_index():
   """Updates Cloud Storage index.html based on available test copies"""
@@ -134,10 +184,14 @@ def write_index():
   content = template.render({'items': items})
   logging.debug('index.html content:\n%s', content)
 
-  with tempfile.NamedTemporaryFile(suffix='.html') as temp:
-    temp.write(content)
-    temp.seek(0)
-    run_modify('gsutil', 'cp', temp.name, BUCKET + '/index.html')
+  with tempfile.NamedTemporaryFile(suffix='.html', delete=False) as temp:
+    try:
+      temp.write(content)
+      temp.seek(0)
+      temp.close()
+      run_modify('gsutil.py', 'cp', temp.name, BUCKET + '/index.html')
+    finally:
+      os.unlink(temp.name)
 
 def update_test_copies():
   """Uploads a new test copy if available"""
@@ -168,6 +222,14 @@ def update_test_copies():
     need_index_update = True
 
   return need_index_update
+
+def numeric_string(value):
+  """Ensure value is a string containing an integer."""
+  # This is used for validating flag values - the usual idiom would be to use
+  # "type=int", but that would convert the value to an integer, and it's more
+  # convenient to keep it string-valued for use in concatenation elsewhere.
+  # Throws an exception if the integer conversion fails.
+  return str(int(value))
 
 def main():
   parser = argparse.ArgumentParser(
@@ -207,7 +269,8 @@ content from failed uploads using the cloud console before retrying.
   parser.add_argument('--ignore-unclean-status', action="store_true",
                       help=("Proceed with copy even if there are uncommitted "
                             "local changes in the git working directory"))
-  parser.add_argument('--force-destination-cr-position',
+  parser.add_argument('--force-destination-cr-position', metavar='NUMBER',
+                      type=numeric_string,
                       help=("Force writing current content to the specified "
                             "destination CR position instead of determining "
                             "the name based on local git history, bypassing "
@@ -215,6 +278,12 @@ content from failed uploads using the cloud console before retrying.
   parser.add_argument('--bucket', default=BUCKET,
                       help=("Destination Cloud Storage location, including "
                             "'gs://' prefix"))
+  parser.add_argument('--direct-publish-samples-source', default=None,
+                      help=("Publish samples from this folder directly to a "
+                            "bucket."))
+  parser.add_argument('--direct-publish-samples-dest', default=None,
+                      help=("Publish samples directly to this subfolder in the "
+                            "chromium-webxr-samples bucket."))
 
   global g_flags
   g_flags = parser.parse_args()
@@ -228,6 +297,12 @@ content from failed uploads using the cloud console before retrying.
   node_modules = os.path.join(TEST_SUBDIR, 'js', 'cottontail', 'node_modules')
   if os.path.isdir(node_modules):
     raise Exception('Please delete the obsolete directory "%s"' % node_modules)
+
+  if g_flags.direct_publish_samples_source and g_flags.direct_publish_samples_dest:
+    direct_publish_samples(
+      g_flags.direct_publish_samples_source,
+      g_flags.direct_publish_samples_dest)
+    return
 
   need_index_update = False
   if g_flags.update_index_only:

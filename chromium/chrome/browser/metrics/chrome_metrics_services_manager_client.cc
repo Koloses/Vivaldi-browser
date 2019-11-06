@@ -174,8 +174,8 @@ void ChromeMetricsServicesManagerClient::CreateFallbackSamplingTrial(
   static const char kTrialName[] = "MetricsAndCrashSampling";
   scoped_refptr<base::FieldTrial> trial(
       base::FieldTrialList::FactoryGetFieldTrial(
-          kTrialName, 1000, "Default", base::FieldTrialList::kNoExpirationYear,
-          1, 1, base::FieldTrial::ONE_TIME_RANDOMIZED, nullptr));
+          kTrialName, 1000, "Default", base::FieldTrial::ONE_TIME_RANDOMIZED,
+          nullptr));
 
   // On all channels except stable, we sample out at a minimal rate to ensure
   // the code paths are exercised in the wild before hitting stable.
@@ -188,16 +188,17 @@ void ChromeMetricsServicesManagerClient::CreateFallbackSamplingTrial(
 
   // Like the trial name, the order that these two groups are added to the trial
   // must be kept in sync with the order that they appear in the server config.
+  // For future sanity purposes, the desired order is:
+  // OutOfReportingSample, InReportingSample
 
-  // 100 per-mille sampling rate group.
-  static const char kInSampleGroup[] = "InReportingSample";
-  AppendSamplingTrialGroup(kInSampleGroup, sampled_in_rate, trial.get());
-
-  // 900 per-mille sampled out.
   static const char kSampledOutGroup[] = "OutOfReportingSample";
   AppendSamplingTrialGroup(kSampledOutGroup, sampled_out_rate, trial.get());
 
-  // Setup the feature.
+  static const char kInSampleGroup[] = "InReportingSample";
+  AppendSamplingTrialGroup(kInSampleGroup, sampled_in_rate, trial.get());
+
+  // Setup the feature. This must be done after all groups are added since
+  // GetGroupNameWithoutActivation() will finalize the group choice.
   const std::string& group_name = trial->GetGroupNameWithoutActivation();
   feature_list->RegisterFieldTrialOverride(
       metrics::internal::kMetricsReportingFeature.name,
@@ -247,14 +248,14 @@ ChromeMetricsServicesManagerClient::GetEnabledStateProviderForTesting() {
 
 std::unique_ptr<rappor::RapporServiceImpl>
 ChromeMetricsServicesManagerClient::CreateRapporServiceImpl() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return std::make_unique<rappor::RapporServiceImpl>(
       local_state_, base::Bind(&chrome::IsIncognitoSessionActive));
 }
 
 std::unique_ptr<variations::VariationsService>
 ChromeMetricsServicesManagerClient::CreateVariationsService() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return variations::VariationsService::Create(
       std::make_unique<ChromeVariationsServiceClient>(), local_state_,
       GetMetricsStateManager(), switches::kDisableBackgroundNetworking,
@@ -264,13 +265,13 @@ ChromeMetricsServicesManagerClient::CreateVariationsService() {
 
 std::unique_ptr<metrics::MetricsServiceClient>
 ChromeMetricsServicesManagerClient::CreateMetricsServiceClient() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return ChromeMetricsServiceClient::Create(GetMetricsStateManager());
 }
 
 metrics::MetricsStateManager*
 ChromeMetricsServicesManagerClient::GetMetricsStateManager() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (!metrics_state_manager_) {
     metrics_state_manager_ = metrics::MetricsStateManager::Create(
         local_state_, enabled_state_provider_.get(), GetRegistryBackupKey(),

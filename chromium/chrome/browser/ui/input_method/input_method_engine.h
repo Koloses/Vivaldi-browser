@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "chrome/browser/ui/ime/ime_window.h"
-#include "chrome/browser/ui/ime/ime_window_observer.h"
+#include "chrome/browser/ui/input_method/ime_window.h"
+#include "chrome/browser/ui/input_method/ime_window_observer.h"
 #include "chrome/browser/ui/input_method/input_method_engine_base.h"
 
 namespace content {
@@ -31,9 +31,16 @@ class InputMethodEngine : public InputMethodEngineBase,
   void UpdateComposition(const ui::CompositionText& composition_text,
                          uint32_t cursor_pos,
                          bool is_visible) override;
+  bool SetCompositionRange(
+      uint32_t before,
+      uint32_t after,
+      const std::vector<ui::ImeTextSpan>& text_spans) override;
   void CommitTextToInputContext(int context_id,
                                 const std::string& text) override;
+  void DeleteSurroundingTextToInputContext(int offset,
+                                           size_t number_of_chars) override;
   bool SendKeyEvent(ui::KeyEvent* ui_event, const std::string& code) override;
+  void ConfirmCompositionText() override;
   bool IsActive() const override;
 
   std::string GetExtensionId() const;

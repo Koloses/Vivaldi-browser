@@ -47,13 +47,6 @@ Polymer({
   screenShown_: false,
 
   /**
-   * Whether the voice match feature has been enabled.
-   * @type {boolean}
-   * @private
-   */
-  voiceMatchFeatureEnabled_: false,
-
-  /**
    * On-tap event handler for next button.
    *
    * @private
@@ -64,10 +57,6 @@ Polymer({
     }
     this.buttonsDisabled = true;
 
-    if (!this.voiceMatchFeatureEnabled_) {
-      var hotword = this.$$('#toggle-hotword').hasAttribute('checked');
-      chrome.send('login.AssistantOptInFlowScreen.hotwordResult', [hotword]);
-    }
     var screenContext = this.$$('#toggle-context').hasAttribute('checked');
     var toggleEmail = this.$$('#toggle-email');
     var emailOptedIn =
@@ -91,8 +80,6 @@ Polymer({
    * Reload the page with the given consent string text data.
    */
   reloadContent: function(data) {
-    this.voiceMatchFeatureEnabled_ = data['voiceMatchFeatureEnabled'];
-
     this.consentStringLoaded_ = true;
     if (this.settingZippyLoaded_) {
       this.onPageLoaded();
@@ -104,6 +91,14 @@ Polymer({
    */
   addSettingZippy: function(zippy_data) {
     assert(zippy_data.length <= 3);
+
+    if (this.settingZippyLoaded_) {
+      if (this.consentStringLoaded_) {
+        this.onPageLoaded();
+      }
+      return;
+    }
+
     for (var i in zippy_data) {
       var data = zippy_data[i];
       var zippy = document.createElement('setting-zippy');
@@ -124,6 +119,9 @@ Polymer({
       toggle.id = 'toggle-' + data['id'];
       if (data['defaultEnabled']) {
         toggle.setAttribute('checked', '');
+      }
+      if (data['toggleDisabled']) {
+        toggle.disabled = true;
       }
       zippy.appendChild(toggle);
 

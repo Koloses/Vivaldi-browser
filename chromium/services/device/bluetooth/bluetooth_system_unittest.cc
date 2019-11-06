@@ -117,10 +117,11 @@ class DEVICE_BLUETOOTH_EXPORT TestBluetoothAdapterClient
         ++set_powered_call_count_;
         last_set_powered_value_ = powered.GetSetValueForTesting();
         if (next_set_powered_response_) {
-          callback.Run(GetValueAndReset(&next_set_powered_response_));
+          std::move(callback).Run(
+              GetValueAndReset(&next_set_powered_response_));
           return;
         }
-        set_powered_callbacks_.push_back(callback);
+        set_powered_callbacks_.push_back(std::move(callback));
       } else {
         NOTIMPLEMENTED();
       }
@@ -167,12 +168,11 @@ class DEVICE_BLUETOOTH_EXPORT TestBluetoothAdapterClient
                          base::Unretained(this), object_path)));
     DCHECK(was_inserted);
 
-    DCHECK(
-        !base::ContainsKey(adapter_object_paths_to_call_counts_, object_path));
+    DCHECK(!base::Contains(adapter_object_paths_to_call_counts_, object_path));
     adapter_object_paths_to_call_counts_[object_path];
 
-    DCHECK(!base::ContainsKey(adapter_object_paths_to_next_responses_,
-                              object_path));
+    DCHECK(
+        !base::Contains(adapter_object_paths_to_next_responses_, object_path));
     adapter_object_paths_to_next_responses_[object_path];
 
     GetProperties(object_path)->powered.ReplaceValue(false);
@@ -341,12 +341,11 @@ class DEVICE_BLUETOOTH_EXPORT TestBluetoothAdapterClient
 
   void StartDiscovery(const dbus::ObjectPath& object_path,
                       ResponseCallback callback) override {
-    DCHECK(
-        base::ContainsKey(adapter_object_paths_to_call_counts_, object_path));
+    DCHECK(base::Contains(adapter_object_paths_to_call_counts_, object_path));
     ++adapter_object_paths_to_call_counts_[object_path].start_discovery;
 
-    DCHECK(base::ContainsKey(adapter_object_paths_to_next_responses_,
-                             object_path));
+    DCHECK(
+        base::Contains(adapter_object_paths_to_next_responses_, object_path));
 
     base::Optional<bool> response;
     response.swap(
@@ -361,12 +360,11 @@ class DEVICE_BLUETOOTH_EXPORT TestBluetoothAdapterClient
 
   void StopDiscovery(const dbus::ObjectPath& object_path,
                      ResponseCallback callback) override {
-    DCHECK(
-        base::ContainsKey(adapter_object_paths_to_call_counts_, object_path));
+    DCHECK(base::Contains(adapter_object_paths_to_call_counts_, object_path));
     ++adapter_object_paths_to_call_counts_[object_path].stop_discovery;
 
-    DCHECK(base::ContainsKey(adapter_object_paths_to_next_responses_,
-                             object_path));
+    DCHECK(
+        base::Contains(adapter_object_paths_to_next_responses_, object_path));
 
     base::Optional<bool> response;
     response.swap(
@@ -565,71 +563,71 @@ class DEVICE_BLUETOOTH_EXPORT TestBluetoothDeviceClient
   }
 
   void Connect(const dbus::ObjectPath& object_path,
-               const base::Closure& callback,
-               const ErrorCallback& error_callback) override {
+               base::OnceClosure callback,
+               ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void Disconnect(const dbus::ObjectPath& object_path,
-                  const base::Closure& callback,
-                  const ErrorCallback& error_callback) override {
+                  base::OnceClosure callback,
+                  ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void ConnectProfile(const dbus::ObjectPath& object_path,
                       const std::string& uuid,
-                      const base::Closure& callback,
-                      const ErrorCallback& error_callback) override {
+                      base::OnceClosure callback,
+                      ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void DisconnectProfile(const dbus::ObjectPath& object_path,
                          const std::string& uuid,
-                         const base::Closure& callback,
-                         const ErrorCallback& error_callback) override {
+                         base::OnceClosure callback,
+                         ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void Pair(const dbus::ObjectPath& object_path,
-            const base::Closure& callback,
-            const ErrorCallback& error_callback) override {
+            base::OnceClosure callback,
+            ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void CancelPairing(const dbus::ObjectPath& object_path,
-                     const base::Closure& callback,
-                     const ErrorCallback& error_callback) override {
+                     base::OnceClosure callback,
+                     ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void GetConnInfo(const dbus::ObjectPath& object_path,
-                   const ConnInfoCallback& callback,
-                   const ErrorCallback& error_callback) override {
+                   ConnInfoCallback callback,
+                   ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void SetLEConnectionParameters(const dbus::ObjectPath& object_path,
                                  const ConnectionParameters& conn_params,
-                                 const base::Closure& callback,
-                                 const ErrorCallback& error_callback) override {
+                                 base::OnceClosure callback,
+                                 ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void GetServiceRecords(const dbus::ObjectPath& object_path,
-                         const ServiceRecordsCallback& callback,
-                         const ErrorCallback& error_callback) override {
+                         ServiceRecordsCallback callback,
+                         ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void ExecuteWrite(const dbus::ObjectPath& object_path,
-                    const base::Closure& callback,
-                    const ErrorCallback& error_callback) override {
+                    base::OnceClosure callback,
+                    ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 
   void AbortWrite(const dbus::ObjectPath& object_path,
-                  const base::Closure& callback,
-                  const ErrorCallback& error_callback) override {
+                  base::OnceClosure callback,
+                  ErrorCallback error_callback) override {
     NOTIMPLEMENTED();
   }
 

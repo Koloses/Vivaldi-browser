@@ -138,6 +138,10 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
   // Overrides the extension cache with |extension_cache| for testing.
   void SetExtensionCacheForTesting(ExtensionCache* extension_cache);
 
+  // Overrides the extension downloader with |downloader| for testing.
+  void SetExtensionDownloaderForTesting(
+      std::unique_ptr<ExtensionDownloader> downloader);
+
  private:
   friend class ExtensionUpdaterTest;
   friend class ExtensionUpdaterFileHandler;
@@ -282,7 +286,7 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
 
   ExtensionCache* extension_cache_;
 
-  base::WeakPtrFactory<ExtensionUpdater> weak_ptr_factory_;
+  base::WeakPtrFactory<ExtensionUpdater> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionUpdater);
 };

@@ -22,11 +22,9 @@
 #include "chrome/browser/chromeos/login/users/avatar/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller_delegate.h"
-#include "chrome/browser/chromeos/policy/cloud_external_data_policy_observer.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
 #include "chrome/browser/chromeos/policy/minimum_version_policy_handler.h"
-#include "chrome/browser/chromeos/printing/external_printers.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "components/account_id/account_id.h"
@@ -45,6 +43,10 @@ namespace user_manager {
 class RemoveUserDelegate;
 }
 
+namespace policy {
+class CloudExternalDataPolicyHandler;
+}  // namespace policy
+
 namespace chromeos {
 
 class MultiProfileUserController;
@@ -56,7 +58,6 @@ class ChromeUserManagerImpl
     : public ChromeUserManager,
       public content::NotificationObserver,
       public DeviceSettingsService::Observer,
-      public policy::CloudExternalDataPolicyObserver::Delegate,
       public policy::DeviceLocalAccountPolicyService::Observer,
       public policy::MinimumVersionPolicyHandler::Observer,
       public MultiProfileUserControllerDelegate {
@@ -84,8 +85,6 @@ class ChromeUserManagerImpl
   // UserManager implementation:
   void Shutdown() override;
   user_manager::UserList GetUsersAllowedForMultiProfile() const override;
-  user_manager::UserList GetUsersAllowedForSupervisedUsersCreation()
-      const override;
   user_manager::UserList GetUnlockUsers() const override;
   void SaveUserOAuthStatus(
       const AccountId& account_id,
@@ -120,16 +119,6 @@ class ChromeUserManagerImpl
 
   // DeviceSettingsService::Observer implementation:
   void OwnershipStatusChanged() override;
-
-  // policy::CloudExternalDataPolicyObserver::Delegate implementation:
-  void OnExternalDataSet(const std::string& policy,
-                         const std::string& user_id) override;
-  void OnExternalDataCleared(const std::string& policy,
-                             const std::string& user_id) override;
-  void OnExternalDataFetched(const std::string& policy,
-                             const std::string& user_id,
-                             std::unique_ptr<std::string> data,
-                             const base::FilePath& file_path) override;
 
   // policy::DeviceLocalAccountPolicyService::Observer implementation.
   void OnPolicyUpdated(const std::string& user_id) override;
@@ -289,17 +278,8 @@ class ChromeUserManagerImpl
 
   std::unique_ptr<MultiProfileUserController> multi_profile_user_controller_;
 
-  // Observer for the policy that can be used to manage user images.
-  std::unique_ptr<policy::CloudExternalDataPolicyObserver>
-      avatar_policy_observer_;
-
-  // Observer for the policy that can be used to manage wallpapers.
-  std::unique_ptr<policy::CloudExternalDataPolicyObserver>
-      wallpaper_policy_observer_;
-
-  // Observer for the policy that provides policy printers.
-  std::unique_ptr<policy::CloudExternalDataPolicyObserver>
-      printers_policy_observer_;
+  std::vector<std::unique_ptr<policy::CloudExternalDataPolicyHandler>>
+      cloud_external_data_policy_handlers_;
 
   base::WeakPtrFactory<ChromeUserManagerImpl> weak_factory_;
 

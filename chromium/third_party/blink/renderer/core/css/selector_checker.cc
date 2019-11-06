@@ -44,6 +44,7 @@
 #include "third_party/blink/renderer/core/dom/v0_insertion_point.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/picture_in_picture_controller.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
@@ -762,33 +763,32 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoNot:
       return CheckPseudoNot(context, result);
     case CSSSelector::kPseudoEmpty: {
-      bool result = true;
+      bool is_empty = true;
       bool has_whitespace = false;
       for (Node* n = element.firstChild(); n; n = n->nextSibling()) {
         if (n->IsElementNode()) {
-          result = false;
+          is_empty = false;
           break;
         }
-        if (n->IsTextNode()) {
-          Text* text_node = ToText(n);
+        if (auto* text_node = DynamicTo<Text>(n)) {
           if (!text_node->data().IsEmpty()) {
             if (text_node->ContainsOnlyWhitespaceOrEmpty()) {
               has_whitespace = true;
             } else {
-              result = false;
+              is_empty = false;
               break;
             }
           }
         }
       }
-      if (result && has_whitespace) {
+      if (is_empty && has_whitespace) {
         UseCounter::Count(context.element->GetDocument(),
                           WebFeature::kCSSSelectorEmptyWhitespaceOnlyFail);
-        result = false;
+        is_empty = false;
       }
       if (mode_ == kResolvingStyle)
         element.SetStyleAffectedByEmpty();
-      return result;
+      return is_empty;
     }
     case CSSSelector::kPseudoFirstChild:
       if (mode_ == kResolvingStyle) {
@@ -901,17 +901,20 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
           return true;
       }
     } break;
-    case CSSSelector::kPseudoAutofill:
-      return element.IsFormControlElement() &&
-             ToHTMLFormControlElement(element).IsAutofilled();
-    case CSSSelector::kPseudoAutofillPreviewed:
-      return element.IsFormControlElement() &&
-             ToHTMLFormControlElement(element).GetAutofillState() ==
-                 WebAutofillState::kPreviewed;
-    case CSSSelector::kPseudoAutofillSelected:
-      return element.IsFormControlElement() &&
-             ToHTMLFormControlElement(element).GetAutofillState() ==
-                 WebAutofillState::kAutofilled;
+    case CSSSelector::kPseudoAutofill: {
+      auto* html_form_element = DynamicTo<HTMLFormControlElement>(&element);
+      return html_form_element && html_form_element->IsAutofilled();
+    }
+    case CSSSelector::kPseudoAutofillPreviewed: {
+      auto* html_form_element = DynamicTo<HTMLFormControlElement>(&element);
+      return html_form_element && html_form_element->GetAutofillState() ==
+                                      WebAutofillState::kPreviewed;
+    }
+    case CSSSelector::kPseudoAutofillSelected: {
+      auto* html_form_element = DynamicTo<HTMLFormControlElement>(&element);
+      return html_form_element && html_form_element->GetAutofillState() ==
+                                      WebAutofillState::kAutofilled;
+    }
     case CSSSelector::kPseudoAnyLink:
     case CSSSelector::kPseudoWebkitAnyLink:
     case CSSSelector::kPseudoLink:
@@ -992,12 +995,8 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoRequired:
       return element.IsRequiredFormControl();
     case CSSSelector::kPseudoValid:
-      if (mode_ == kResolvingStyle)
-        element.GetDocument().SetContainsValidityStyleRules();
       return element.MatchesValidityPseudoClasses() && element.IsValidElement();
     case CSSSelector::kPseudoInvalid:
-      if (mode_ == kResolvingStyle)
-        element.GetDocument().SetContainsValidityStyleRules();
       return element.MatchesValidityPseudoClasses() &&
              !element.IsValidElement();
     case CSSSelector::kPseudoChecked: {
@@ -1021,11 +1020,9 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     case CSSSelector::kPseudoRoot:
       return element == element.GetDocument().documentElement();
     case CSSSelector::kPseudoLang: {
-      AtomicString value;
-      if (element.IsVTTElement())
-        value = ToVTTElement(element).Language();
-      else
-        value = element.ComputeInheritedLanguage();
+      auto* vtt_element = DynamicTo<VTTElement>(element);
+      AtomicString value = vtt_element ? vtt_element->Language()
+                                       : element.ComputeInheritedLanguage();
       const AtomicString& argument = selector.Argument();
       if (value.IsEmpty() ||
           !value.StartsWith(argument, kTextCaseASCIIInsensitive))
@@ -1041,6 +1038,8 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       return Fullscreen::IsFullscreenElement(element);
     case CSSSelector::kPseudoFullScreenAncestor:
       return element.ContainsFullScreenElement();
+    case CSSSelector::kPseudoPictureInPicture:
+      return PictureInPictureController::IsElementInPictureInPicture(&element);
     case CSSSelector::kPseudoVideoPersistent:
       DCHECK(is_ua_rule_);
       return IsHTMLVideoElement(element) &&
@@ -1049,17 +1048,17 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       DCHECK(is_ua_rule_);
       return element.ContainsPersistentVideo();
     case CSSSelector::kPseudoInRange:
-      if (mode_ == kResolvingStyle)
-        element.GetDocument().SetContainsValidityStyleRules();
       return element.IsInRange();
     case CSSSelector::kPseudoOutOfRange:
-      if (mode_ == kResolvingStyle)
-        element.GetDocument().SetContainsValidityStyleRules();
       return element.IsOutOfRange();
-    case CSSSelector::kPseudoFutureCue:
-      return element.IsVTTElement() && !ToVTTElement(element).IsPastNode();
-    case CSSSelector::kPseudoPastCue:
-      return element.IsVTTElement() && ToVTTElement(element).IsPastNode();
+    case CSSSelector::kPseudoFutureCue: {
+      auto* vtt_element = DynamicTo<VTTElement>(element);
+      return vtt_element && !vtt_element->IsPastNode();
+    }
+    case CSSSelector::kPseudoPastCue: {
+      auto* vtt_element = DynamicTo<VTTElement>(element);
+      return vtt_element && vtt_element->IsPastNode();
+    }
     case CSSSelector::kPseudoScope:
       if (!context.scope)
         return false;
@@ -1072,8 +1071,14 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       return !element.IsDefined() && element.IsUnresolvedV0CustomElement();
     case CSSSelector::kPseudoDefined:
       return element.IsDefined() || element.IsUpgradedV0CustomElement();
-    case CSSSelector::kPseudoHost:
     case CSSSelector::kPseudoHostContext:
+      UseCounter::Count(
+          context.element->GetDocument(),
+          mode_ == kQueryingRules
+              ? WebFeature::kCSSSelectorHostContextInSnapshotProfile
+              : WebFeature::kCSSSelectorHostContextInLiveProfile);
+      FALLTHROUGH;
+    case CSSSelector::kPseudoHost:
       return CheckPseudoHost(context, result);
     case CSSSelector::kPseudoSpatialNavigationFocus:
       DCHECK(is_ua_rule_);

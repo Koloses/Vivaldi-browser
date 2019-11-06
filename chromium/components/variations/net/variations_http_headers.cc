@@ -112,9 +112,10 @@ class VariationsHeaderHelper {
       return false;
 
     if (resource_request_) {
-      // Set the variations header to client_data_header rather than headers to
-      // be exempted from CORS checks.
-      resource_request_->client_data_header = variations_header_;
+      // Set the variations header to cors_exempt_headers rather than headers
+      // to be exempted from CORS checks.
+      resource_request_->cors_exempt_headers.SetHeaderIfMissing(
+          kClientDataHeader, variations_header_);
     } else if (url_request_) {
       url_request_->SetExtraRequestHeaderByName(kClientDataHeader,
                                                 variations_header_, false);
@@ -156,14 +157,6 @@ bool AppendVariationsHeader(const GURL& url,
       .AppendHeaderIfNeeded(url, incognito);
 }
 
-bool AppendVariationsHeader(const GURL& url,
-                            InIncognito incognito,
-                            SignedIn signed_in,
-                            net::URLRequest* request) {
-  return VariationsHeaderHelper(request, signed_in)
-      .AppendHeaderIfNeeded(url, incognito);
-}
-
 bool AppendVariationsHeaderWithCustomValue(const GURL& url,
                                            InIncognito incognito,
                                            const std::string& variations_header,
@@ -178,24 +171,12 @@ bool AppendVariationsHeaderUnknownSignedIn(const GURL& url,
   return VariationsHeaderHelper(request).AppendHeaderIfNeeded(url, incognito);
 }
 
-bool AppendVariationsHeaderUnknownSignedIn(const GURL& url,
-                                           InIncognito incognito,
-                                           net::URLRequest* request) {
-  return VariationsHeaderHelper(request).AppendHeaderIfNeeded(url, incognito);
-}
-
 void RemoveVariationsHeaderIfNeeded(
     const net::RedirectInfo& redirect_info,
     const network::ResourceResponseHead& response_head,
     std::vector<std::string>* to_be_removed_headers) {
   if (!ShouldAppendVariationsHeader(redirect_info.new_url))
     to_be_removed_headers->push_back(kClientDataHeader);
-}
-
-void StripVariationsHeaderIfNeeded(const GURL& new_location,
-                                   net::URLRequest* request) {
-  if (!ShouldAppendVariationsHeader(new_location))
-    request->RemoveRequestHeaderByName(kClientDataHeader);
 }
 
 std::unique_ptr<network::SimpleURLLoader>
@@ -229,11 +210,16 @@ bool IsVariationsHeader(const std::string& header_name) {
 }
 
 bool HasVariationsHeader(const network::ResourceRequest& request) {
-  return !request.client_data_header.empty();
+  return request.cors_exempt_headers.HasHeader(kClientDataHeader);
 }
 
 bool ShouldAppendVariationsHeaderForTesting(const GURL& url) {
   return ShouldAppendVariationsHeader(url);
+}
+
+void UpdateCorsExemptHeaderForVariations(
+    network::mojom::NetworkContextParams* params) {
+  params->cors_exempt_header_list.push_back(kClientDataHeader);
 }
 
 }  // namespace variations

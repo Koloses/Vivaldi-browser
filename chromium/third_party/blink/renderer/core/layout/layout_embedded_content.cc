@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/layout/layout_analyzer.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/paint/embedded_content_painter.h"
+#include "third_party/blink/renderer/core/paint/paint_layer.h"
 
 namespace blink {
 
@@ -140,16 +141,16 @@ bool LayoutEmbeddedContent::RequiresAcceleratedCompositing() const {
 
 bool LayoutEmbeddedContent::NodeAtPointOverEmbeddedContentView(
     HitTestResult& result,
-    const HitTestLocation& location_in_container,
-    const LayoutPoint& accumulated_offset,
+    const HitTestLocation& hit_test_location,
+    const PhysicalOffset& accumulated_offset,
     HitTestAction action) {
   bool had_result = result.InnerNode();
-  bool inside = LayoutReplaced::NodeAtPoint(result, location_in_container,
+  bool inside = LayoutReplaced::NodeAtPoint(result, hit_test_location,
                                             accumulated_offset, action);
 
   // Check to see if we are really over the EmbeddedContentView itself (and not
   // just in the border/padding area).
-  if ((inside || location_in_container.IsRectBasedTest()) && !had_result &&
+  if ((inside || hit_test_location.IsRectBasedTest()) && !had_result &&
       result.InnerNode() == GetNode()) {
     result.SetIsOverEmbeddedContentView(
         PhysicalContentBoxRect().Contains(result.LocalPoint()));
@@ -159,14 +160,14 @@ bool LayoutEmbeddedContent::NodeAtPointOverEmbeddedContentView(
 
 bool LayoutEmbeddedContent::NodeAtPoint(
     HitTestResult& result,
-    const HitTestLocation& location_in_container,
-    const LayoutPoint& accumulated_offset,
+    const HitTestLocation& hit_test_location,
+    const PhysicalOffset& accumulated_offset,
     HitTestAction action) {
   auto* local_frame_view = DynamicTo<LocalFrameView>(ChildFrameView());
   bool skip_contents = (result.GetHitTestRequest().GetStopNode() == this ||
                         !result.GetHitTestRequest().AllowsChildFrameContent());
   if (!local_frame_view || skip_contents) {
-    return NodeAtPointOverEmbeddedContentView(result, location_in_container,
+    return NodeAtPointOverEmbeddedContentView(result, hit_test_location,
                                               accumulated_offset, action);
   }
 
@@ -179,7 +180,7 @@ bool LayoutEmbeddedContent::NodeAtPoint(
       !local_frame_view->GetFrame().GetDocument() ||
       local_frame_view->GetFrame().GetDocument()->Lifecycle().GetState() <
           DocumentLifecycle::kCompositingClean) {
-    return NodeAtPointOverEmbeddedContentView(result, location_in_container,
+    return NodeAtPointOverEmbeddedContentView(result, hit_test_location,
                                               accumulated_offset, action);
   }
 
@@ -191,17 +192,17 @@ bool LayoutEmbeddedContent::NodeAtPoint(
 
     if (VisibleToHitTestRequest(result.GetHitTestRequest()) &&
         child_layout_view) {
-      LayoutPoint adjusted_location = accumulated_offset + Location();
-      LayoutPoint content_offset =
-          LayoutPoint(BorderLeft() + PaddingLeft(), BorderTop() + PaddingTop());
+      PhysicalOffset content_offset(BorderLeft() + PaddingLeft(),
+                                    BorderTop() + PaddingTop());
       HitTestLocation new_hit_test_location(
-          location_in_container, -adjusted_location - content_offset);
+          hit_test_location, -accumulated_offset - content_offset);
       HitTestRequest new_hit_test_request(
           result.GetHitTestRequest().GetType() |
               HitTestRequest::kChildFrameHitTest,
           result.GetHitTestRequest().GetStopNode());
       HitTestResult child_frame_result(new_hit_test_request,
                                        new_hit_test_location);
+      child_frame_result.SetInertNode(result.InertNode());
 
       // The frame's layout and style must be up to date if we reach here.
       bool is_inside_child_frame = child_layout_view->HitTestNoLifecycleUpdate(
@@ -224,12 +225,12 @@ bool LayoutEmbeddedContent::NodeAtPoint(
       // iframe element itself if the hit-test rect is totally within the
       // iframe.
       if (is_inside_child_frame) {
-        if (!location_in_container.IsRectBasedTest())
+        if (!hit_test_location.IsRectBasedTest())
           return true;
         HitTestResult point_over_embedded_content_view_result = result;
         bool point_over_embedded_content_view =
             NodeAtPointOverEmbeddedContentView(
-                point_over_embedded_content_view_result, location_in_container,
+                point_over_embedded_content_view_result, hit_test_location,
                 accumulated_offset, action);
         if (point_over_embedded_content_view)
           return true;
@@ -239,7 +240,7 @@ bool LayoutEmbeddedContent::NodeAtPoint(
     }
   }
 
-  return NodeAtPointOverEmbeddedContentView(result, location_in_container,
+  return NodeAtPointOverEmbeddedContentView(result, hit_test_location,
                                             accumulated_offset, action);
 }
 
@@ -278,7 +279,9 @@ void LayoutEmbeddedContent::UpdateLayout() {
 
 void LayoutEmbeddedContent::PaintReplaced(
     const PaintInfo& paint_info,
-    const LayoutPoint& paint_offset) const {
+    const PhysicalOffset& paint_offset) const {
+  if (PaintBlockedByDisplayLock(DisplayLockContext::kChildren))
+    return;
   EmbeddedContentPainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
@@ -289,7 +292,7 @@ void LayoutEmbeddedContent::InvalidatePaint(
     plugin->InvalidatePaint();
 }
 
-CursorDirective LayoutEmbeddedContent::GetCursor(const LayoutPoint& point,
+CursorDirective LayoutEmbeddedContent::GetCursor(const PhysicalOffset& point,
                                                  Cursor& cursor) const {
   if (Plugin()) {
     // A plugin is responsible for setting the cursor when the pointer is over
@@ -299,11 +302,13 @@ CursorDirective LayoutEmbeddedContent::GetCursor(const LayoutPoint& point,
   return LayoutReplaced::GetCursor(point, cursor);
 }
 
-LayoutRect LayoutEmbeddedContent::ReplacedContentRect() const {
-  LayoutRect content_rect = PhysicalContentBoxRect();
+PhysicalRect LayoutEmbeddedContent::ReplacedContentRect() const {
+  PhysicalRect content_rect = PhysicalContentBoxRect();
   // IFrames set as the root scroller should get their size from their parent.
-  if (ChildFrameView() && View() && IsEffectiveRootScroller())
-    content_rect = LayoutRect(LayoutPoint(), View()->ViewRect().Size());
+  if (ChildFrameView() && View() && IsEffectiveRootScroller()) {
+    content_rect.offset = PhysicalOffset();
+    content_rect.size = View()->ViewRect().size;
+  }
 
   // We don't propagate sub-pixel into sub-frame layout, in other words, the
   // rect is snapped at the document boundary, and sub-pixel movement could
@@ -313,41 +318,49 @@ LayoutRect LayoutEmbeddedContent::ReplacedContentRect() const {
 }
 
 void LayoutEmbeddedContent::UpdateOnEmbeddedContentViewChange() {
-  EmbeddedContentView* embedded_content_view = GetEmbeddedContentView();
-  if (!embedded_content_view)
-    return;
-
   if (!Style())
     return;
 
-  if (!NeedsLayout())
-    UpdateGeometry(*embedded_content_view);
+  if (EmbeddedContentView* embedded_content_view = GetEmbeddedContentView()) {
+    if (!NeedsLayout())
+      UpdateGeometry(*embedded_content_view);
 
-  if (StyleRef().Visibility() != EVisibility::kVisible) {
-    embedded_content_view->Hide();
-  } else {
-    embedded_content_view->Show();
-    // FIXME: Why do we issue a full paint invalidation in this case, but not
-    // the other?
-    SetShouldDoFullPaintInvalidation();
+    if (StyleRef().Visibility() != EVisibility::kVisible)
+      embedded_content_view->Hide();
+    else
+      embedded_content_view->Show();
   }
+
+  // One of the reasons of the following is that the layout tree in the new
+  // embedded content view may have already had some paint property and paint
+  // invalidation flags set, and we need to propagate the flags into the host
+  // view. Adding, changing and removing are also significant changes to the
+  // tree so setting the flags ensures the required updates.
+  SetNeedsPaintPropertyUpdate();
+  SetShouldDoFullPaintInvalidation();
+  // Showing/hiding the embedded content view and changing the view between null
+  // and non-null affect compositing (see: PaintLayerCompositor::CanBeComposited
+  // and RootShouldAlwaysComposite).
+  if (HasLayer())
+    Layer()->SetNeedsCompositingInputsUpdate();
 }
 
 void LayoutEmbeddedContent::UpdateGeometry(
     EmbeddedContentView& embedded_content_view) {
-  // Ignore transform here, as we only care about the sub-pixel accumulation.
-  // TODO(trchen): What about multicol? Need a LayoutBox function to query
-  // sub-pixel accumulation.
-  LayoutRect replaced_rect = ReplacedContentRect();
+  // TODO(wangxianzhu): We reset subpixel accumulation at some boundaries, so
+  // the following code is incorrect when some ancestors are such boundaries.
+  // What about multicol? Need a LayoutBox function to query sub-pixel
+  // accumulation.
+  PhysicalRect replaced_rect = ReplacedContentRect();
   TransformState transform_state(TransformState::kApplyTransformDirection,
                                  FloatPoint(),
                                  FloatQuad(FloatRect(replaced_rect)));
-  MapLocalToAncestor(nullptr, transform_state,
-                     kApplyContainerFlip | kUseTransforms);
+  MapLocalToAncestor(nullptr, transform_state, 0);
   transform_state.Flatten();
-  LayoutPoint absolute_location(transform_state.LastPlanarPoint());
-  LayoutRect absolute_replaced_rect(replaced_rect);
-  absolute_replaced_rect.MoveBy(absolute_location);
+  PhysicalOffset absolute_location =
+      PhysicalOffset::FromFloatPointRound(transform_state.LastPlanarPoint());
+  PhysicalRect absolute_replaced_rect = replaced_rect;
+  absolute_replaced_rect.Move(absolute_location);
   FloatRect absolute_bounding_box =
       transform_state.LastPlanarQuad().BoundingBox();
   IntRect frame_rect(IntPoint(),
@@ -371,8 +384,11 @@ void LayoutEmbeddedContent::UpdateGeometry(
   // TODO(szager): Refactor this functionality into EmbeddedContentView, rather
   // than reimplementing in each concrete subclass.
   LayoutView* layout_view = View();
-  if (layout_view && layout_view->HasOverflowClip())
-    frame_rect.Move(layout_view->ScrolledContentOffset());
+  if (layout_view && layout_view->HasOverflowClip()) {
+    // Floored because the frame_rect in a content view is an IntRect. We may
+    // want to reevaluate that since scroll offsets/layout can be fractional.
+    frame_rect.Move(FlooredIntSize(layout_view->ScrolledContentOffset()));
+  }
 
   embedded_content_view.SetFrameRect(frame_rect);
 }

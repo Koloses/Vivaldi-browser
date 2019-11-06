@@ -12,40 +12,45 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
+#include "components/autofill_assistant/browser/client_settings.h"
 #include "components/autofill_assistant/browser/element_precondition.h"
 #include "url/gurl.h"
 
 namespace autofill_assistant {
 
-namespace {
-// Time between two chip precondition checks.
-static constexpr base::TimeDelta kPreconditionChipCheckInterval =
-    base::TimeDelta::FromSeconds(1);
-}  // namespace
-
-PromptAction::PromptAction(const ActionProto& proto)
-    : Action(proto), weak_ptr_factory_(this) {
+PromptAction::PromptAction(ActionDelegate* delegate, const ActionProto& proto)
+    : Action(delegate, proto), weak_ptr_factory_(this) {
   DCHECK(proto_.has_prompt());
 }
 
 PromptAction::~PromptAction() {}
 
-void PromptAction::InternalProcessAction(ActionDelegate* delegate,
-                                         ProcessActionCallback callback) {
+void PromptAction::InternalProcessAction(ProcessActionCallback callback) {
   if (proto_.prompt().choices_size() == 0) {
-    UpdateProcessedAction(OTHER_ACTION_STATUS);
+    UpdateProcessedAction(INVALID_ACTION);
     std::move(callback).Run(std::move(processed_action_proto_));
     return;
   }
 
-  delegate_ = delegate;
   callback_ = std::move(callback);
-  delegate->SetStatusMessage(proto_.prompt().message());
+  delegate_->SetStatusMessage(proto_.prompt().message());
 
-  SetupAutoSelect();
   SetupPreconditions();
+  UpdateUserActions();
+
+  if (HasNonemptyPreconditions() || HasAutoSelect()) {
+    RunPeriodicChecks();
+    timer_ = std::make_unique<base::RepeatingTimer>();
+    timer_->Start(FROM_HERE,
+                  delegate_->GetSettings().periodic_script_check_interval,
+                  base::BindRepeating(&PromptAction::RunPeriodicChecks,
+                                      weak_ptr_factory_.GetWeakPtr()));
+  }
+}
+
+void PromptAction::RunPeriodicChecks() {
   CheckPreconditions();
-  UpdateChips();
+  CheckAutoSelect();
 }
 
 void PromptAction::SetupPreconditions() {
@@ -57,29 +62,28 @@ void PromptAction::SetupPreconditions() {
     preconditions_[i] = std::make_unique<ElementPrecondition>(
         choice_proto.show_only_if_element_exists(),
         choice_proto.show_only_if_form_value_matches());
-    precondition_results_[i] = false;
+    precondition_results_[i] = preconditions_[i]->empty();
   }
 }
 
-void PromptAction::CheckPreconditions() {
-  // This method might be called by PostDelayedTask, possibly after
-  // OnSuggestionChosen ran. The condition on callback_ makes sure that the
-  // caller is still waiting for a response.
-  if (!callback_)
-    return;
+bool PromptAction::HasNonemptyPreconditions() {
+  for (const auto& precondition : preconditions_) {
+    if (!precondition->empty())
+      return true;
+  }
+  return false;
+}
 
-  precondition_checker_ = delegate_->CreateBatchElementChecker();
+void PromptAction::CheckPreconditions() {
+  precondition_checker_ = std::make_unique<BatchElementChecker>();
   for (size_t i = 0; i < preconditions_.size(); i++) {
     preconditions_[i]->Check(precondition_checker_.get(),
                              base::BindOnce(&PromptAction::OnPreconditionResult,
                                             weak_ptr_factory_.GetWeakPtr(), i));
   }
-  precondition_checker_->Run(
-      // Try once; retries are handled by OnPreconditionChecksDone.
-      base::TimeDelta::FromSeconds(0),
-      /* try_done= */ base::DoNothing(),
-      base::BindOnce(&PromptAction::OnPreconditionChecksDone,
-                     weak_ptr_factory_.GetWeakPtr()));
+  precondition_checker_->AddAllDoneCallback(base::BindOnce(
+      &PromptAction::OnPreconditionChecksDone, weak_ptr_factory_.GetWeakPtr()));
+  delegate_->RunElementChecks(precondition_checker_.get());
 }
 
 void PromptAction::OnPreconditionResult(size_t choice_index, bool result) {
@@ -92,75 +96,60 @@ void PromptAction::OnPreconditionResult(size_t choice_index, bool result) {
 
 void PromptAction::OnPreconditionChecksDone() {
   if (precondition_changed_)
-    UpdateChips();
-
-  if (HasNonemptyPreconditions()) {
-    // If there are element preconditions, the result can change with time, so
-    // schedule another check later on.
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE,
-        base::BindOnce(&PromptAction::CheckPreconditions,
-                       weak_ptr_factory_.GetWeakPtr()),
-        kPreconditionChipCheckInterval);
-  }
+    UpdateUserActions();
 }
 
-bool PromptAction::HasNonemptyPreconditions() {
-  for (const auto& precondition : preconditions_) {
-    if (!precondition->empty())
+void PromptAction::UpdateUserActions() {
+  DCHECK(callback_);  // Make sure we're still waiting for a response
+
+  auto user_actions = std::make_unique<std::vector<UserAction>>();
+  for (int i = 0; i < proto_.prompt().choices_size(); i++) {
+    auto& choice_proto = proto_.prompt().choices(i);
+    UserAction user_action(choice_proto.chip(), choice_proto.direct_action());
+    if (!user_action.has_triggers())
+      continue;
+
+    // Hide actions whose preconditions don't match.
+    if (!precondition_results_[i] && !choice_proto.allow_disabling())
+      continue;
+
+    user_action.SetEnabled(precondition_results_[i]);
+    user_action.SetCallback(base::BindOnce(&PromptAction::OnSuggestionChosen,
+                                           weak_ptr_factory_.GetWeakPtr(), i));
+    user_actions->emplace_back(std::move(user_action));
+  }
+  delegate_->Prompt(std::move(user_actions));
+  precondition_changed_ = false;
+}
+
+bool PromptAction::HasAutoSelect() {
+  for (int i = 0; i < proto_.prompt().choices_size(); i++) {
+    Selector selector =
+        Selector(proto_.prompt().choices(i).auto_select_if_element_exists());
+    if (!selector.empty())
       return true;
   }
   return false;
 }
 
-void PromptAction::UpdateChips() {
-  DCHECK(callback_);  // Make sure we're still waiting for a response
+void PromptAction::CheckAutoSelect() {
+  auto_select_checker_ = std::make_unique<BatchElementChecker>();
 
-  auto chips = std::make_unique<std::vector<Chip>>();
-  for (int i = 0; i < proto_.prompt().choices_size(); i++) {
-    if (!precondition_results_[i])  // chip disabled
-      continue;
-
-    auto& choice_proto = proto_.prompt().choices(i);
-    chips->emplace_back();
-    Chip& chip = chips->back();
-    chip.text = choice_proto.name();
-    chip.type = choice_proto.chip_type();
-    chips->back().callback = base::BindOnce(&PromptAction::OnSuggestionChosen,
-                                            weak_ptr_factory_.GetWeakPtr(), i);
-  }
-  SetDefaultChipType(chips.get());
-  delegate_->Prompt(std::move(chips),
-                    base::BindOnce(&PromptAction::OnTerminated,
-                                   weak_ptr_factory_.GetWeakPtr()));
-  precondition_changed_ = false;
-}
-
-void PromptAction::SetupAutoSelect() {
   // Wait as long as necessary for one of the elements to show up. This is
-  // cancelled by CancelProto()
+  // cancelled by CancelPrompt()
   for (int i = 0; i < proto_.prompt().choices_size(); i++) {
-    Selector selector(
-        proto_.prompt().choices(i).auto_select_if_element_exists());
+    Selector selector =
+        Selector(proto_.prompt().choices(i).auto_select_if_element_exists());
     if (selector.empty())
       continue;
 
-    if (!auto_select_checker_)
-      auto_select_checker_ = delegate_->CreateBatchElementChecker();
-
     auto_select_checker_->AddElementCheck(
-        kExistenceCheck, selector,
-        base::BindOnce(&PromptAction::OnAutoSelectElementExists,
-                       weak_ptr_factory_.GetWeakPtr(), i));
+        selector, base::BindOnce(&PromptAction::OnAutoSelectElementExists,
+                                 weak_ptr_factory_.GetWeakPtr(), i));
   }
-  if (!auto_select_checker_)
-    return;
-
-  auto_select_checker_->Run(base::TimeDelta::Max(),
-                            /* try_done= */
-                            base::BindRepeating(&PromptAction::OnAutoSelectDone,
-                                                weak_ptr_factory_.GetWeakPtr()),
-                            /* all_done= */ base::DoNothing());
+  auto_select_checker_->AddAllDoneCallback(base::BindOnce(
+      &PromptAction::OnAutoSelectDone, weak_ptr_factory_.GetWeakPtr()));
+  delegate_->RunElementChecks(auto_select_checker_.get());
 }
 
 void PromptAction::OnAutoSelectElementExists(int choice_index, bool exists) {
@@ -186,7 +175,8 @@ void PromptAction::OnSuggestionChosen(int choice_index) {
   }
   DCHECK(choice_index >= 0 && choice_index <= proto_.prompt().choices_size());
 
-  // Interrupt checks.
+  // Interrupt checks and timer.
+  timer_.reset();
   precondition_checker_.reset();
   auto_select_checker_.reset();
 
@@ -196,14 +186,4 @@ void PromptAction::OnSuggestionChosen(int choice_index) {
       proto_.prompt().choices(choice_index);
   std::move(callback_).Run(std::move(processed_action_proto_));
 }
-
-void PromptAction::OnTerminated() {
-  if (!callback_) {
-    NOTREACHED();
-    return;
-  }
-  UpdateProcessedAction(USER_ABORTED_ACTION);
-  std::move(callback_).Run(std::move(processed_action_proto_));
-}
-
 }  // namespace autofill_assistant

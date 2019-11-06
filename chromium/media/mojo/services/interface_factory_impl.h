@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "media/base/media_util.h"
 #include "media/mojo/buildflags.h"
@@ -42,10 +43,20 @@ class InterfaceFactoryImpl : public DeferredDestroy<mojom::InterfaceFactory> {
   void CreateVideoDecoder(mojom::VideoDecoderRequest request) final;
   void CreateDefaultRenderer(const std::string& audio_device_id,
                              mojom::RendererRequest request) final;
+#if BUILDFLAG(ENABLE_CAST_RENDERER)
+  void CreateCastRenderer(const base::UnguessableToken& overlay_plane_id,
+                          media::mojom::RendererRequest request) final;
+#endif
 #if defined(OS_ANDROID)
-  void CreateMediaPlayerRenderer(mojom::RendererRequest request) final;
-  void CreateFlingingRenderer(const std::string& presentation_id,
-                              mojom::RendererRequest request) final;
+  void CreateMediaPlayerRenderer(
+      mojom::MediaPlayerRendererClientExtensionPtr client_extension_ptr,
+      mojom::RendererRequest request,
+      mojom::MediaPlayerRendererExtensionRequest renderer_extension_request)
+      final;
+  void CreateFlingingRenderer(
+      const std::string& presentation_id,
+      mojom::FlingingRendererClientExtensionPtr client_extension,
+      mojom::RendererRequest request) final;
 #endif  // defined(OS_ANDROID)
   void CreateCdm(const std::string& key_system,
                  mojom::ContentDecryptionModuleRequest request) final;

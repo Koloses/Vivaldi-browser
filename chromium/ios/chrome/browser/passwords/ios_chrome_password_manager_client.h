@@ -15,11 +15,15 @@
 
 namespace ios {
 class ChromeBrowserState;
+}
+
+namespace autofill {
 class LogManager;
 }
 
 namespace password_manager {
 class PasswordFormManagerForUI;
+class PasswordManagerDriver;
 }
 
 namespace web {
@@ -53,6 +57,7 @@ class WebState;
 @end
 
 // An iOS implementation of password_manager::PasswordManagerClient.
+// TODO(crbug.com/958833): write unit tests for this class.
 class IOSChromePasswordManagerClient
     : public password_manager::PasswordManagerClient,
       public password_manager::PasswordManagerClientHelperDelegate {
@@ -72,6 +77,9 @@ class IOSChromePasswordManagerClient
       bool has_generated_password,
       bool is_update) override;
   void HideManualFallbackForSaving() override;
+  void FocusedInputChanged(
+      password_manager::PasswordManagerDriver* driver,
+      autofill::mojom::FocusedFieldType focused_field_type) override;
   bool PromptUserToChooseCredentials(
       std::vector<std::unique_ptr<autofill::PasswordForm>> local_forms,
       const GURL& origin,
@@ -93,14 +101,19 @@ class IOSChromePasswordManagerClient
       const autofill::PasswordForm& form) override;
   void NotifyStorePasswordCalled() override;
   bool IsSavingAndFillingEnabled(const GURL& url) const override;
+  bool IsFillingEnabled(const GURL& url) const override;
   const GURL& GetLastCommittedEntryURL() const override;
   std::string GetPageLanguage() const override;
   const password_manager::CredentialsFilter* GetStoreResultFilter()
       const override;
-  const password_manager::LogManager* GetLogManager() const override;
+  const autofill::LogManager* GetLogManager() const override;
   ukm::SourceId GetUkmSourceId() override;
   password_manager::PasswordManagerMetricsRecorder* GetMetricsRecorder()
       override;
+  password_manager::PasswordRequirementsService*
+  GetPasswordRequirementsService() override;
+  bool IsIsolationForPasswordSitesEnabled() const override;
+  bool IsNewTabPage() const override;
 
  private:
   // password_manager::PasswordManagerClientHelperDelegate implementation.
@@ -115,7 +128,7 @@ class IOSChromePasswordManagerClient
 
   const password_manager::SyncCredentialsFilter credentials_filter_;
 
-  std::unique_ptr<password_manager::LogManager> log_manager_;
+  std::unique_ptr<autofill::LogManager> log_manager_;
 
   // Recorder of metrics that is associated with the last committed navigation
   // of the tab owning this ChromePasswordManagerClient. May be unset at

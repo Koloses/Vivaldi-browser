@@ -123,6 +123,7 @@ Network.NetworkLogView = class extends UI.VBox {
         Object.values(Common.resourceCategories)
             .map(category => ({name: category.title, label: category.shortTitle, title: category.title}));
     this._resourceCategoryFilterUI = new UI.NamedBitSetFilterUI(filterItems, this._networkResourceTypeFiltersSetting);
+    UI.ARIAUtils.setAccessibleName(this._resourceCategoryFilterUI.element(), ls`Resource types to include`);
     this._resourceCategoryFilterUI.addEventListener(
         UI.FilterUI.Events.FilterChanged, this._filterChanged.bind(this), this);
     filterBar.addFilter(this._resourceCategoryFilterUI);
@@ -138,7 +139,7 @@ Network.NetworkLogView = class extends UI.VBox {
     filterBar.filterButton().addEventListener(
         UI.ToolbarButton.Events.Click, this._dataGrid.scheduleUpdate.bind(this._dataGrid, true /* isFromUser */));
 
-    this._summaryBarElement = this.element.createChild('div', 'network-summary-bar');
+    this._summaryToolbar = new UI.Toolbar('network-summary-bar', this.element);
 
     new UI.DropTarget(
         this.element, [UI.DropTarget.Type.File], Common.UIString('Drop HAR files here'), this._handleDrop.bind(this));
@@ -402,14 +403,6 @@ Network.NetworkLogView = class extends UI.VBox {
   }
 
   /**
-   * @param {!SDK.NetworkRequest} request
-   * @return {boolean}
-   */
-  static FinishedRequestsFilter(request) {
-    return request.finished;
-  }
-
-  /**
    * @param {number} windowStart
    * @param {number} windowEnd
    * @param {!SDK.NetworkRequest} request
@@ -461,13 +454,13 @@ Network.NetworkLogView = class extends UI.VBox {
     if (entry.isDirectory)
       return;
 
-    entry.file(this._onLoadFromFile.bind(this));
+    entry.file(this.onLoadFromFile.bind(this));
   }
 
   /**
    * @param {!File} file
    */
-  async _onLoadFromFile(file) {
+  async onLoadFromFile(file) {
     const outputStream = new Common.StringOutputStream();
     const reader = new Bindings.ChunkedFileReader(file, /* chunkSize */ 10000000);
     const success = await reader.read(outputStream);
@@ -758,53 +751,52 @@ Network.NetworkLogView = class extends UI.VBox {
       return;
     }
 
-    const summaryBar = this._summaryBarElement;
-    summaryBar.removeChildren();
-    const separator = '\u2002\u2758\u2002';
-    let text = '';
+    this._summaryToolbar.removeToolbarItems();
     /**
      * @param {string} chunk
+     * @param {string=} title
      * @return {!Element}
      */
-    function appendChunk(chunk) {
-      const span = summaryBar.createChild('span');
-      span.textContent = chunk;
-      text += chunk;
-      return span;
-    }
+    const appendChunk = (chunk, title) => {
+      const toolbarText = new UI.ToolbarText(chunk);
+      toolbarText.setTitle(title ? title : chunk);
+      this._summaryToolbar.appendToolbarItem(toolbarText);
+      return toolbarText.element;
+    };
 
     if (selectedNodeNumber !== nodeCount) {
-      appendChunk(Common.UIString('%d / %d requests', selectedNodeNumber, nodeCount));
-      appendChunk(separator);
-      appendChunk(Common.UIString(
-          '%s / %s transferred', Number.bytesToString(selectedTransferSize), Number.bytesToString(transferSize)));
-      appendChunk(separator);
-      appendChunk(Common.UIString(
-          '%s / %s resources', Number.bytesToString(selectedResourceSize), Number.bytesToString(resourceSize)));
+      appendChunk(ls`${selectedNodeNumber} / ${nodeCount} requests`);
+      this._summaryToolbar.appendSeparator();
+      appendChunk(
+          ls`${Number.bytesToString(selectedTransferSize)} / ${Number.bytesToString(transferSize)} transferred`,
+          ls`${selectedTransferSize} B / ${transferSize} B transferred`);
+      this._summaryToolbar.appendSeparator();
+      appendChunk(
+          ls`${Number.bytesToString(selectedResourceSize)} / ${Number.bytesToString(resourceSize)} resources`,
+          ls`${selectedResourceSize} B / ${resourceSize} B resources`);
     } else {
-      appendChunk(Common.UIString('%d requests', nodeCount));
-      appendChunk(separator);
-      appendChunk(Common.UIString('%s transferred', Number.bytesToString(transferSize)));
-      appendChunk(separator);
-      appendChunk(Common.UIString('%s resources', Number.bytesToString(resourceSize)));
+      appendChunk(ls`${nodeCount} requests`);
+      this._summaryToolbar.appendSeparator();
+      appendChunk(ls`${Number.bytesToString(transferSize)} transferred`, ls`${transferSize} B transferred`);
+      this._summaryToolbar.appendSeparator();
+      appendChunk(ls`${Number.bytesToString(resourceSize)} resources`, ls`${resourceSize} B resources`);
     }
 
     if (baseTime !== -1 && maxTime !== -1) {
-      appendChunk(separator);
-      appendChunk(Common.UIString('Finish: %s', Number.secondsToString(maxTime - baseTime)));
+      this._summaryToolbar.appendSeparator();
+      appendChunk(ls`Finish: ${Number.secondsToString(maxTime - baseTime)}`);
       if (this._mainRequestDOMContentLoadedTime !== -1 && this._mainRequestDOMContentLoadedTime > baseTime) {
-        appendChunk(separator);
+        this._summaryToolbar.appendSeparator();
         const domContentLoadedText =
             ls`DOMContentLoaded: ${Number.secondsToString(this._mainRequestDOMContentLoadedTime - baseTime)}`;
-        appendChunk(domContentLoadedText).classList.add('summary-dcl-event');
+        appendChunk(domContentLoadedText).style.color = Network.NetworkLogView.getDCLEventColor();
       }
       if (this._mainRequestLoadTime !== -1) {
-        appendChunk(separator);
+        this._summaryToolbar.appendSeparator();
         const loadText = ls`Load: ${Number.secondsToString(this._mainRequestLoadTime - baseTime)}`;
-        appendChunk(loadText).classList.add('summary-load-event');
+        appendChunk(loadText).style.color = Network.NetworkLogView.getLoadEventColor();
       }
     }
-    summaryBar.title = text;
   }
 
   scheduleRefresh() {
@@ -1221,7 +1213,7 @@ Network.NetworkLogView = class extends UI.VBox {
     }
     footerSection.appendItem(Common.UIString('Copy all as HAR'), this._copyAll.bind(this));
 
-    contextMenu.saveSection().appendItem(Common.UIString('Save all as HAR with content'), this._exportAll.bind(this));
+    contextMenu.saveSection().appendItem(ls`Save all as HAR with content`, this.exportAll.bind(this));
 
     contextMenu.editSection().appendItem(Common.UIString('Clear browser cache'), this._clearBrowserCache.bind(this));
     contextMenu.editSection().appendItem(
@@ -1279,8 +1271,10 @@ Network.NetworkLogView = class extends UI.VBox {
   }
 
   _harRequests() {
-    const httpRequests = SDK.networkLog.requests().filter(Network.NetworkLogView.HTTPRequestsFilter);
-    return httpRequests.filter(Network.NetworkLogView.FinishedRequestsFilter);
+    return SDK.networkLog.requests().filter(Network.NetworkLogView.HTTPRequestsFilter).filter(request => {
+      return request.finished ||
+          (request.resourceType() === Common.resourceTypes.WebSocket && request.responseReceivedTime);
+    });
   }
 
   async _copyAll() {
@@ -1332,7 +1326,7 @@ Network.NetworkLogView = class extends UI.VBox {
     InspectorFrontendHost.copyText(commands);
   }
 
-  async _exportAll() {
+  async exportAll() {
     const url = SDK.targetManager.mainTarget().inspectedURL();
     const parsedURL = url.asParsedURL();
     const filename = parsedURL ? parsedURL.host : 'network-log';
@@ -1698,8 +1692,13 @@ Network.NetworkLogView = class extends UI.VBox {
        */
       function escapeCharacter(x) {
         const code = x.charCodeAt(0);
-        // Add leading zero when needed to not care about the next character.
-        return code < 16 ? '\\u0' + code.toString(16) : '\\u' + code.toString(16);
+        let hexString = code.toString(16);
+        // Zero pad to four digits to comply with ANSI-C Quoting:
+        // http://www.gnu.org/software/bash/manual/html_node/ANSI_002dC-Quoting.html
+        while (hexString.length < 4)
+          hexString = '0' + hexString;
+
+        return '\\u' + hexString;
       }
 
       if (/[\u0000-\u001f\u007f-\u009f!]|\'/.test(str)) {
@@ -1841,6 +1840,22 @@ Network.NetworkLogView = class extends UI.VBox {
     const nonBlobRequests = this._filterOutBlobRequests(requests);
     const commands = await Promise.all(nonBlobRequests.map(request => this._generatePowerShellCommand(request)));
     return commands.join(';\r\n');
+  }
+
+  /**
+   * @return {string}
+   */
+  static getDCLEventColor() {
+    if (UI.themeSupport.themeName() === 'dark')
+      return '#03A9F4';
+    return '#0867CB';
+  }
+
+  /**
+   * @return {string}
+   */
+  static getLoadEventColor() {
+    return UI.themeSupport.patchColorText('#B31412', UI.ThemeSupport.ColorUsage.Foreground);
   }
 };
 

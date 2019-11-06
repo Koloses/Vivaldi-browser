@@ -4,7 +4,6 @@
 
 #include "chrome/browser/apps/platform_apps/platform_app_launch.h"
 
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
@@ -44,12 +43,6 @@ bool GetAppLaunchContainer(Profile* profile,
   extensions::LaunchContainer launch_container = extensions::GetLaunchContainer(
       extensions::ExtensionPrefs::Get(profile), app);
 
-  if (!extensions::util::IsNewBookmarkAppsEnabled() &&
-      !extensions::HasPreferredLaunchContainer(
-          extensions::ExtensionPrefs::Get(profile), app)) {
-    launch_container = extensions::LAUNCH_CONTAINER_WINDOW;
-  }
-
   *out_app = app;
   *out_launch_container = launch_container;
   return true;
@@ -79,14 +72,14 @@ bool OpenExtensionApplicationWindow(Profile* profile,
   if (!GetAppLaunchContainer(profile, app_id, &app, &launch_container))
     return false;
 
-  if (launch_container == extensions::LAUNCH_CONTAINER_TAB)
+  if (launch_container == extensions::LaunchContainer::kLaunchContainerTab)
     return false;
 
   RecordCmdLineAppHistogram(app->GetType());
 
-  ::AppLaunchParams params(profile, app, launch_container,
+  ::AppLaunchParams params(profile, app_id, launch_container,
                            WindowOpenDisposition::NEW_WINDOW,
-                           extensions::SOURCE_COMMAND_LINE);
+                           extensions::AppLaunchSource::kSourceCommandLine);
   params.command_line = command_line;
   params.current_directory = current_directory;
   content::WebContents* tab_in_app_window = ::OpenApplication(params);
@@ -102,15 +95,15 @@ bool OpenExtensionApplicationTab(Profile* profile, const std::string& app_id) {
     return false;
 
   // If the user doesn't want to open a tab, fail.
-  if (launch_container != extensions::LAUNCH_CONTAINER_TAB)
+  if (launch_container != extensions::LaunchContainer::kLaunchContainerTab)
     return false;
 
   RecordCmdLineAppHistogram(app->GetType());
 
-  content::WebContents* app_tab = ::OpenApplication(
-      ::AppLaunchParams(profile, app, extensions::LAUNCH_CONTAINER_TAB,
-                        WindowOpenDisposition::NEW_FOREGROUND_TAB,
-                        extensions::SOURCE_COMMAND_LINE));
+  content::WebContents* app_tab = ::OpenApplication(::AppLaunchParams(
+      profile, app_id, extensions::LaunchContainer::kLaunchContainerTab,
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      extensions::AppLaunchSource::kSourceCommandLine));
   return app_tab != nullptr;
 }
 
@@ -119,14 +112,14 @@ bool OpenExtensionApplicationWithReenablePrompt(
     const std::string& app_id,
     const base::CommandLine& command_line,
     const base::FilePath& current_directory) {
-  const extensions::Extension* app = GetPlatformApp(profile, app_id);
-  if (!app)
+  if (!GetPlatformApp(profile, app_id))
     return false;
 
   RecordCmdLineAppHistogram(extensions::Manifest::TYPE_PLATFORM_APP);
-  ::AppLaunchParams params(profile, app, extensions::LAUNCH_CONTAINER_NONE,
+  ::AppLaunchParams params(profile, app_id,
+                           extensions::LaunchContainer::kLaunchContainerNone,
                            WindowOpenDisposition::NEW_WINDOW,
-                           extensions::SOURCE_COMMAND_LINE);
+                           extensions::AppLaunchSource::kSourceCommandLine);
   params.command_line = command_line;
   params.current_directory = current_directory;
   ::OpenApplicationWithReenablePrompt(params);

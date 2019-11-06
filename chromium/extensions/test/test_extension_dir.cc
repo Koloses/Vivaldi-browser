@@ -46,8 +46,6 @@ void TestExtensionDir::WriteFile(const base::FilePath::StringType& filename,
                             contents.size()));
 }
 
-// This function packs the extension into a .crx, and returns the path to that
-// .crx. Multiple calls to Pack() will produce extensions with the same ID.
 base::FilePath TestExtensionDir::Pack() {
   base::ScopedAllowBlockingForTesting allow_blocking;
   ExtensionCreator creator;

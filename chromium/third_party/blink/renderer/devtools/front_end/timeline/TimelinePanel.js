@@ -549,7 +549,7 @@ Timeline.TimelinePanel = class extends UI.Panel {
   }
 
   _reset() {
-    PerfUI.LineLevelProfile.Performance.instance().reset();
+    self.runtime.sharedInstance(PerfUI.LineLevelProfile.Performance).reset();
     this._setModel(null);
   }
 
@@ -582,7 +582,7 @@ Timeline.TimelinePanel = class extends UI.Panel {
           Timeline.PerformanceModel.Events.WindowChanged, this._onModelWindowChanged, this);
       this._overviewPane.setBounds(
           model.timelineModel().minimumRecordTime(), model.timelineModel().maximumRecordTime());
-      const lineLevelProfile = PerfUI.LineLevelProfile.Performance.instance();
+      const lineLevelProfile = self.runtime.sharedInstance(PerfUI.LineLevelProfile.Performance);
       lineLevelProfile.reset();
       for (const profile of model.timelineModel().cpuProfiles())
         lineLevelProfile.appendCPUProfile(profile);
@@ -655,13 +655,11 @@ Timeline.TimelinePanel = class extends UI.Panel {
     const reloadButton = UI.createInlineButton(UI.Toolbar.createActionButtonForId('timeline.record-reload'));
 
     centered.createChild('p').appendChild(UI.formatLocalized(
-        'Click the record button %s or hit %s to start a new recording.\n' +
-            'Click the reload button %s or hit %s to record the page load.',
+        'Click the record button %s or hit %s to start a new recording.\nClick the reload button %s or hit %s to record the page load.',
         [recordButton, recordKey, reloadButton, reloadKey]));
 
     centered.createChild('p').appendChild(UI.formatLocalized(
-        'After recording, select an area of interest in the overview by dragging.\n' +
-        'Then, zoom and pan the timeline with the mousewheel or %s keys.\n%s',
+        'After recording, select an area of interest in the overview by dragging.\nThen, zoom and pan the timeline with the mousewheel or %s keys.\n%s',
         [navigateNode, learnMoreNode]));
 
     this._landingPage.show(this._statusPaneContainer);
@@ -1037,6 +1035,7 @@ Timeline.TimelinePanel.StatusPane = class extends UI.VBox {
     const statusLine = this.contentElement.createChild('div', 'status-dialog-line status');
     statusLine.createChild('div', 'label').textContent = Common.UIString('Status');
     this._status = statusLine.createChild('div', 'content');
+    UI.ARIAUtils.markAsStatus(this._status);
 
     if (showTimer) {
       const timeLine = this.contentElement.createChild('div', 'status-dialog-line time');
@@ -1046,6 +1045,7 @@ Timeline.TimelinePanel.StatusPane = class extends UI.VBox {
     const progressLine = this.contentElement.createChild('div', 'status-dialog-line progress');
     this._progressLabel = progressLine.createChild('div', 'label');
     this._progressBar = progressLine.createChild('div', 'indicator-container').createChild('div', 'indicator');
+    UI.ARIAUtils.markAsProgressBar(this._progressBar);
 
     this._stopButton = UI.createTextButton(Common.UIString('Stop'), stopCallback, '', true);
     this.contentElement.createChild('div', 'stop-button').appendChild(this._stopButton);
@@ -1084,6 +1084,7 @@ Timeline.TimelinePanel.StatusPane = class extends UI.VBox {
   updateProgressBar(activity, percent) {
     this._progressLabel.textContent = activity;
     this._progressBar.style.width = percent.toFixed(1) + '%';
+    UI.ARIAUtils.setProgressBarCurrentPercentage(this._progressBar, percent);
     this._updateTimer();
   }
 

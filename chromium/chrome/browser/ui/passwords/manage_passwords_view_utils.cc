@@ -14,7 +14,6 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -42,6 +41,10 @@
 #include "ui/gfx/image/image_skia_operations.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/browser.h"
+#endif
 
 namespace {
 
@@ -161,6 +164,13 @@ base::string16 GetDisplayUsername(const autofill::PasswordForm& form) {
   return form.username_value.empty()
              ? l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_EMPTY_LOGIN)
              : form.username_value;
+}
+
+base::string16 GetDisplayUsername(
+    const password_manager::CredentialPair& credential_pair) {
+  return credential_pair.username.empty()
+             ? l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_EMPTY_LOGIN)
+             : credential_pair.username;
 }
 
 base::string16 GetDisplayFederation(const autofill::PasswordForm& form) {

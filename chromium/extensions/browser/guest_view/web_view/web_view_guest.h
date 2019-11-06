@@ -171,6 +171,9 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   // Used to expose the view to extensions, only popups now.
   std::unique_ptr<::vivaldi::VivaldiExtensionHost> extension_host_;
 
+  // Vivaldi added for devtools web contents ownership
+  void SetWebContentsIsOwnedByThis(bool is_owned);
+
  private:
   friend class WebViewPermissionHelper;
 
@@ -223,7 +226,7 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
 
   // WebContentsDelegate implementation.
   bool DidAddMessageToConsole(content::WebContents* source,
-                              int32_t level,
+                              blink::mojom::ConsoleMessageLevel log_level,
                               const base::string16& message,
                               int32_t line_no,
                               const base::string16& source_id) final;
@@ -251,10 +254,10 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
       const base::Callback<void(bool)>& callback) final;
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
-                                  blink::MediaStreamType type) final;
+                                  blink::mojom::MediaStreamType type) final;
   void CanDownload(const GURL& url,
                    const std::string& request_method,
-                   const base::Callback<void(bool)>& callback) override;
+                   base::OnceCallback<void(bool)> callback) override;
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) final;
   void AddNewContents(content::WebContents* source,
@@ -278,7 +281,7 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
       const blink::WebFullscreenOptions& options) final;
   void ExitFullscreenModeForTab(content::WebContents* web_contents) final;
   bool IsFullscreenForTabOrPending(
-      const content::WebContents* web_contents) const final;
+      const content::WebContents* web_contents) final;
   void RequestToLockMouse(content::WebContents* web_contents,
                           bool user_gesture,
                           bool last_unlocked_by_target) override;
@@ -300,6 +303,7 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   void FrameNameChanged(content::RenderFrameHost* render_frame_host,
                         const std::string& name) final;
   void OnAudioStateChanged(bool audible) final;
+  void OnVisibilityChanged(content::Visibility visibility) override;
 
   // Informs the embedder of a frame name change.
   void ReportFrameNameChange(const std::string& name);
@@ -429,7 +433,7 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
 
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.
-  base::WeakPtrFactory<WebViewGuest> weak_ptr_factory_;
+  base::WeakPtrFactory<WebViewGuest> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WebViewGuest);
 };

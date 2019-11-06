@@ -43,17 +43,6 @@ bool IsIPhoneX();
 // in tab switcher when the last incognito tab is closed.
 bool IsClosingLastIncognitoTabEnabled();
 
-// Returns whether the UI Refresh Location Bar will be used.
-// TODO (crbug.com/884723): Remove all use of this flag.
-bool IsRefreshLocationBarEnabled();
-
-// Returns whether the first phase of the UI refresh will be displayed.
-// TODO (crbug.com/884725): Remove all use of this flag.
-bool IsUIRefreshPhase1Enabled();
-
-// Returns the height of the status bar, accounting for orientation.
-CGFloat StatusBarHeight();
-
 // Returns the approximate corner radius of the current device.
 CGFloat DeviceCornerRadius();
 

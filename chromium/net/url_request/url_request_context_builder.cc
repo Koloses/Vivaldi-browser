@@ -25,6 +25,7 @@
 #include "net/cert/multi_log_ct_verifier.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/dns/host_resolver.h"
+#include "net/dns/host_resolver_manager.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
@@ -52,13 +53,14 @@
 #endif
 
 #if !BUILDFLAG(DISABLE_FTP_SUPPORT)
+#include "net/ftp/ftp_auth_cache.h"                // nogncheck
 #include "net/ftp/ftp_network_layer.h"             // nogncheck
 #include "net/url_request/ftp_protocol_handler.h"  // nogncheck
 #endif
 
 #if BUILDFLAG(ENABLE_REPORTING)
-#include "net/network_error_logging/network_error_logging_delegate.h"
 #include "net/network_error_logging/network_error_logging_service.h"
+#include "net/network_error_logging/persistent_reporting_and_nel_store.h"
 #include "net/reporting/reporting_policy.h"
 #include "net/reporting/reporting_service.h"
 #endif  // BUILDFLAG(ENABLE_REPORTING)
@@ -146,7 +148,8 @@ class BasicNetworkDelegate : public NetworkDelegateImpl {
 // it's not safe to subclass this.
 class ContainerURLRequestContext final : public URLRequestContext {
  public:
-  ContainerURLRequestContext() : storage_(this) {}
+  explicit ContainerURLRequestContext(bool allow_copy)
+      : URLRequestContext(allow_copy), storage_(this) {}
 
   ~ContainerURLRequestContext() override {
 #if BUILDFLAG(ENABLE_REPORTING)
@@ -213,6 +216,8 @@ void URLRequestContextBuilder::SetHttpNetworkSessionComponents(
   session_context->proxy_resolution_service =
       request_context->proxy_resolution_service();
   session_context->proxy_delegate = request_context->proxy_delegate();
+  session_context->http_user_agent_settings =
+      request_context->http_user_agent_settings();
   session_context->ssl_config_service = request_context->ssl_config_service();
   session_context->http_auth_handler_factory =
       request_context->http_auth_handler_factory();
@@ -323,14 +328,28 @@ void URLRequestContextBuilder::SetProtocolHandler(
 
 void URLRequestContextBuilder::set_host_resolver(
     std::unique_ptr<HostResolver> host_resolver) {
-  DCHECK(!shared_host_resolver_);
+  DCHECK(!host_resolver_manager_);
+  DCHECK(host_mapping_rules_.empty());
+  DCHECK(!host_resolver_factory_);
   host_resolver_ = std::move(host_resolver);
 }
 
-void URLRequestContextBuilder::set_shared_host_resolver(
-    HostResolver* shared_host_resolver) {
+void URLRequestContextBuilder::set_host_mapping_rules(
+    std::string host_mapping_rules) {
   DCHECK(!host_resolver_);
-  shared_host_resolver_ = shared_host_resolver;
+  host_mapping_rules_ = std::move(host_mapping_rules);
+}
+
+void URLRequestContextBuilder::set_host_resolver_manager(
+    HostResolverManager* manager) {
+  DCHECK(!host_resolver_);
+  host_resolver_manager_ = manager;
+}
+
+void URLRequestContextBuilder::set_host_resolver_factory(
+    HostResolver::Factory* factory) {
+  DCHECK(!host_resolver_);
+  host_resolver_factory_ = factory;
 }
 
 void URLRequestContextBuilder::SetCreateLayeredNetworkDelegateCallback(
@@ -341,14 +360,7 @@ void URLRequestContextBuilder::SetCreateLayeredNetworkDelegateCallback(
 
 void URLRequestContextBuilder::set_proxy_delegate(
     std::unique_ptr<ProxyDelegate> proxy_delegate) {
-  DCHECK(!shared_proxy_delegate_);
   proxy_delegate_ = std::move(proxy_delegate);
-}
-
-void URLRequestContextBuilder::set_shared_proxy_delegate(
-    ProxyDelegate* shared_proxy_delegate) {
-  DCHECK(!proxy_delegate_);
-  shared_proxy_delegate_ = shared_proxy_delegate;
 }
 
 void URLRequestContextBuilder::SetHttpAuthHandlerFactory(
@@ -377,7 +389,7 @@ void URLRequestContextBuilder::SetCreateHttpTransactionFactoryCallback(
 
 std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
   std::unique_ptr<ContainerURLRequestContext> context(
-      new ContainerURLRequestContext());
+      new ContainerURLRequestContext(allow_copy_));
   URLRequestContextStorage* storage = context->storage();
 
   if (!name_.empty())
@@ -410,14 +422,32 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
   }
 
   if (host_resolver_) {
-    DCHECK(!shared_host_resolver_);
-    storage->set_host_resolver(std::move(host_resolver_));
-  } else if (shared_host_resolver_) {
-    context->set_host_resolver(shared_host_resolver_);
+    DCHECK(host_mapping_rules_.empty());
+    DCHECK(!host_resolver_manager_);
+    DCHECK(!host_resolver_factory_);
+  } else if (host_resolver_manager_) {
+    if (host_resolver_factory_) {
+      host_resolver_ = host_resolver_factory_->CreateResolver(
+          host_resolver_manager_, host_mapping_rules_,
+          true /* enable_caching */);
+    } else {
+      host_resolver_ = HostResolver::CreateResolver(host_resolver_manager_,
+                                                    host_mapping_rules_,
+                                                    true /* enable_caching */);
+    }
   } else {
-    storage->set_host_resolver(
-        HostResolver::CreateDefaultResolver(context->net_log()));
+    if (host_resolver_factory_) {
+      host_resolver_ = host_resolver_factory_->CreateStandaloneResolver(
+          context->net_log(), HostResolver::ManagerOptions(),
+          host_mapping_rules_, true /* enable_caching */);
+    } else {
+      host_resolver_ = HostResolver::CreateStandaloneResolver(
+          context->net_log(), HostResolver::ManagerOptions(),
+          host_mapping_rules_, true /* enable_caching */);
+    }
   }
+  host_resolver_->SetRequestContext(context.get());
+  storage->set_host_resolver(std::move(host_resolver_));
 
   if (ssl_config_service_) {
     storage->set_ssl_config_service(std::move(ssl_config_service_));
@@ -441,8 +471,7 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
     storage->set_cookie_store(std::move(cookie_store_));
   } else {
     std::unique_ptr<CookieStore> cookie_store(
-        new CookieMonster(nullptr /* store */, nullptr /* channel_id_service */,
-                          context->net_log()));
+        new CookieMonster(nullptr /* store */, context->net_log()));
     storage->set_cookie_store(std::move(cookie_store));
   }
 
@@ -475,7 +504,9 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
   } else if (shared_cert_verifier_) {
     context->set_cert_verifier(shared_cert_verifier_);
   } else {
-    storage->set_cert_verifier(CertVerifier::CreateDefault());
+    // TODO(mattm): Should URLRequestContextBuilder create a CertNetFetcherImpl?
+    storage->set_cert_verifier(
+        CertVerifier::CreateDefault(/*cert_net_fetcher=*/nullptr));
   }
 
   if (ct_verifier_) {
@@ -513,8 +544,6 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
         context->net_log());
     proxy_resolution_service_->set_quick_check_enabled(
         pac_quick_check_enabled_);
-    proxy_resolution_service_->set_sanitize_url_policy(
-        pac_sanitize_url_policy_);
   }
   ProxyResolutionService* proxy_resolution_service =
       proxy_resolution_service_.get();
@@ -524,15 +553,18 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
   // Note: ReportingService::Create and NetworkErrorLoggingService::Create can
   // both return nullptr if the corresponding base::Feature is disabled.
 
+  // TODO(chlily): Use a real one to enable persistent storage. (This is just a
+  // placeholder for now.)
+  PersistentReportingAndNelStore* store = nullptr;
+
   if (reporting_policy_) {
     storage->set_reporting_service(
-        ReportingService::Create(*reporting_policy_, context.get()));
+        ReportingService::Create(*reporting_policy_, context.get(), store));
   }
 
   if (network_error_logging_enabled_) {
     storage->set_network_error_logging_service(
-        NetworkErrorLoggingService::Create(
-            NetworkErrorLoggingDelegate::Create()));
+        NetworkErrorLoggingService::Create(store));
   }
 
   // If both Reporting and Network Error Logging are actually enabled, then
@@ -546,14 +578,9 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
 #endif  // BUILDFLAG(ENABLE_REPORTING)
 
   if (proxy_delegate_) {
-    DCHECK(!shared_proxy_delegate_);
     proxy_resolution_service->AssertNoProxyDelegate();
     proxy_resolution_service->SetProxyDelegate(proxy_delegate_.get());
     storage->set_proxy_delegate(std::move(proxy_delegate_));
-  } else if (shared_proxy_delegate_) {
-    proxy_resolution_service->AssertNoProxyDelegate();
-    proxy_resolution_service->SetProxyDelegate(shared_proxy_delegate_);
-    context->set_proxy_delegate(shared_proxy_delegate_);
   }
 
   HttpNetworkSession::Context network_session_context;
@@ -635,8 +662,10 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
 
 #if !BUILDFLAG(DISABLE_FTP_SUPPORT)
   if (ftp_enabled_) {
+    storage->set_ftp_auth_cache(std::make_unique<FtpAuthCache>());
     job_factory->SetProtocolHandler(
-        url::kFtpScheme, FtpProtocolHandler::Create(context->host_resolver()));
+        url::kFtpScheme, FtpProtocolHandler::Create(context->host_resolver(),
+                                                    context->ftp_auth_cache()));
   }
 #endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
 

@@ -5,9 +5,13 @@
 #include "ash/system/status_area_widget.h"
 
 #include "ash/focus_cycler.h"
+#include "ash/keyboard/ui/keyboard_ui_controller.h"
+#include "ash/keyboard/ui/keyboard_util.h"
+#include "ash/keyboard/ui/test/keyboard_test_util.h"
 #include "ash/public/cpp/ash_switches.h"
+#include "ash/public/cpp/keyboard/keyboard_switches.h"
 #include "ash/public/cpp/system_tray_focus_observer.h"
-#include "ash/session/session_controller.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/shell.h"
 #include "ash/system/ime_menu/ime_menu_tray.h"
@@ -21,15 +25,11 @@
 #include "ash/test/ash_test_base.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/shill/shill_clients.h"
 #include "chromeos/network/network_handler.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/session_manager/session_manager_types.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/keyboard/keyboard_controller.h"
-#include "ui/keyboard/keyboard_util.h"
-#include "ui/keyboard/public/keyboard_switches.h"
-#include "ui/keyboard/test/keyboard_test_util.h"
 
 using session_manager::SessionState;
 
@@ -59,11 +59,11 @@ TEST_F(StatusAreaWidgetTest, Basics) {
   EXPECT_TRUE(status->palette_tray());
 
   // Default trays are visible.
-  EXPECT_FALSE(status->overview_button_tray()->visible());
-  EXPECT_TRUE(status->unified_system_tray()->visible());
-  EXPECT_FALSE(status->logout_button_tray_for_testing()->visible());
-  EXPECT_FALSE(status->ime_menu_tray()->visible());
-  EXPECT_FALSE(status->virtual_keyboard_tray_for_testing()->visible());
+  EXPECT_FALSE(status->overview_button_tray()->GetVisible());
+  EXPECT_TRUE(status->unified_system_tray()->GetVisible());
+  EXPECT_FALSE(status->logout_button_tray_for_testing()->GetVisible());
+  EXPECT_FALSE(status->ime_menu_tray()->GetVisible());
+  EXPECT_FALSE(status->virtual_keyboard_tray_for_testing()->GetVisible());
 }
 
 class SystemTrayFocusTestObserver : public SystemTrayFocusObserver {
@@ -129,7 +129,7 @@ class StatusAreaWidgetFocusTest : public AshTestBase {
 // TODO(crbug.com/934939): Failing on trybot.
 TEST_F(StatusAreaWidgetFocusTest, DISABLED_FocusOutObserverUnified) {
   // Set session state to LOCKED.
-  SessionController* session = Shell::Get()->session_controller();
+  SessionControllerImpl* session = Shell::Get()->session_controller();
   ASSERT_TRUE(session->IsActiveUserSessionStarted());
   TestSessionControllerClient* client = GetSessionControllerClient();
   client->SetSessionState(SessionState::LOCKED);
@@ -144,16 +144,16 @@ TEST_F(StatusAreaWidgetFocusTest, DISABLED_FocusOutObserverUnified) {
   ASSERT_TRUE(status->virtual_keyboard_tray_for_testing());
 
   // Default trays are visible.
-  ASSERT_FALSE(status->overview_button_tray()->visible());
-  ASSERT_TRUE(status->unified_system_tray()->visible());
-  ASSERT_FALSE(status->logout_button_tray_for_testing()->visible());
-  ASSERT_FALSE(status->ime_menu_tray()->visible());
-  ASSERT_FALSE(status->virtual_keyboard_tray_for_testing()->visible());
+  ASSERT_FALSE(status->overview_button_tray()->GetVisible());
+  ASSERT_TRUE(status->unified_system_tray()->GetVisible());
+  ASSERT_FALSE(status->logout_button_tray_for_testing()->GetVisible());
+  ASSERT_FALSE(status->ime_menu_tray()->GetVisible());
+  ASSERT_FALSE(status->virtual_keyboard_tray_for_testing()->GetVisible());
 
   // In Unified, we don't have notification tray, so ImeMenuTray is used for
   // tab testing.
   status->ime_menu_tray()->OnIMEMenuActivationChanged(true);
-  ASSERT_TRUE(status->ime_menu_tray()->visible());
+  ASSERT_TRUE(status->ime_menu_tray()->GetVisible());
 
   // Set focus to status area widget. The first focused view will be the IME
   // tray.
@@ -217,7 +217,7 @@ class UnifiedStatusAreaWidgetTest : public AshTestBase {
 
   // AshTestBase:
   void SetUp() override {
-    chromeos::DBusThreadManager::Initialize();
+    chromeos::shill_clients::InitializeFakes();
     // Initializing NetworkHandler before ash is more like production.
     chromeos::NetworkHandler::Initialize();
     AshTestBase::SetUp();
@@ -232,7 +232,7 @@ class UnifiedStatusAreaWidgetTest : public AshTestBase {
     chromeos::NetworkHandler::Get()->ShutdownPrefServices();
     AshTestBase::TearDown();
     chromeos::NetworkHandler::Shutdown();
-    chromeos::DBusThreadManager::Shutdown();
+    chromeos::shill_clients::Shutdown();
   }
 
  private:
@@ -259,13 +259,12 @@ class StatusAreaWidgetVirtualKeyboardTest : public AshTestBase {
     // These tests only apply to the floating virtual keyboard, as it is the
     // only case where both the virtual keyboard and the shelf are visible.
     const gfx::Rect keyboard_bounds(0, 0, 1, 1);
-    keyboard_controller()->SetContainerType(
-        keyboard::mojom::ContainerType::kFloating, keyboard_bounds,
-        base::DoNothing());
+    keyboard_ui_controller()->SetContainerType(
+        keyboard::ContainerType::kFloating, keyboard_bounds, base::DoNothing());
   }
 
-  keyboard::KeyboardController* keyboard_controller() {
-    return keyboard::KeyboardController::Get();
+  keyboard::KeyboardUIController* keyboard_ui_controller() {
+    return keyboard::KeyboardUIController::Get();
   }
 };
 
@@ -277,7 +276,7 @@ TEST_F(StatusAreaWidgetVirtualKeyboardTest,
   status->virtual_keyboard_tray_for_testing()->SetVisible(true);
   status->ime_menu_tray()->SetVisible(true);
 
-  keyboard_controller()->ShowKeyboard(false /* locked */);
+  keyboard_ui_controller()->ShowKeyboard(false /* locked */);
   ASSERT_TRUE(keyboard::WaitUntilShown());
 
   // The keyboard should hide when clicked.
@@ -298,7 +297,7 @@ TEST_F(StatusAreaWidgetVirtualKeyboardTest,
   status->virtual_keyboard_tray_for_testing()->SetVisible(true);
   status->ime_menu_tray()->SetVisible(true);
 
-  keyboard_controller()->ShowKeyboard(false /* locked */);
+  keyboard_ui_controller()->ShowKeyboard(false /* locked */);
   ASSERT_TRUE(keyboard::WaitUntilShown());
 
   // The keyboard should hide when tapped.
@@ -310,8 +309,8 @@ TEST_F(StatusAreaWidgetVirtualKeyboardTest,
 }
 
 TEST_F(StatusAreaWidgetVirtualKeyboardTest, ClickingHidesVirtualKeyboard) {
-  keyboard_controller()->ShowKeyboard(false /* locked */);
-  ASSERT_TRUE(keyboard_controller()->IsKeyboardVisible());
+  keyboard_ui_controller()->ShowKeyboard(false /* locked */);
+  ASSERT_TRUE(keyboard_ui_controller()->IsKeyboardVisible());
 
   ui::test::EventGenerator* generator = GetEventGenerator();
   generator->set_current_screen_location(
@@ -325,7 +324,7 @@ TEST_F(StatusAreaWidgetVirtualKeyboardTest, ClickingHidesVirtualKeyboard) {
 }
 
 TEST_F(StatusAreaWidgetVirtualKeyboardTest, TappingHidesVirtualKeyboard) {
-  keyboard_controller()->ShowKeyboard(false /* locked */);
+  keyboard_ui_controller()->ShowKeyboard(false /* locked */);
   ASSERT_TRUE(keyboard::WaitUntilShown());
 
   ui::test::EventGenerator* generator = GetEventGenerator();
@@ -340,7 +339,7 @@ TEST_F(StatusAreaWidgetVirtualKeyboardTest, TappingHidesVirtualKeyboard) {
 }
 
 TEST_F(StatusAreaWidgetVirtualKeyboardTest, DoesNotHideLockedVirtualKeyboard) {
-  keyboard_controller()->ShowKeyboard(true /* locked */);
+  keyboard_ui_controller()->ShowKeyboard(true /* locked */);
   ASSERT_TRUE(keyboard::WaitUntilShown());
 
   ui::test::EventGenerator* generator = GetEventGenerator();

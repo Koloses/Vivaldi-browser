@@ -4,8 +4,8 @@
 
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth.h"
 
-#include <memory>
 #include <utility>
+
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
@@ -28,6 +28,7 @@
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth_service_data_map.h"
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth_uuid.h"
 #include "third_party/blink/renderer/modules/bluetooth/request_device_options.h"
+#include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
@@ -166,7 +167,8 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* script_state,
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_MACOSX) && \
     !defined(OS_WIN)
   context->AddConsoleMessage(ConsoleMessage::Create(
-      kJSMessageSource, mojom::ConsoleMessageLevel::kInfo,
+      mojom::ConsoleMessageSource::kJavaScript,
+      mojom::ConsoleMessageLevel::kInfo,
       "Web Bluetooth is experimental on this platform. See "
       "https://github.com/WebBluetoothCG/web-bluetooth/blob/gh-pages/"
       "implementation-status.md"));
@@ -187,7 +189,7 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* script_state,
   if (!LocalFrame::HasTransientUserActivation(frame)) {
     return ScriptPromise::RejectWithDOMException(
         script_state,
-        DOMException::Create(
+        MakeGarbageCollected<DOMException>(
             DOMExceptionCode::kSecurityError,
             "Must be handling a user gesture to show a permission request."));
   }
@@ -210,7 +212,7 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* script_state,
   Platform::Current()->RecordRapporURL("Bluetooth.APIUsage.Origin", doc.Url());
 
   // Subsequent steps are handled in the browser process.
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
   service_->RequestDevice(
@@ -271,8 +273,8 @@ void Bluetooth::RequestScanningCallback(
     return;
   }
 
-  auto* scan =
-      BluetoothLEScan::Create(id, this, std::move(result->get_options()));
+  auto* scan = MakeGarbageCollected<BluetoothLEScan>(
+      id, this, std::move(result->get_options()));
   resolver->Resolve(scan);
 }
 
@@ -286,7 +288,8 @@ ScriptPromise Bluetooth::requestLEScan(ScriptState* script_state,
   // Remind developers when they are using Web Bluetooth on unsupported
   // platforms.
   context->AddConsoleMessage(ConsoleMessage::Create(
-      kJSMessageSource, mojom::ConsoleMessageLevel::kInfo,
+      mojom::ConsoleMessageSource::kJavaScript,
+      mojom::ConsoleMessageLevel::kInfo,
       "Web Bluetooth Scanning is experimental on this platform. See "
       "https://github.com/WebBluetoothCG/web-bluetooth/blob/gh-pages/"
       "implementation-status.md"));
@@ -306,7 +309,7 @@ ScriptPromise Bluetooth::requestLEScan(ScriptState* script_state,
   if (!LocalFrame::HasTransientUserActivation(frame)) {
     return ScriptPromise::RejectWithDOMException(
         script_state,
-        DOMException::Create(
+        MakeGarbageCollected<DOMException>(
             DOMExceptionCode::kSecurityError,
             "Must be handling a user gesture to show a permission request."));
   }
@@ -327,7 +330,7 @@ ScriptPromise Bluetooth::requestLEScan(ScriptState* script_state,
   Platform::Current()->RecordRapporURL("Bluetooth.APIUsage.Origin", doc.Url());
 
   // Subsequent steps are handled in the browser process.
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
 
   mojom::blink::WebBluetoothScanClientAssociatedPtrInfo client;
@@ -375,7 +378,7 @@ void Bluetooth::ScanEvent(mojom::blink::WebBluetoothScanResultPtr result) {
   if (result->appearance_is_set)
     appearance = result->appearance;
 
-  auto* event = BluetoothAdvertisingEvent::Create(
+  auto* event = MakeGarbageCollected<BluetoothAdvertisingEvent>(
       event_type_names::kAdvertisementreceived, bluetooth_device, result->name,
       uuids, appearance, tx_power, rssi, manufacturer_data, service_data);
   DispatchEvent(*event);

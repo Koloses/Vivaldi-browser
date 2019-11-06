@@ -10,8 +10,12 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/string16.h"
+#include "base/strings/stringprintf.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "components/search/search.h"
 #include "components/variations/entropy_provider.h"
 #include "components/variations/variations_associated_data.h"
@@ -175,46 +179,6 @@ TEST_F(OmniboxFieldTrialTest, GetDisabledProviderTypes) {
   }
 }
 
-// Test if InZeroSuggestFieldTrial*() properly parses various field trial
-// group names.
-TEST_F(OmniboxFieldTrialTest, ZeroSuggestFieldTrial) {
-  {
-    SCOPED_TRACE("Bundled field trial parameters.");
-    ResetFieldTrialList();
-    std::map<std::string, std::string> params;
-    ASSERT_TRUE(variations::AssociateVariationParams(
-        OmniboxFieldTrial::kBundledExperimentFieldTrialName, "A", params));
-    base::FieldTrialList::CreateFieldTrial(
-        OmniboxFieldTrial::kBundledExperimentFieldTrialName, "A");
-#if defined(OS_ANDROID) || defined(OS_IOS)
-    EXPECT_TRUE(OmniboxFieldTrial::InZeroSuggestMostVisitedFieldTrial());
-#else
-    EXPECT_FALSE(OmniboxFieldTrial::InZeroSuggestMostVisitedFieldTrial());
-#endif
-
-    ResetFieldTrialList();
-    params[std::string(OmniboxFieldTrial::kZeroSuggestVariantRule)] =
-        "MostVisited";
-    ASSERT_TRUE(variations::AssociateVariationParams(
-        OmniboxFieldTrial::kBundledExperimentFieldTrialName, "A", params));
-    base::FieldTrialList::CreateFieldTrial(
-        OmniboxFieldTrial::kBundledExperimentFieldTrialName, "A");
-    EXPECT_TRUE(OmniboxFieldTrial::InZeroSuggestMostVisitedFieldTrial());
-
-    ResetFieldTrialList();
-    params.erase(std::string(OmniboxFieldTrial::kZeroSuggestVariantRule));
-    base::FieldTrialList::CreateFieldTrial(
-        OmniboxFieldTrial::kBundledExperimentFieldTrialName, "A");
-    ASSERT_TRUE(variations::AssociateVariationParams(
-        OmniboxFieldTrial::kBundledExperimentFieldTrialName, "A", params));
-#if defined(OS_ANDROID) || defined(OS_IOS)
-    EXPECT_TRUE(OmniboxFieldTrial::InZeroSuggestMostVisitedFieldTrial());
-#else
-    EXPECT_FALSE(OmniboxFieldTrial::InZeroSuggestMostVisitedFieldTrial());
-#endif
-  }
-}
-
 TEST_F(OmniboxFieldTrialTest, GetDemotionsByTypeWithFallback) {
   {
     std::map<std::string, std::string> params;
@@ -242,6 +206,43 @@ TEST_F(OmniboxFieldTrialTest, GetDemotionsByTypeWithFallback) {
       OmniboxEventProto::BLANK, &demotions_by_type);
   ASSERT_EQ(1u, demotions_by_type.size());
   VerifyDemotion(demotions_by_type, AutocompleteMatchType::HISTORY_URL, 0.25);
+}
+
+TEST_F(OmniboxFieldTrialTest, GetProviderMaxMatches) {
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndEnableFeatureWithParameters(
+        omnibox::kUIExperimentMaxAutocompleteMatches,
+        {{OmniboxFieldTrial::kUIMaxAutocompleteMatchesByProviderParam,
+          "1:50,2:0"}});
+    ASSERT_EQ(50ul, OmniboxFieldTrial::GetProviderMaxMatches(
+                        AutocompleteProvider::Type::TYPE_BOOKMARK));
+    ASSERT_EQ(0ul, OmniboxFieldTrial::GetProviderMaxMatches(
+                       AutocompleteProvider::Type::TYPE_BUILTIN));
+    ASSERT_EQ(3ul, OmniboxFieldTrial::GetProviderMaxMatches(
+                       AutocompleteProvider::Type::TYPE_HISTORY_QUICK));
+  }
+  {
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndEnableFeatureWithParameters(
+        omnibox::kUIExperimentMaxAutocompleteMatches,
+        {{OmniboxFieldTrial::kUIMaxAutocompleteMatchesByProviderParam,
+          "1:60,*:61,2:62"}});
+    ASSERT_EQ(60ul, OmniboxFieldTrial::GetProviderMaxMatches(
+                        AutocompleteProvider::Type::TYPE_BOOKMARK));
+    ASSERT_EQ(62ul, OmniboxFieldTrial::GetProviderMaxMatches(
+                        AutocompleteProvider::Type::TYPE_BUILTIN));
+    ASSERT_EQ(61ul, OmniboxFieldTrial::GetProviderMaxMatches(
+                        AutocompleteProvider::Type::TYPE_HISTORY_QUICK));
+  }
+  {
+    ASSERT_EQ(3ul, OmniboxFieldTrial::GetProviderMaxMatches(
+                       AutocompleteProvider::Type::TYPE_BOOKMARK));
+    ASSERT_EQ(3ul, OmniboxFieldTrial::GetProviderMaxMatches(
+                       AutocompleteProvider::Type::TYPE_BUILTIN));
+    ASSERT_EQ(3ul, OmniboxFieldTrial::GetProviderMaxMatches(
+                       AutocompleteProvider::Type::TYPE_HISTORY_QUICK));
+  }
 }
 
 TEST_F(OmniboxFieldTrialTest, GetValueForRuleInContext) {

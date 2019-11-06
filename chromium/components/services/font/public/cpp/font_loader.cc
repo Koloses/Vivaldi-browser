@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/trace_event/trace_event.h"
 #include "components/services/font/public/cpp/font_service_thread.h"
-#include "components/services/font/public/interfaces/constants.mojom.h"
+#include "components/services/font/public/mojom/constants.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 
 namespace font_service {
@@ -60,6 +60,11 @@ SkStreamAsset* FontLoader::openStream(const FontIdentity& identity) {
             .first;
     return mapped_font_files_it->second->CreateMemoryStream();
   }
+}
+
+sk_sp<SkTypeface> FontLoader::makeTypeface(const FontIdentity& identity) {
+  TRACE_EVENT0("fonts", "FontServiceThread::makeTypeface");
+  return SkFontConfigInterface::makeTypeface(identity);
 }
 
 // Additional cross-thread accessible methods.

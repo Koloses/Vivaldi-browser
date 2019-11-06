@@ -105,7 +105,7 @@ void RealtimeAudioDestinationHandler::SetChannelCount(
     return;
   }
 
-  unsigned long old_channel_count = this->ChannelCount();
+  uint32_t old_channel_count = this->ChannelCount();
   AudioHandler::SetChannelCount(channel_count, exception_state);
 
   // Stop, re-create and start the destination to apply the new channel count.
@@ -165,7 +165,7 @@ void RealtimeAudioDestinationHandler::Render(
     AudioBus* destination_bus,
     uint32_t number_of_frames,
     const AudioIOPosition& output_position,
-    const AudioIOCallbackMetric& metric) {
+    const AudioCallbackMetric& metric) {
   TRACE_EVENT0("webaudio", "RealtimeAudioDestinationHandler::Render");
 
   // Denormals can seriously hurt performance of audio processing. This will

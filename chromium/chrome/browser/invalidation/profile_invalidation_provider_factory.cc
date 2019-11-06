@@ -23,15 +23,12 @@
 #include "components/invalidation/impl/invalidator_storage.h"
 #include "components/invalidation/impl/profile_identity_provider.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
-#include "components/invalidation/impl/ticl_invalidation_service.h"
-#include "components/invalidation/impl/ticl_profile_settings_provider.h"
-#include "components/invalidation/impl/ticl_settings_provider.h"
 #include "components/invalidation/public/invalidation_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_registry.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "services/data_decoder/public/cpp/safe_json_parser.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -46,6 +43,29 @@
 #endif
 
 namespace invalidation {
+namespace {
+
+std::unique_ptr<InvalidationService> CreateInvalidationServiceForSenderId(
+    Profile* profile,
+    IdentityProvider* identity_provider,
+    const std::string& sender_id) {
+  auto service = std::make_unique<FCMInvalidationService>(
+      identity_provider,
+      gcm::GCMProfileServiceFactory::GetForProfile(profile)->driver(),
+      instance_id::InstanceIDProfileServiceFactory::GetForProfile(profile)
+          ->driver(),
+      profile->GetPrefs(),
+      base::BindRepeating(&data_decoder::SafeJsonParser::Parse,
+                          content::GetSystemConnector()),
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetURLLoaderFactoryForBrowserProcess()
+          .get(),
+      sender_id);
+  service->Init();
+  return service;
+}
+
+}  // namespace
 
 // static
 ProfileInvalidationProvider* ProfileInvalidationProviderFactory::GetForProfile(
@@ -113,22 +133,14 @@ KeyedService* ProfileInvalidationProviderFactory::BuildServiceInstanceFor(
     identity_provider.reset(new ProfileIdentityProvider(
         IdentityManagerFactory::GetForProfile(profile)));
   }
-  std::unique_ptr<FCMInvalidationService> service =
-      std::make_unique<FCMInvalidationService>(
-          identity_provider.get(),
-          gcm::GCMProfileServiceFactory::GetForProfile(profile)->driver(),
-          instance_id::InstanceIDProfileServiceFactory::GetForProfile(profile)
-              ->driver(),
-          profile->GetPrefs(),
-          base::BindRepeating(data_decoder::SafeJsonParser::Parse,
-                              content::ServiceManagerConnection::GetForProcess()
-                                  ->GetConnector()),
-          content::BrowserContext::GetDefaultStoragePartition(profile)
-              ->GetURLLoaderFactoryForBrowserProcess()
-              .get());
-  service->Init();
+  auto service =
+      CreateInvalidationServiceForSenderId(profile, identity_provider.get(),
+                                           /* sender_id = */ "");
+  auto custom_sender_id_factory = base::BindRepeating(
+      &CreateInvalidationServiceForSenderId, profile, identity_provider.get());
   return new ProfileInvalidationProvider(std::move(service),
-                                         std::move(identity_provider));
+                                         std::move(identity_provider),
+                                         std::move(custom_sender_id_factory));
 }
 
 }  // namespace invalidation

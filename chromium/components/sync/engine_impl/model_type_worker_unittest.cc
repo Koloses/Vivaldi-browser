@@ -7,13 +7,13 @@
 #include <stdint.h>
 
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/threading/thread.h"
 #include "components/sync/base/cancelation_signal.h"
-#include "components/sync/base/fake_encryptor.h"
 #include "components/sync/base/hash_util.h"
 #include "components/sync/base/unique_position.h"
 #include "components/sync/engine/model_type_processor.h"
@@ -84,32 +84,32 @@ KeyParams GetNthKeyParams(int n) {
 // Modifies the input/output parameter |specifics| by encrypting it with
 // a Nigori intialized with the specified KeyParams.
 void EncryptUpdate(const KeyParams& params, EntitySpecifics* specifics) {
-  Nigori nigori;
-  nigori.InitByDerivation(params.derivation_params, params.password);
+  std::unique_ptr<Nigori> nigori =
+      Nigori::CreateByDerivation(params.derivation_params, params.password);
 
   EntitySpecifics original_specifics = *specifics;
   std::string plaintext;
   original_specifics.SerializeToString(&plaintext);
 
   std::string encrypted;
-  nigori.Encrypt(plaintext, &encrypted);
+  nigori->Encrypt(plaintext, &encrypted);
 
   specifics->Clear();
   AddDefaultFieldValue(PREFERENCES, specifics);
-  specifics->mutable_encrypted()->set_key_name(GetNigoriName(nigori));
+  specifics->mutable_encrypted()->set_key_name(GetNigoriName(*nigori));
   specifics->mutable_encrypted()->set_blob(encrypted);
 }
 
 sync_pb::EntitySpecifics EncryptPasswordSpecifics(
     const KeyParams& key_params,
     const sync_pb::PasswordSpecificsData& unencrypted_password) {
-  Nigori nigori;
-  nigori.InitByDerivation(key_params.derivation_params, key_params.password);
+  std::unique_ptr<Nigori> nigori = Nigori::CreateByDerivation(
+      key_params.derivation_params, key_params.password);
   std::string encrypted_blob;
-  nigori.Encrypt(unencrypted_password.SerializeAsString(), &encrypted_blob);
+  nigori->Encrypt(unencrypted_password.SerializeAsString(), &encrypted_blob);
   sync_pb::EntitySpecifics encrypted_specifics;
   encrypted_specifics.mutable_password()->mutable_encrypted()->set_key_name(
-      GetNigoriName(nigori));
+      GetNigoriName(*nigori));
   encrypted_specifics.mutable_password()->mutable_encrypted()->set_blob(
       encrypted_blob);
   return encrypted_specifics;
@@ -246,7 +246,7 @@ class ModelTypeWorkerTest : public ::testing::Test {
 
   void InitializeCryptographer() {
     if (!cryptographer_) {
-      cryptographer_ = std::make_unique<Cryptographer>(&fake_encryptor_);
+      cryptographer_ = std::make_unique<Cryptographer>();
     }
   }
 
@@ -259,29 +259,29 @@ class ModelTypeWorkerTest : public ::testing::Test {
     sync_pb::NigoriKeyBag bag;
 
     for (int i = 0; i <= foreign_encryption_key_index_; ++i) {
-      Nigori nigori;
       KeyParams params = GetNthKeyParams(i);
-      nigori.InitByDerivation(params.derivation_params, params.password);
+      std::unique_ptr<Nigori> nigori =
+          Nigori::CreateByDerivation(params.derivation_params, params.password);
 
       sync_pb::NigoriKey* key = bag.add_key();
 
-      key->set_name(GetNigoriName(nigori));
-      nigori.ExportKeys(key->mutable_user_key(), key->mutable_encryption_key(),
-                        key->mutable_mac_key());
+      key->set_name(GetNigoriName(*nigori));
+      nigori->ExportKeys(key->mutable_user_key(), key->mutable_encryption_key(),
+                         key->mutable_mac_key());
     }
 
     // Re-create the last nigori from that loop.
-    Nigori last_nigori;
     KeyParams params = GetNthKeyParams(foreign_encryption_key_index_);
-    last_nigori.InitByDerivation(params.derivation_params, params.password);
+    std::unique_ptr<Nigori> last_nigori =
+        Nigori::CreateByDerivation(params.derivation_params, params.password);
 
     // Serialize and encrypt the bag with the last nigori.
     std::string serialized_bag;
     bag.SerializeToString(&serialized_bag);
 
     sync_pb::EncryptedData encrypted;
-    encrypted.set_key_name(GetNigoriName(last_nigori));
-    last_nigori.Encrypt(serialized_bag, encrypted.mutable_blob());
+    encrypted.set_key_name(GetNigoriName(*last_nigori));
+    last_nigori->Encrypt(serialized_bag, encrypted.mutable_blob());
 
     // Update the cryptographer with new pending keys.
     cryptographer_->SetPendingKeys(encrypted);
@@ -498,9 +498,6 @@ class ModelTypeWorkerTest : public ::testing::Test {
 
  private:
   const ModelType model_type_;
-
-  // An encryptor for our cryptographer.
-  FakeEncryptor fake_encryptor_;
 
   // The cryptographer itself. Null if we're not encrypting the type.
   std::unique_ptr<Cryptographer> cryptographer_;
@@ -723,19 +720,20 @@ TEST_F(ModelTypeWorkerTest, ReceiveUpdates) {
   TriggerUpdateFromServer(10, kTag1, kValue1);
 
   ASSERT_EQ(1U, processor()->GetNumUpdateResponses());
-  UpdateResponseDataList updates_list = processor()->GetNthUpdateResponse(0);
+  std::vector<const UpdateResponseData*> updates_list =
+      processor()->GetNthUpdateResponse(0);
   EXPECT_EQ(1U, updates_list.size());
 
   ASSERT_TRUE(processor()->HasUpdateResponse(kHash1));
-  UpdateResponseData update = processor()->GetUpdateResponse(kHash1);
-  const EntityData& entity = update.entity.value();
+  const UpdateResponseData& update = processor()->GetUpdateResponse(kHash1);
+  const EntityData& entity = *update.entity;
 
   EXPECT_FALSE(entity.id.empty());
   EXPECT_EQ(tag_hash, entity.client_tag_hash);
   EXPECT_LT(0, update.response_version);
   EXPECT_FALSE(entity.creation_time.is_null());
   EXPECT_FALSE(entity.modification_time.is_null());
-  EXPECT_FALSE(entity.non_unique_name.empty());
+  EXPECT_FALSE(entity.name.empty());
   EXPECT_FALSE(entity.is_deleted());
   EXPECT_EQ(kTag1, entity.specifics.preference().name());
   EXPECT_EQ(kValue1, entity.specifics.preference().value());
@@ -773,11 +771,15 @@ TEST_F(ModelTypeWorkerTest, ReceiveUpdates_NoDuplicateHash) {
 
   // Make sure all the updates arrived, in order.
   ASSERT_EQ(1u, processor()->GetNumUpdateResponses());
-  UpdateResponseDataList result = processor()->GetNthUpdateResponse(0);
+  std::vector<const UpdateResponseData*> result =
+      processor()->GetNthUpdateResponse(0);
   ASSERT_EQ(3u, result.size());
-  EXPECT_EQ(GenerateTagHash(kTag1), result[0].entity->client_tag_hash);
-  EXPECT_EQ(GenerateTagHash(kTag2), result[1].entity->client_tag_hash);
-  EXPECT_EQ(GenerateTagHash(kTag3), result[2].entity->client_tag_hash);
+  ASSERT_TRUE(result[0]);
+  EXPECT_EQ(GenerateTagHash(kTag1), result[0]->entity->client_tag_hash);
+  ASSERT_TRUE(result[1]);
+  EXPECT_EQ(GenerateTagHash(kTag2), result[1]->entity->client_tag_hash);
+  ASSERT_TRUE(result[2]);
+  EXPECT_EQ(GenerateTagHash(kTag3), result[2]->entity->client_tag_hash);
 }
 
 TEST_F(ModelTypeWorkerTest, ReceiveUpdates_DuplicateHashWithinPartialUpdate) {
@@ -808,10 +810,12 @@ TEST_F(ModelTypeWorkerTest, ReceiveUpdates_DuplicateHashWithinPartialUpdate) {
 
   // Make sure the duplicate entry got de-duped, and the last one won.
   ASSERT_EQ(1u, processor()->GetNumUpdateResponses());
-  UpdateResponseDataList result = processor()->GetNthUpdateResponse(0);
+  std::vector<const UpdateResponseData*> result =
+      processor()->GetNthUpdateResponse(0);
   ASSERT_EQ(1u, result.size());
-  EXPECT_EQ(GenerateTagHash(kTag1), result[0].entity->client_tag_hash);
-  EXPECT_EQ(kValue2, result[0].entity->specifics.preference().value());
+  ASSERT_TRUE(result[0]);
+  EXPECT_EQ(GenerateTagHash(kTag1), result[0]->entity->client_tag_hash);
+  EXPECT_EQ(kValue2, result[0]->entity->specifics.preference().value());
 }
 
 TEST_F(ModelTypeWorkerTest, ReceiveUpdates_DuplicateHashAcrossPartialUpdates) {
@@ -844,10 +848,12 @@ TEST_F(ModelTypeWorkerTest, ReceiveUpdates_DuplicateHashAcrossPartialUpdates) {
 
   // Make sure the duplicate entry got de-duped, and the last one won.
   ASSERT_EQ(1u, processor()->GetNumUpdateResponses());
-  UpdateResponseDataList result = processor()->GetNthUpdateResponse(0);
+  std::vector<const UpdateResponseData*> result =
+      processor()->GetNthUpdateResponse(0);
   ASSERT_EQ(1u, result.size());
-  EXPECT_EQ(GenerateTagHash(kTag1), result[0].entity->client_tag_hash);
-  EXPECT_EQ(kValue2, result[0].entity->specifics.preference().value());
+  ASSERT_TRUE(result[0]);
+  EXPECT_EQ(GenerateTagHash(kTag1), result[0]->entity->client_tag_hash);
+  EXPECT_EQ(kValue2, result[0]->entity->specifics.preference().value());
 }
 
 TEST_F(ModelTypeWorkerTest,
@@ -892,10 +898,13 @@ TEST_F(ModelTypeWorkerTest,
 
   // Make sure the empty client tag hashes did *not* get de-duped.
   ASSERT_EQ(1u, processor()->GetNumUpdateResponses());
-  UpdateResponseDataList result = processor()->GetNthUpdateResponse(0);
+  std::vector<const UpdateResponseData*> result =
+      processor()->GetNthUpdateResponse(0);
   ASSERT_EQ(2u, result.size());
-  EXPECT_EQ(entity1.id_string(), result[0].entity->id);
-  EXPECT_EQ(entity2.id_string(), result[1].entity->id);
+  ASSERT_TRUE(result[0]);
+  EXPECT_EQ(entity1.id_string(), result[0]->entity->id);
+  ASSERT_TRUE(result[1]);
+  EXPECT_EQ(entity2.id_string(), result[1]->entity->id);
 }
 
 TEST_F(ModelTypeWorkerTest, ReceiveUpdates_MultipleDuplicateHashes) {
@@ -932,14 +941,18 @@ TEST_F(ModelTypeWorkerTest, ReceiveUpdates_MultipleDuplicateHashes) {
 
   // Make sure the duplicate entries got de-duped, and the last one won.
   ASSERT_EQ(1u, processor()->GetNumUpdateResponses());
-  UpdateResponseDataList result = processor()->GetNthUpdateResponse(0);
+  std::vector<const UpdateResponseData*> result =
+      processor()->GetNthUpdateResponse(0);
   ASSERT_EQ(3u, result.size());
-  EXPECT_EQ(GenerateTagHash(kTag1), result[0].entity->client_tag_hash);
-  EXPECT_EQ(GenerateTagHash(kTag2), result[1].entity->client_tag_hash);
-  EXPECT_EQ(GenerateTagHash(kTag3), result[2].entity->client_tag_hash);
-  EXPECT_EQ(kValue1, result[0].entity->specifics.preference().value());
-  EXPECT_EQ(kValue2, result[1].entity->specifics.preference().value());
-  EXPECT_EQ(kValue3, result[2].entity->specifics.preference().value());
+  ASSERT_TRUE(result[0]);
+  ASSERT_TRUE(result[1]);
+  ASSERT_TRUE(result[2]);
+  EXPECT_EQ(GenerateTagHash(kTag1), result[0]->entity->client_tag_hash);
+  EXPECT_EQ(GenerateTagHash(kTag2), result[1]->entity->client_tag_hash);
+  EXPECT_EQ(GenerateTagHash(kTag3), result[2]->entity->client_tag_hash);
+  EXPECT_EQ(kValue1, result[0]->entity->specifics.preference().value());
+  EXPECT_EQ(kValue2, result[1]->entity->specifics.preference().value());
+  EXPECT_EQ(kValue3, result[2]->entity->specifics.preference().value());
 }
 
 TEST_F(ModelTypeWorkerTest,
@@ -987,9 +1000,11 @@ TEST_F(ModelTypeWorkerTest,
 
   // Make sure the first update has been discarded.
   ASSERT_EQ(1u, processor()->GetNumUpdateResponses());
-  UpdateResponseDataList result = processor()->GetNthUpdateResponse(0);
+  std::vector<const UpdateResponseData*> result =
+      processor()->GetNthUpdateResponse(0);
   ASSERT_EQ(1u, result.size());
-  EXPECT_EQ(entity2.id_string(), result[0].entity->id);
+  ASSERT_TRUE(result[0]);
+  EXPECT_EQ(entity2.id_string(), result[0]->entity->id);
 }
 
 // Test that an update download coming in multiple parts gets accumulated into
@@ -1006,17 +1021,21 @@ TEST_F(ModelTypeWorkerTest, ReceiveMultiPartUpdates) {
 
   // Processor received exactly one update with entities in the right order.
   ASSERT_EQ(1U, processor()->GetNumUpdateResponses());
-  UpdateResponseDataList updates = processor()->GetNthUpdateResponse(0);
+  std::vector<const UpdateResponseData*> updates =
+      processor()->GetNthUpdateResponse(0);
   ASSERT_EQ(2U, updates.size());
-  EXPECT_EQ(GenerateTagHash(kTag1), updates[0].entity->client_tag_hash);
-  EXPECT_EQ(GenerateTagHash(kTag2), updates[1].entity->client_tag_hash);
+  ASSERT_TRUE(updates[0]);
+  EXPECT_EQ(GenerateTagHash(kTag1), updates[0]->entity->client_tag_hash);
+  ASSERT_TRUE(updates[1]);
+  EXPECT_EQ(GenerateTagHash(kTag2), updates[1]->entity->client_tag_hash);
 
   // A subsequent update doesn't pass the same entities again.
   TriggerUpdateFromServer(10, kTag3, kValue3);
   ASSERT_EQ(2U, processor()->GetNumUpdateResponses());
   updates = processor()->GetNthUpdateResponse(1);
   ASSERT_EQ(1U, updates.size());
-  EXPECT_EQ(GenerateTagHash(kTag3), updates[0].entity->client_tag_hash);
+  ASSERT_TRUE(updates[0]);
+  EXPECT_EQ(GenerateTagHash(kTag3), updates[0]->entity->client_tag_hash);
 }
 
 // Test that updates with no entities behave correctly.
@@ -1110,7 +1129,8 @@ TEST_F(ModelTypeWorkerTest, EncryptionBlocksUpdates) {
   // Update local cryptographer, verify everything is pushed to processor.
   DecryptPendingKey();
   ASSERT_EQ(1U, processor()->GetNumUpdateResponses());
-  UpdateResponseDataList updates_list = processor()->GetNthUpdateResponse(0);
+  std::vector<const UpdateResponseData*> updates_list =
+      processor()->GetNthUpdateResponse(0);
   EXPECT_EQ(
       server()->GetProgress().SerializeAsString(),
       processor()->GetNthUpdateState(0).progress_marker().SerializeAsString());
@@ -1161,7 +1181,7 @@ TEST_F(ModelTypeWorkerTest, ReceiveDecryptableEntities) {
 
   // Test some basic properties regarding the update.
   ASSERT_TRUE(processor()->HasUpdateResponse(kHash1));
-  UpdateResponseData update1 = processor()->GetUpdateResponse(kHash1);
+  const UpdateResponseData& update1 = processor()->GetUpdateResponse(kHash1);
   EXPECT_EQ(kTag1, update1.entity->specifics.preference().name());
   EXPECT_EQ(kValue1, update1.entity->specifics.preference().value());
   EXPECT_TRUE(update1.encryption_key_name.empty());
@@ -1174,7 +1194,7 @@ TEST_F(ModelTypeWorkerTest, ReceiveDecryptableEntities) {
 
   // Test its basic features and the value of encryption_key_name.
   ASSERT_TRUE(processor()->HasUpdateResponse(kHash2));
-  UpdateResponseData update2 = processor()->GetUpdateResponse(kHash2);
+  const UpdateResponseData& update2 = processor()->GetUpdateResponse(kHash2);
   EXPECT_EQ(kTag2, update2.entity->specifics.preference().name());
   EXPECT_EQ(kValue2, update2.entity->specifics.preference().value());
   EXPECT_FALSE(update2.encryption_key_name.empty());
@@ -1301,7 +1321,7 @@ TEST_F(ModelTypeWorkerTest, ReceiveUndecryptableEntries) {
   DecryptPendingKey();
   EXPECT_EQ(1U, processor()->GetNumUpdateResponses());
   ASSERT_TRUE(processor()->HasUpdateResponse(kHash1));
-  UpdateResponseData update = processor()->GetUpdateResponse(kHash1);
+  const UpdateResponseData& update = processor()->GetUpdateResponse(kHash1);
   EXPECT_EQ(kTag1, update.entity->specifics.preference().name());
   EXPECT_EQ(kValue1, update.entity->specifics.preference().value());
   EXPECT_EQ(GetLocalCryptographerKeyName(), update.encryption_key_name);
@@ -1434,14 +1454,13 @@ TEST_F(ModelTypeWorkerTest, PopulateUpdateResponseData) {
   entity.mutable_specifics()->CopyFrom(GenerateSpecifics(kTag1, kValue1));
   UpdateResponseData response_data;
 
-  FakeEncryptor encryptor;
-  Cryptographer cryptographer(&encryptor);
+  Cryptographer cryptographer;
   base::HistogramTester histogram_tester;
 
   EXPECT_EQ(ModelTypeWorker::SUCCESS,
-            ModelTypeWorker::PopulateUpdateResponseData(&cryptographer, entity,
-                                                        &response_data));
-  const EntityData& data = response_data.entity.value();
+            ModelTypeWorker::PopulateUpdateResponseData(
+                &cryptographer, PREFERENCES, entity, &response_data));
+  const EntityData& data = *response_data.entity;
   EXPECT_FALSE(data.id.empty());
   EXPECT_FALSE(data.parent_id.empty());
   EXPECT_FALSE(data.is_folder);
@@ -1460,6 +1479,35 @@ TEST_F(ModelTypeWorkerTest, PopulateUpdateResponseData) {
       /*count=*/1);
 }
 
+TEST_F(ModelTypeWorkerTest, PopulateUpdateResponseDataForBookmarkTombstone) {
+  sync_pb::SyncEntity entity;
+  // Production server sets the name to be "tombstone" for all tombstones.
+  entity.set_name("tombstone");
+  entity.set_id_string("SomeID");
+  entity.set_parent_id_string("ParentID");
+  entity.set_folder(false);
+  entity.mutable_unique_position()->CopyFrom(
+      UniquePosition::InitialPosition(UniquePosition::RandomSuffix())
+          .ToProto());
+  entity.set_version(1);
+  entity.set_server_defined_unique_tag("SERVER_TAG");
+  // Mark this as a tombstone.
+  entity.set_deleted(true);
+  // Add default value field for a Bookmark.
+  entity.mutable_specifics()->mutable_bookmark();
+
+  Cryptographer cryptographer;
+
+  UpdateResponseData response_data;
+  EXPECT_EQ(ModelTypeWorker::SUCCESS,
+            ModelTypeWorker::PopulateUpdateResponseData(
+                &cryptographer, BOOKMARKS, entity, &response_data));
+
+  const EntityData& data = *response_data.entity;
+  // A tombstone should remain a tombstone after populating the response data.
+  EXPECT_TRUE(data.is_deleted());
+}
+
 TEST_F(ModelTypeWorkerTest, PopulateUpdateResponseDataWithPositionInParent) {
   InitializeCommitOnly();
   sync_pb::SyncEntity entity;
@@ -1470,14 +1518,13 @@ TEST_F(ModelTypeWorkerTest, PopulateUpdateResponseDataWithPositionInParent) {
   entity.mutable_specifics()->CopyFrom(GenerateSpecifics(kTag1, kValue1));
 
   UpdateResponseData response_data;
-  FakeEncryptor encryptor;
-  Cryptographer cryptographer(&encryptor);
+  Cryptographer cryptographer;
   base::HistogramTester histogram_tester;
 
   EXPECT_EQ(ModelTypeWorker::SUCCESS,
-            ModelTypeWorker::PopulateUpdateResponseData(&cryptographer, entity,
-                                                        &response_data));
-  const EntityData& data = response_data.entity.value();
+            ModelTypeWorker::PopulateUpdateResponseData(
+                &cryptographer, PREFERENCES, entity, &response_data));
+  const EntityData& data = *response_data.entity;
   EXPECT_TRUE(
       syncer::UniquePosition::FromProto(data.unique_position).IsValid());
 
@@ -1498,14 +1545,13 @@ TEST_F(ModelTypeWorkerTest, PopulateUpdateResponseDataWithInsertAfterItemId) {
   entity.mutable_specifics()->CopyFrom(GenerateSpecifics(kTag1, kValue1));
 
   UpdateResponseData response_data;
-  FakeEncryptor encryptor;
-  Cryptographer cryptographer(&encryptor);
+  Cryptographer cryptographer;
   base::HistogramTester histogram_tester;
 
   EXPECT_EQ(ModelTypeWorker::SUCCESS,
-            ModelTypeWorker::PopulateUpdateResponseData(&cryptographer, entity,
-                                                        &response_data));
-  const EntityData& data = response_data.entity.value();
+            ModelTypeWorker::PopulateUpdateResponseData(
+                &cryptographer, PREFERENCES, entity, &response_data));
+  const EntityData& data = *response_data.entity;
   EXPECT_TRUE(
       syncer::UniquePosition::FromProto(data.unique_position).IsValid());
   histogram_tester.ExpectUniqueSample(
@@ -1528,14 +1574,13 @@ TEST_F(ModelTypeWorkerTest,
   entity.mutable_specifics()->CopyFrom(specifics);
 
   UpdateResponseData response_data;
-  FakeEncryptor encryptor;
-  Cryptographer cryptographer(&encryptor);
+  Cryptographer cryptographer;
   base::HistogramTester histogram_tester;
 
   EXPECT_EQ(ModelTypeWorker::SUCCESS,
-            ModelTypeWorker::PopulateUpdateResponseData(&cryptographer, entity,
-                                                        &response_data));
-  const EntityData& data = response_data.entity.value();
+            ModelTypeWorker::PopulateUpdateResponseData(
+                &cryptographer, PREFERENCES, entity, &response_data));
+  const EntityData& data = *response_data.entity;
   EXPECT_FALSE(
       syncer::UniquePosition::FromProto(data.unique_position).IsValid());
   histogram_tester.ExpectUniqueSample("Sync.Entities.PositioningScheme",
@@ -1553,14 +1598,13 @@ TEST_F(ModelTypeWorkerTest,
   entity.mutable_specifics()->CopyFrom(GenerateSpecifics(kTag1, kValue1));
 
   UpdateResponseData response_data;
-  FakeEncryptor encryptor;
-  Cryptographer cryptographer(&encryptor);
+  Cryptographer cryptographer;
   base::HistogramTester histogram_tester;
 
   EXPECT_EQ(ModelTypeWorker::SUCCESS,
-            ModelTypeWorker::PopulateUpdateResponseData(&cryptographer, entity,
-                                                        &response_data));
-  const EntityData& data = response_data.entity.value();
+            ModelTypeWorker::PopulateUpdateResponseData(
+                &cryptographer, PREFERENCES, entity, &response_data));
+  const EntityData& data = *response_data.entity;
   EXPECT_FALSE(
       syncer::UniquePosition::FromProto(data.unique_position).IsValid());
   histogram_tester.ExpectTotalCount("Sync.Entities.PositioningScheme",
@@ -1650,15 +1694,15 @@ TEST_F(GetLocalChangesRequestTest, SuccessfulRequest) {
   start_event_.Wait();
   {
     CommitRequestDataList response;
-    response.emplace_back();
-    response.back().specifics_hash = kHash1;
+    response.push_back(std::make_unique<CommitRequestData>());
+    response.back()->specifics_hash = kHash1;
     request->SetResponse(std::move(response));
   }
   done_event_.Wait();
   EXPECT_FALSE(request->WasCancelled());
   CommitRequestDataList response = request->ExtractResponse();
   EXPECT_EQ(1U, response.size());
-  EXPECT_EQ(kHash1, response[0].specifics_hash);
+  EXPECT_EQ(kHash1, response[0]->specifics_hash);
 }
 
 // Analogous test fixture but uses PASSWORDS instead of PREFERENCES, in order
@@ -1731,7 +1775,7 @@ TEST_F(ModelTypeWorkerPasswordsTest, ReceiveDecryptablePasswordEntities) {
 
   // Test its basic features and the value of encryption_key_name.
   ASSERT_TRUE(processor()->HasUpdateResponse(kHash1));
-  UpdateResponseData update = processor()->GetUpdateResponse(kHash1);
+  const UpdateResponseData& update = processor()->GetUpdateResponse(kHash1);
   EXPECT_FALSE(update.entity->specifics.password().has_encrypted());
   EXPECT_FALSE(update.entity->specifics.has_encrypted());
   ASSERT_TRUE(
@@ -1747,7 +1791,7 @@ TEST_F(ModelTypeWorkerPasswordsTest,
        ReceiveDecryptablePasswordShouldWaitTillKeyArrives) {
   NormalInitialize();
 
-  // Receive an encrypted password, encrypted with the second ecnryption key.
+  // Receive an encrypted password, encrypted with the second encryption key.
   sync_pb::PasswordSpecificsData unencrypted_password;
   unencrypted_password.set_password_value(kPassword);
   sync_pb::EntitySpecifics encrypted_specifics =
@@ -1807,7 +1851,7 @@ TEST_F(ModelTypeWorkerPasswordsTest, ReceiveUndecryptablePasswordEntries) {
   DecryptPendingKey();
   EXPECT_EQ(1U, processor()->GetNumUpdateResponses());
   ASSERT_TRUE(processor()->HasUpdateResponse(kHash1));
-  UpdateResponseData update = processor()->GetUpdateResponse(kHash1);
+  const UpdateResponseData& update = processor()->GetUpdateResponse(kHash1);
   // Password should now be decrypted and sent to the processor.
   EXPECT_TRUE(update.entity->specifics.has_password());
   EXPECT_FALSE(update.entity->specifics.password().has_encrypted());

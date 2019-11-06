@@ -90,7 +90,10 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
 
   // Returns true if TraceLog is enabled on recording mode.
   // Note: Returns false even if FILTERING_MODE is enabled.
-  bool IsEnabled() { return enabled_modes_ & RECORDING_MODE; }
+  bool IsEnabled() {
+    AutoLock lock(lock_);
+    return enabled_modes_ & RECORDING_MODE;
+  }
 
   // Returns a bitmap of enabled modes from TraceLog::Mode.
   uint8_t enabled_modes() { return enabled_modes_; }
@@ -185,8 +188,9 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
   // callback will be called directly with (empty_string, false) to indicate
   // the end of this unsuccessful flush. Flush does the serialization
   // on the same thread if the caller doesn't set use_worker_thread explicitly.
-  typedef base::Callback<void(const scoped_refptr<base::RefCountedString>&,
-                              bool has_more_events)> OutputCallback;
+  using OutputCallback =
+      base::RepeatingCallback<void(const scoped_refptr<base::RefCountedString>&,
+                                   bool has_more_events)>;
   void Flush(const OutputCallback& cb, bool use_worker_thread = false);
 
   // Cancels tracing and discards collected data.
@@ -196,9 +200,11 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
                                                  bool thread_will_flush,
                                                  TraceEventHandle* handle);
   using OnFlushCallback = void (*)();
-  using UpdateDurationCallback = void (*)(TraceEventHandle handle,
-                                          const TimeTicks& now,
-                                          const ThreadTicks& thread_now);
+  using UpdateDurationCallback =
+      void (*)(TraceEventHandle handle,
+               const TimeTicks& now,
+               const ThreadTicks& thread_now,
+               ThreadInstructionCount thread_instruction_now);
   // The callbacks will be called up until the point where the flush is
   // finished, i.e. must be callable until OutputCallback is called with
   // has_more_events==false.
@@ -287,7 +293,8 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
       const char* name,
       TraceEventHandle handle,
       const TimeTicks& now,
-      const ThreadTicks& thread_now);
+      const ThreadTicks& thread_now,
+      ThreadInstructionCount thread_instruction_now);
 
   void EndFilteredEvent(const unsigned char* category_group_enabled,
                         const char* name,

@@ -7,7 +7,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "content/public/common/url_constants.h"
-#include "net/base/completion_callback.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/url_util.h"
 #include "url/gurl.h"
@@ -184,8 +183,7 @@ GeneratedCodeCache::GeneratedCodeCache(const base::FilePath& path,
     : backend_state_(kInitializing),
       path_(path),
       max_size_bytes_(max_size_bytes),
-      cache_type_(cache_type),
-      weak_ptr_factory_(this) {
+      cache_type_(cache_type) {
   CreateBackend();
 }
 
@@ -210,7 +208,7 @@ void GeneratedCodeCache::GetBackend(GetBackendCallback callback) {
 void GeneratedCodeCache::WriteData(const GURL& url,
                                    const GURL& origin_lock,
                                    const base::Time& response_time,
-                                   const std::vector<uint8_t>& data) {
+                                   base::span<const uint8_t> data) {
   // Silently ignore the requests.
   if (backend_state_ == kFailed) {
     CollectStatistics(CacheEntryStatus::kError);
@@ -226,8 +224,7 @@ void GeneratedCodeCache::WriteData(const GURL& url,
       response_time.ToDeltaSinceWindowsEpoch().InMicroseconds();
   memcpy(buffer->data(), &serialized_time, kResponseTimeSizeInBytes);
   if (!data.empty())
-    memcpy(buffer->data() + kResponseTimeSizeInBytes, &data.front(),
-           data.size());
+    memcpy(buffer->data() + kResponseTimeSizeInBytes, data.data(), data.size());
 
   std::string key = GetCacheKey(url, origin_lock);
   // If there is an in progress operation corresponding to this key. Enqueue it
@@ -314,9 +311,11 @@ void GeneratedCodeCache::CreateBackend() {
   // If the initialization of the existing cache fails, this call would delete
   // all the contents and recreates a new one.
   int rv = disk_cache::CreateCacheBackend(
-      net::GENERATED_CODE_CACHE, net::CACHE_BACKEND_SIMPLE, path_,
-      max_size_bytes_, true, nullptr, &shared_backend_ptr->data,
-      std::move(create_backend_complete));
+      cache_type_ == GeneratedCodeCache::CodeCacheType::kJavaScript
+          ? net::GENERATED_BYTE_CODE_CACHE
+          : net::GENERATED_NATIVE_CODE_CACHE,
+      net::CACHE_BACKEND_SIMPLE, path_, max_size_bytes_, true, nullptr,
+      &shared_backend_ptr->data, std::move(create_backend_complete));
   if (rv != net::ERR_IO_PENDING) {
     DidCreateBackend(shared_backend_ptr, rv);
   }
@@ -338,7 +337,6 @@ void GeneratedCodeCache::DidCreateBackend(
 }
 
 void GeneratedCodeCache::IssuePendingOperations() {
-  DCHECK_EQ(backend_state_, kInitialized);
   // Issue all the pending operations that were received when creating
   // the backend.
   for (auto const& op : pending_ops_) {

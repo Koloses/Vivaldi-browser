@@ -37,6 +37,7 @@ enum class VideoPlayerState : size_t {
 };
 
 enum class VideoPlayerEvent : size_t {
+  kInitialized,
   kFrameDecoded,
   kFlushing,
   kFlushDone,
@@ -67,6 +68,8 @@ class VideoPlayer {
   // Wait until all frame processors have finished processing. Returns whether
   // processing was successful.
   bool WaitForFrameProcessors();
+  // Wait until the renderer has finished rendering all queued frames.
+  void WaitForRenderer();
 
   // Play the video asynchronously.
   void Play();

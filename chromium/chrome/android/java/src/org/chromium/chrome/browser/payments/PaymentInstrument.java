@@ -12,6 +12,7 @@ import org.chromium.chrome.browser.widget.prefeditor.EditableOption;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.payments.mojom.PaymentDetailsModifier;
 import org.chromium.payments.mojom.PaymentItem;
+import org.chromium.payments.mojom.PaymentMethodChangeResponse;
 import org.chromium.payments.mojom.PaymentMethodData;
 
 import java.util.List;
@@ -43,8 +44,10 @@ public abstract class PaymentInstrument extends EditableOption {
 
         /**
          * Called if unable to retrieve instrument details.
+         * @param errorMessage Developer-facing error message to be used when rejecting the promise
+         *                     returned from PaymentRequest.show().
          */
-        void onInstrumentDetailsError();
+        void onInstrumentDetailsError(String errorMessage);
     }
 
     /** The interface for the requester to abort payment. */
@@ -120,7 +123,7 @@ public abstract class PaymentInstrument extends EditableOption {
      *         supported card types and networks in the data should be verified for 'basic-card'
      *         payment method.
      */
-    public boolean isValidForPaymentMethodData(String method, PaymentMethodData data) {
+    public boolean isValidForPaymentMethodData(String method, @Nullable PaymentMethodData data) {
         return getInstrumentMethodNames().contains(method);
     }
 
@@ -174,11 +177,30 @@ public abstract class PaymentInstrument extends EditableOption {
             InstrumentDetailsCallback callback);
 
     /**
+     * Update the payment information in response to payment method change event.
+     *
+     * @param response The merchant's response to the payment method change event.
+     */
+    public void updateWith(PaymentMethodChangeResponse response) {}
+
+    /** Called when the merchant ignored the payment method change event. */
+    public void noUpdatedPaymentDetails() {}
+
+    /**
+     * @return True after changePaymentMethodFromInvokedApp(), before update updateWith() or
+     * noUpdatedPaymentDetails().
+     */
+    public boolean isChangingPaymentMethod() {
+        return false;
+    }
+
+    /**
      * Abort invocation of the payment app.
      *
+     * @param id       The unique identifier of the PaymentRequest.
      * @param callback The callback to return abort result.
      */
-    public void abortPaymentApp(AbortCallback callback) {
+    public void abortPaymentApp(String id, AbortCallback callback) {
         PostTask.postTask(UiThreadTaskTraits.DEFAULT, new Runnable() {
             @Override
             public void run() {

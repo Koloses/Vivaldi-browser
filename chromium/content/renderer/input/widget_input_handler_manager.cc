@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "content/common/input_messages.h"
 #include "content/renderer/compositor/layer_tree_view.h"
 #include "content/renderer/ime_event_guard.h"
@@ -23,8 +24,8 @@
 
 #if defined(OS_ANDROID)
 #include "content/public/common/content_client.h"
-#include "content/renderer/android/synchronous_compositor_proxy.h"
-#include "content/renderer/android/synchronous_compositor_registry.h"
+#include "content/renderer/input/synchronous_compositor_proxy.h"
+#include "content/renderer/input/synchronous_compositor_registry.h"
 #endif
 
 namespace content {
@@ -123,12 +124,15 @@ class SynchronousCompositorProxyRegistry
 scoped_refptr<WidgetInputHandlerManager> WidgetInputHandlerManager::Create(
     base::WeakPtr<RenderWidget> render_widget,
     scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
-    blink::scheduler::WebThreadScheduler* main_thread_scheduler) {
+    blink::scheduler::WebThreadScheduler* main_thread_scheduler,
+    bool uses_input_handler) {
   scoped_refptr<WidgetInputHandlerManager> manager =
       new WidgetInputHandlerManager(std::move(render_widget),
                                     std::move(compositor_task_runner),
                                     main_thread_scheduler);
-  manager->Init();
+  if (uses_input_handler)
+    manager->InitInputHandler();
+
   return manager;
 }
 
@@ -150,61 +154,55 @@ WidgetInputHandlerManager::WidgetInputHandlerManager(
 #endif
 }
 
-void WidgetInputHandlerManager::Init() {
-  if (compositor_task_runner_) {
-    bool sync_compositing = false;
+void WidgetInputHandlerManager::InitInputHandler() {
+  bool sync_compositing = false;
 #if defined(OS_ANDROID)
-    sync_compositing = GetContentClient()->UsingSynchronousCompositing();
+  sync_compositing = GetContentClient()->UsingSynchronousCompositing();
 #endif
-
-    compositor_task_runner_->PostTask(
-        FROM_HERE,
-        base::BindOnce(
-            &WidgetInputHandlerManager::InitOnCompositorThread, this,
-            render_widget_->layer_tree_view()->GetInputHandler(),
-            render_widget_->compositor_deps()->IsScrollAnimatorEnabled(),
-            sync_compositing));
-  }
+  uses_input_handler_ = true;
+  base::OnceClosure init_closure = base::BindOnce(
+      &WidgetInputHandlerManager::InitOnInputHandlingThread, this,
+      render_widget_->layer_tree_view()->GetInputHandler(),
+      render_widget_->compositor_deps()->IsScrollAnimatorEnabled(),
+      sync_compositing);
+  InputThreadTaskRunner()->PostTask(FROM_HERE, std::move(init_closure));
 }
 
 WidgetInputHandlerManager::~WidgetInputHandlerManager() = default;
 
 void WidgetInputHandlerManager::AddAssociatedInterface(
-    mojom::WidgetInputHandlerAssociatedRequest request,
-    mojom::WidgetInputHandlerHostPtr host) {
+    mojo::PendingAssociatedReceiver<mojom::WidgetInputHandler> receiver,
+    mojo::PendingRemote<mojom::WidgetInputHandlerHost> host) {
   if (compositor_task_runner_) {
-    associated_host_ =
-        mojo::ThreadSafeInterfacePtr<mojom::WidgetInputHandlerHost>::Create(
-            host.PassInterface(), compositor_task_runner_);
+    associated_host_ = mojo::SharedRemote<mojom::WidgetInputHandlerHost>(
+        std::move(host), compositor_task_runner_);
     // Mojo channel bound on compositor thread.
     compositor_task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&WidgetInputHandlerManager::BindAssociatedChannel, this,
-                       std::move(request)));
+                       std::move(receiver)));
   } else {
     associated_host_ =
-        mojo::ThreadSafeInterfacePtr<mojom::WidgetInputHandlerHost>::Create(
-            std::move(host));
+        mojo::SharedRemote<mojom::WidgetInputHandlerHost>(std::move(host));
     // Mojo channel bound on main thread.
-    BindAssociatedChannel(std::move(request));
+    BindAssociatedChannel(std::move(receiver));
   }
 }
 
 void WidgetInputHandlerManager::AddInterface(
-    mojom::WidgetInputHandlerRequest request,
-    mojom::WidgetInputHandlerHostPtr host) {
+    mojo::PendingReceiver<mojom::WidgetInputHandler> receiver,
+    mojo::PendingRemote<mojom::WidgetInputHandlerHost> host) {
   if (compositor_task_runner_) {
-    host_ = mojo::ThreadSafeInterfacePtr<mojom::WidgetInputHandlerHost>::Create(
-        host.PassInterface(), compositor_task_runner_);
+    host_ = mojo::SharedRemote<mojom::WidgetInputHandlerHost>(
+        std::move(host), compositor_task_runner_);
     // Mojo channel bound on compositor thread.
     compositor_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&WidgetInputHandlerManager::BindChannel, this,
-                                  std::move(request)));
+                                  std::move(receiver)));
   } else {
-    host_ = mojo::ThreadSafeInterfacePtr<mojom::WidgetInputHandlerHost>::Create(
-        std::move(host));
+    host_ = mojo::SharedRemote<mojom::WidgetInputHandlerHost>(std::move(host));
     // Mojo channel bound on main thread.
-    BindChannel(std::move(request));
+    BindChannel(std::move(receiver));
   }
 }
 
@@ -257,16 +255,8 @@ void WidgetInputHandlerManager::DidStartScrollingViewport() {
 void WidgetInputHandlerManager::GenerateScrollBeginAndSendToMainThread(
     const blink::WebGestureEvent& update_event) {
   DCHECK_EQ(update_event.GetType(), blink::WebInputEvent::kGestureScrollUpdate);
-  blink::WebGestureEvent scroll_begin(update_event);
-  scroll_begin.SetType(blink::WebInputEvent::kGestureScrollBegin);
-  scroll_begin.data.scroll_begin.inertial_phase =
-      update_event.data.scroll_update.inertial_phase;
-  scroll_begin.data.scroll_begin.delta_x_hint =
-      update_event.data.scroll_update.delta_x;
-  scroll_begin.data.scroll_begin.delta_y_hint =
-      update_event.data.scroll_update.delta_y;
-  scroll_begin.data.scroll_begin.delta_hint_units =
-      update_event.data.scroll_update.delta_units;
+  blink::WebGestureEvent scroll_begin =
+      ui::ScrollBeginFromScrollUpdate(update_event);
 
   DispatchNonBlockingEventToMainThread(
       ui::WebInputEventTraits::Clone(scroll_begin), ui::LatencyInfo());
@@ -297,16 +287,17 @@ void WidgetInputHandlerManager::ProcessTouchAction(
 mojom::WidgetInputHandlerHost*
 WidgetInputHandlerManager::GetWidgetInputHandlerHost() {
   if (associated_host_)
-    return associated_host_.get()->get();
+    return associated_host_.get();
   if (host_)
-    return host_.get()->get();
+    return host_.get();
   return nullptr;
 }
 
 void WidgetInputHandlerManager::AttachSynchronousCompositor(
-    mojom::SynchronousCompositorControlHostPtr control_host,
-    mojom::SynchronousCompositorHostAssociatedPtrInfo host,
-    mojom::SynchronousCompositorAssociatedRequest compositor_request) {
+    mojo::PendingRemote<mojom::SynchronousCompositorControlHost> control_host,
+    mojo::PendingAssociatedRemote<mojom::SynchronousCompositorHost> host,
+    mojo::PendingAssociatedReceiver<mojom::SynchronousCompositor>
+        compositor_request) {
 #if defined(OS_ANDROID)
   DCHECK(synchronous_compositor_registry_);
   synchronous_compositor_registry_->proxy()->BindChannel(
@@ -317,13 +308,11 @@ void WidgetInputHandlerManager::AttachSynchronousCompositor(
 void WidgetInputHandlerManager::ObserveGestureEventOnMainThread(
     const blink::WebGestureEvent& gesture_event,
     const cc::InputHandlerScrollResult& scroll_result) {
-  if (compositor_task_runner_) {
-    compositor_task_runner_->PostTask(
-        FROM_HERE,
-        base::BindOnce(
-            &WidgetInputHandlerManager::ObserveGestureEventOnCompositorThread,
-            this, gesture_event, scroll_result));
-  }
+  base::OnceClosure observe_gesture_event_closure = base::BindOnce(
+      &WidgetInputHandlerManager::ObserveGestureEventOnInputHandlingThread,
+      this, gesture_event, scroll_result);
+  InputThreadTaskRunner()->PostTask(FROM_HERE,
+                                    std::move(observe_gesture_event_closure));
 }
 
 void WidgetInputHandlerManager::DispatchEvent(
@@ -340,6 +329,14 @@ void WidgetInputHandlerManager::DispatchEvent(
     return;
   }
 
+  if (!(have_emitted_uma_ ||
+        event->web_event->GetType() == WebInputEvent::Type::kMouseMove ||
+        event->web_event->GetType() == WebInputEvent::Type::kPointerMove)) {
+    UMA_HISTOGRAM_ENUMERATION("PaintHolding.InputTiming",
+                              current_lifecycle_state_);
+    have_emitted_uma_ = true;
+  }
+
   // If TimeTicks is not consistent across processes we cannot use the event's
   // platform timestamp in this process. Instead use the time that the event is
   // received as the event's timestamp.
@@ -347,7 +344,7 @@ void WidgetInputHandlerManager::DispatchEvent(
     event->web_event->SetTimeStamp(base::TimeTicks::Now());
   }
 
-  if (compositor_task_runner_) {
+  if (uses_input_handler_) {
     // If the input_handler_proxy has disappeared ensure we just ack event.
     if (!input_handler_proxy_) {
       if (callback) {
@@ -357,7 +354,6 @@ void WidgetInputHandlerManager::DispatchEvent(
       }
       return;
     }
-    CHECK(!main_thread_task_runner_->BelongsToCurrentThread());
     input_handler_proxy_->HandleInputEventWithLatencyInfo(
         std::move(event->web_event), event->latency_info,
         base::BindOnce(
@@ -378,14 +374,10 @@ void WidgetInputHandlerManager::InvokeInputProcessedCallback() {
     return;
 
   // The handler's method needs to respond to the mojo message so it needs to
-  // run on the input handling thread. PostTask to the correct task runner.
-  // Even if we're already on the correct thread, we PostTask for symmetry.
-  base::SingleThreadTaskRunner* mojo_bound_task_runner =
-      compositor_task_runner_ ? compositor_task_runner_.get()
-                              : main_thread_task_runner_.get();
-
-  mojo_bound_task_runner->PostTask(FROM_HERE,
-                                   std::move(input_processed_callback_));
+  // run on the input handling thread.  Even if we're already on the correct
+  // thread, we PostTask for symmetry.
+  InputThreadTaskRunner()->PostTask(FROM_HERE,
+                                    std::move(input_processed_callback_));
 }
 
 void WidgetInputHandlerManager::InputWasProcessed(
@@ -403,17 +395,14 @@ static void WaitForInputProcessedFromMain(
   WidgetInputHandlerManager* manager =
       render_widget->widget_input_handler_manager();
 
-  // TODO(bokan): The synchronous compositor doesn't support the
-  // RequestPresentation API yet so just ACK the gesture immediately so it
-  // doesn't hang forever. https://crbug.com/938956.
-  bool sync_compositing = false;
-#if defined(OS_ANDROID)
-  sync_compositing = GetContentClient()->UsingSynchronousCompositing();
-#endif
+  // TODO(bokan): Temporary to unblock synthetic gesture events running under
+  // VR. https://crbug.com/940063
+  bool ack_immediately =
+      render_widget->delegate()->ShouldAckSyntheticInputImmediately();
 
   // If the RenderWidget is hidden, we won't produce compositor frames for it
   // so just ACK the input to prevent blocking the browser indefinitely.
-  if (render_widget->is_hidden() || sync_compositing) {
+  if (render_widget->is_hidden() || ack_immediately) {
     manager->InvokeInputProcessedCallback();
     return;
   }
@@ -446,12 +435,47 @@ void WidgetInputHandlerManager::WaitForInputProcessed(
       base::BindOnce(&WaitForInputProcessedFromMain, render_widget_));
 }
 
-void WidgetInputHandlerManager::InitOnCompositorThread(
+void WidgetInputHandlerManager::FallbackCursorModeLockCursor(bool left,
+                                                             bool right,
+                                                             bool up,
+                                                             bool down) {
+#if defined(OS_ANDROID)
+  if (mojom::WidgetInputHandlerHost* host = GetWidgetInputHandlerHost())
+    host->FallbackCursorModeLockCursor(left, right, up, down);
+#endif
+}
+
+void WidgetInputHandlerManager::FallbackCursorModeSetCursorVisibility(
+    bool visible) {
+#if defined(OS_ANDROID)
+  if (mojom::WidgetInputHandlerHost* host = GetWidgetInputHandlerHost())
+    host->FallbackCursorModeSetCursorVisibility(visible);
+#endif
+}
+
+void WidgetInputHandlerManager::MarkBeginMainFrame() {
+  if (current_lifecycle_state_ == InitialInputTiming::kBeforeLifecycle)
+    current_lifecycle_state_ = InitialInputTiming::kBeforeCommit;
+}
+
+void WidgetInputHandlerManager::MarkCompositorCommit() {
+  if (current_lifecycle_state_ == InitialInputTiming::kBeforeCommit)
+    current_lifecycle_state_ = InitialInputTiming::kAfterCommit;
+}
+
+void WidgetInputHandlerManager::InitOnInputHandlingThread(
     const base::WeakPtr<cc::InputHandler>& input_handler,
     bool smooth_scroll_enabled,
     bool sync_compositing) {
-  input_handler_proxy_ =
-      std::make_unique<ui::InputHandlerProxy>(input_handler.get(), this);
+  DCHECK(InputThreadTaskRunner()->BelongsToCurrentThread());
+
+  // If there's no compositor thread (i.e. we're in a LayoutTest), force input
+  // to go through the main thread.
+  bool force_input_handling_on_main = !compositor_task_runner_;
+
+  input_handler_proxy_ = std::make_unique<ui::InputHandlerProxy>(
+      input_handler.get(), this, force_input_handling_on_main);
+
   input_handler_proxy_->set_smooth_scroll_enabled(smooth_scroll_enabled);
 
 #if defined(OS_ANDROID)
@@ -463,8 +487,8 @@ void WidgetInputHandlerManager::InitOnCompositorThread(
 }
 
 void WidgetInputHandlerManager::BindAssociatedChannel(
-    mojom::WidgetInputHandlerAssociatedRequest request) {
-  if (!request.is_pending())
+    mojo::PendingAssociatedReceiver<mojom::WidgetInputHandler> request) {
+  if (!request.is_valid())
     return;
   // Don't pass the |input_event_queue_| on if we don't have a
   // |compositor_task_runner_| as events might get out of order.
@@ -475,8 +499,8 @@ void WidgetInputHandlerManager::BindAssociatedChannel(
 }
 
 void WidgetInputHandlerManager::BindChannel(
-    mojom::WidgetInputHandlerRequest request) {
-  if (!request.is_pending())
+    mojo::PendingReceiver<mojom::WidgetInputHandler> request) {
+  if (!request.is_valid())
     return;
   // Don't pass the |input_event_queue_| on if we don't have a
   // |compositor_task_runner_| as events might get out of order.
@@ -587,7 +611,7 @@ void WidgetInputHandlerManager::HandledInputEvent(
   }
 }
 
-void WidgetInputHandlerManager::ObserveGestureEventOnCompositorThread(
+void WidgetInputHandlerManager::ObserveGestureEventOnInputHandlingThread(
     const blink::WebGestureEvent& gesture_event,
     const cc::InputHandlerScrollResult& scroll_result) {
   if (!input_handler_proxy_)
@@ -595,6 +619,13 @@ void WidgetInputHandlerManager::ObserveGestureEventOnCompositorThread(
   DCHECK(input_handler_proxy_->scroll_elasticity_controller());
   input_handler_proxy_->scroll_elasticity_controller()
       ->ObserveGestureEventAndResult(gesture_event, scroll_result);
+}
+
+const scoped_refptr<base::SingleThreadTaskRunner>&
+WidgetInputHandlerManager::InputThreadTaskRunner() const {
+  if (compositor_task_runner_)
+    return compositor_task_runner_;
+  return main_thread_task_runner_;
 }
 
 #if defined(OS_ANDROID)

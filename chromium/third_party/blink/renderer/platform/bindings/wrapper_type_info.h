@@ -33,7 +33,7 @@
 
 #include "gin/public/wrapper_info.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "v8/include/v8.h"
 
@@ -154,7 +154,6 @@ struct WrapperTypeInfo {
   // Garbage collection support for when the type depends the WrapperTypeInfo
   // object.
   PLATFORM_EXPORT void Trace(Visitor*, void*) const;
-  PLATFORM_EXPORT void TraceWithWrappers(Visitor*, void*) const;
 
   // This field must be the first member of the struct WrapperTypeInfo.
   // See also static_assert() in .cpp file.

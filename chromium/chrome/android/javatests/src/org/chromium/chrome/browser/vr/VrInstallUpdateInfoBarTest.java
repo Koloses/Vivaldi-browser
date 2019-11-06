@@ -51,8 +51,9 @@ import java.util.concurrent.Callable;
  */
 @RunWith(ParameterizedRunner.class)
 @UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
-@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT) // WebVR is only supported on K+
+@CommandLineFlags.
+Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE, "enable-features=LogJsConsoleMessages"})
+@MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP) // WebVR is only supported on L+
 @Restriction(RESTRICTION_TYPE_SVR)
 public class VrInstallUpdateInfoBarTest {
     @ClassParameter
@@ -126,8 +127,10 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
-    @XrActivityRestriction({XrActivityRestriction.SupportedActivity.ALL})
-    public void testInfoBarPresentWhenVrServicesOutdated() throws InterruptedException {
+    @XrActivityRestriction({XrActivityRestriction.SupportedActivity.CTA,
+            XrActivityRestriction.SupportedActivity.CCT})
+    public void
+    testInfoBarPresentWhenVrServicesOutdated() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_OUT_OF_DATE);
     }
 
@@ -136,8 +139,10 @@ public class VrInstallUpdateInfoBarTest {
      */
     @Test
     @MediumTest
-    @XrActivityRestriction({XrActivityRestriction.SupportedActivity.ALL})
-    public void testInfoBarPresentWhenVrServicesMissing() throws InterruptedException {
+    @XrActivityRestriction({XrActivityRestriction.SupportedActivity.CTA,
+            XrActivityRestriction.SupportedActivity.CCT})
+    public void
+    testInfoBarPresentWhenVrServicesMissing() throws InterruptedException {
         infoBarTestHelper(VrCoreCompatibility.VR_NOT_AVAILABLE);
     }
 

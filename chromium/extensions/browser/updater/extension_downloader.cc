@@ -24,6 +24,9 @@
 #include "base/time/time.h"
 #include "base/version.h"
 #include "components/crx_file/crx_verifier.h"
+#include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
 #include "components/update_client/update_query_params.h"
 #include "content/public/browser/file_url_loader.h"
 #include "content/public/browser/notification_details.h"
@@ -44,10 +47,6 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_request_status.h"
-#include "services/identity/public/cpp/access_token_info.h"
-#include "services/identity/public/cpp/identity_manager.h"
-#include "services/identity/public/cpp/primary_account_access_token_fetcher.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
@@ -229,8 +228,7 @@ ExtensionDownloader::ExtensionDownloader(
                               base::Unretained(this))),
       extension_cache_(nullptr),
       identity_manager_(nullptr),
-      crx_format_requirement_(crx_format_requirement),
-      weak_ptr_factory_(this) {
+      crx_format_requirement_(crx_format_requirement) {
   DCHECK(delegate_);
   DCHECK(url_loader_factory_);
 }
@@ -274,7 +272,19 @@ bool ExtensionDownloader::AddPendingExtension(
   // Use a zero version to ensure that a pending extension will always
   // be updated, and thus installed (assuming all extensions have
   // non-zero versions).
-  base::Version version("0.0.0.0");
+  return AddPendingExtensionWithVersion(
+      id, update_url, install_location, is_corrupt_reinstall, request_id,
+      fetch_priority, base::Version("0.0.0.0"));
+}
+
+bool ExtensionDownloader::AddPendingExtensionWithVersion(
+    const std::string& id,
+    const GURL& update_url,
+    Manifest::Location install_location,
+    bool is_corrupt_reinstall,
+    int request_id,
+    ManifestFetchData::FetchPriority fetch_priority,
+    base::Version version) {
   DCHECK(version.IsValid());
   ExtraParams extra;
   if (is_corrupt_reinstall)
@@ -310,7 +320,7 @@ void ExtensionDownloader::DoStartAllPending() {
 }
 
 void ExtensionDownloader::SetIdentityManager(
-    identity::IdentityManager* identity_manager) {
+    signin::IdentityManager* identity_manager) {
   identity_manager_ = identity_manager;
 }
 
@@ -764,7 +774,9 @@ ExtensionDownloader::GetUpdateAvailability(
     const std::string& update_version_str = update->version;
     if (VLOG_IS_ON(2)) {
       if (update_version_str.empty())
-        VLOG(2) << "Manifest indicates " << extension_id << " has no update";
+        VLOG(2) << "Manifest indicates " << extension_id
+                << " has no update (info: " << update->info.value_or("no info")
+                << ")";
       else
         VLOG(2) << "Manifest indicates " << extension_id
                 << " latest version is '" << update_version_str << "'";
@@ -884,6 +896,9 @@ void ExtensionDownloader::FetchUpdatedExtension(
                   << "' for extension " << fetch_data->id;
     delegate_->OnExtensionDownloadStageChanged(
         fetch_data->id, ExtensionDownloaderDelegate::FINISHED);
+    NotifyExtensionsDownloadFailed(
+        {fetch_data->id}, fetch_data->request_ids,
+        ExtensionDownloaderDelegate::CRX_FETCH_FAILED);
     return;
   }
 
@@ -990,11 +1005,11 @@ void ExtensionDownloader::CreateExtensionLoader() {
       // It is safe to use Unretained(this) here given that the callback
       // will not be invoked if this object is deleted.
       access_token_fetcher_ =
-          std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
+          std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
               kTokenServiceConsumerId, identity_manager_, webstore_scopes,
               base::BindOnce(&ExtensionDownloader::OnAccessTokenFetchComplete,
                              base::Unretained(this)),
-              identity::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
+              signin::PrimaryAccountAccessTokenFetcher::Mode::kImmediate);
       return;
     }
     extension_loader_resource_request_->headers.SetHeader(
@@ -1221,7 +1236,7 @@ bool ExtensionDownloader::IterateFetchCredentialsAfterFailure(
 
 void ExtensionDownloader::OnAccessTokenFetchComplete(
     GoogleServiceAuthError error,
-    identity::AccessTokenInfo token_info) {
+    signin::AccessTokenInfo token_info) {
   access_token_fetcher_.reset();
 
   if (error.state() != GoogleServiceAuthError::NONE) {

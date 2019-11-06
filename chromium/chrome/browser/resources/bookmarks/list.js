@@ -43,6 +43,9 @@ Polymer({
       type: String,
       observer: 'onDisplayedListSourceChange_',
     },
+
+    /** @private {Set<string>} */
+    selectedItems_: Object,
   },
 
   listeners: {
@@ -64,6 +67,7 @@ Polymer({
     this.watch('selectedFolder_', function(state) {
       return state.selectedFolder;
     });
+    this.watch('selectedItems_', ({selection: {items}}) => items);
     this.updateFromStore();
 
     this.$.list.addEventListener(
@@ -97,6 +101,20 @@ Polymer({
    */
   onDisplayedIdsChanged_: async function(newValue, oldValue) {
     const updatedList = newValue.map(id => ({id: id}));
+    let skipFocus = false;
+    let selectIndex = -1;
+    if (this.matches(':focus-within')) {
+      if (this.selectedItems_.size > 0) {
+        const selectedId = Array.from(this.selectedItems_)[0];
+        skipFocus = newValue.some(id => id == selectedId);
+        selectIndex = this.displayedList_.findIndex(({id}) => selectedId == id);
+      }
+      if (selectIndex == -1 && updatedList.length > 0) {
+        selectIndex = 0;
+      } else {
+        selectIndex = Math.min(selectIndex, updatedList.length - 1);
+      }
+    }
     this.updateList('displayedList_', item => item.id, updatedList);
     // Trigger a layout of the iron list. Otherwise some elements may render
     // as blank entries. See https://crbug.com/848683
@@ -104,6 +122,17 @@ Polymer({
     const label = await cr.sendWithPromise(
         'getPluralString', 'listChanged', this.displayedList_.length);
     this.fire('iron-announce', {text: label});
+
+    if (!skipFocus && selectIndex > -1) {
+      setTimeout(() => {
+        this.$.list.focusItem(selectIndex);
+        // Focus menu button so 'Undo' is only one tab stop away on delete.
+        const item = getDeepActiveElement();
+        if (item) {
+          item.focusMenuButton();
+        }
+      });
+    }
   },
 
   /** @private */

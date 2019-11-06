@@ -17,6 +17,28 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
+namespace {
+
+// The 'revert' and 'default' keywords are reserved.
+//
+// https://drafts.csswg.org/css-cascade/#default
+// https://drafts.csswg.org/css-values-4/#identifier-value
+//
+// TODO(crbug.com/579788): Implement 'revert'.
+// TODO(crbug.com/882285): Make 'default' invalid as <custom-ident>.
+bool IsReservedIdentToken(const CSSParserToken& token) {
+  if (token.GetType() != kIdentToken)
+    return false;
+  return css_property_parser_helpers::IsRevertKeyword(token.Value()) ||
+         css_property_parser_helpers::IsDefaultKeyword(token.Value());
+}
+
+bool CouldConsumeReservedKeyword(CSSParserTokenRange range) {
+  range.ConsumeWhitespace();
+  if (IsReservedIdentToken(range.ConsumeIncludingWhitespace()))
+    return range.AtEnd();
+  return false;
+}
 
 const CSSValue* ConsumeSingleType(const CSSSyntaxComponent& syntax,
                                   CSSParserTokenRange& range,
@@ -28,7 +50,8 @@ const CSSValue* ConsumeSingleType(const CSSSyntaxComponent& syntax,
       if (range.Peek().GetType() == kIdentToken &&
           range.Peek().Value() == syntax.GetString()) {
         range.ConsumeIncludingWhitespace();
-        return CSSCustomIdentValue::Create(AtomicString(syntax.GetString()));
+        return MakeGarbageCollected<CSSCustomIdentValue>(
+            AtomicString(syntax.GetString()));
       }
       return nullptr;
     case CSSSyntaxType::kLength:
@@ -60,6 +83,10 @@ const CSSValue* ConsumeSingleType(const CSSSyntaxComponent& syntax,
     case CSSSyntaxType::kTransformList:
       return ConsumeTransformList(range, *context);
     case CSSSyntaxType::kCustomIdent:
+      // TODO(crbug.com/579788): Implement 'revert'.
+      // TODO(crbug.com/882285): Make 'default' invalid as <custom-ident>.
+      if (IsReservedIdentToken(range.Peek()))
+        return nullptr;
       return ConsumeCustomIdent(range, *context);
     default:
       NOTREACHED();
@@ -98,23 +125,16 @@ const CSSValue* ConsumeSyntaxComponent(const CSSSyntaxComponent& syntax,
   return result;
 }
 
-const CSSSyntaxComponent* CSSSyntaxDescriptor::Match(
-    const CSSStyleValue& value) const {
-  for (const CSSSyntaxComponent& component : syntax_components_) {
-    if (component.CanTake(value))
-      return &component;
-  }
-  return nullptr;
-}
-
-bool CSSSyntaxDescriptor::CanTake(const CSSStyleValue& value) const {
-  return Match(value);
-}
+}  // namespace
 
 const CSSValue* CSSSyntaxDescriptor::Parse(CSSParserTokenRange range,
                                            const CSSParserContext* context,
                                            bool is_animation_tainted) const {
   if (IsTokenStream()) {
+    // TODO(crbug.com/579788): Implement 'revert'.
+    // TODO(crbug.com/882285): Make 'default' invalid as <custom-ident>.
+    if (CouldConsumeReservedKeyword(range))
+      return nullptr;
     return CSSVariableParser::ParseRegisteredPropertyValue(
         range, *context, false, is_animation_tainted);
   }
@@ -126,6 +146,17 @@ const CSSValue* CSSSyntaxDescriptor::Parse(CSSParserTokenRange range,
   }
   return CSSVariableParser::ParseRegisteredPropertyValue(range, *context, true,
                                                          is_animation_tainted);
+}
+
+CSSSyntaxDescriptor CSSSyntaxDescriptor::IsolatedCopy() const {
+  Vector<CSSSyntaxComponent> syntax_components_copy;
+  syntax_components_copy.ReserveCapacity(syntax_components_.size());
+  for (const auto& syntax_component : syntax_components_) {
+    syntax_components_copy.push_back(CSSSyntaxComponent(
+        syntax_component.GetType(), syntax_component.GetString().IsolatedCopy(),
+        syntax_component.GetRepeat()));
+  }
+  return CSSSyntaxDescriptor(std::move(syntax_components_copy));
 }
 
 CSSSyntaxDescriptor::CSSSyntaxDescriptor(Vector<CSSSyntaxComponent> components)

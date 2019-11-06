@@ -34,6 +34,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.consent_auditor.ConsentAuditorFeature;
 import org.chromium.chrome.browser.externalauth.UserRecoverableErrorHandler;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.sync.SyncUserDataWiper;
 import org.chromium.components.signin.AccountIdProvider;
 import org.chromium.components.signin.AccountManagerDelegateException;
 import org.chromium.components.signin.AccountManagerFacade;
@@ -103,6 +104,7 @@ public abstract class SigninFragmentBase
     private boolean mDestroyed;
     private boolean mIsSigninInProgress;
     private boolean mHasGmsError;
+    private boolean mRecordUndoSignin;
 
     private UserRecoverableErrorHandler.ModalDialog mGooglePlayServicesUpdateErrorHandler;
     private AlertDialog mGmsIsUpdatingDialog;
@@ -246,6 +248,9 @@ public abstract class SigninFragmentBase
         }
         mProfileDataCache = new ProfileDataCache(getActivity(),
                 getResources().getDimensionPixelSize(R.dimen.user_picture_size), badgeConfig);
+        // By default this is set to true so that when system back button is pressed user action
+        // is recorded in onDestroy().
+        mRecordUndoSignin = true;
     }
 
     @Override
@@ -257,6 +262,7 @@ public abstract class SigninFragmentBase
             mConfirmSyncDataStateMachine.cancel(/* isBeingDestroyed = */ true);
             mConfirmSyncDataStateMachine = null;
         }
+        if (mRecordUndoSignin) RecordUserAction.record("Signin_Undo_Signin");
         mDestroyed = true;
     }
 
@@ -377,12 +383,15 @@ public abstract class SigninFragmentBase
     }
 
     private void onRefuseButtonClicked(View button) {
+        RecordUserAction.record("Signin_Undo_Signin");
+        mRecordUndoSignin = false;
         onSigninRefused();
     }
 
     private void onAcceptButtonClicked(View button) {
         if (!areControlsEnabled()) return;
         mIsSigninInProgress = true;
+        mRecordUndoSignin = false;
         RecordUserAction.record("Signin_Signin_WithDefaultSyncSettings");
 
         // Record the fact that the user consented to the consent text by clicking on a button
@@ -436,9 +445,6 @@ public abstract class SigninFragmentBase
                         if (mDestroyed) return;
                         runStateMachineAndSignin(settingsClicked);
                     }
-
-                    @Override
-                    public void onSystemAccountsChanged() {}
                 };
         accountTrackerService.addSystemAccountsSeededListener(listener);
     }
@@ -455,7 +461,7 @@ public abstract class SigninFragmentBase
 
                         // Don't start sign-in if this fragment has been destroyed.
                         if (mDestroyed) return;
-                        SigninManager.wipeSyncUserDataIfRequired(wipeData).then((Void v) -> {
+                        SyncUserDataWiper.wipeSyncUserDataIfRequired(wipeData).then((Void v) -> {
                             onSigninAccepted(mSelectedAccountName, mIsDefaultAccountSelected,
                                     settingsClicked, () -> mIsSigninInProgress = false);
                         });
@@ -667,7 +673,7 @@ public abstract class SigninFragmentBase
                 && mGooglePlayServicesUpdateErrorHandler.isShowing()) {
             return;
         }
-        boolean cancelable = !SigninManager.get().isForceSigninEnabled();
+        boolean cancelable = !IdentityServicesProvider.getSigninManager().isForceSigninEnabled();
         mGooglePlayServicesUpdateErrorHandler =
                 new UserRecoverableErrorHandler.ModalDialog(getActivity(), cancelable);
         mGooglePlayServicesUpdateErrorHandler.handleError(getActivity(), gmsErrorCode);

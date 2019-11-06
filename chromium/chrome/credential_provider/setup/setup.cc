@@ -105,13 +105,20 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
     }
   }
 
-  logging::SetEventSource("GCP", GCP_CATEGORY, MSG_LOG_MESSAGE);
+  logging::SetEventSource("GCPW", GCPW_CATEGORY, MSG_LOG_MESSAGE);
 
   // Make sure the process exits cleanly on unexpected errors.
   base::EnableTerminationOnHeapCorruption();
   base::EnableTerminationOnOutOfMemory();
   base::win::RegisterInvalidParamHandler();
   base::win::SetupCRT(*base::CommandLine::ForCurrentProcess());
+
+  // If the program is being run to either enable or disable stats, do that
+  // and exit.
+  if (cmdline->HasSwitch(credential_provider::switches::kEnableStats) ||
+      cmdline->HasSwitch(credential_provider::switches::kDisableStats)) {
+    return credential_provider::EnableStatsCollection(*cmdline);
+  }
 
   base::FilePath gcp_setup_exe_path;
   hr = credential_provider::GetPathToDllFromHandle(hInstance,

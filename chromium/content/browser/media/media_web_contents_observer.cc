@@ -9,15 +9,14 @@
 #include "build/build_config.h"
 #include "content/browser/media/audible_metrics.h"
 #include "content/browser/media/audio_stream_monitor.h"
-#include "content/browser/picture_in_picture/picture_in_picture_window_controller_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/media/media_player_delegate_messages.h"
-#include "content/public/browser/picture_in_picture_window_controller.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "ipc/ipc_message_macros.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "services/device/public/mojom/wake_lock_context.mojom.h"
+#include "services/media_session/public/cpp/media_position.h"
 #include "third_party/blink/public/platform/web_fullscreen_video_status.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -45,7 +44,7 @@ void CheckFullscreenDetectionEnabled(WebContents* web_contents) {
 
 // Returns true if |player_id| exists in |player_map|.
 bool MediaPlayerEntryExists(
-    const WebContentsObserver::MediaPlayerId& player_id,
+    const MediaPlayerId& player_id,
     const MediaWebContentsObserver::ActiveMediaPlayerMap& player_map) {
   const auto& players = player_map.find(player_id.render_frame_host);
   if (players == player_map.end())
@@ -122,7 +121,7 @@ bool MediaWebContentsObserver::IsPictureInPictureAllowedForFullscreenVideo()
   return *picture_in_picture_allowed_in_fullscreen_;
 }
 
-const base::Optional<WebContentsObserver::MediaPlayerId>&
+const base::Optional<MediaPlayerId>&
 MediaWebContentsObserver::GetFullscreenVideoMediaPlayerId() const {
   CheckFullscreenDetectionEnabled(web_contents_impl());
   return fullscreen_player_;
@@ -141,6 +140,8 @@ bool MediaWebContentsObserver::OnMessageReceived(
                         OnMediaPlaying)
     IPC_MESSAGE_HANDLER(MediaPlayerDelegateHostMsg_OnMutedStatusChanged,
                         OnMediaMutedStatusChanged)
+    IPC_MESSAGE_HANDLER(MediaPlayerDelegateHostMsg_OnMediaPositionStateChanged,
+                        OnMediaPositionStateChanged);
     IPC_MESSAGE_HANDLER(
         MediaPlayerDelegateHostMsg_OnMediaEffectivelyFullscreenChanged,
         OnMediaEffectivelyFullscreenChanged)
@@ -333,6 +334,14 @@ void MediaWebContentsObserver::OnMediaMutedStatusChanged(
     bool muted) {
   const MediaPlayerId id(render_frame_host, delegate_id);
   web_contents_impl()->MediaMutedStatusChanged(id, muted);
+}
+
+void MediaWebContentsObserver::OnMediaPositionStateChanged(
+    RenderFrameHost* render_frame_host,
+    int delegate_id,
+    const media_session::MediaPosition& position) {
+  const MediaPlayerId id(render_frame_host, delegate_id);
+  session_controllers_manager_.OnMediaPositionStateChanged(id, position);
 }
 
 void MediaWebContentsObserver::AddMediaPlayerEntry(

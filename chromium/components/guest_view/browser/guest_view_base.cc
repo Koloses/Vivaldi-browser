@@ -198,8 +198,7 @@ GuestViewBase::GuestViewBase(WebContents* owner_web_contents)
       guest_host_(nullptr),
       auto_size_enabled_(false),
       is_full_page_plugin_(false),
-      guest_proxy_routing_id_(MSG_ROUTING_NONE),
-      weak_ptr_factory_(this) {
+      guest_proxy_routing_id_(MSG_ROUTING_NONE) {
   SetOwnerHost();
 }
 
@@ -478,8 +477,13 @@ void GuestViewBase::DidAttach(int guest_proxy_routing_id) {
 
   SetUpSizing(*attach_params());
 
-  // The guest should have the same muting state as the owner.
+  // NOTE(andre@vivaldi.com) : We can set muting on a tab, which is a guest. So
+  // we cannot do the default behaviour of copying the parents mute-state. Check
+  // bail if the owner is our app-window. The guest should have the same muting
+  if (!extensions::VivaldiAppHelper::FromWebContents(owner_web_contents())){
+  // state as the owner.
   web_contents()->SetAudioMuted(owner_web_contents()->IsAudioMuted());
+  } // if the owner is the Vivaldi app-window.
 
   // Give the derived class an opportunity to perform some actions.
   DidAttachToEmbedder();
@@ -503,7 +507,7 @@ void GuestViewBase::DidDetach() {
     Destroy(true);
 }
 
-WebContents* GuestViewBase::GetOwnerWebContents() const {
+WebContents* GuestViewBase::GetOwnerWebContents() {
   return owner_web_contents_;
 }
 
@@ -626,18 +630,6 @@ void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
 
   WillAttachToEmbedder();
 
-  // NOTE(andre@vivaldi.com) : We need to sync up the detaching of any guests
-  // with the same web_contents() before doeing the attaching! Do this in
-  // WebContentsDidDetach.
-  if (web_contents()->GetOuterWebContents()) {
-    static_cast<content::WebContentsImpl*>(web_contents())->DetachFromOuter();
-    // this is usually |GuestViewBase::DidAttach|
-    attach_completion_callback_ = std::move(completion_callback);
-    WebContentsDidDetach();
-  }
-  else {
-
-
   if (content::GuestMode::IsCrossProcessFrameGuest(web_contents())) {
     owner_web_contents_->AttachInnerWebContents(
         base::WrapUnique<WebContents>(web_contents()), outer_contents_frame);
@@ -654,8 +646,6 @@ void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
   // Completing attachment will resume suspended resource loads and then send
   // queued events.
   SignalWhenReady(std::move(completion_callback));
-
-  }
 
 }
 
@@ -747,7 +737,7 @@ void GuestViewBase::ContentsZoomChange(bool zoom_in) {
 bool GuestViewBase::HandleKeyboardEvent(
     WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
-  if (!attached())
+  if (!attached() || !embedder_web_contents()->GetDelegate())
     return false;
 
   // Send the keyboard events back to the embedder to reprocess them.
@@ -808,8 +798,7 @@ bool GuestViewBase::PreHandleGestureEvent(WebContents* source,
   // Pinch events which cause a scale change should not be routed to a guest.
   // We still allow synthetic wheel events for touchpad pinch to go to the page.
   DCHECK(!blink::WebInputEvent::IsPinchGestureEventType(event.GetType()) ||
-         (event.SourceDevice() ==
-              blink::WebGestureDevice::kWebGestureDeviceTouchpad &&
+         (event.SourceDevice() == blink::WebGestureDevice::kTouchpad &&
           event.NeedsWheelEvent()));
   return false;
 }

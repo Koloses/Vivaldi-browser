@@ -54,7 +54,7 @@ class FCMInvalidationListener : public InvalidationListener,
 
   // Update the set of object IDs that we're interested in getting
   // notifications for. May be called at any time.
-  void UpdateRegisteredTopics(const TopicSet& topics);
+  void UpdateRegisteredTopics(const Topics& topics);
 
   // InvalidationListener implementation.
   void Invalidate(const std::string& payload,
@@ -78,13 +78,16 @@ class FCMInvalidationListener : public InvalidationListener,
 
   void DoRegistrationUpdate();
 
-  void RequestDetailedStatus(
+  virtual void RequestDetailedStatus(
       const base::RepeatingCallback<void(const base::DictionaryValue&)>&
           callback) const;
 
   void StopForTest();
+  void StartForTest(Delegate* delegate);
+  void EmitStateChangeForTest(InvalidatorState state);
+  void EmitSavedInvalidationsForTest(const TopicInvalidationMap& to_emit);
 
-  TopicSet GetRegisteredIdsForTest() const;
+  Topics GetRegisteredIdsForTest() const;
 
   base::WeakPtr<FCMInvalidationListener> AsWeakPtr();
 
@@ -122,7 +125,7 @@ class FCMInvalidationListener : public InvalidationListener,
   Logger logger_;
 
   // Stored to pass to |per_user_topic_registration_manager_| on start.
-  TopicSet registered_topics_;
+  Topics registered_topics_;
 
   // The states of the HTTP and FCM channel.
   SubscriptionChannelState subscription_channel_state_ =
@@ -138,7 +141,7 @@ class FCMInvalidationListener : public InvalidationListener,
   // requested registration for topics.
   bool ids_update_requested_ = false;
 
-  base::WeakPtrFactory<FCMInvalidationListener> weak_factory_;
+  base::WeakPtrFactory<FCMInvalidationListener> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(FCMInvalidationListener);
 };

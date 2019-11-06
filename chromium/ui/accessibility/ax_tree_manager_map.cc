@@ -4,6 +4,8 @@
 
 #include "ui/accessibility/ax_tree_manager_map.h"
 
+#include "base/stl_util.h"
+
 namespace ui {
 
 AXTreeManagerMap::AXTreeManagerMap() {}
@@ -27,10 +29,34 @@ void AXTreeManagerMap::RemoveTreeManager(AXTreeID tree_id) {
 }
 
 AXTreeManager* AXTreeManagerMap::GetManager(AXTreeID tree_id) {
-  if (tree_id == AXTreeIDUnknown())
+  if (tree_id == AXTreeIDUnknown() || !base::Contains(map_, tree_id))
     return nullptr;
 
-  return map_[tree_id];
+  return map_.at(tree_id);
+}
+
+AXTreeManager* AXTreeManagerMap::GetManagerForChildTree(
+    const AXNode& parent_node) {
+  if (!parent_node.data().HasStringAttribute(
+          ax::mojom::StringAttribute::kChildTreeId)) {
+    return nullptr;
+  }
+
+  AXTreeID child_tree_id =
+      AXTreeID::FromString(parent_node.data().GetStringAttribute(
+          ax::mojom::StringAttribute::kChildTreeId));
+  AXTreeManager* child_tree_manager =
+      AXTreeManagerMap::GetInstance().GetManager(child_tree_id);
+
+  // Some platforms do not use AXTreeManagers, so child trees don't exist in
+  // the browser process.
+  if (!child_tree_manager)
+    return nullptr;
+
+  DCHECK(child_tree_manager->GetParentNodeFromParentTreeAsAXNode()->id() ==
+         parent_node.id());
+
+  return child_tree_manager;
 }
 
 }  // namespace ui

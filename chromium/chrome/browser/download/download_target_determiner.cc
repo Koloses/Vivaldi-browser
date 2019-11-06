@@ -70,14 +70,11 @@ const base::FilePath::CharType kCrdownloadSuffix[] =
 // single bool. A host is considered visited before if prior visible visits were
 // found in history and the first such visit was earlier than the most recent
 // midnight.
-void VisitCountsToVisitedBefore(
-    const base::Callback<void(bool)>& callback,
-    bool found_visits,
-    int count,
-    base::Time first_visit) {
-  callback.Run(
-      found_visits && count > 0 &&
-      (first_visit.LocalMidnight() < base::Time::Now().LocalMidnight()));
+void VisitCountsToVisitedBefore(base::OnceCallback<void(bool)> callback,
+                                history::VisibleVisitCountToHostResult result) {
+  std::move(callback).Run(
+      result.success && result.count > 0 &&
+      (result.first_visit.LocalMidnight() < base::Time::Now().LocalMidnight()));
 }
 
 #if defined(OS_WIN)
@@ -115,8 +112,7 @@ DownloadTargetDeterminer::DownloadTargetDeterminer(
                      !initial_virtual_path.empty()),
       download_prefs_(download_prefs),
       delegate_(delegate),
-      completion_callback_(callback),
-      weak_ptr_factory_(this) {
+      completion_callback_(callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(download_);
   DCHECK(delegate);
@@ -141,6 +137,9 @@ void DownloadTargetDeterminer::DoLoop() {
     switch (current_state) {
       case STATE_GENERATE_TARGET_PATH:
         result = DoGenerateTargetPath();
+        break;
+      case STATE_CHECK_IF_DOWNLOAD_BLOCKED:
+        result = DoCheckIfDownloadBlocked();
         break;
       case STATE_NOTIFY_EXTENSIONS:
         result = DoNotifyExtensions();
@@ -193,7 +192,7 @@ DownloadTargetDeterminer::Result
   DCHECK(!should_notify_extensions_);
   bool is_forced_path = !download_->GetForcedFilePath().empty();
 
-  next_state_ = STATE_NOTIFY_EXTENSIONS;
+  next_state_ = STATE_CHECK_IF_DOWNLOAD_BLOCKED;
 
   // Transient download should use the existing path.
   if (download_->IsTransient()) {
@@ -291,6 +290,7 @@ DownloadTargetDeterminer::Result
     }
     virtual_path_ = target_directory.Append(generated_filename);
     should_notify_extensions_ = true;
+    DCHECK(virtual_path_.IsAbsolute());
   } else {
     conflict_action_ = DownloadPathReservationTracker::OVERWRITE;
     virtual_path_ = download_->GetForcedFilePath();
@@ -300,11 +300,40 @@ DownloadTargetDeterminer::Result
     // issue with the forced path, the user is still not prompted. If the path
     // supplied to a programmatic download is invalid, then the caller needs to
     // intervene.
+    DCHECK(virtual_path_.IsAbsolute());
   }
-  DCHECK(virtual_path_.IsAbsolute());
   DVLOG(20) << "Generated virtual path: " << virtual_path_.AsUTF8Unsafe();
 
   return CONTINUE;
+}
+
+DownloadTargetDeterminer::Result
+DownloadTargetDeterminer::DoCheckIfDownloadBlocked() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(!virtual_path_.empty());
+
+  next_state_ = STATE_NOTIFY_EXTENSIONS;
+
+  delegate_->ShouldBlockDownload(
+      download_, virtual_path_,
+      base::Bind(&DownloadTargetDeterminer::CheckIfDownloadBlockedDone,
+                 weak_ptr_factory_.GetWeakPtr()));
+  return QUIT_DOLOOP;
+}
+
+void DownloadTargetDeterminer::CheckIfDownloadBlockedDone(bool should_block) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  // Delegate should not call back here more than once.
+  DCHECK_EQ(STATE_NOTIFY_EXTENSIONS, next_state_);
+
+  if (should_block) {
+    ScheduleCallbackAndDeleteSelf(
+        download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED);
+    return;
+  }
+
+  DoLoop();
 }
 
 DownloadTargetDeterminer::Result
@@ -381,7 +410,6 @@ void DownloadTargetDeterminer::ReserveVirtualPathDone(
             << " Result:" << static_cast<int>(result);
   DCHECK_EQ(STATE_PROMPT_USER_FOR_DOWNLOAD_PATH, next_state_);
   RecordDownloadPathValidation(result, download_->IsTransient());
-
   if (download_->IsTransient()) {
     DCHECK_EQ(DownloadConfirmationReason::NONE, confirmation_reason_)
         << "Transient download should not ask the user for confirmation.";
@@ -770,9 +798,9 @@ DownloadTargetDeterminer::Result
     if (history_service && download_->GetReferrerUrl().is_valid()) {
       history_service->GetVisibleVisitCountToHost(
           download_->GetReferrerUrl(),
-          base::Bind(
+          base::BindOnce(
               &VisitCountsToVisitedBefore,
-              base::Bind(
+              base::BindOnce(
                   &DownloadTargetDeterminer::CheckVisitedReferrerBeforeDone,
                   weak_ptr_factory_.GetWeakPtr())),
           &history_tracker_);

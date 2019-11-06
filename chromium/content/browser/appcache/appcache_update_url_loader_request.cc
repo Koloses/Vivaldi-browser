@@ -7,6 +7,8 @@
 #include "base/bind.h"
 #include "content/browser/appcache/appcache_request_handler.h"
 #include "content/browser/appcache/appcache_update_url_fetcher.h"
+#include "content/browser/loader/navigation_url_loader_impl.h"
+#include "content/browser/storage_partition_impl.h"
 #include "net/base/ip_endpoint.h"
 #include "net/http/http_response_info.h"
 #include "net/url_request/url_request_context.h"
@@ -55,12 +57,21 @@ void AppCacheUpdateJob::UpdateURLLoaderRequest::Start() {
   network::mojom::URLLoaderClientPtr client;
   client_binding_.Bind(mojo::MakeRequest(&client));
 
-  loader_factory_getter_->GetNetworkFactoryWithCORBEnabled()
-      ->CreateLoaderAndStart(
-          mojo::MakeRequest(&url_loader_), -1, -1,
-          network::mojom::kURLLoadOptionSendSSLInfoWithResponse, request_,
-          std::move(client),
-          net::MutableNetworkTrafficAnnotationTag(kAppCacheTrafficAnnotation));
+  scoped_refptr<network::SharedURLLoaderFactory> loader;
+  if (NavigationURLLoaderImpl::IsNavigationLoaderOnUIEnabled()) {
+    // The partition has shutdown, return without making the request.
+    if (!partition_)
+      return;
+    loader = partition_->GetURLLoaderFactoryForBrowserProcessWithCORBEnabled();
+  } else {
+    loader = loader_factory_getter_->GetNetworkFactoryWithCORBEnabled();
+  }
+
+  loader->CreateLoaderAndStart(
+      mojo::MakeRequest(&url_loader_), -1, -1,
+      network::mojom::kURLLoadOptionSendSSLInfoWithResponse, request_,
+      std::move(client),
+      net::MutableNetworkTrafficAnnotationTag(kAppCacheTrafficAnnotation));
 }
 
 void AppCacheUpdateJob::UpdateURLLoaderRequest::SetExtraRequestHeaders(
@@ -137,7 +148,7 @@ void AppCacheUpdateJob::UpdateURLLoaderRequest::OnReceiveResponse(
   // Populate other fields in the HttpResponseInfo class. It would be good to
   // have a helper function which populates the HttpResponseInfo structure from
   // the ResourceResponseHead structure.
-  http_response_info_.reset(new net::HttpResponseInfo());
+  http_response_info_ = std::make_unique<net::HttpResponseInfo>();
   if (response_head.ssl_info.has_value())
     http_response_info_->ssl_info = *response_head.ssl_info;
   http_response_info_->headers = response_head.headers;
@@ -148,6 +159,8 @@ void AppCacheUpdateJob::UpdateURLLoaderRequest::OnReceiveResponse(
       response_head.alpn_negotiated_protocol;
   http_response_info_->connection_info = response_head.connection_info;
   http_response_info_->remote_endpoint = response_head.remote_endpoint;
+  http_response_info_->request_time = response_head.request_time;
+  http_response_info_->response_time = response_head.response_time;
   fetcher_->OnResponseStarted(net::OK);
 }
 
@@ -166,12 +179,10 @@ void AppCacheUpdateJob::UpdateURLLoaderRequest::OnUploadProgress(
 }
 
 void AppCacheUpdateJob::UpdateURLLoaderRequest::OnReceiveCachedMetadata(
-    const std::vector<uint8_t>& data) {
-}
+    mojo_base::BigBuffer data) {}
 
 void AppCacheUpdateJob::UpdateURLLoaderRequest::OnTransferSizeUpdated(
     int32_t transfer_size_diff) {
-  NOTIMPLEMENTED();
 }
 
 void AppCacheUpdateJob::UpdateURLLoaderRequest::OnStartLoadingResponseBody(
@@ -199,11 +210,13 @@ void AppCacheUpdateJob::UpdateURLLoaderRequest::OnComplete(
 
 AppCacheUpdateJob::UpdateURLLoaderRequest::UpdateURLLoaderRequest(
     URLLoaderFactoryGetter* loader_factory_getter,
+    base::WeakPtr<StoragePartitionImpl> partition,
     const GURL& url,
     int buffer_size,
     URLFetcher* fetcher)
     : fetcher_(fetcher),
       loader_factory_getter_(loader_factory_getter),
+      partition_(std::move(partition)),
       client_binding_(this),
       buffer_size_(buffer_size),
       handle_watcher_(FROM_HERE,

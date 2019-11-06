@@ -8,6 +8,7 @@ import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.os.Build;
@@ -33,6 +34,7 @@ import org.chromium.android_webview.AwAutofillProvider;
 import org.chromium.android_webview.AwBrowserContext;
 import org.chromium.android_webview.AwBrowserProcess;
 import org.chromium.android_webview.AwSettings;
+import org.chromium.android_webview.AwSwitches;
 import org.chromium.android_webview.ResourcesContextWrapperFactory;
 import org.chromium.android_webview.ScopedSysTraceEvent;
 import org.chromium.android_webview.WebViewChromiumRunQueue;
@@ -49,7 +51,6 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.DoNotInline;
 import org.chromium.base.library_loader.NativeLibraries;
 import org.chromium.base.metrics.CachedMetrics.TimesHistogramSample;
-import org.chromium.base.process_launcher.ChildProcessService;
 import org.chromium.components.autofill.AutofillProvider;
 import org.chromium.content_public.browser.LGEmailActionModeWorkaround;
 
@@ -286,13 +287,23 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
             }
             if (multiProcess) {
                 CommandLine cl = CommandLine.getInstance();
-                cl.appendSwitch("webview-sandboxed-renderer");
+                cl.appendSwitch(AwSwitches.WEBVIEW_SANDBOXED_RENDERER);
+            }
+
+            int applicationFlags = ContextUtils.getApplicationContext().getApplicationInfo().flags;
+            boolean isAppDebuggable = (applicationFlags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+            boolean isOsDebuggable = BuildInfo.isDebugAndroid();
+            // Enable logging JS console messages in system logs only if the app is debuggable or
+            // it's a debugable android build.
+            if (isAppDebuggable || isOsDebuggable) {
+                CommandLine cl = CommandLine.getInstance();
+                cl.appendSwitch(AwSwitches.WEBVIEW_LOG_JS_CONSOLE_MESSAGES);
             }
 
             ThreadUtils.setWillOverrideUiThread(true);
             BuildInfo.setBrowserPackageInfo(packageInfo);
 
-            try (StrictModeContext smc = StrictModeContext.allowDiskWrites()) {
+            try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
                 try (ScopedSysTraceEvent e2 = ScopedSysTraceEvent.scoped(
                              "WebViewChromiumFactoryProvider.loadChromiumLibrary")) {
                     String dataDirectorySuffix = null;
@@ -372,14 +383,9 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
     public static boolean preloadInZygote() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                && Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            // If we're on O, where the split APK handling bug exists, then go through the motions
-            // of applying the workaround - don't actually change anything if Chrome is an APK (as
-            // opposed to an app bundle), but do the reflection to check for compatibility issues.
-            // The result will be logged to UMA later, because we can't do very much in the
-            // restricted environment of the WebView zygote process.
-            ChildProcessService.setSplitApkWorkaroundResult(
-                    SplitApkWorkaround.apply(/* realRun */ BundleUtils.isBundle()));
+                && Build.VERSION.SDK_INT < Build.VERSION_CODES.P && BundleUtils.isBundle()) {
+            // Apply workaround if we're a bundle on O, where the split APK handling bug exists.
+            SplitApkWorkaround.apply();
         }
 
         for (String library : NativeLibraries.LIBRARIES) {
@@ -449,6 +455,10 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                     @Override
                     public Uri getSafeBrowsingPrivacyPolicyUrl() {
                         return sharedStatics.getSafeBrowsingPrivacyPolicyUrl();
+                    }
+
+                    public boolean isMultiProcessEnabled() {
+                        return sharedStatics.isMultiProcessEnabled();
                     }
                 };
             }

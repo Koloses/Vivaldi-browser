@@ -108,6 +108,8 @@ CrostiniPackageService::CrostiniPackageService(Profile* profile)
   CrostiniManager* manager = CrostiniManager::GetForProfile(profile);
 
   manager->AddLinuxPackageOperationProgressObserver(this);
+  manager->AddPendingAppListUpdatesObserver(this);
+  manager->AddVmShutdownObserver(this);
 }
 
 CrostiniPackageService::~CrostiniPackageService() = default;
@@ -115,6 +117,15 @@ CrostiniPackageService::~CrostiniPackageService() = default;
 void CrostiniPackageService::Shutdown() {
   CrostiniManager* manager = CrostiniManager::GetForProfile(profile_);
   manager->RemoveLinuxPackageOperationProgressObserver(this);
+  manager->RemovePendingAppListUpdatesObserver(this);
+  manager->RemoveVmShutdownObserver(this);
+
+  // CrostiniPackageNotification registers itself as a CrostiniRegistryService
+  // observer, so they need to be destroyed here while the
+  // CrostiniRegistryService still exists.
+  running_notifications_.clear();
+  queued_uninstalls_.clear();
+  finished_notifications_.clear();
 }
 
 void CrostiniPackageService::SetNotificationStateChangeCallbackForTesting(
@@ -162,18 +173,6 @@ void CrostiniPackageService::InstallLinuxPackage(
                      std::move(callback)));
 }
 
-void CrostiniPackageService::InstallLinuxPackageFromApt(
-    const std::string& vm_name,
-    const std::string& container_name,
-    const std::string& package_id,
-    CrostiniManager::InstallLinuxPackageCallback callback) {
-  CrostiniManager::GetForProfile(profile_)->InstallLinuxPackageFromApt(
-      vm_name, container_name, package_id,
-      base::BindOnce(&CrostiniPackageService::OnInstallLinuxPackage,
-                     weak_ptr_factory_.GetWeakPtr(), vm_name, container_name,
-                     std::move(callback)));
-}
-
 void CrostiniPackageService::OnInstallLinuxPackageProgress(
     const std::string& vm_name,
     const std::string& container_name,
@@ -199,6 +198,26 @@ void CrostiniPackageService::OnUninstallPackageProgress(
   UpdatePackageOperationStatus(ContainerId(vm_name, container_name),
                                UninstallStatusToOperationStatus(status),
                                progress_percent);
+}
+
+void CrostiniPackageService::OnVmShutdown(const std::string& vm_name) {
+  // Making a notification as failed removes it from |running_notifications_|,
+  // which invalidates the iterators. To avoid this, we record all the
+  // containers that just shut down before removing any notifications.
+  std::vector<ContainerId> to_remove;
+  for (auto iter = running_notifications_.begin();
+       iter != running_notifications_.end(); iter++) {
+    if (iter->first.first == vm_name) {
+      to_remove.push_back(iter->first);
+    }
+  }
+  for (auto iter : to_remove) {
+    // Use a loop because removing a notification from the running set can cause
+    // a queued operation to start, which will also need to be removed.
+    while (ContainerHasRunningOperation(iter)) {
+      UpdatePackageOperationStatus(iter, PackageOperationStatus::FAILED, 0);
+    }
+  }
 }
 
 void CrostiniPackageService::QueueUninstallApplication(
@@ -227,8 +246,8 @@ void CrostiniPackageService::QueueUninstallApplication(
 
 bool CrostiniPackageService::ContainerHasRunningOperation(
     const ContainerId& container_id) const {
-  return base::ContainsKey(running_notifications_, container_id) ||
-         base::ContainsKey(containers_with_pending_installs_, container_id);
+  return base::Contains(running_notifications_, container_id) ||
+         base::Contains(containers_with_pending_installs_, container_id);
 }
 
 void CrostiniPackageService::CreateRunningNotification(
@@ -252,7 +271,8 @@ void CrostiniPackageService::CreateRunningNotification(
   running_notifications_[container_id] =
       std::make_unique<CrostiniPackageNotification>(
           profile_, notification_type, PackageOperationStatus::RUNNING,
-          base::UTF8ToUTF16(app_name), GetUniqueNotificationId(), this);
+          container_id, base::UTF8ToUTF16(app_name), GetUniqueNotificationId(),
+          this);
 }
 
 void CrostiniPackageService::CreateQueuedUninstall(
@@ -264,8 +284,8 @@ void CrostiniPackageService::CreateQueuedUninstall(
       std::make_unique<CrostiniPackageNotification>(
           profile_,
           CrostiniPackageNotification::NotificationType::APPLICATION_UNINSTALL,
-          PackageOperationStatus::QUEUED, base::UTF8ToUTF16(app_name),
-          GetUniqueNotificationId(), this));
+          PackageOperationStatus::QUEUED, container_id,
+          base::UTF8ToUTF16(app_name), GetUniqueNotificationId(), this));
 }
 
 void CrostiniPackageService::UpdatePackageOperationStatus(
@@ -278,6 +298,14 @@ void CrostiniPackageService::UpdatePackageOperationStatus(
       << ContainerIdToString(container_id) << " has no notification to update";
   DCHECK(it->second) << ContainerIdToString(container_id)
                      << " has null notification pointer";
+
+  // If an operation has finished, but there are still app list updates pending,
+  // don't finish the flow yet.
+  if (status == PackageOperationStatus::SUCCEEDED &&
+      has_pending_app_list_updates_.count(container_id)) {
+    status = PackageOperationStatus::WAITING_FOR_APP_REGISTRY_UPDATE;
+  }
+
   it->second->UpdateProgress(status, progress_percent);
 
   if (status == PackageOperationStatus::SUCCEEDED ||
@@ -294,6 +322,29 @@ void CrostiniPackageService::UpdatePackageOperationStatus(
   }
   if (testing_state_change_callback_) {
     testing_state_change_callback_.Run(status);
+  }
+}
+
+void CrostiniPackageService::OnPendingAppListUpdates(
+    const std::string& vm_name,
+    const std::string& container_name,
+    int count) {
+  const ContainerId container_id(vm_name, container_name);
+
+  if (count != 0) {
+    has_pending_app_list_updates_.insert(container_id);
+  } else {
+    has_pending_app_list_updates_.erase(container_id);
+  }
+
+  auto it = running_notifications_.find(container_id);
+  if (it != running_notifications_.end()) {
+    if (it->second->GetOperationStatus() ==
+            PackageOperationStatus::WAITING_FOR_APP_REGISTRY_UPDATE &&
+        count == 0) {
+      UpdatePackageOperationStatus(container_id,
+                                   PackageOperationStatus::SUCCEEDED, 100);
+    }
   }
 }
 
@@ -406,8 +457,16 @@ void CrostiniPackageService::StartQueuedUninstall(
   auto registration =
       CrostiniRegistryServiceFactory::GetForProfile(profile_)->GetRegistration(
           app_id);
-  DCHECK(registration);
-  UninstallApplication(*registration, app_id);
+
+  // It's possible that some other process has uninstalled this application
+  // already. If this happens, we want to skip the notification directly to the
+  // success state.
+  if (registration) {
+    UninstallApplication(*registration, app_id);
+  } else {
+    UpdatePackageOperationStatus(container_id,
+                                 PackageOperationStatus::SUCCEEDED, 100);
+  }
 
   // Clean up memory.
   if (uninstall_queue.empty()) {

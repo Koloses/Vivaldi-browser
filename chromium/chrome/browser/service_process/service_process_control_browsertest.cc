@@ -42,8 +42,7 @@
 class ServiceProcessControlBrowserTest
     : public InProcessBrowserTest {
  public:
-  ServiceProcessControlBrowserTest() {
-  }
+  ServiceProcessControlBrowserTest() {}
   ~ServiceProcessControlBrowserTest() override {}
 
   void HistogramsCallback(base::RepeatingClosure on_done) {
@@ -83,11 +82,14 @@ class ServiceProcessControlBrowserTest
     // point to a bundle so that the service process has an Info.plist.
     base::FilePath exe_path;
     ASSERT_TRUE(base::PathService::Get(base::DIR_EXE, &exe_path));
-    exe_path = exe_path.DirName()
+    exe_path = exe_path.Append(chrome::kBrowserProcessExecutablePath)
                    .DirName()
-                   .Append("Contents")
+                   .DirName()
+                   .Append("Frameworks")
+                   .Append(chrome::kFrameworkName)
                    .Append("Versions")
                    .Append(chrome::kChromeVersion)
+                   .Append("Helpers")
                    .Append(chrome::kHelperProcessExecutablePath);
     child_process_exe_override_ = std::make_unique<base::ScopedPathOverride>(
         content::CHILD_PROCESS_EXE, exe_path);
@@ -126,7 +128,8 @@ class ServiceProcessControlBrowserTest
   void ProcessControlLaunched(base::OnceClosure on_done) {
     base::ScopedAllowBlockingForTesting allow_blocking;
     base::ProcessId service_pid;
-    EXPECT_TRUE(GetServiceProcessData(NULL, &service_pid));
+    EXPECT_TRUE(
+        ServiceProcessState::GetServiceProcessData(nullptr, &service_pid));
     EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
 #if defined(OS_WIN)
     service_process_ =
@@ -208,7 +211,14 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, LaunchAndIPC) {
   EXPECT_TRUE(ServiceProcessControl::GetInstance()->Shutdown());
 }
 
-IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, LaunchAndReconnect) {
+// Flaky on macOS: https://crbug.com/978948
+#if defined(OS_MACOSX)
+#define MAYBE_LaunchAndReconnect DISABLED_LaunchAndReconnect
+#else
+#define MAYBE_LaunchAndReconnect LaunchAndReconnect
+#endif
+IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest,
+                       MAYBE_LaunchAndReconnect) {
   LaunchServiceProcessControlAndWait();
 
   // Make sure we are connected to the service process.
@@ -376,7 +386,8 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MAYBE_ForceShutdown) {
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
   base::ProcessId service_pid;
   base::ScopedAllowBlockingForTesting allow_blocking;
-  EXPECT_TRUE(GetServiceProcessData(NULL, &service_pid));
+  EXPECT_TRUE(
+      ServiceProcessState::GetServiceProcessData(nullptr, &service_pid));
   EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
   ForceServiceProcessShutdown(version_info::GetVersionNumber(), service_pid);
 }
@@ -390,10 +401,12 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MAYBE_ForceShutdown) {
 IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MAYBE_CheckPid) {
   base::ProcessId service_pid;
   base::ScopedAllowBlockingForTesting allow_blocking;
-  EXPECT_FALSE(GetServiceProcessData(NULL, &service_pid));
+  EXPECT_FALSE(
+      ServiceProcessState::GetServiceProcessData(nullptr, &service_pid));
   // Launch the service process.
   LaunchServiceProcessControlAndWait();
-  EXPECT_TRUE(GetServiceProcessData(NULL, &service_pid));
+  EXPECT_TRUE(
+      ServiceProcessState::GetServiceProcessData(nullptr, &service_pid));
   EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
   // Disconnect from service process.
   Disconnect();
@@ -408,16 +421,7 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, HistogramsNoService) {
       base::TimeDelta()));
 }
 
-// Histograms disabled on OSX http://crbug.com/406227
-#if defined(OS_MACOSX)
-#define MAYBE_HistogramsTimeout DISABLED_HistogramsTimeout
-#define MAYBE_Histograms DISABLED_Histograms
-#else
-#define MAYBE_HistogramsTimeout HistogramsTimeout
-#define MAYBE_Histograms Histograms
-#endif
-IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest,
-                       MAYBE_HistogramsTimeout) {
+IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, HistogramsTimeout) {
   LaunchServiceProcessControlAndWait();
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
   // Callback should not be called during GetHistograms call.
@@ -432,7 +436,7 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest,
   run_loop.Run();
 }
 
-IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MAYBE_Histograms) {
+IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, Histograms) {
   LaunchServiceProcessControlAndWait();
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
   // Callback should not be called during GetHistograms call.

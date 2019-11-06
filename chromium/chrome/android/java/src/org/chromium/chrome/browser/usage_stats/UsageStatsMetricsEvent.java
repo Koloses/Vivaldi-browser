@@ -13,11 +13,17 @@ import java.lang.annotation.RetentionPolicy;
  * Enumeration of usage stats-related metrics events.
  */
 @IntDef({
-        UsageStatsMetricsEvent.OPT_IN, UsageStatsMetricsEvent.OPT_OUT,
-        UsageStatsMetricsEvent.START_TRACKING_TOKEN, UsageStatsMetricsEvent.STOP_TRACKING_TOKEN,
-        UsageStatsMetricsEvent.SUSPEND_SITES, UsageStatsMetricsEvent.UNSUSPEND_SITES,
-        UsageStatsMetricsEvent.QUERY_EVENTS, UsageStatsMetricsEvent.CLEAR_ALL_HISTORY,
-        UsageStatsMetricsEvent.CLEAR_HISTORY_RANGE, UsageStatsMetricsEvent.NUM_ENTRIES,
+        UsageStatsMetricsEvent.OPT_IN,
+        UsageStatsMetricsEvent.OPT_OUT,
+        UsageStatsMetricsEvent.START_TRACKING_TOKEN,
+        UsageStatsMetricsEvent.STOP_TRACKING_TOKEN,
+        UsageStatsMetricsEvent.SUSPEND_SITES,
+        UsageStatsMetricsEvent.UNSUSPEND_SITES,
+        UsageStatsMetricsEvent.QUERY_EVENTS,
+        UsageStatsMetricsEvent.CLEAR_ALL_HISTORY,
+        UsageStatsMetricsEvent.CLEAR_HISTORY_RANGE,
+        UsageStatsMetricsEvent.CLEAR_HISTORY_DOMAIN,
+        UsageStatsMetricsEvent.NUM_ENTRIES,
 })
 @Retention(RetentionPolicy.SOURCE)
 public @interface UsageStatsMetricsEvent {
@@ -30,5 +36,6 @@ public @interface UsageStatsMetricsEvent {
     int QUERY_EVENTS = 6;
     int CLEAR_ALL_HISTORY = 7;
     int CLEAR_HISTORY_RANGE = 8;
-    int NUM_ENTRIES = 9;
+    int CLEAR_HISTORY_DOMAIN = 9;
+    int NUM_ENTRIES = 10;
 }

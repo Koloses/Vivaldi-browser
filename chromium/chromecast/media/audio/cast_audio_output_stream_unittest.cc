@@ -228,7 +228,7 @@ class CastAudioOutputStreamTest : public ::testing::Test {
   CastAudioOutputStreamTest()
       : audio_thread_("CastAudioThread"),
         scoped_task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME),
+            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME),
         format_(::media::AudioParameters::AUDIO_PCM_LINEAR),
         channel_layout_(::media::CHANNEL_LAYOUT_MONO),
         sample_rate_(::media::AudioParameters::kAudioCDSampleRate),
@@ -369,6 +369,7 @@ TEST_F(CastAudioOutputStreamTest, CloseWithoutStop) {
   RunThreadsUntilIdle();
 
   stream->Close();
+  RunThreadsUntilIdle();
 }
 
 TEST_F(CastAudioOutputStreamTest, CloseCancelsOpen) {
@@ -556,7 +557,7 @@ TEST_F(CastAudioOutputStreamTest, Format) {
     const AudioConfig& audio_config = audio_decoder->config();
     EXPECT_EQ(kCodecPCM, audio_config.codec);
     EXPECT_EQ(kSampleFormatS16, audio_config.sample_format);
-    EXPECT_FALSE(audio_config.encryption_scheme.is_encrypted());
+    EXPECT_EQ(audio_config.encryption_scheme, EncryptionScheme::kUnencrypted);
 
     stream->Close();
   }
@@ -616,6 +617,10 @@ TEST_F(CastAudioOutputStreamTest, DeviceState) {
   EXPECT_EQ(FakeCmaBackend::kStateRunning, cma_backend_->state());
 
   stream->Stop();
+  RunThreadsUntilIdle();
+  EXPECT_EQ(FakeCmaBackend::kStatePaused, cma_backend_->state());
+
+  stream->Flush();
   RunThreadsUntilIdle();
   EXPECT_EQ(FakeCmaBackend::kStateStopped, cma_backend_->state());
 

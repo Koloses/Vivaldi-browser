@@ -32,7 +32,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/common/webui_url_constants.h"
 #endif
 
 #if defined(OS_WIN)
@@ -146,10 +147,6 @@ void LaunchDateAndTimeSettingsImpl() {
 }
 #endif
 
-bool AreCommittedInterstitialsEnabled() {
-  return base::FeatureList::IsEnabled(features::kSSLCommittedInterstitials);
-}
-
 }  // namespace
 
 SSLErrorControllerClient::SSLErrorControllerClient(
@@ -176,11 +173,6 @@ SSLErrorControllerClient::SSLErrorControllerClient(
 SSLErrorControllerClient::~SSLErrorControllerClient() {}
 
 void SSLErrorControllerClient::GoBack() {
-  if (!AreCommittedInterstitialsEnabled()) {
-    SecurityInterstitialControllerClient::GoBack();
-    return;
-  }
-
   SecurityInterstitialControllerClient::GoBackAfterNavigationCommitted();
 }
 
@@ -196,17 +188,9 @@ void SSLErrorControllerClient::Proceed() {
   // certificate. So, when users click proceed on an interstitial, move the tab
   // to a regular Chrome window and proceed as usual there.
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
-  if (browser &&
-      extensions::HostedAppBrowserController::IsForExperimentalHostedAppBrowser(
-          browser)) {
+  if (web_app::AppBrowserController::IsForWebAppBrowser(browser))
     chrome::OpenInChrome(browser);
-  }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
-
-  if (!AreCommittedInterstitialsEnabled()) {
-    SecurityInterstitialControllerClient::Proceed();
-    return;
-  }
 
   Profile* profile =
       Profile::FromBrowserContext(web_contents_->GetBrowserContext());
@@ -214,8 +198,7 @@ void SSLErrorControllerClient::Proceed() {
       profile->GetSSLHostStateDelegate());
   // ChromeSSLHostStateDelegate can be null during tests.
   if (state) {
-    state->AllowCert(request_url_.host(), *ssl_info_.cert.get(),
-                     net::MapCertStatusToNetError(ssl_info_.cert_status));
+    state->AllowCert(request_url_.host(), *ssl_info_.cert.get(), cert_error_);
     Reload();
   }
 }
@@ -233,8 +216,8 @@ void SSLErrorControllerClient::LaunchDateAndTimeSettings() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
 #if defined(OS_CHROMEOS)
-  chrome::ShowSettingsSubPageForProfile(ProfileManager::GetActiveUserProfile(),
-                                        chrome::kDateTimeSubPage);
+  chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
+      ProfileManager::GetActiveUserProfile(), chrome::kDateTimeSubPage);
 #else
   base::PostTaskWithTraits(FROM_HERE,
                            {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
@@ -243,7 +226,5 @@ void SSLErrorControllerClient::LaunchDateAndTimeSettings() {
 }
 
 bool SSLErrorControllerClient::HasSeenRecurrentError() {
-  return HasSeenRecurrentErrorInternal(web_contents_, cert_error_) &&
-         base::GetFieldTrialParamByFeatureAsBool(kRecurrentInterstitialFeature,
-                                                 "show_error_ui", true);
+  return HasSeenRecurrentErrorInternal(web_contents_, cert_error_);
 }

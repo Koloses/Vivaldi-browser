@@ -25,7 +25,7 @@
 #include "chrome/browser/media/router/route_message_observer.h"
 #include "chrome/common/media_router/media_route.h"
 #include "chrome/common/media_router/media_sink.h"
-#include "chrome/common/media_router/media_source_helper.h"
+#include "chrome/common/media_router/media_source.h"
 #include "chrome/common/media_router/route_request_result.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/presentation_request.h"
@@ -164,7 +164,7 @@ bool PresentationFrame::SetScreenAvailabilityListener(
 
   MediaRouterMetrics::RecordPresentationUrlType(url);
 
-  MediaSource source = MediaSourceForPresentationUrl(url);
+  MediaSource source = MediaSource::ForPresentationUrl(url);
   auto& sinks_observer = url_to_sinks_observer_[source.id()];
   if (sinks_observer && sinks_observer->listener() == listener)
     return false;
@@ -185,7 +185,7 @@ bool PresentationFrame::SetScreenAvailabilityListener(
 void PresentationFrame::RemoveScreenAvailabilityListener(
     content::PresentationScreenAvailabilityListener* listener) {
   MediaSource source =
-      MediaSourceForPresentationUrl(listener->GetAvailabilityUrl());
+      MediaSource::ForPresentationUrl(listener->GetAvailabilityUrl());
   auto sinks_observer_it = url_to_sinks_observer_.find(source.id());
   if (sinks_observer_it != url_to_sinks_observer_.end() &&
       sinks_observer_it->second->listener() == listener) {
@@ -248,7 +248,7 @@ void PresentationFrame::ConnectToPresentation(
         << "Creating BrowserPresentationConnectionProxy for [presentation_id]: "
         << presentation_info.id;
     MediaRoute::Id route_id = pid_route_it->second.media_route_id();
-    if (base::ContainsKey(browser_connection_proxies_, route_id)) {
+    if (base::Contains(browser_connection_proxies_, route_id)) {
       DLOG(ERROR) << __func__
                   << "Already has a BrowserPresentationConnectionProxy for "
                   << "route: " << route_id;
@@ -362,8 +362,7 @@ PresentationServiceDelegateImpl::PresentationServiceDelegateImpl(
     content::WebContents* web_contents)
     : web_contents_(web_contents),
       router_(MediaRouterFactory::GetApiForBrowserContext(
-          web_contents_->GetBrowserContext())),
-      weak_factory_(this) {
+          web_contents_->GetBrowserContext())) {
   DCHECK(web_contents_);
   DCHECK(router_);
 }
@@ -585,7 +584,7 @@ void PresentationServiceDelegateImpl::ReconnectPresentation(
       return;
     }
 
-    if (!base::ContainsValue(presentation_urls, route->media_source().url())) {
+    if (!base::Contains(presentation_urls, route->media_source().url())) {
       DVLOG(2) << "Presentation URLs do not match URL of current presentation:"
                << route->media_source().url();
       return;
@@ -601,7 +600,7 @@ void PresentationServiceDelegateImpl::ReconnectPresentation(
     const GURL& presentation_url = presentation_urls[0];
     bool incognito = web_contents_->GetBrowserContext()->IsOffTheRecord();
     router_->JoinRoute(
-        MediaSourceForPresentationUrl(presentation_url).id(), presentation_id,
+        MediaSource::ForPresentationUrl(presentation_url).id(), presentation_id,
         request.frame_origin, web_contents_,
         base::BindOnce(&PresentationServiceDelegateImpl::OnJoinRouteResponse,
                        GetWeakPtr(), render_frame_host_id, presentation_url,
@@ -670,9 +669,8 @@ void PresentationServiceDelegateImpl::OnRouteResponse(
     const content::PresentationRequest& presentation_request,
     mojom::RoutePresentationConnectionPtr connection,
     const RouteRequestResult& result) {
-  if (!result.route() ||
-      !base::ContainsValue(presentation_request.presentation_urls,
-                           result.presentation_url())) {
+  if (!result.route() || !base::Contains(presentation_request.presentation_urls,
+                                         result.presentation_url())) {
     return;
   }
 

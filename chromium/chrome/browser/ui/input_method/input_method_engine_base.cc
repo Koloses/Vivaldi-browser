@@ -211,9 +211,7 @@ void InputMethodEngineBase::Enable(const std::string& component_id) {
 void InputMethodEngineBase::Disable() {
   std::string last_component_id{active_component_id_};
   active_component_id_.clear();
-  if (ui::IMEBridge::Get()->GetInputContextHandler())
-    ui::IMEBridge::Get()->GetInputContextHandler()->CommitText(
-        base::UTF16ToUTF8(composition_text_->text));
+  ConfirmCompositionText();
   composition_text_.reset(new ui::CompositionText());
   observer_->OnDeactivated(last_component_id);
 }
@@ -261,10 +259,6 @@ void InputMethodEngineBase::SetCompositionBounds(
     const std::vector<gfx::Rect>& bounds) {
   composition_bounds_ = bounds;
   observer_->OnCompositionBoundsChanged(bounds);
-}
-
-bool InputMethodEngineBase::IsInterestedInKeyEvent() const {
-  return observer_->IsInterestedInKeyEvent();
 }
 
 const std::string& InputMethodEngineBase::GetActiveComponentId() const {
@@ -320,10 +314,7 @@ bool InputMethodEngineBase::DeleteSurroundingText(int context_id,
 
   // TODO(nona): Return false if there is ongoing composition.
 
-  ui::IMEInputContextHandlerInterface* input_context =
-      ui::IMEBridge::Get()->GetInputContextHandler();
-  if (input_context)
-    input_context->DeleteSurroundingText(offset, number_of_chars);
+  DeleteSurroundingTextToInputContext(offset, number_of_chars);
 
   return true;
 }
@@ -412,27 +403,68 @@ bool InputMethodEngineBase::SetComposition(
   return true;
 }
 
+bool InputMethodEngineBase::SetCompositionRange(
+    int context_id,
+    int selection_before,
+    int selection_after,
+    const std::vector<SegmentInfo>& segments,
+    std::string* error) {
+  if (!IsActive()) {
+    *error = kErrorNotActive;
+    return false;
+  }
+  if (context_id != context_id_ || context_id_ == -1) {
+    *error = kErrorWrongContext;
+    return false;
+  }
+
+  // When there is composition text, commit it to the text field first before
+  // changing the composition range.
+  if (!composition_text_->text.empty()) {
+    const std::string composition_text_utf8 =
+        base::UTF16ToUTF8(composition_text_->text);
+    CommitTextToInputContext(context_id, composition_text_utf8);
+  }
+
+  std::vector<ui::ImeTextSpan> text_spans;
+  for (const auto& segment : segments) {
+    ui::ImeTextSpan text_span;
+
+    text_span.underline_color = SK_ColorTRANSPARENT;
+    switch (segment.style) {
+      case SEGMENT_STYLE_UNDERLINE:
+        text_span.thickness = ui::ImeTextSpan::Thickness::kThin;
+        break;
+      case SEGMENT_STYLE_DOUBLE_UNDERLINE:
+        text_span.thickness = ui::ImeTextSpan::Thickness::kThick;
+        break;
+      case SEGMENT_STYLE_NO_UNDERLINE:
+        text_span.thickness = ui::ImeTextSpan::Thickness::kNone;
+        break;
+    }
+
+    text_span.start_offset = segment.start;
+    text_span.end_offset = segment.end;
+    text_spans.push_back(text_span);
+  }
+
+  return SetCompositionRange(selection_before, selection_after, text_spans);
+}
+
 void InputMethodEngineBase::KeyEventHandled(const std::string& extension_id,
                                             const std::string& request_id,
                                             bool handled) {
   handling_key_event_ = false;
   // When finish handling key event, take care of the unprocessed commitText
   // and setComposition calls.
-  ui::IMEInputContextHandlerInterface* input_context =
-      ui::IMEBridge::Get()->GetInputContextHandler();
   if (commit_text_changed_) {
-    if (input_context) {
-      input_context->CommitText(text_);
-    }
+    CommitTextToInputContext(context_id_, text_);
     text_ = "";
     commit_text_changed_ = false;
   }
 
   if (composition_changed_) {
-    if (input_context) {
-      input_context->UpdateCompositionText(
-          composition_, composition_.selection.start(), true);
-    }
+    UpdateComposition(composition_, composition_.selection.start(), true);
     composition_ = ui::CompositionText();
     composition_changed_ = false;
   }

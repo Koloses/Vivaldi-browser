@@ -20,8 +20,6 @@
 #include "base/environment.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/memory/protected_memory.h"
-#include "base/memory/protected_memory_cfi.h"
 #include "base/nix/mime_util_xdg.h"
 #include "base/nix/xdg_util.h"
 #include "base/stl_util.h"
@@ -66,6 +64,7 @@
 #include "ui/gfx/x/x11_types.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/shell_dialogs/select_file_policy.h"
+#include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/linux_ui/device_scale_factor_observer.h"
@@ -100,23 +99,31 @@ const double kDefaultDPI = 96;
 
 class GtkButtonImageSource : public gfx::ImageSkiaSource {
  public:
-  GtkButtonImageSource(const char* idr_string, gfx::Size size)
-      : width_(size.width()), height_(size.height()) {
-    is_blue_ = !!strstr(idr_string, "IDR_BLUE");
-    focus_ = !!strstr(idr_string, "_FOCUSED_");
-
-    if (strstr(idr_string, "_DISABLED")) {
-      state_ = ui::NativeTheme::kDisabled;
-    } else if (strstr(idr_string, "_HOVER")) {
-      state_ = ui::NativeTheme::kHovered;
-    } else if (strstr(idr_string, "_PRESSED")) {
-      state_ = ui::NativeTheme::kPressed;
-    } else {
-      state_ = ui::NativeTheme::kNormal;
+  GtkButtonImageSource(bool focus,
+                       views::Button::ButtonState button_state,
+                       gfx::Size size)
+      : focus_(focus), width_(size.width()), height_(size.height()) {
+    switch (button_state) {
+      case views::Button::ButtonState::STATE_NORMAL:
+        state_ = ui::NativeTheme::kNormal;
+        break;
+      case views::Button::ButtonState::STATE_HOVERED:
+        state_ = ui::NativeTheme::kHovered;
+        break;
+      case views::Button::ButtonState::STATE_PRESSED:
+        state_ = ui::NativeTheme::kPressed;
+        break;
+      case views::Button::ButtonState::STATE_DISABLED:
+        state_ = ui::NativeTheme::kDisabled;
+        break;
+      case views::Button::ButtonState::STATE_COUNT:
+        NOTREACHED();
+        state_ = ui::NativeTheme::kNormal;
+        break;
     }
   }
 
-  ~GtkButtonImageSource() override {}
+  ~GtkButtonImageSource() override = default;
 
   gfx::ImageSkiaRep GetImageForScale(float scale) override {
     int width = width_ * scale;
@@ -131,9 +138,7 @@ class GtkButtonImageSource : public gfx::ImageSkiaSource {
         width, height, width * 4);
     cairo_t* cr = cairo_create(surface);
 
-    ScopedStyleContext context = GetStyleContextFromCss(
-        is_blue_ ? "GtkButton#button.default.suggested-action"
-                 : "GtkButton#button");
+    ScopedStyleContext context = GetStyleContextFromCss("GtkButton#button");
     GtkStateFlags state_flags = StateToStateFlags(state_);
     if (focus_) {
       state_flags =
@@ -186,7 +191,6 @@ class GtkButtonImageSource : public gfx::ImageSkiaSource {
   }
 
  private:
-  bool is_blue_;
   bool focus_;
   ui::NativeTheme::State state_;
   int width_;
@@ -197,18 +201,20 @@ class GtkButtonImageSource : public gfx::ImageSkiaSource {
 
 class GtkButtonPainter : public views::Painter {
  public:
-  explicit GtkButtonPainter(std::string idr) : idr_(idr) {}
-  ~GtkButtonPainter() override {}
+  GtkButtonPainter(bool focus, views::Button::ButtonState button_state)
+      : focus_(focus), button_state_(button_state) {}
+  ~GtkButtonPainter() override = default;
 
   gfx::Size GetMinimumSize() const override { return gfx::Size(); }
   void Paint(gfx::Canvas* canvas, const gfx::Size& size) override {
     gfx::ImageSkia image(
-        std::make_unique<GtkButtonImageSource>(idr_.c_str(), size), 1);
+        std::make_unique<GtkButtonImageSource>(focus_, button_state_, size), 1);
     canvas->DrawImageInt(image, 0, 0);
   }
 
  private:
-  std::string idr_;
+  const bool focus_;
+  const views::Button::ButtonState button_state_;
 
   DISALLOW_COPY_AND_ASSIGN(GtkButtonPainter);
 };
@@ -236,12 +242,6 @@ int indicators_count;
 
 // The unknown content type.
 const char kUnknownContentType[] = "application/octet-stream";
-
-using GdkSetAllowedBackendsFn = void (*)(const gchar*);
-// Place this function pointer in read-only memory after being resolved to
-// prevent it being tampered with. See https://crbug.com/771365 for details.
-PROTECTED_MEMORY_SECTION base::ProtectedMemory<GdkSetAllowedBackendsFn>
-    g_gdk_set_allowed_backends;
 
 std::unique_ptr<SettingsProvider> CreateSettingsProvider(GtkUi* gtk_ui) {
   if (GtkVersionCheck(3, 14))
@@ -302,9 +302,9 @@ gfx::FontRenderParams GetGtkFontRenderParams() {
   return params;
 }
 
-views::LinuxUI::NonClientWindowFrameAction GetDefaultMiddleClickAction() {
+views::LinuxUI::WindowFrameAction GetDefaultMiddleClickAction() {
   if (GtkVersionCheck(3, 14))
-    return views::LinuxUI::WINDOW_FRAME_ACTION_NONE;
+    return views::LinuxUI::WindowFrameAction::kNone;
   std::unique_ptr<base::Environment> env(base::Environment::Create());
   switch (base::nix::GetDesktopEnvironment(env.get())) {
     case base::nix::DESKTOP_ENVIRONMENT_KDE4:
@@ -313,33 +313,28 @@ views::LinuxUI::NonClientWindowFrameAction GetDefaultMiddleClickAction() {
       // middle mouse button to create tab groups. We don't support that in
       // Chrome, but at least avoid lowering windows in response to middle
       // clicks to avoid surprising users who expect the KDE behavior.
-      return views::LinuxUI::WINDOW_FRAME_ACTION_NONE;
+      return views::LinuxUI::WindowFrameAction::kNone;
     default:
-      return views::LinuxUI::WINDOW_FRAME_ACTION_LOWER;
+      return views::LinuxUI::WindowFrameAction::kLower;
   }
 }
 
 }  // namespace
 
 GtkUi::GtkUi() {
-  window_frame_actions_[WINDOW_FRAME_ACTION_SOURCE_DOUBLE_CLICK] =
-      views::LinuxUI::WINDOW_FRAME_ACTION_TOGGLE_MAXIMIZE;
-  window_frame_actions_[WINDOW_FRAME_ACTION_SOURCE_MIDDLE_CLICK] =
-      GetDefaultMiddleClickAction();
-  window_frame_actions_[WINDOW_FRAME_ACTION_SOURCE_RIGHT_CLICK] =
-      views::LinuxUI::WINDOW_FRAME_ACTION_MENU;
+  using Action = views::LinuxUI::WindowFrameAction;
+  using ActionSource = views::LinuxUI::WindowFrameActionSource;
+  window_frame_actions_ = {
+      {ActionSource::kDoubleClick, Action::kToggleMaximize},
+      {ActionSource::kMiddleClick, GetDefaultMiddleClickAction()},
+      {ActionSource::kRightClick, Action::kMenu}};
+
   // Force Gtk to use Xwayland if it would have used wayland.  libgtkui assumes
   // the use of X11 (eg. X11InputMethodContextImplGtk) and will crash under
   // other backends.
   // TODO(thomasanderson): Change this logic once Wayland support is added.
-  static base::ProtectedMemory<GdkSetAllowedBackendsFn>::Initializer init(
-      &g_gdk_set_allowed_backends,
-      reinterpret_cast<void (*)(const gchar*)>(
-          dlsym(GetGdkSharedLibrary(), "gdk_set_allowed_backends")));
-  if (GtkVersionCheck(3, 10))
-    DCHECK(*g_gdk_set_allowed_backends);
-  if (*g_gdk_set_allowed_backends)
-    base::UnsanitizedCfiCall(g_gdk_set_allowed_backends)("x11");
+  gdk_set_allowed_backends("x11");
+
   // Avoid GTK initializing atk-bridge, and let AuraLinux implementation
   // do it once it is ready.
   std::unique_ptr<base::Environment> env(base::Environment::Create());
@@ -354,18 +349,14 @@ GtkUi::~GtkUi() {
   gtk_widget_destroy(fake_window_);
 }
 
-void OnThemeChanged(GObject* obj, GParamSpec* param, GtkUi* gtkui) {
-  gtkui->ResetStyle();
-}
-
 void GtkUi::Initialize() {
   GtkSettings* settings = gtk_settings_get_default();
   g_signal_connect_after(settings, "notify::gtk-theme-name",
-                         G_CALLBACK(OnThemeChanged), this);
+                         G_CALLBACK(OnThemeChangedThunk), this);
   g_signal_connect_after(settings, "notify::gtk-icon-theme-name",
-                         G_CALLBACK(OnThemeChanged), this);
+                         G_CALLBACK(OnThemeChangedThunk), this);
   g_signal_connect_after(settings, "notify::gtk-application-prefer-dark-theme",
-                         G_CALLBACK(OnThemeChanged), this);
+                         G_CALLBACK(OnThemeChangedThunk), this);
 
   GdkScreen* screen = gdk_screen_get_default();
   // Listen for DPI changes.
@@ -488,8 +479,8 @@ ui::NativeTheme* GtkUi::GetNativeTheme(aura::Window* window) const {
   return native_theme_;
 }
 
-void GtkUi::SetNativeThemeOverride(const NativeThemeGetter& callback) {
-  native_theme_overrider_ = callback;
+void GtkUi::SetNativeThemeOverride(NativeThemeGetter callback) {
+  native_theme_overrider_ = std::move(callback);
 }
 
 bool GtkUi::GetDefaultUsesSystemTheme() const {
@@ -591,48 +582,32 @@ std::unique_ptr<views::Border> GtkUi::CreateNativeBorder(
   if (owning_button->GetNativeTheme() != native_theme_)
     return std::move(border);
 
-  std::unique_ptr<views::LabelButtonAssetBorder> gtk_border(
-      new views::LabelButtonAssetBorder(owning_button->style()));
+  auto gtk_border = std::make_unique<views::LabelButtonAssetBorder>();
 
   gtk_border->set_insets(border->GetInsets());
 
+  constexpr bool kFocus = true;
+
   static struct {
-    const char* idr;
     bool focus;
     views::Button::ButtonState state;
   } const paintstate[] = {
-      {
-          "IDR_BUTTON_NORMAL", false, views::Button::STATE_NORMAL,
-      },
-      {
-          "IDR_BUTTON_HOVER", false, views::Button::STATE_HOVERED,
-      },
-      {
-          "IDR_BUTTON_PRESSED", false, views::Button::STATE_PRESSED,
-      },
-      {
-          "IDR_BUTTON_DISABLED", false, views::Button::STATE_DISABLED,
-      },
-
-      {
-          "IDR_BUTTON_FOCUSED_NORMAL", true, views::Button::STATE_NORMAL,
-      },
-      {
-          "IDR_BUTTON_FOCUSED_HOVER", true, views::Button::STATE_HOVERED,
-      },
-      {
-          "IDR_BUTTON_FOCUSED_PRESSED", true, views::Button::STATE_PRESSED,
-      },
-      {
-          "IDR_BUTTON_DISABLED", true, views::Button::STATE_DISABLED,
-      },
+      { !kFocus, views::Button::STATE_NORMAL, },
+      { !kFocus, views::Button::STATE_HOVERED, },
+      { !kFocus, views::Button::STATE_PRESSED, },
+      { !kFocus, views::Button::STATE_DISABLED, },
+      { kFocus, views::Button::STATE_NORMAL, },
+      { kFocus, views::Button::STATE_HOVERED, },
+      { kFocus, views::Button::STATE_PRESSED, },
+      { kFocus, views::Button::STATE_DISABLED, },
   };
 
   for (unsigned i = 0; i < base::size(paintstate); i++) {
     gtk_border->SetPainter(
         paintstate[i].focus, paintstate[i].state,
         border->PaintsButtonState(paintstate[i].focus, paintstate[i].state)
-            ? std::make_unique<GtkButtonPainter>(paintstate[i].idr)
+            ? std::make_unique<GtkButtonPainter>(paintstate[i].focus,
+                                                 paintstate[i].state)
             : nullptr);
   }
 
@@ -665,9 +640,8 @@ void GtkUi::SetWindowButtonOrdering(
   }
 }
 
-void GtkUi::SetNonClientWindowFrameAction(
-    NonClientWindowFrameActionSourceType source,
-    NonClientWindowFrameAction action) {
+void GtkUi::SetWindowFrameAction(WindowFrameActionSource source,
+                                 WindowFrameAction action) {
   window_frame_actions_[source] = action;
 }
 
@@ -701,8 +675,8 @@ ui::SelectFileDialog* GtkUi::CreateSelectFileDialog(
   return SelectFileDialogImpl::Create(listener, std::move(policy));
 }
 
-views::LinuxUI::NonClientWindowFrameAction GtkUi::GetNonClientWindowFrameAction(
-    NonClientWindowFrameActionSourceType source) {
+views::LinuxUI::WindowFrameAction GtkUi::GetWindowFrameAction(
+    WindowFrameActionSource source) {
   return window_frame_actions_[source];
 }
 
@@ -803,6 +777,15 @@ bool GtkUi::MatchEvent(const ui::Event& event,
   return key_bindings_handler_->MatchEvent(event, commands);
 }
 
+void GtkUi::OnThemeChanged(GtkSettings* settings, GtkParamSpec* param) {
+  colors_.clear();
+  custom_frame_colors_.clear();
+  native_frame_colors_.clear();
+  native_theme_->OnThemeChanged(settings, param);
+  LoadGtkValues();
+  native_theme_->NotifyObservers();
+}
+
 void GtkUi::OnDeviceScaleFactorMaybeChanged(void*, GParamSpec*) {
   UpdateDeviceScaleFactor();
 }
@@ -836,8 +819,6 @@ void GtkUi::UpdateColors() {
   colors_[ThemeProperties::COLOR_TOOLBAR_CONTENT_AREA_SEPARATOR] = tab_border;
   // Separates entries in the downloads bar.
   colors_[ThemeProperties::COLOR_TOOLBAR_VERTICAL_SEPARATOR] = tab_border;
-  // Separates the detached bookmark bar from the NTP.
-  colors_[ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_SEPARATOR] = tab_border;
 
   colors_[ThemeProperties::COLOR_NTP_BACKGROUND] =
       native_theme_->GetSystemColor(
@@ -885,9 +866,8 @@ void GtkUi::UpdateColors() {
   for (bool custom_frame : {false, true}) {
     ColorMap& color_map =
         custom_frame ? custom_frame_colors_ : native_frame_colors_;
-    const std::string header_selector = custom_frame && GtkVersionCheck(3, 10)
-                                            ? "#headerbar.header-bar.titlebar"
-                                            : "GtkMenuBar#menubar";
+    const std::string header_selector =
+        custom_frame ? "#headerbar.header-bar.titlebar" : "GtkMenuBar#menubar";
     const std::string header_selector_inactive = header_selector + ":backdrop";
     const SkColor frame_color =
         SkColorSetA(GetBgColor(header_selector), SK_AlphaOPAQUE);
@@ -910,10 +890,6 @@ void GtkUi::UpdateColors() {
         color_utils::GetResultingPaintColor(GetBgColor(""), frame_color);
 
     color_map[ThemeProperties::COLOR_TOOLBAR] = tab_color;
-    color_map[ThemeProperties::COLOR_CONTROL_BACKGROUND] = tab_color;
-
-    color_map[ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_BACKGROUND] =
-        tab_color;
     color_map[ThemeProperties::COLOR_DOWNLOAD_SHELF] = tab_color;
     color_map[ThemeProperties::COLOR_INFOBAR] = tab_color;
     color_map[ThemeProperties::COLOR_STATUS_BUBBLE] = tab_color;
@@ -926,17 +902,19 @@ void GtkUi::UpdateColors() {
     color_map[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT] =
         background_tab_text_color;
     color_map[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT_INCOGNITO] =
-        color_utils::GetColorWithMinimumContrast(
+        color_utils::BlendForMinContrast(
             color_utils::HSLShift(background_tab_text_color,
                                   kDefaultTintFrameIncognito),
-            frame_color_incognito);
+            frame_color_incognito)
+            .color;
     color_map[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT_INACTIVE] =
         background_tab_text_color_inactive;
     color_map[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT_INCOGNITO_INACTIVE] =
-        color_utils::GetColorWithMinimumContrast(
+        color_utils::BlendForMinContrast(
             color_utils::HSLShift(background_tab_text_color_inactive,
                                   kDefaultTintFrameIncognito),
-            frame_color_incognito_inactive);
+            frame_color_incognito_inactive)
+            .color;
 
     // These colors represent the border drawn around tabs and between
     // the tabstrip and toolbar.
@@ -1038,14 +1016,6 @@ void GtkUi::UpdateDefaultFont() {
 
   gtk_widget_destroy(fake_label);
   g_object_unref(fake_label);
-}
-
-void GtkUi::ResetStyle() {
-  colors_.clear();
-  custom_frame_colors_.clear();
-  native_frame_colors_.clear();
-  LoadGtkValues();
-  native_theme_->NotifyObservers();
 }
 
 float GtkUi::GetRawDeviceScaleFactor() {

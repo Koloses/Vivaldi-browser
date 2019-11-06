@@ -25,7 +25,7 @@
 #include "net/test/cert_test_util.h"
 #include "net/test/ct_test_util.h"
 #include "net/test/test_data_directory.h"
-#include "net/third_party/quic/core/crypto/proof_verifier.h"
+#include "net/third_party/quiche/src/quic/core/crypto/proof_verifier.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -123,8 +123,8 @@ class ProofVerifierChromiumTest : public ::testing::Test {
         .WillRepeatedly(
             Return(ct::CTPolicyCompliance::CT_POLICY_NOT_ENOUGH_SCTS));
 
-    scoped_refptr<const CTLogVerifier> log(CTLogVerifier::Create(
-        ct::GetTestPublicKey(), kLogDescription, "dns.example.com"));
+    scoped_refptr<const CTLogVerifier> log(
+        CTLogVerifier::Create(ct::GetTestPublicKey(), kLogDescription));
     ASSERT_TRUE(log);
     log_verifiers_.push_back(log);
 
@@ -1004,8 +1004,9 @@ TEST_F(ProofVerifierChromiumTest, VerifyCertChain) {
   std::unique_ptr<DummyProofVerifierCallback> callback(
       new DummyProofVerifierCallback);
   quic::QuicAsyncStatus status = proof_verifier.VerifyCertChain(
-      kTestHostname, certs_, verify_context_.get(), &error_details_, &details_,
-      std::move(callback));
+      kTestHostname, certs_, /*ocsp_response=*/std::string(),
+      /*cert_sct=*/std::string(), verify_context_.get(), &error_details_,
+      &details_, std::move(callback));
   ASSERT_EQ(quic::QUIC_SUCCESS, status);
 
   ASSERT_TRUE(details_.get());

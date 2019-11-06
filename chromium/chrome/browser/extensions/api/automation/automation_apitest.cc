@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/path_service.h"
@@ -10,13 +11,11 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "chrome/browser/extensions/api/automation_internal/automation_event_router.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/api/automation_internal.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -26,20 +25,23 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
+#include "extensions/browser/api/automation_internal/automation_event_router.h"
+#include "extensions/common/api/automation_internal.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/accessibility/accessibility_switches.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_serializable_tree.h"
 #include "ui/accessibility/ax_tree.h"
 #include "ui/accessibility/ax_tree_serializer.h"
 #include "ui/accessibility/tree_generator.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/display/display_switches.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/accelerators/accelerator_controller.h"
-#include "ash/shell.h"
+#include "ash/public/cpp/accelerators.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #endif
 
@@ -85,6 +87,16 @@ class AutomationApiTest : public ExtensionApiTest {
   }
 
   base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+// Canvas tests rely on the harness producing pixel output in order to read back
+// pixels from a canvas element. So we have to override the setup function.
+class AutomationApiCanvasTest : public AutomationApiTest {
+ public:
+  void SetUp() override {
+    EnablePixelOutput();
+    ExtensionApiTest::SetUp();
+  }
 };
 
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, TestRendererAccessibilityEnabled) {
@@ -142,7 +154,8 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, ImageLabels) {
   EXPECT_EQ(expected_mode, web_contents->GetAccessibilityMode());
 }
 
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, GetTreeByTabId) {
+// TODO(aboxhall): Fix flakiness
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_GetTreeByTabId) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "tab_id.html"))
       << message_;
@@ -186,7 +199,7 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, LineStartOffsets) {
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, ImageData) {
+IN_PROC_BROWSER_TEST_F(AutomationApiCanvasTest, ImageData) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "image_data.html"))
       << message_;
@@ -261,8 +274,8 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_DesktopHitTestIframe) {
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_DesktopFocusViews) {
   AutomationManagerAura::GetInstance()->Enable();
   // Trigger the shelf subtree to be computed.
-  ash::Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
-      ash::FOCUS_SHELF);
+  ash::AcceleratorController::Get()->PerformActionIfEnabled(ash::FOCUS_SHELF,
+                                                            {});
 
   ASSERT_TRUE(
       RunExtensionSubtest("automation/tests/desktop", "focus_views.html"))
@@ -292,8 +305,8 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopNotRequested) {
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_DesktopActions) {
   AutomationManagerAura::GetInstance()->Enable();
   // Trigger the shelf subtree to be computed.
-  ash::Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
-      ash::FOCUS_SHELF);
+  ash::AcceleratorController::Get()->PerformActionIfEnabled(ash::FOCUS_SHELF,
+                                                            {});
 
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "actions.html"))
       << message_;
@@ -374,6 +387,30 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DocumentSelection) {
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, HitTest) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "hit_test.html"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, WordBoundaries) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(
+      RunExtensionSubtest("automation/tests/tabs", "word_boundaries.html"))
+      << message_;
+}
+
+class AutomationApiTestWithLanguageDetection : public AutomationApiTest {
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    AutomationApiTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(
+        ::switches::kEnableExperimentalAccessibilityLanguageDetection);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTestWithLanguageDetection,
+                       DetectedLanguage) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(
+      RunExtensionSubtest("automation/tests/tabs", "detected_language.html"))
       << message_;
 }
 

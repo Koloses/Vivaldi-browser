@@ -19,7 +19,7 @@
 #include "chrome/browser/content_settings/mixed_content_settings_tab_helper.h"
 #include "chrome/browser/content_settings/sound_content_setting_observer.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/data_use_measurement/data_use_web_contents_observer.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_tab_helper.h"
 #include "chrome/browser/engagement/site_engagement_helper.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/external_protocol/external_protocol_observer.h"
@@ -32,8 +32,8 @@
 #include "chrome/browser/metrics/desktop_session_duration/desktop_session_duration_observer.h"
 #include "chrome/browser/metrics/oom/out_of_memory_reporter.h"
 #include "chrome/browser/metrics/renderer_uptime_web_contents_observer.h"
+#include "chrome/browser/native_file_system/native_file_system_permission_request_manager.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
-#include "chrome/browser/ntp_snippets/bookmark_last_visit_updater.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_initialize.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/performance_manager/performance_manager.h"
@@ -43,6 +43,7 @@
 #include "chrome/browser/predictors/loading_predictor_factory.h"
 #include "chrome/browser/predictors/loading_predictor_tab_helper.h"
 #include "chrome/browser/prerender/prerender_tab_helper.h"
+#include "chrome/browser/previews/previews_lite_page_predictor.h"
 #include "chrome/browser/previews/previews_ui_tab_helper.h"
 #include "chrome/browser/previews/resource_loading_hints/resource_loading_hints_web_contents_observer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -59,7 +60,6 @@
 #include "chrome/browser/tracing/navigation_tracing.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
-#include "chrome/browser/ui/bloated_renderer/bloated_renderer_tab_helper.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #include "chrome/browser/ui/blocked_content/popup_opener_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
@@ -73,6 +73,7 @@
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_dialogs.h"
 #include "chrome/browser/ui/tab_ui_helper.h"
+#include "chrome/browser/ui/thumbnails/thumbnail_tab_helper.h"
 #include "chrome/browser/ui/web_applications/web_app_metrics.h"
 #include "chrome/browser/vr/vr_tab_helper.h"
 #include "chrome/common/buildflags.h"
@@ -109,9 +110,11 @@
 #include "chrome/browser/safe_browsing/safe_browsing_tab_observer.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/hung_plugin_tab_helper.h"
+#include "chrome/browser/ui/intent_picker_tab_helper.h"
 #include "chrome/browser/ui/sad_tab_helper.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/sync/browser_synced_tab_delegate.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "components/pdf/browser/pdf_web_contents_helper.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "components/zoom/zoom_controller.h"
@@ -149,11 +152,8 @@
 #endif
 
 #include "app/vivaldi_apptools.h"
+#include "browser/ui/vivaldi_tab_helpers.h"
 #include "vivaldi/prefs/vivaldi_gen_prefs.h"
-
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "extensions/api/tabs/tabs_private_api.h"
-#endif
 
 using content::WebContents;
 
@@ -208,10 +208,6 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
       enable_autofill_download_manager ?
         autofill::AutofillManager::ENABLE_AUTOFILL_DOWNLOAD_MANAGER :
         autofill::AutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
-  BloatedRendererTabHelper::CreateForWebContents(web_contents);
-  BookmarkLastVisitUpdater::MaybeCreateForWebContentsWithBookmarkModel(
-      web_contents, BookmarkModelFactory::GetForBrowserContext(
-                        web_contents->GetBrowserContext()));
   chrome_browser_net::NetErrorTabHelper::CreateForWebContents(web_contents);
   ChromePasswordManagerClient::CreateForWebContentsWithAutofillClient(
       web_contents,
@@ -226,8 +222,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   ClientHintsObserver::CreateForWebContents(web_contents);
   ConnectionHelpTabHelper::CreateForWebContents(web_contents);
   CoreTabHelper::CreateForWebContents(web_contents);
-  data_use_measurement::DataUseWebContentsObserver::CreateForWebContents(
-      web_contents);
+  DataReductionProxyTabHelper::CreateForWebContents(web_contents);
   ExternalProtocolObserver::CreateForWebContents(web_contents);
   favicon::CreateContentFaviconDriverForWebContents(web_contents);
   FindTabHelper::CreateForWebContents(web_contents);
@@ -236,7 +231,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   download::DownloadNavigationObserver::CreateForWebContents(
       web_contents,
-      download::NavigationMonitorFactory::GetForBrowserContext(profile));
+      download::NavigationMonitorFactory::GetForKey(profile->GetProfileKey()));
   history::WebContentsTopSitesObserver::CreateForWebContents(
       web_contents, TopSitesFactory::GetForProfile(profile).get());
   HistoryTabHelper::CreateForWebContents(web_contents);
@@ -245,6 +240,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   metrics::RendererUptimeWebContentsObserver::CreateForWebContents(
       web_contents);
   MixedContentSettingsTabHelper::CreateForWebContents(web_contents);
+  NativeFileSystemPermissionRequestManager::CreateForWebContents(web_contents);
   NavigationCorrectionTabObserver::CreateForWebContents(web_contents);
   NavigationMetricsRecorder::CreateForWebContents(web_contents);
   OutOfMemoryReporter::CreateForWebContents(web_contents);
@@ -262,6 +258,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
       web_contents, base::DefaultTickClock::GetInstance());
   PrefsTabHelper::CreateForWebContents(web_contents);
   prerender::PrerenderTabHelper::CreateForWebContents(web_contents);
+  PreviewsLitePagePredictor::CreateForWebContents(web_contents);
   PreviewsUITabHelper::CreateForWebContents(web_contents);
   RecentlyAudibleHelper::CreateForWebContents(web_contents);
   ResourceLoadingHintsWebContentsObserver::CreateForWebContents(web_contents);
@@ -307,6 +304,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   SingleTabModeTabHelper::CreateForWebContents(web_contents);
   ViewAndroidHelper::CreateForWebContents(web_contents);
 #else
+  banners::AppBannerManagerDesktop::CreateForWebContents(web_contents);
   BookmarkTabHelper::CreateForWebContents(web_contents);
   BrowserSyncedTabDelegate::CreateForWebContents(web_contents);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
@@ -314,6 +312,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   extensions::WebNavigationTabObserver::CreateForWebContents(web_contents);
   FramebustBlockTabHelper::CreateForWebContents(web_contents);
   HungPluginTabHelper::CreateForWebContents(web_contents);
+  IntentPickerTabHelper::CreateForWebContents(web_contents);
   JavaScriptDialogTabHelper::CreateForWebContents(web_contents);
   ManagePasswordsUIController::CreateForWebContents(web_contents);
   pdf::PDFWebContentsHelper::CreateForWebContentsWithClient(
@@ -323,16 +322,9 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   safe_browsing::SafeBrowsingTabObserver::CreateForWebContents(web_contents);
   SearchTabHelper::CreateForWebContents(web_contents);
   TabDialogs::CreateForWebContents(web_contents);
+  if (base::FeatureList::IsEnabled(features::kTabHoverCardImages))
+    ThumbnailTabHelper::CreateForWebContents(web_contents);
   web_modal::WebContentsModalDialogManager::CreateForWebContents(web_contents);
-
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  if (vivaldi::IsVivaldiRunning()) {
-    extensions::VivaldiPrivateTabObserver::CreateForWebContents(web_contents);
-  }
-#endif
-
-  if (banners::AppBannerManagerDesktop::IsEnabled())
-    banners::AppBannerManagerDesktop::CreateForWebContents(web_contents);
 #endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || \
@@ -347,12 +339,12 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   }
 #endif
 
-// --- Feature tab helpers behind flags ---
+  // --- Feature tab helpers behind flags ---
 
 #if BUILDFLAG(ENABLE_OFFLINE_PAGES)
-offline_pages::OfflinePageTabHelper::CreateForWebContents(web_contents);
-offline_pages::RecentTabHelper::CreateForWebContents(web_contents);
-offline_pages::AutoFetchPageLoadWatcher::CreateForWebContents(web_contents);
+  offline_pages::OfflinePageTabHelper::CreateForWebContents(web_contents);
+  offline_pages::RecentTabHelper::CreateForWebContents(web_contents);
+  offline_pages::AutoFetchPageLoadWatcher::CreateForWebContents(web_contents);
 #endif
 
 #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
@@ -399,4 +391,6 @@ offline_pages::AutoFetchPageLoadWatcher::CreateForWebContents(web_contents);
   //     See https://crbug.com/910288.
   resource_coordinator::ResourceCoordinatorTabHelper::CreateForWebContents(
       web_contents);
+
+  vivaldi::VivaldiAttachTabHelpers(web_contents);
 }

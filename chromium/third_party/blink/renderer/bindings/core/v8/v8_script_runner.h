@@ -28,7 +28,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/sanitize_script_errors.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "v8/include/v8.h"
 
@@ -81,6 +81,7 @@ class CORE_EXPORT V8ScriptRunner final {
       v8::Local<v8::Value> argv[] = nullptr);
   static v8::MaybeLocal<v8::Value> CallInternalFunction(
       v8::Isolate*,
+      v8::MicrotaskQueue*,
       v8::Local<v8::Function>,
       v8::Local<v8::Value> receiver,
       int argc,
@@ -92,10 +93,11 @@ class CORE_EXPORT V8ScriptRunner final {
                                                 v8::Local<v8::Value> info[],
                                                 v8::Isolate*);
   static v8::MaybeLocal<v8::Value> EvaluateModule(v8::Isolate*,
+                                                  ExecutionContext*,
                                                   v8::Local<v8::Module>,
                                                   v8::Local<v8::Context>);
 
-  // Only to be used from ScriptModule::ReportException().
+  // Only to be used from ModuleRecord::ReportException().
   static void ReportExceptionForModule(v8::Isolate*,
                                        v8::Local<v8::Value> exception,
                                        const String& file_name,

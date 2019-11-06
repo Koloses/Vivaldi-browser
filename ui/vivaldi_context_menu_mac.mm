@@ -59,30 +59,33 @@ VivaldiContextMenu* CreateVivaldiContextMenu(
   return new VivaldiContextMenuMac(web_contents, menu_model, params);
 }
 
+void ConvertContainerRectToScreen(
+    content::WebContents* web_contents,
+    vivaldi::BookmarkMenuContainer& container) {
+
+views::Widget* widget = views::Widget::GetTopLevelWidgetForNativeView(
+      VivaldiBookmarkMenuViews::GetActiveNativeViewFromWebContents(
+          web_contents));
+  gfx::Point screen_loc;
+  views::View::ConvertPointToScreen(widget->GetContentsView(), &screen_loc);
+  // Adjust for the button positions within content area.
+  for (::vivaldi::BookmarkMenuContainerEntry& e: container.siblings) {
+    gfx::Point point(e.rect.origin());
+    point.Offset(screen_loc.x(), screen_loc.y());
+    e.rect.set_origin(point);
+  }
+}
+
 VivaldiBookmarkMenu* CreateVivaldiBookmarkMenu(
     content::WebContents* web_contents,
-    const vivaldi::BookmarkMenuParams& params,
+    const BookmarkMenuContainer* container,
+    const bookmarks::BookmarkNode* node,
+    int offset,
     const gfx::Rect& button_rect) {
-  // Transform coordinate from local to screen. Since Mac uses a lower-left
-  // origin and chrome does not we must adjust for this before and after,
-  NSView* view = web_contents->GetNativeView().GetNativeNSView();
-  NSWindow* window = [view window];
-  // Adjust position to lower left in view
-  NSPoint position = NSMakePoint(button_rect.x(),
-                                 NSHeight([view bounds]) - button_rect.y());
-  // Position in window
-  position = [view convertPoint:position toView:nil];
-  // Position in screen
-  NSRect screen_rect = [window convertRectToScreen:
-      NSMakeRect(position.x, position.y, 0, 0)];
-  // Adjust to upper left in screen
-  gfx::Rect rect(screen_rect.origin.x,
-                 window.screen.frame.size.height - screen_rect.origin.y,
-                 button_rect.width(),
-                 button_rect.height());
-
-  return new VivaldiBookmarkMenuViews(web_contents, params, rect);
+  return new VivaldiBookmarkMenuViews(web_contents, container, node, offset,
+                                      button_rect);
 }
+
 }  // vivialdi
 
 VivaldiContextMenuMac::VivaldiContextMenuMac(

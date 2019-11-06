@@ -16,7 +16,7 @@ suite('manager tests', function() {
     PolymerTest.clearBody();
 
     testBrowserProxy = new TestDownloadsProxy();
-    pageRouterProxy = testBrowserProxy.pageRouterProxy;
+    callbackRouterRemote = testBrowserProxy.callbackRouterRemote;
     downloads.BrowserProxy.instance_ = testBrowserProxy;
 
     manager = document.createElement('downloads-manager');
@@ -24,104 +24,143 @@ suite('manager tests', function() {
     assertEquals(manager, downloads.Manager.get());
   });
 
-  test('long URLs elide', function() {
-    pageRouterProxy.insertItems(0, [createDownload({
-                                  fileName: 'file name',
-                                  state: downloads.States.COMPLETE,
-                                  sinceString: 'Today',
-                                  url: 'a'.repeat(1000),
-                                })]);
-    return pageRouterProxy.$.flushForTesting().then(() => {
-      Polymer.dom.flush();
+  test('long URLs elide', async () => {
+    callbackRouterRemote.insertItems(0, [createDownload({
+                                       fileName: 'file name',
+                                       state: downloads.States.COMPLETE,
+                                       sinceString: 'Today',
+                                       url: 'a'.repeat(1000),
+                                     })]);
+    await callbackRouterRemote.$.flushForTesting();
+    Polymer.dom.flush();
 
-      const item = manager.$$('downloads-item');
-      assertLT(item.$$('#url').offsetWidth, item.offsetWidth);
-      assertEquals(300, item.$$('#url').textContent.length);
-    });
+    const item = manager.$$('downloads-item');
+    assertLT(item.$$('#url').offsetWidth, item.offsetWidth);
+    assertEquals(300, item.$$('#url').textContent.length);
   });
 
-  test('inserting items at beginning render dates correctly', function() {
+  test('inserting items at beginning render dates correctly', async () => {
     const countDates = () => {
       const items = manager.shadowRoot.querySelectorAll('downloads-item');
       return Array.from(items).reduce((soFar, item) => {
-        return item.$$('h3[id=date]:not(:empty)') ? soFar + 1 : soFar;
+        return item.$$('div[id=date]:not(:empty)') ? soFar + 1 : soFar;
       }, 0);
     };
 
-    let download1 = createDownload();
-    let download2 = createDownload();
+    const download1 = createDownload();
+    const download2 = createDownload();
 
-    pageRouterProxy.insertItems(0, [download1, download2]);
-    return pageRouterProxy.$.flushForTesting()
-        .then(() => {
-          Polymer.dom.flush();
-          assertEquals(1, countDates());
+    callbackRouterRemote.insertItems(0, [download1, download2]);
+    await callbackRouterRemote.$.flushForTesting();
+    Polymer.dom.flush();
+    assertEquals(1, countDates());
 
-          pageRouterProxy.removeItem(0);
-          return pageRouterProxy.$.flushForTesting();
-        })
-        .then(() => {
-          Polymer.dom.flush();
-          assertEquals(1, countDates());
+    callbackRouterRemote.removeItem(0);
+    await callbackRouterRemote.$.flushForTesting();
+    Polymer.dom.flush();
+    assertEquals(1, countDates());
 
-          pageRouterProxy.insertItems(0, [download1]);
-          return pageRouterProxy.$.flushForTesting();
-        })
-        .then(() => {
-          Polymer.dom.flush();
-          assertEquals(1, countDates());
-        });
+    callbackRouterRemote.insertItems(0, [download1]);
+    await callbackRouterRemote.$.flushForTesting();
+    Polymer.dom.flush();
+    assertEquals(1, countDates());
   });
 
-  test('update', function() {
-    let dangerousDownload = createDownload({
+  test('update', async () => {
+    const dangerousDownload = createDownload({
       dangerType: downloads.DangerType.DANGEROUS_FILE,
       state: downloads.States.DANGEROUS,
     });
-    pageRouterProxy.insertItems(0, [dangerousDownload]);
-    return pageRouterProxy.$.flushForTesting()
-        .then(() => {
-          Polymer.dom.flush();
-          assertTrue(!!manager.$$('downloads-item').$$('.dangerous'));
+    callbackRouterRemote.insertItems(0, [dangerousDownload]);
+    await callbackRouterRemote.$.flushForTesting();
+    Polymer.dom.flush();
+    assertTrue(!!manager.$$('downloads-item').$$('.dangerous'));
 
-          let safeDownload = Object.assign({}, dangerousDownload, {
-            dangerType: downloads.DangerType.NOT_DANGEROUS,
-            state: downloads.States.COMPLETE,
-          });
-          pageRouterProxy.updateItem(0, safeDownload);
-          return pageRouterProxy.$.flushForTesting();
-        })
-        .then(() => {
-          Polymer.dom.flush();
-          assertFalse(!!manager.$$('downloads-item').$$('.dangerous'));
-        });
+    const safeDownload = Object.assign({}, dangerousDownload, {
+      dangerType: downloads.DangerType.NOT_DANGEROUS,
+      state: downloads.States.COMPLETE,
+    });
+    callbackRouterRemote.updateItem(0, safeDownload);
+    await callbackRouterRemote.$.flushForTesting();
+    Polymer.dom.flush();
+    assertFalse(!!manager.$$('downloads-item').$$('.dangerous'));
   });
 
-  test('remove', () => {
-    pageRouterProxy.insertItems(0, [createDownload({
-                                  fileName: 'file name',
-                                  state: downloads.States.COMPLETE,
-                                  sinceString: 'Today',
-                                  url: 'a'.repeat(1000),
-                                })]);
-    return pageRouterProxy.$.flushForTesting()
-        .then(() => {
-          Polymer.dom.flush();
-          const item = manager.$$('downloads-item');
+  test('remove', async () => {
+    callbackRouterRemote.insertItems(0, [createDownload({
+                                       fileName: 'file name',
+                                       state: downloads.States.COMPLETE,
+                                       sinceString: 'Today',
+                                       url: 'a'.repeat(1000),
+                                     })]);
+    await callbackRouterRemote.$.flushForTesting();
+    Polymer.dom.flush();
+    const item = manager.$$('downloads-item');
 
-          item.$.remove.click();
-          return testBrowserProxy.handler.whenCalled('remove');
-        })
-        .then(() => {
-          Polymer.dom.flush();
-          const list = manager.$$('iron-list');
-          assertTrue(list.hidden);
-        });
+    item.$.remove.click();
+    await testBrowserProxy.handler.whenCalled('remove');
+    Polymer.dom.flush();
+    const list = manager.$$('iron-list');
+    assertTrue(list.hidden);
+  });
+
+  test('toolbar hasClearableDownloads set correctly', async () => {
+    const clearable = createDownload();
+    callbackRouterRemote.insertItems(0, [clearable]);
+    const checkNotClearable = async state => {
+      const download = createDownload({state: state});
+      callbackRouterRemote.updateItem(0, clearable);
+      await callbackRouterRemote.$.flushForTesting();
+      assertTrue(manager.$.toolbar.hasClearableDownloads);
+      callbackRouterRemote.updateItem(0, download);
+      await callbackRouterRemote.$.flushForTesting();
+      assertFalse(manager.$.toolbar.hasClearableDownloads);
+    };
+    await checkNotClearable(downloads.States.DANGEROUS);
+    await checkNotClearable(downloads.States.IN_PROGRESS);
+    await checkNotClearable(downloads.States.PAUSED);
+
+    callbackRouterRemote.updateItem(0, clearable);
+    callbackRouterRemote.insertItems(
+        1, [createDownload({state: downloads.States.DANGEROUS})]);
+    await callbackRouterRemote.$.flushForTesting();
+    assertTrue(manager.$.toolbar.hasClearableDownloads);
+    callbackRouterRemote.removeItem(0);
+    await callbackRouterRemote.$.flushForTesting();
+    assertFalse(manager.$.toolbar.hasClearableDownloads);
   });
 
   test('loadTimeData contains isManaged and managedByOrg', function() {
     // Check that loadTimeData contains these values.
     loadTimeData.getBoolean('isManaged');
     loadTimeData.getString('managedByOrg');
+  });
+
+  test('toast is shown when clear-all-command is fired', () => {
+    const toastManager = cr.toastManager.getInstance();
+    assertFalse(toastManager.isToastOpen);
+    const event = new Event('command', {bubbles: true});
+    event.command = {id: 'clear-all-command'};
+    manager.dispatchEvent(event);
+    assertTrue(toastManager.isToastOpen);
+    assertFalse(toastManager.isUndoButtonHidden);
+  });
+
+  test('toast is hidden when undo-command is fired', () => {
+    const toastManager = cr.toastManager.getInstance();
+    toastManager.show('');
+    const event = new Event('command', {bubbles: true});
+    event.command = {id: 'undo-command'};
+    assertTrue(toastManager.isToastOpen);
+    manager.dispatchEvent(event);
+    assertFalse(toastManager.isToastOpen);
+  });
+
+  test('toast is hidden when undo is clicked', () => {
+    const toastManager = cr.toastManager.getInstance();
+    toastManager.show('');
+    assertTrue(toastManager.isToastOpen);
+    toastManager.dispatchEvent(new Event('undo-click'));
+    assertFalse(toastManager.isToastOpen);
   });
 });

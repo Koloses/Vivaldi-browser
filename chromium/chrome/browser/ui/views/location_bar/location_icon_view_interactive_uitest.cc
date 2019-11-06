@@ -7,11 +7,12 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/browser/ui/views/page_action/page_action_icon_container_view.h"
+#include "chrome/browser/ui/views/page_action/omnibox_page_action_icon_container_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
+#include "content/public/test/test_utils.h"
 
 namespace {
 
@@ -42,10 +43,8 @@ IN_PROC_BROWSER_TEST_F(LocationIconViewTest, MAYBE_HideOnSecondClick) {
   scoped_refptr<content::MessageLoopRunner> runner1 =
       new content::MessageLoopRunner;
   ui_test_utils::MoveMouseToCenterAndPress(
-      location_icon_view,
-      ui_controls::LEFT,
-      ui_controls::DOWN | ui_controls::UP,
-      runner1->QuitClosure());
+      location_icon_view, ui_controls::LEFT,
+      ui_controls::DOWN | ui_controls::UP, runner1->QuitClosure());
   runner1->Run();
 
   EXPECT_EQ(PageInfoBubbleView::BUBBLE_PAGE_INFO,
@@ -55,10 +54,8 @@ IN_PROC_BROWSER_TEST_F(LocationIconViewTest, MAYBE_HideOnSecondClick) {
   scoped_refptr<content::MessageLoopRunner> runner2 =
       new content::MessageLoopRunner;
   ui_test_utils::MoveMouseToCenterAndPress(
-      location_icon_view,
-      ui_controls::LEFT,
-      ui_controls::DOWN | ui_controls::UP,
-      runner2->QuitClosure());
+      location_icon_view, ui_controls::LEFT,
+      ui_controls::DOWN | ui_controls::UP, runner2->QuitClosure());
   runner2->Run();
 
   EXPECT_EQ(PageInfoBubbleView::BUBBLE_NONE,
@@ -89,10 +86,10 @@ IN_PROC_BROWSER_TEST_F(LocationIconViewTest,
 
   PageActionIconView* icon_view =
       browser_view->toolbar_button_provider()
-          ->GetPageActionIconContainerView()
+          ->GetOmniboxPageActionIconContainerView()
           ->GetPageActionIconView(PageActionIconType::kTranslate);
   ASSERT_TRUE(icon_view);
-  EXPECT_TRUE(icon_view->visible());
+  EXPECT_TRUE(icon_view->GetVisible());
 
   // Ensure the bubble's widget is visible, but inactive. Active widgets are
   // focused by accessibility, so not of concern.
@@ -105,7 +102,7 @@ IN_PROC_BROWSER_TEST_F(LocationIconViewTest,
   EXPECT_TRUE(location_bar_view->ActivateFirstInactiveBubbleForAccessibility());
 
   // Ensure the bubble's widget refreshed appropriately.
-  EXPECT_TRUE(icon_view->visible());
+  EXPECT_TRUE(icon_view->GetVisible());
   EXPECT_TRUE(widget->IsVisible());
   EXPECT_TRUE(widget->IsActive());
 }

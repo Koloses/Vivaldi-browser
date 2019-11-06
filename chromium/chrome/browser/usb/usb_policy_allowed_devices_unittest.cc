@@ -8,52 +8,83 @@
 #include <utility>
 
 #include "base/json/json_reader.h"
+#include "chrome/browser/policy/webusb_allow_devices_for_urls_policy_handler.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "components/prefs/testing_pref_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
-#include "device/usb/public/cpp/fake_usb_device_manager.h"
-#include "device/usb/public/mojom/device.mojom.h"
+#include "services/device/public/cpp/test/fake_usb_device_manager.h"
+#include "services/device/public/mojom/usb_device.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace {
 
-class UsbPolicyAllowedDevicesTest : public testing::Test {
- public:
-  UsbPolicyAllowedDevicesTest() {}
-  ~UsbPolicyAllowedDevicesTest() override {}
+// For ChromeOS this test is parameterized to test user and device policy. For
+// other operating systems, this test just tests the user policy.
+enum class PolicyType { kUser, kDevice };
 
-  void SetWebUsbAllowDevicesForUrlsPrefValue(const base::Value& value) {
-    profile_.GetPrefs()->Set(prefs::kManagedWebUsbAllowDevicesForUrls, value);
+class UsbPolicyAllowedDevicesTestBase
+    : public testing::Test,
+      public testing::WithParamInterface<PolicyType> {
+ public:
+  UsbPolicyAllowedDevicesTestBase() {
+#if defined(OS_CHROMEOS)
+    policy::WebUsbAllowDevicesForUrlsPolicyHandler::RegisterPrefs(
+        local_state()->registry());
+#endif  // defined(OS_CHROMEOS)
+  }
+
+  TestingPrefServiceSimple* local_state() { return &local_state_; }
+
+  std::unique_ptr<UsbPolicyAllowedDevices> Create() {
+    return std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs(),
+                                                     local_state());
   }
 
  protected:
   Profile* profile() { return &profile_; }
 
+  content::TestBrowserThreadBundle thread_bundle_;
+
   device::FakeUsbDeviceManager device_manager_;
 
- private:
-  content::TestBrowserThreadBundle thread_bundle_;
   TestingProfile profile_;
+  TestingPrefServiceSimple local_state_;
+
+  DISALLOW_COPY_AND_ASSIGN(UsbPolicyAllowedDevicesTestBase);
+};
+
+class UsbPolicyAllowedDevicesTest : public UsbPolicyAllowedDevicesTestBase {
+ public:
+  virtual void SetWebUsbAllowDevicesForUrlsPrefValue(const base::Value& value) {
+#if defined(OS_CHROMEOS)
+    if (GetParam() == PolicyType::kDevice) {
+      local_state_.Set(prefs::kDeviceWebUsbAllowDevicesForUrls, value);
+      return;
+    }
+#endif  // defined(OS_CHROMEOS)
+    profile_.GetPrefs()->Set(prefs::kManagedWebUsbAllowDevicesForUrls, value);
+  }
 };
 
 }  // namespace
 
-TEST_F(UsbPolicyAllowedDevicesTest, InitializeWithMissingPrefValue) {
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+TEST_P(UsbPolicyAllowedDevicesTest, InitializeWithMissingPrefValue) {
+  auto usb_policy_allowed_devices = Create();
 
   EXPECT_TRUE(usb_policy_allowed_devices->map().empty());
 }
 
-TEST_F(UsbPolicyAllowedDevicesTest, InitializeWithExistingEmptyPrefValue) {
+TEST_P(UsbPolicyAllowedDevicesTest, InitializeWithExistingEmptyPrefValue) {
   base::Value pref_value(base::Value::Type::LIST);
 
   SetWebUsbAllowDevicesForUrlsPrefValue(pref_value);
 
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+  auto usb_policy_allowed_devices = Create();
 
   EXPECT_TRUE(usb_policy_allowed_devices->map().empty());
 }
@@ -77,59 +108,60 @@ constexpr char kPolicySetting[] = R"(
       }
     ])";
 
-std::pair<GURL, GURL> MakeGURLPair(std::string requesting_url) {
-  return std::make_pair(GURL(requesting_url), GURL::EmptyGURL());
+std::pair<url::Origin, base::Optional<url::Origin>> MakeOriginPair(
+    std::string requesting_url) {
+  return std::make_pair(url::Origin::Create(GURL(requesting_url)),
+                        base::nullopt);
 }
 
-std::pair<GURL, GURL> MakeGURLPair(std::string requesting_url,
-                                   std::string embedding_url) {
-  return std::make_pair(GURL(requesting_url), GURL(embedding_url));
+std::pair<url::Origin, base::Optional<url::Origin>> MakeOriginPair(
+    std::string requesting_url,
+    std::string embedding_url) {
+  return std::make_pair(url::Origin::Create(GURL(requesting_url)),
+                        url::Origin::Create(GURL(embedding_url)));
 }
 
 }  // namespace
 
-TEST_F(UsbPolicyAllowedDevicesTest, InitializeWithExistingPrefValue) {
+TEST_P(UsbPolicyAllowedDevicesTest, InitializeWithExistingPrefValue) {
   std::unique_ptr<base::Value> pref_value =
       base::JSONReader::ReadDeprecated(kPolicySetting);
 
   SetWebUsbAllowDevicesForUrlsPrefValue(*pref_value);
 
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+  auto usb_policy_allowed_devices = Create();
 
   const UsbPolicyAllowedDevices::UsbDeviceIdsToUrlsMap& map =
       usb_policy_allowed_devices->map();
   EXPECT_EQ(map.size(), 3ul);
 
   auto device_key = std::make_pair(1234, 5678);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   const auto& first_urls = map.at(device_key);
-  EXPECT_TRUE(base::ContainsKey(
-      first_urls, MakeGURLPair("https://google.com", "https://google.com")));
-  EXPECT_TRUE(base::ContainsKey(first_urls, MakeGURLPair("https://crbug.com")));
+  EXPECT_TRUE(base::Contains(
+      first_urls, MakeOriginPair("https://google.com", "https://google.com")));
+  EXPECT_TRUE(base::Contains(first_urls, MakeOriginPair("https://crbug.com")));
 
   device_key = std::make_pair(4321, -1);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   const auto& second_urls = map.at(device_key);
-  EXPECT_TRUE(base::ContainsKey(
-      second_urls, MakeGURLPair("https://google.com", "https://google.com")));
-  EXPECT_TRUE(
-      base::ContainsKey(second_urls, MakeGURLPair("https://crbug.com")));
+  EXPECT_TRUE(base::Contains(
+      second_urls, MakeOriginPair("https://google.com", "https://google.com")));
+  EXPECT_TRUE(base::Contains(second_urls, MakeOriginPair("https://crbug.com")));
 
   device_key = std::make_pair(-1, -1);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   const auto& third_urls = map.at(device_key);
   EXPECT_TRUE(
-      base::ContainsKey(third_urls, MakeGURLPair("https://www.youtube.com")));
+      base::Contains(third_urls, MakeOriginPair("https://www.youtube.com")));
 }
 
-TEST_F(UsbPolicyAllowedDevicesTest,
+TEST_P(UsbPolicyAllowedDevicesTest,
        InitializeWithMissingPolicyThenUpdatePolicy) {
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+  auto usb_policy_allowed_devices = Create();
   EXPECT_TRUE(usb_policy_allowed_devices->map().empty());
 
   // Ensure that the allowed devices can be dynamically updated.
@@ -143,67 +175,64 @@ TEST_F(UsbPolicyAllowedDevicesTest,
   EXPECT_EQ(map.size(), 3ul);
 
   auto device_key = std::make_pair(1234, 5678);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   const auto& first_urls = map.at(device_key);
-  EXPECT_TRUE(base::ContainsKey(
-      first_urls, MakeGURLPair("https://google.com", "https://google.com")));
-  EXPECT_TRUE(base::ContainsKey(first_urls, MakeGURLPair("https://crbug.com")));
+  EXPECT_TRUE(base::Contains(
+      first_urls, MakeOriginPair("https://google.com", "https://google.com")));
+  EXPECT_TRUE(base::Contains(first_urls, MakeOriginPair("https://crbug.com")));
 
   device_key = std::make_pair(4321, -1);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   const auto& second_urls = map.at(device_key);
-  EXPECT_TRUE(base::ContainsKey(
-      second_urls, MakeGURLPair("https://google.com", "https://google.com")));
-  EXPECT_TRUE(
-      base::ContainsKey(second_urls, MakeGURLPair("https://crbug.com")));
+  EXPECT_TRUE(base::Contains(
+      second_urls, MakeOriginPair("https://google.com", "https://google.com")));
+  EXPECT_TRUE(base::Contains(second_urls, MakeOriginPair("https://crbug.com")));
 
   device_key = std::make_pair(-1, -1);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   const auto& third_urls = map.at(device_key);
   EXPECT_TRUE(
-      base::ContainsKey(third_urls, MakeGURLPair("https://www.youtube.com")));
+      base::Contains(third_urls, MakeOriginPair("https://www.youtube.com")));
 }
 
-TEST_F(UsbPolicyAllowedDevicesTest,
+TEST_P(UsbPolicyAllowedDevicesTest,
        InitializeWithExistingPolicyThenRemovePolicy) {
   std::unique_ptr<base::Value> pref_value =
       base::JSONReader::ReadDeprecated(kPolicySetting);
 
   SetWebUsbAllowDevicesForUrlsPrefValue(*pref_value);
 
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+  auto usb_policy_allowed_devices = Create();
 
   const UsbPolicyAllowedDevices::UsbDeviceIdsToUrlsMap& map =
       usb_policy_allowed_devices->map();
   EXPECT_EQ(map.size(), 3ul);
 
   auto device_key = std::make_pair(1234, 5678);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   const auto& first_urls = map.at(device_key);
-  EXPECT_TRUE(base::ContainsKey(
-      first_urls, MakeGURLPair("https://google.com", "https://google.com")));
-  EXPECT_TRUE(base::ContainsKey(first_urls, MakeGURLPair("https://crbug.com")));
+  EXPECT_TRUE(base::Contains(
+      first_urls, MakeOriginPair("https://google.com", "https://google.com")));
+  EXPECT_TRUE(base::Contains(first_urls, MakeOriginPair("https://crbug.com")));
 
   device_key = std::make_pair(4321, -1);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   const auto& second_urls = map.at(device_key);
-  EXPECT_TRUE(base::ContainsKey(
-      second_urls, MakeGURLPair("https://google.com", "https://google.com")));
-  EXPECT_TRUE(
-      base::ContainsKey(second_urls, MakeGURLPair("https://crbug.com")));
+  EXPECT_TRUE(base::Contains(
+      second_urls, MakeOriginPair("https://google.com", "https://google.com")));
+  EXPECT_TRUE(base::Contains(second_urls, MakeOriginPair("https://crbug.com")));
 
   device_key = std::make_pair(-1, -1);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   const auto& third_urls = map.at(device_key);
   EXPECT_TRUE(
-      base::ContainsKey(third_urls, MakeGURLPair("https://www.youtube.com")));
+      base::Contains(third_urls, MakeOriginPair("https://www.youtube.com")));
 
   // Ensure that the allowed devices can be removed dynamically.
   pref_value.reset(new base::Value(base::Value::Type::LIST));
@@ -230,28 +259,27 @@ constexpr char kPolicySettingWithEntriesContainingDuplicateDevices[] = R"(
 
 }  // namespace
 
-TEST_F(UsbPolicyAllowedDevicesTest,
+TEST_P(UsbPolicyAllowedDevicesTest,
        InitializeWithExistingPrefValueContainingDuplicateDevices) {
   std::unique_ptr<base::Value> pref_value = base::JSONReader::ReadDeprecated(
       kPolicySettingWithEntriesContainingDuplicateDevices);
 
   SetWebUsbAllowDevicesForUrlsPrefValue(*pref_value);
 
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+  auto usb_policy_allowed_devices = Create();
 
   const UsbPolicyAllowedDevices::UsbDeviceIdsToUrlsMap& map =
       usb_policy_allowed_devices->map();
   ASSERT_EQ(map.size(), 1ul);
 
   auto device_key = std::make_pair(1234, 5678);
-  ASSERT_TRUE(base::ContainsKey(map, device_key));
+  ASSERT_TRUE(base::Contains(map, device_key));
 
   // Ensure a device has all of the URL patterns allowed to access it.
   const auto& urls = map.at(device_key);
-  EXPECT_TRUE(base::ContainsKey(urls, MakeGURLPair("https://google.com")));
-  EXPECT_TRUE(base::ContainsKey(urls, MakeGURLPair("https://crbug.com")));
-  EXPECT_TRUE(base::ContainsKey(urls, MakeGURLPair("https://www.youtube.com")));
+  EXPECT_TRUE(base::Contains(urls, MakeOriginPair("https://google.com")));
+  EXPECT_TRUE(base::Contains(urls, MakeOriginPair("https://crbug.com")));
+  EXPECT_TRUE(base::Contains(urls, MakeOriginPair("https://www.youtube.com")));
 }
 
 namespace {
@@ -272,19 +300,20 @@ constexpr char kPolicySettingWithEntriesMatchingMultipleDevices[] = R"(
 
 }  // namespace
 
-TEST_F(UsbPolicyAllowedDevicesTest, IsDeviceAllowed) {
+TEST_P(UsbPolicyAllowedDevicesTest, IsDeviceAllowed) {
   std::unique_ptr<base::Value> pref_value = base::JSONReader::ReadDeprecated(
       kPolicySettingWithEntriesMatchingMultipleDevices);
 
   SetWebUsbAllowDevicesForUrlsPrefValue(*pref_value);
 
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+  auto usb_policy_allowed_devices = Create();
 
-  const GURL kGoogleOrigin("https://google.com");
-  const GURL kYoutubeOrigin("https://www.youtube.com");
-  const GURL kChromiumOrigin("https://chromium.org");
-  const GURL kAndroidOrigin("https://android.com");
+  const auto kGoogleOrigin = url::Origin::Create(GURL("https://google.com"));
+  const auto kYoutubeOrigin =
+      url::Origin::Create(GURL("https://www.youtube.com"));
+  const auto kChromiumOrigin =
+      url::Origin::Create(GURL("https://chromium.org"));
+  const auto kAndroidOrigin = url::Origin::Create(GURL("https://android.com"));
 
   auto specific_device_info = device_manager_.CreateAndAddDevice(
       1234, 5678, "Google", "Gizmo", "123ABC");
@@ -340,45 +369,45 @@ TEST_F(UsbPolicyAllowedDevicesTest, IsDeviceAllowed) {
       kChromiumOrigin, kAndroidOrigin, *unrelated_device_info));
 }
 
-TEST_F(UsbPolicyAllowedDevicesTest, IsDeviceAllowedForUrlsNotInPref) {
+TEST_P(UsbPolicyAllowedDevicesTest, IsDeviceAllowedForUrlsNotInPref) {
   std::unique_ptr<base::Value> pref_value = base::JSONReader::ReadDeprecated(
       kPolicySettingWithEntriesMatchingMultipleDevices);
 
   SetWebUsbAllowDevicesForUrlsPrefValue(*pref_value);
 
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+  auto usb_policy_allowed_devices = Create();
 
-  const GURL origins[] = {GURL("https://evil.com"),
-                          GURL("https://very.evil.com"),
-                          GURL("https://chromium.deceptive.org")};
+  const url::Origin origins[] = {
+      url::Origin::Create(GURL("https://evil.com")),
+      url::Origin::Create(GURL("https://very.evil.com")),
+      url::Origin::Create(GURL("https://chromium.deceptive.org"))};
 
   auto device_info = device_manager_.CreateAndAddDevice(1234, 5678, "Google",
                                                         "Gizmo", "123ABC");
-  for (const GURL& requesting_origin : origins) {
-    for (const GURL& embedding_origin : origins) {
+  for (const url::Origin& requesting_origin : origins) {
+    for (const url::Origin& embedding_origin : origins) {
       EXPECT_FALSE(usb_policy_allowed_devices->IsDeviceAllowed(
           requesting_origin, embedding_origin, *device_info));
     }
   }
 }
 
-TEST_F(UsbPolicyAllowedDevicesTest, IsDeviceAllowedForDeviceNotInPref) {
+TEST_P(UsbPolicyAllowedDevicesTest, IsDeviceAllowedForDeviceNotInPref) {
   std::unique_ptr<base::Value> pref_value = base::JSONReader::ReadDeprecated(
       kPolicySettingWithEntriesMatchingMultipleDevices);
 
   SetWebUsbAllowDevicesForUrlsPrefValue(*pref_value);
 
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+  auto usb_policy_allowed_devices = Create();
 
-  const GURL origins[] = {GURL("https://google.com"),
-                          GURL("https://www.youtube.com")};
+  const url::Origin origins[] = {
+      url::Origin::Create(GURL("https://google.com")),
+      url::Origin::Create(GURL("https://www.youtube.com"))};
 
   auto device_info = device_manager_.CreateAndAddDevice(4321, 8765, "Google",
                                                         "Gizmo", "123ABC");
-  for (const GURL& requesting_origin : origins) {
-    for (const GURL& embedding_origin : origins) {
+  for (const url::Origin& requesting_origin : origins) {
+    for (const url::Origin& embedding_origin : origins) {
       EXPECT_FALSE(usb_policy_allowed_devices->IsDeviceAllowed(
           requesting_origin, embedding_origin, *device_info));
     }
@@ -399,18 +428,19 @@ constexpr char kPolicySettingWithUrlContainingEmbeddingOrigin[] = R"(
 
 }  // namespace
 
-TEST_F(UsbPolicyAllowedDevicesTest,
+TEST_P(UsbPolicyAllowedDevicesTest,
        IsDeviceAllowedForUrlContainingEmbeddingOrigin) {
   std::unique_ptr<base::Value> pref_value = base::JSONReader::ReadDeprecated(
       kPolicySettingWithUrlContainingEmbeddingOrigin);
 
   SetWebUsbAllowDevicesForUrlsPrefValue(*pref_value);
 
-  auto usb_policy_allowed_devices =
-      std::make_unique<UsbPolicyAllowedDevices>(profile()->GetPrefs());
+  auto usb_policy_allowed_devices = Create();
 
-  const GURL requesting_origin("https://requesting.com");
-  const GURL embedding_origin("https://embedding.com");
+  const auto requesting_origin =
+      url::Origin::Create(GURL("https://requesting.com"));
+  const auto embedding_origin =
+      url::Origin::Create(GURL("https://embedding.com"));
 
   auto device_info = device_manager_.CreateAndAddDevice(1234, 5678, "Google",
                                                         "Gizmo", "123ABC");
@@ -423,3 +453,95 @@ TEST_F(UsbPolicyAllowedDevicesTest,
   EXPECT_FALSE(usb_policy_allowed_devices->IsDeviceAllowed(
       embedding_origin, embedding_origin, *device_info));
 }
+
+// For ChromeOS this test is parameterized to test user and device policy. For
+// other operating systems, this test just tests the user policy.
+INSTANTIATE_TEST_SUITE_P(,
+                         UsbPolicyAllowedDevicesTest,
+#if defined(OS_CHROMEOS)
+                         testing::Values(PolicyType::kUser, PolicyType::kDevice)
+#else
+                         testing::Values(PolicyType::kUser)
+#endif
+);
+
+#if defined(OS_CHROMEOS)
+namespace {
+
+constexpr char kUserPolicySetting[] = R"(
+    [
+      {
+        "devices": [
+          { "vendor_id": 1234, "product_id": 5678 },
+          { "vendor_id": 4321 }
+        ],
+        "urls": [
+          "https://crbug.com"
+        ]
+      }, {
+        "devices": [{}],
+        "urls": ["https://www.youtube.com"]
+      }
+    ])";
+
+constexpr char kDevicePolicySetting[] = R"(
+    [
+      {
+        "devices": [
+          { "vendor_id": 1234, "product_id": 5678 }
+        ],
+        "urls": [
+          "https://google.com"
+        ]
+      }, {
+        "devices": [{ "vendor_id": 1111, "product_id": 2222 }],
+        "urls": ["https://www.ebay.com"]
+      }
+    ])";
+
+}  // namespace
+
+TEST_P(UsbPolicyAllowedDevicesTestBase, CombineUserAndDevicePolicies) {
+  // Set user policy pref directly.
+  std::unique_ptr<base::Value> user_pref_value =
+      base::JSONReader::ReadDeprecated(kUserPolicySetting);
+  profile_.GetPrefs()->Set(prefs::kManagedWebUsbAllowDevicesForUrls,
+                           *user_pref_value);
+
+  // Set device policy pref directly.
+  std::unique_ptr<base::Value> device_pref_value =
+      base::JSONReader::ReadDeprecated(kDevicePolicySetting);
+  local_state_.Set(prefs::kDeviceWebUsbAllowDevicesForUrls, *device_pref_value);
+
+  auto usb_policy_allowed_devices = Create();
+
+  const UsbPolicyAllowedDevices::UsbDeviceIdsToUrlsMap& map =
+      usb_policy_allowed_devices->map();
+  EXPECT_EQ(map.size(), 4ul);
+
+  auto device_key = std::make_pair(1234, 5678);
+  ASSERT_TRUE(base::Contains(map, device_key));
+  const auto& first_urls = map.at(device_key);
+  EXPECT_TRUE(base::Contains(first_urls, MakeOriginPair("https://crbug.com")));
+  EXPECT_TRUE(base::Contains(first_urls, MakeOriginPair("https://google.com")));
+
+  device_key = std::make_pair(4321, -1);
+  ASSERT_TRUE(base::Contains(map, device_key));
+  const auto& second_urls = map.at(device_key);
+  EXPECT_TRUE(base::Contains(second_urls, MakeOriginPair("https://crbug.com")));
+  EXPECT_FALSE(
+      base::Contains(second_urls, MakeOriginPair("https://google.com")));
+
+  device_key = std::make_pair(-1, -1);
+  ASSERT_TRUE(base::Contains(map, device_key));
+  const auto& third_urls = map.at(device_key);
+  EXPECT_TRUE(
+      base::Contains(third_urls, MakeOriginPair("https://www.youtube.com")));
+
+  device_key = std::make_pair(1111, 2222);
+  ASSERT_TRUE(base::Contains(map, device_key));
+  const auto& fourth_urls = map.at(device_key);
+  EXPECT_TRUE(
+      base::Contains(fourth_urls, MakeOriginPair("https://www.ebay.com")));
+}
+#endif  // defined(OS_CHROMEOS)

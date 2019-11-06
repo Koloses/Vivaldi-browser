@@ -35,7 +35,7 @@
 #include "ui/base/ime/chromeos/mock_component_extension_ime_manager_delegate.h"
 #include "ui/base/ime/chromeos/mock_ime_engine_handler.h"
 #include "ui/base/ime/ime_bridge.h"
-#include "ui/base/ime/input_method_initializer.h"
+#include "ui/base/ime/init/input_method_initializer.h"
 
 namespace chromeos {
 
@@ -136,13 +136,9 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
       : delegate_(nullptr),
         candidate_window_controller_(nullptr),
         keyboard_(nullptr) {
-    chrome_keyboard_controller_client_test_helper_ =
-        ChromeKeyboardControllerClientTestHelper::InitializeWithFake();
   }
 
-  ~InputMethodManagerImplTest() override {
-    chrome_keyboard_controller_client_test_helper_.reset();
-  }
+  ~InputMethodManagerImplTest() override = default;
 
   void SetUp() override {
     ui::InitializeInputMethodForTesting();
@@ -165,6 +161,10 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
     InitImeList();
 
     BrowserWithTestWindowTest::SetUp();
+
+    // Needs ash::Shell keyboard to be created first.
+    chrome_keyboard_controller_client_test_helper_ =
+        ChromeKeyboardControllerClientTestHelper::InitializeForAsh();
   }
 
   void TearDown() override {
@@ -176,6 +176,9 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
     candidate_window_controller_ = nullptr;
     keyboard_ = nullptr;
     manager_.reset();
+
+    // Needs to destroyed after ash::Shell keyboard.
+    chrome_keyboard_controller_client_test_helper_.reset();
   }
 
   scoped_refptr<InputMethodManagerImpl::StateImpl> GetActiveIMEState() {
@@ -193,8 +196,16 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
 
     // CreateNewState(nullptr) returns state with non-empty
     // current_input_method. So SetState() triggers ChangeInputMethod().
-    manager_->SetState(
-        manager_->CreateNewState(ProfileManager::GetActiveUserProfile()));
+    InputMethodDescriptors descriptors;
+    auto state =
+        manager_->CreateNewState(ProfileManager::GetActiveUserProfile());
+    state->AddInputMethodExtension(extension_ime_util::kXkbExtensionId,
+                                   descriptors, mock_engine_handler_.get());
+    state->AddInputMethodExtension(extension_ime_util::kMozcExtensionId,
+                                   descriptors, mock_engine_handler_.get());
+    state->AddInputMethodExtension(extension_ime_util::kT13nExtensionId,
+                                   descriptors, mock_engine_handler_.get());
+    manager_->SetState(state);
 
     std::vector<std::string> layouts;
     layouts.push_back("us");
@@ -204,15 +215,6 @@ class InputMethodManagerImplTest :  public BrowserWithTestWindowTest {
     // Note, for production, these SetEngineHandler are called when
     // IMEEngineHandlerInterface is initialized via
     // InitializeComponentextension.
-    InputMethodDescriptors descriptors;
-    manager_->GetActiveIMEState()->AddInputMethodExtension(
-        ImeIdFromEngineId(kNaclMozcUsId),
-        descriptors,
-        mock_engine_handler_.get());
-    manager_->GetActiveIMEState()->AddInputMethodExtension(
-        ImeIdFromEngineId(kExt2Engine1Id),
-        descriptors,
-        mock_engine_handler_.get());
     manager_->InitializeComponentExtensionForTesting(std::move(delegate));
   }
 

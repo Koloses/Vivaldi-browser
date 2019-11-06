@@ -165,8 +165,8 @@ bool ContentSettingsObserver::IsPluginTemporarilyAllowed(
     const std::string& identifier) {
   // If the empty string is in here, it means all plugins are allowed.
   // TODO(bauerb): Remove this once we only pass in explicit identifiers.
-  return base::ContainsKey(temporarily_allowed_plugins_, identifier) ||
-         base::ContainsKey(temporarily_allowed_plugins_, std::string());
+  return base::Contains(temporarily_allowed_plugins_, identifier) ||
+         base::Contains(temporarily_allowed_plugins_, std::string());
 }
 
 void ContentSettingsObserver::DidBlockContentType(
@@ -317,6 +317,19 @@ bool ContentSettingsObserver::AllowIndexedDB(const WebSecurityOrigin& origin) {
   return result;
 }
 
+bool ContentSettingsObserver::AllowCacheStorage(
+    const blink::WebSecurityOrigin& origin) {
+  WebFrame* frame = render_frame()->GetWebFrame();
+  if (IsUniqueFrame(frame))
+    return false;
+
+  bool result = false;
+  Send(new ChromeViewHostMsg_AllowCacheStorage(
+      routing_id(), url::Origin(frame->GetSecurityOrigin()).GetURL(),
+      url::Origin(frame->Top()->GetSecurityOrigin()).GetURL(), &result));
+  return result;
+}
+
 bool ContentSettingsObserver::AllowScript(bool enabled_per_settings) {
   if (!enabled_per_settings)
     return false;
@@ -407,7 +420,8 @@ bool ContentSettingsObserver::AllowWriteToClipboard(bool default_value) {
       extension_dispatcher_->script_context_set().GetCurrent();
   if (current_context) {
     if (current_context->effective_context_type() ==
-        extensions::Feature::BLESSED_EXTENSION_CONTEXT) {
+            extensions::Feature::BLESSED_EXTENSION_CONTEXT &&
+        !current_context->IsForServiceWorker()) {
       allowed = true;
     } else {
       allowed |= current_context->HasAPIPermission(
@@ -498,9 +512,16 @@ void ContentSettingsObserver::PersistClientHints(
   if (update_count == 0)
     return;
 
-  UMA_HISTOGRAM_CUSTOM_TIMES("ClientHints.PersistDuration", duration,
-                             base::TimeDelta::FromSeconds(1),
-                             base::TimeDelta::FromDays(365), 100);
+  UMA_HISTOGRAM_CUSTOM_TIMES(
+      "ClientHints.PersistDuration", duration, base::TimeDelta::FromSeconds(1),
+      // TODO(crbug.com/949034): Rename and fix this histogram to have some
+      // intended max value. We throw away the 32 most-significant bits of the
+      // 64-bit time delta in milliseconds. Before it happened silently in
+      // histogram.cc, now it is explicit here. The previous value of 365 days
+      // effectively turns into roughly 17 days when getting cast to int.
+      base::TimeDelta::FromMilliseconds(
+          static_cast<int>(base::TimeDelta::FromDays(365).InMilliseconds())),
+      100);
 
   UMA_HISTOGRAM_COUNTS_100("ClientHints.UpdateSize", update_count);
 

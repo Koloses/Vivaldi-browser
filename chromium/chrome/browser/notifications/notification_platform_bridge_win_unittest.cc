@@ -13,7 +13,7 @@
 #include <wrl/client.h>
 #include <wrl/implements.h>
 
-#include "base/hash.h"
+#include "base/hash/hash.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -50,7 +50,7 @@ class NotificationPlatformBridgeWinTest : public testing::Test {
  public:
   NotificationPlatformBridgeWinTest()
       : thread_bundle_(
-            base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME) {}
+            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME) {}
 
   ~NotificationPlatformBridgeWinTest() override = default;
 
@@ -101,7 +101,7 @@ class NotificationPlatformBridgeWinTest : public testing::Test {
 TEST_F(NotificationPlatformBridgeWinTest, GroupAndTag) {
   // This test requires WinRT core functions, which are not available in
   // older versions of Windows.
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+  if (base::win::GetVersion() < base::win::Version::WIN8)
     return;
 
   base::win::ScopedCOMInitializer com_initializer;
@@ -135,7 +135,7 @@ TEST_F(NotificationPlatformBridgeWinTest, GroupAndTag) {
 TEST_F(NotificationPlatformBridgeWinTest, GroupAndTagUniqueness) {
   // This test requires WinRT core functions, which are not available in
   // older versions of Windows.
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+  if (base::win::GetVersion() < base::win::Version::WIN8)
     return;
 
   base::win::ScopedCOMInitializer com_initializer;
@@ -212,7 +212,7 @@ TEST_F(NotificationPlatformBridgeWinTest, GroupAndTagUniqueness) {
 TEST_F(NotificationPlatformBridgeWinTest, Suppress) {
   // This test requires WinRT core functions, which are not available in
   // older versions of Windows.
-  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+  if (base::win::GetVersion() < base::win::Version::WIN8)
     return;
 
   base::win::ScopedCOMInitializer com_initializer;

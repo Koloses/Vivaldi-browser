@@ -36,10 +36,10 @@ LayoutWorkletGlobalScopeProxy::LayoutWorkletGlobalScopeProxy(
   reporting_proxy_ =
       std::make_unique<MainThreadWorkletReportingProxy>(document);
 
-  String global_scope_name("LayoutWorklet #");
-  global_scope_name.append(String::Number(global_scope_number));
+  String global_scope_name =
+      StringView("LayoutWorklet #") + String::Number(global_scope_number);
 
-  WorkerClients* worker_clients = WorkerClients::Create();
+  auto* worker_clients = MakeGarbageCollected<WorkerClients>();
   ProvideContentSettingsClientToWorker(
       worker_clients, frame->Client()->CreateWorkerContentSettingsClient());
 
@@ -60,14 +60,16 @@ LayoutWorkletGlobalScopeProxy::LayoutWorkletGlobalScopeProxy(
 
 void LayoutWorkletGlobalScopeProxy::FetchAndInvokeScript(
     const KURL& module_url_record,
-    network::mojom::FetchCredentialsMode credentials_mode,
+    network::mojom::CredentialsMode credentials_mode,
     const FetchClientSettingsObjectSnapshot& outside_settings_object,
+    WorkerResourceTimingNotifier& outside_resource_timing_notifier,
     scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
     WorkletPendingTasks* pending_tasks) {
   DCHECK(IsMainThread());
   global_scope_->FetchAndInvokeScript(
       module_url_record, credentials_mode, outside_settings_object,
-      std::move(outside_settings_task_runner), pending_tasks);
+      outside_resource_timing_notifier, std::move(outside_settings_task_runner),
+      pending_tasks);
 }
 
 void LayoutWorkletGlobalScopeProxy::WorkletObjectDestroyed() {

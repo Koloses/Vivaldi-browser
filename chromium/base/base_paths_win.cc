@@ -54,8 +54,7 @@ bool PathProviderWin(int key, FilePath* result) {
       cur = FilePath(system_buffer);
       break;
     case base::DIR_PROGRAM_FILESX86:
-      if (base::win::OSInfo::GetInstance()->architecture() !=
-          base::win::OSInfo::X86_ARCHITECTURE) {
+      if (win::OSInfo::GetArchitecture() != win::OSInfo::X86_ARCHITECTURE) {
         if (FAILED(SHGetFolderPath(NULL, CSIDL_PROGRAM_FILESX86, NULL,
                                    SHGFP_TYPE_CURRENT, wsystem_buffer)))
           return false;
@@ -132,15 +131,11 @@ bool PathProviderWin(int key, FilePath* result) {
       // On Windows, unit tests execute two levels deep from the source root.
       // For example:  chrome/{Debug|Release}/ui_tests.exe
       PathService::Get(base::DIR_EXE, &executableDir);
-      cur = executableDir.DirName().DirName()
-#if defined(VIVALDI_BUILD)
-            .Append(FILE_PATH_LITERAL("chromium"))
-#endif
-            ;
+      cur = executableDir.DirName().DirName();
       break;
     }
     case base::DIR_APP_SHORTCUTS: {
-      if (win::GetVersion() < win::VERSION_WIN8)
+      if (win::GetVersion() < win::Version::WIN8)
         return false;
 
       base::win::ScopedCoMem<wchar_t> path_buf;

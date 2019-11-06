@@ -9,6 +9,7 @@
 #include "base/run_loop.h"
 #include "base/task/post_task.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -22,6 +23,7 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
@@ -59,14 +61,14 @@ class SecurityStatePageLoadMetricsBrowserTest : public InProcessBrowserTest {
     https_test_server_ = std::make_unique<net::EmbeddedTestServer>(
         net::EmbeddedTestServer::TYPE_HTTPS);
     https_test_server_->SetSSLConfig(cert);
-    https_test_server_->ServeFilesFromSourceDirectory("chrome/test/data");
+    https_test_server_->ServeFilesFromSourceDirectory(GetChromeTestDataDir());
     ASSERT_TRUE(https_test_server_->Start());
   }
 
   void StartHttpServer() {
     http_test_server_ = std::make_unique<net::EmbeddedTestServer>(
         net::EmbeddedTestServer::TYPE_HTTP);
-    http_test_server_->ServeFilesFromSourceDirectory("chrome/test/data");
+    http_test_server_->ServeFilesFromSourceDirectory(GetChromeTestDataDir());
     ASSERT_TRUE(http_test_server_->Start());
   }
 
@@ -249,7 +251,22 @@ IN_PROC_BROWSER_TEST_F(SecurityStatePageLoadMetricsBrowserTest, OtherScheme) {
       0);
 }
 
-IN_PROC_BROWSER_TEST_F(SecurityStatePageLoadMetricsBrowserTest, MixedContent) {
+class SecurityStatePageLoadMetricsBrowserTestWithAutoupgradesDisabled
+    : public SecurityStatePageLoadMetricsBrowserTest {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    SecurityStatePageLoadMetricsBrowserTest::SetUpCommandLine(command_line);
+    feature_list.InitAndDisableFeature(
+        blink::features::kMixedContentAutoupgrade);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list;
+};
+
+IN_PROC_BROWSER_TEST_F(
+    SecurityStatePageLoadMetricsBrowserTestWithAutoupgradesDisabled,
+    MixedContent) {
   StartHttpsServer(net::EmbeddedTestServer::CERT_OK);
   GURL url = https_test_server()->GetURL("/simple.html");
   ui_test_utils::NavigateToURL(browser(), url);

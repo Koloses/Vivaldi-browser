@@ -180,6 +180,12 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadUrlParameters {
   // See |DownloadSaveInfo.length|.
   void set_length(int64_t length) { save_info_.length = length; }
 
+  // Sets the offset to start writing to the file. If set, The data received
+  // before |file_offset| are discarded or are used for validation purpose.
+  void set_file_offset(int64_t file_offset) {
+    save_info_.file_offset = file_offset;
+  }
+
   // If |offset| is non-zero, then |hash_of_partial_file| contains the raw
   // SHA-256 hash of the first |offset| bytes of the target file. Only
   // meaningful if a partial file exists and is identified by either the
@@ -251,6 +257,11 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadUrlParameters {
     require_safety_checks_ = require_safety_checks;
   }
 
+  // Sets whether to ignore content length mismatch errors.
+  void set_ignore_content_length_mismatch(bool ignore_content_length_mismatch) {
+    ignore_content_length_mismatch_ = ignore_content_length_mismatch;
+  }
+
   const OnStartedCallback& callback() const { return callback_; }
   bool content_initiated() const { return content_initiated_; }
   const std::string& last_modified() const { return last_modified_; }
@@ -304,6 +315,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadUrlParameters {
   bool is_transient() const { return transient_; }
   std::string guid() const { return guid_; }
   bool require_safety_checks() const { return require_safety_checks_; }
+  bool ignore_content_length_mismatch() const {
+    return ignore_content_length_mismatch_;
+  }
 
   // STATE CHANGING: All save_info_ sub-objects will be in an indeterminate
   // state following this call.
@@ -351,6 +365,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadUrlParameters {
   DownloadSource download_source_;
   UploadProgressCallback upload_callback_;
   bool require_safety_checks_;
+  bool ignore_content_length_mismatch_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadUrlParameters);
 };

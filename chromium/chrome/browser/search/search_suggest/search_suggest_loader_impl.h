@@ -48,7 +48,7 @@ class SearchSuggestLoaderImpl : public SearchSuggestLoader {
   void LoadDone(const network::SimpleURLLoader* simple_loader,
                 std::unique_ptr<std::string> response_body);
 
-  void JsonParsed(std::unique_ptr<base::Value> value);
+  void JsonParsed(base::Value value);
   void JsonParseFailed(const std::string& message);
 
   void Respond(Status status, const base::Optional<SearchSuggestData>& data);
@@ -60,7 +60,7 @@ class SearchSuggestLoaderImpl : public SearchSuggestLoader {
   std::vector<SearchSuggestionsCallback> callbacks_;
   std::unique_ptr<AuthenticatedURLLoader> pending_request_;
 
-  base::WeakPtrFactory<SearchSuggestLoaderImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<SearchSuggestLoaderImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SearchSuggestLoaderImpl);
 };

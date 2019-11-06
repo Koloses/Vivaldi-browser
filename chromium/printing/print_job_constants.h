@@ -53,6 +53,7 @@ PRINTING_EXPORT extern const char kSettingPageRangeTo[];
 PRINTING_EXPORT extern const char kSettingPageWidth[];
 PRINTING_EXPORT extern const char kSettingPageHeight[];
 PRINTING_EXPORT extern const char kSettingPagesPerSheet[];
+PRINTING_EXPORT extern const char kSettingPinValue[];
 PRINTING_EXPORT extern const char kSettingPolicies[];
 PRINTING_EXPORT extern const char kSettingPreviewModifiable[];
 PRINTING_EXPORT extern const char kSettingPrintToGoogleDrive[];
@@ -79,7 +80,7 @@ PRINTING_EXPORT extern const int FIRST_PAGE_INDEX;
 PRINTING_EXPORT extern const int COMPLETE_PREVIEW_DOCUMENT_INDEX;
 PRINTING_EXPORT extern const char kSettingOpenPDFInPreview[];
 
-#if defined (USE_CUPS)
+#if defined(USE_CUPS)
 // Printer color models
 PRINTING_EXPORT extern const char kBlack[];
 PRINTING_EXPORT extern const char kCMYK[];
@@ -109,17 +110,10 @@ enum DuplexMode {
 };
 
 // Specifies the horizontal alignment of the headers and footers.
-enum HorizontalHeaderFooterPosition {
-  LEFT,
-  CENTER,
-  RIGHT
-};
+enum HorizontalHeaderFooterPosition { LEFT, CENTER, RIGHT };
 
 // Specifies the vertical alignment of the Headers and Footers.
-enum VerticalHeaderFooterPosition {
-  TOP,
-  BOTTOM
-};
+enum VerticalHeaderFooterPosition { TOP, BOTTOM };
 
 // Print job color mode values.
 enum ColorModel {

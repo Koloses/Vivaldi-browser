@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/keyboard/ui/keyboard_ui.h"
+#include "ash/keyboard/ui/keyboard_ui_controller.h"
+#include "ash/keyboard/ui/keyboard_util.h"
+#include "ash/keyboard/ui/test/keyboard_test_util.h"
+#include "ash/public/cpp/keyboard/keyboard_switches.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
@@ -11,16 +16,10 @@
 #include "ash/wm/window_state.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "services/ws/public/mojom/window_tree_constants.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
-#include "ui/keyboard/keyboard_controller.h"
-#include "ui/keyboard/keyboard_ui.h"
-#include "ui/keyboard/keyboard_util.h"
-#include "ui/keyboard/public/keyboard_switches.h"
-#include "ui/keyboard/test/keyboard_test_util.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -80,7 +79,7 @@ class LockLayoutManagerTest : public AshTestBase {
 
   // Show or hide the keyboard.
   void ShowKeyboard(bool show) {
-    auto* keyboard = keyboard::KeyboardController::Get();
+    auto* keyboard = keyboard::KeyboardUIController::Get();
     ASSERT_TRUE(keyboard->IsEnabled());
     if (show == keyboard->IsKeyboardVisible())
       return;
@@ -96,10 +95,10 @@ class LockLayoutManagerTest : public AshTestBase {
   }
 
   void SetKeyboardOverscrollBehavior(
-      keyboard::mojom::KeyboardOverscrollBehavior overscroll_behavior) {
-    auto config = keyboard::KeyboardController::Get()->keyboard_config();
+      keyboard::KeyboardOverscrollBehavior overscroll_behavior) {
+    auto config = keyboard::KeyboardUIController::Get()->keyboard_config();
     config.overscroll_behavior = overscroll_behavior;
-    keyboard::KeyboardController::Get()->UpdateKeyboardConfig(config);
+    keyboard::KeyboardUIController::Get()->UpdateKeyboardConfig(config);
   }
 };
 
@@ -182,9 +181,11 @@ TEST_F(LockLayoutManagerTest, AccessibilityPanel) {
       GetPrimaryShelf()->shelf_layout_manager();
   ASSERT_TRUE(shelf_layout_manager);
 
-  // Set the accessibility panel height.
+  // Create accessibility panel and set its height.
   int accessibility_panel_height = 45;
-  shelf_layout_manager->SetAccessibilityPanelHeight(accessibility_panel_height);
+  std::unique_ptr<views::Widget> accessibility_panel_widget =
+      CreateTestWidget(nullptr, kShellWindowId_AccessibilityPanelContainer);
+  SetAccessibilityPanelHeight(accessibility_panel_height);
 
   views::Widget::InitParams widget_params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
@@ -204,7 +205,7 @@ TEST_F(LockLayoutManagerTest, AccessibilityPanel) {
   // Update the accessibility panel height, and verify the window bounds are
   // updated accordingly.
   accessibility_panel_height = 25;
-  shelf_layout_manager->SetAccessibilityPanelHeight(accessibility_panel_height);
+  SetAccessibilityPanelHeight(accessibility_panel_height);
 
   target_bounds = primary_display.bounds();
   target_bounds.Inset(0 /* left */, accessibility_panel_height /* top */,
@@ -228,12 +229,12 @@ TEST_F(LockLayoutManagerTest, KeyboardBounds) {
 
   // When virtual keyboard overscroll is enabled keyboard bounds should not
   // affect window bounds.
-  keyboard::KeyboardController* keyboard = keyboard::KeyboardController::Get();
-  SetKeyboardOverscrollBehavior(
-      keyboard::mojom::KeyboardOverscrollBehavior::kEnabled);
+  keyboard::KeyboardUIController* keyboard =
+      keyboard::KeyboardUIController::Get();
+  SetKeyboardOverscrollBehavior(keyboard::KeyboardOverscrollBehavior::kEnabled);
   ShowKeyboard(true);
   EXPECT_EQ(screen_bounds.ToString(), window->GetBoundsInScreen().ToString());
-  gfx::Rect keyboard_bounds = keyboard->visual_bounds_in_screen();
+  gfx::Rect keyboard_bounds = keyboard->GetVisualBoundsInScreen();
   EXPECT_NE(keyboard_bounds, gfx::Rect());
   ShowKeyboard(false);
 
@@ -243,7 +244,7 @@ TEST_F(LockLayoutManagerTest, KeyboardBounds) {
   // 1. Set up login screen defaults: VK overscroll disabled
   // 2. Show/hide keyboard, make sure that no stale keyboard bounds are cached.
   SetKeyboardOverscrollBehavior(
-      keyboard::mojom::KeyboardOverscrollBehavior::kDisabled);
+      keyboard::KeyboardOverscrollBehavior::kDisabled);
   ShowKeyboard(true);
   ShowKeyboard(false);
   display_manager()->SetDisplayRotation(
@@ -259,7 +260,7 @@ TEST_F(LockLayoutManagerTest, KeyboardBounds) {
   // When virtual keyboard overscroll is disabled keyboard bounds do
   // affect window bounds.
   SetKeyboardOverscrollBehavior(
-      keyboard::mojom::KeyboardOverscrollBehavior::kDisabled);
+      keyboard::KeyboardOverscrollBehavior::kDisabled);
   ShowKeyboard(true);
 
   primary_display = display::Screen::GetScreen()->GetPrimaryDisplay();
@@ -270,10 +271,9 @@ TEST_F(LockLayoutManagerTest, KeyboardBounds) {
   EXPECT_EQ(target_bounds.ToString(), window->GetBoundsInScreen().ToString());
   ShowKeyboard(false);
 
-  SetKeyboardOverscrollBehavior(
-      keyboard::mojom::KeyboardOverscrollBehavior::kDefault);
+  SetKeyboardOverscrollBehavior(keyboard::KeyboardOverscrollBehavior::kDefault);
 
-  keyboard->SetContainerType(keyboard::mojom::ContainerType::kFloating,
+  keyboard->SetContainerType(keyboard::ContainerType::kFloating,
                              base::nullopt /* target_bounds */,
                              base::BindOnce([](bool success) {}));
   ShowKeyboard(true);
@@ -295,13 +295,13 @@ TEST_F(LockLayoutManagerTest, MultipleMonitors) {
   std::unique_ptr<aura::Window> window(
       CreateTestLoginWindow(widget_params, false /* use_delegate */));
   window->SetProperty(aura::client::kResizeBehaviorKey,
-                      ws::mojom::kResizeBehaviorCanMaximize);
+                      aura::client::kResizeBehaviorCanMaximize);
 
   EXPECT_EQ(screen_bounds.ToString(), window->GetBoundsInScreen().ToString());
 
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
 
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
+  WindowState* window_state = WindowState::Get(window.get());
   window_state->SetRestoreBoundsInScreen(gfx::Rect(400, 0, 30, 40));
 
   // Maximize the window with as the restore bounds is inside 2nd display but
@@ -339,8 +339,11 @@ TEST_F(LockLayoutManagerTest, AccessibilityPanelWithMultipleMonitors) {
       GetPrimaryShelf()->shelf_layout_manager();
   ASSERT_TRUE(shelf_layout_manager);
 
-  int accessibility_panel_height = 45;
-  shelf_layout_manager->SetAccessibilityPanelHeight(accessibility_panel_height);
+  // Create accessibility panel and set its height.
+  const int kAccessibilityPanelHeight = 45;
+  std::unique_ptr<views::Widget> accessibility_panel_widget =
+      CreateTestWidget(nullptr, kShellWindowId_AccessibilityPanelContainer);
+  SetAccessibilityPanelHeight(kAccessibilityPanelHeight);
 
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
@@ -350,16 +353,16 @@ TEST_F(LockLayoutManagerTest, AccessibilityPanelWithMultipleMonitors) {
   std::unique_ptr<aura::Window> window(
       CreateTestLoginWindow(widget_params, false /* use_delegate */));
   window->SetProperty(aura::client::kResizeBehaviorKey,
-                      ws::mojom::kResizeBehaviorCanMaximize);
+                      aura::client::kResizeBehaviorCanMaximize);
 
   gfx::Rect target_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
-  target_bounds.Inset(0, accessibility_panel_height, 0, 0);
+  target_bounds.Inset(0, kAccessibilityPanelHeight, 0, 0);
   EXPECT_EQ(target_bounds, window->GetBoundsInScreen());
 
   // Restore window with bounds in the second display, the window should be
   // shown in the primary display.
-  wm::WindowState* window_state = wm::GetWindowState(window.get());
+  WindowState* window_state = WindowState::Get(window.get());
   window_state->SetRestoreBoundsInScreen(gfx::Rect(400, 0, 30, 40));
 
   window_state->Restore();

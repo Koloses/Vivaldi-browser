@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "base/guid.h"
-#include "base/hash.h"
+#include "base/hash/hash.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -36,8 +36,7 @@ namespace fake_server {
 FakeServer::FakeServer()
     : error_type_(sync_pb::SyncEnums::SUCCESS),
       alternate_triggered_errors_(false),
-      request_counter_(0),
-      weak_ptr_factory_(this) {
+      request_counter_(0) {
   base::ThreadRestrictions::SetIOAllowed(true);
   loopback_server_storage_ = std::make_unique<base::ScopedTempDir>();
   if (!loopback_server_storage_->CreateUniqueTempDir()) {
@@ -51,8 +50,7 @@ FakeServer::FakeServer()
 FakeServer::FakeServer(const base::FilePath& user_data_dir)
     : error_type_(sync_pb::SyncEnums::SUCCESS),
       alternate_triggered_errors_(false),
-      request_counter_(0),
-      weak_ptr_factory_(this) {
+      request_counter_(0) {
   base::ThreadRestrictions::SetIOAllowed(true);
   base::FilePath loopback_server_path =
       user_data_dir.AppendASCII("FakeSyncServer");
@@ -309,6 +307,11 @@ std::string FakeServer::GetTopLevelPermanentItemId(
   return loopback_server_->GetTopLevelPermanentItemId(model_type);
 }
 
+const std::vector<std::string>& FakeServer::GetKeystoreKeys() const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return loopback_server_->GetKeystoreKeysForTesting();
+}
+
 void FakeServer::InjectEntity(std::unique_ptr<LoopbackServerEntity> entity) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(entity->GetModelType() != syncer::AUTOFILL_WALLET_DATA)
@@ -456,6 +459,11 @@ void FakeServer::SetMaxGetUpdatesBatchSize(int batch_size) {
 void FakeServer::SetBagOfChips(const sync_pb::ChipBag& bag_of_chips) {
   DCHECK(thread_checker_.CalledOnValidThread());
   loopback_server_->SetBagOfChipsForTesting(bag_of_chips);
+}
+
+void FakeServer::TriggerMigrationDoneError(syncer::ModelTypeSet types) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  loopback_server_->TriggerMigrationForTesting(types);
 }
 
 const std::set<std::string>& FakeServer::GetCommittedHistoryURLs() const {

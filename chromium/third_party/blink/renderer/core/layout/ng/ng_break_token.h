@@ -7,7 +7,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_input_node.h"
-#include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 
 namespace blink {
@@ -58,10 +58,10 @@ class CORE_EXPORT NGBreakToken : public RefCounted<NGBreakToken> {
         box_, static_cast<NGLayoutInputNode::NGLayoutInputNodeType>(type_));
   }
 
-#ifndef NDEBUG
+#if DCHECK_IS_ON()
   virtual String ToString() const;
   void ShowBreakTokenTree() const;
-#endif  // NDEBUG
+#endif
 
  protected:
   NGBreakToken(NGBreakTokenType type,

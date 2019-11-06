@@ -10,13 +10,19 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "content/browser/loader/navigation_url_loader_impl.h"
 #include "content/browser/web_package/signed_exchange_prefetch_metric_recorder.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
-#include "mojo/public/cpp/bindings/strong_binding_set.h"
+#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "third_party/blink/public/common/loader/url_loader_factory_bundle.h"
 #include "third_party/blink/public/mojom/renderer_preference_watcher.mojom.h"
+
+namespace storage {
+class BlobStorageContext;
+}
 
 namespace net {
 class URLRequestContextGetter;
@@ -29,13 +35,16 @@ class SharedURLLoaderFactory;
 namespace content {
 
 class BrowserContext;
+class ChromeBlobStorageContext;
+class PrefetchedSignedExchangeCache;
 class ResourceContext;
 class URLLoaderFactoryGetter;
 class URLLoaderThrottle;
 
 class CONTENT_EXPORT PrefetchURLLoaderService final
-    : public base::RefCountedThreadSafe<PrefetchURLLoaderService,
-                                        BrowserThread::DeleteOnIOThread>,
+    : public base::RefCountedThreadSafe<
+          PrefetchURLLoaderService,
+          NavigationURLLoaderImpl::DeleteOnLoaderThread>,
       public blink::mojom::RendererPreferenceWatcher,
       public network::mojom::URLLoaderFactory {
  public:
@@ -45,12 +54,15 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
   // be valid as far as request_context_getter returns non-null context.
   void InitializeResourceContext(
       ResourceContext* resource_context,
-      scoped_refptr<net::URLRequestContextGetter> request_context_getter);
+      scoped_refptr<net::URLRequestContextGetter> request_context_getter,
+      ChromeBlobStorageContext* blob_storage_context);
 
   void GetFactory(
-      network::mojom::URLLoaderFactoryRequest request,
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
       int frame_tree_node_id,
-      std::unique_ptr<network::SharedURLLoaderFactoryInfo> factory_info);
+      std::unique_ptr<network::SharedURLLoaderFactoryInfo> factory_info,
+      scoped_refptr<PrefetchedSignedExchangeCache>
+          prefetched_signed_exchange_cache);
 
   // Used only when NetworkService is not enabled (or indirectly via the
   // other CreateLoaderAndStart when NetworkService is enabled).
@@ -86,7 +98,7 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
 
  private:
   friend class base::DeleteHelper<content::PrefetchURLLoaderService>;
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
+  friend struct NavigationURLLoaderImpl::DeleteOnLoaderThread;
   struct BindContext;
 
   ~PrefetchURLLoaderService() override;
@@ -112,12 +124,14 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
       base::RepeatingCallback<int(void)> frame_tree_node_id_getter);
 
   scoped_refptr<URLLoaderFactoryGetter> loader_factory_getter_;
+  BrowserContext* browser_context_ = nullptr;
+  // Not used when NavigationLoaderOnUI is enabled.
   ResourceContext* resource_context_ = nullptr;
   scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
 
-  mojo::BindingSet<network::mojom::URLLoaderFactory,
-                   std::unique_ptr<BindContext>>
-      loader_factory_bindings_;
+  mojo::ReceiverSet<network::mojom::URLLoaderFactory,
+                    std::unique_ptr<BindContext>>
+      loader_factory_receivers_;
   // Used in the IO thread.
   mojo::Binding<blink::mojom::RendererPreferenceWatcher>
       preference_watcher_binding_;
@@ -131,6 +145,11 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
       signed_exchange_prefetch_metric_recorder_;
 
   std::string accept_langs_;
+
+  // Used to create a BlobDataHandle from a DataPipe of signed exchange's inner
+  // response body to store to |prefetched_signed_exchange_cache_| when
+  // SignedExchangeSubresourcePrefetch is enabled.
+  base::WeakPtr<storage::BlobStorageContext> blob_storage_context_;
 
   DISALLOW_COPY_AND_ASSIGN(PrefetchURLLoaderService);
 };

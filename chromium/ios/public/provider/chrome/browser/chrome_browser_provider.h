@@ -22,6 +22,8 @@ class BrowserURLRewriterProvider;
 class FullscreenProvider;
 class MailtoHandlerProvider;
 class OmahaServiceProvider;
+class OverridesProvider;
+class SpecialUserProvider;
 class SpotlightProvider;
 class UserFeedbackProvider;
 class VoiceSearchProvider;
@@ -36,11 +38,9 @@ class WebState;
 
 @protocol LogoVendor;
 @protocol TextFieldStyling;
-@class Tab;
 @class TabModel;
 @class UITextField;
 @class UIView;
-@protocol UrlLoader;
 
 namespace ios {
 
@@ -116,10 +116,8 @@ class ChromeBrowserProvider {
   // |main_tab_model| is created.
   virtual void InitializeCastService(TabModel* main_tab_model) const;
 
-  // Attaches any embedder-specific tab helpers to the given |web_state|.  The
-  // owning |tab| is included for helpers that need access to information that
-  // is not yet available through web::WebState.
-  virtual void AttachTabHelpers(web::WebState* web_state, Tab* tab) const;
+  // Attaches any embedder-specific tab helpers to the given |web_state|.
+  virtual void AttachTabHelpers(web::WebState* web_state) const;
 
   // Returns an instance of the voice search provider, if one exists.
   virtual VoiceSearchProvider* GetVoiceSearchProvider() const;
@@ -130,14 +128,16 @@ class ChromeBrowserProvider {
   // Creates and returns an object that can fetch and vend search engine logos.
   // The caller assumes ownership of the returned object.
   virtual id<LogoVendor> CreateLogoVendor(
-      ios::ChromeBrowserState* browser_state,
-      id<UrlLoader> loader) const NS_RETURNS_RETAINED;
+      ios::ChromeBrowserState* browser_state) const NS_RETURNS_RETAINED;
 
   // Returns an instance of the omaha service provider.
   virtual OmahaServiceProvider* GetOmahaServiceProvider() const;
 
   // Returns an instance of the user feedback provider.
   virtual UserFeedbackProvider* GetUserFeedbackProvider() const;
+
+  // Returns an instance of the special user provider.
+  virtual SpecialUserProvider* GetSpecialUserProvider() const;
 
   // Returns an instance of the branded image provider.
   virtual BrandedImageProvider* GetBrandedImageProvider() const;
@@ -160,6 +160,9 @@ class ChromeBrowserProvider {
 
   // Returns an instance of the BrowserURLRewriter provider.
   virtual BrowserURLRewriterProvider* GetBrowserURLRewriterProvider() const;
+
+  // Returns an instance of the Overrides provider;
+  virtual OverridesProvider* GetOverridesProvider() const;
 
   // Adds and removes observers.
   void AddObserver(Observer* observer);

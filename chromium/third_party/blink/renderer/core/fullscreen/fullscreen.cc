@@ -43,7 +43,6 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen_options.h"
 #include "third_party/blink/renderer/core/fullscreen/scoped_allow_fullscreen.h"
@@ -55,6 +54,7 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
@@ -225,7 +225,9 @@ bool AllowedToRequestFullscreen(Document& document) {
   // true:
 
   //  The algorithm is triggered by a user activation.
-  if (LocalFrame::HasTransientUserActivation(document.GetFrame()))
+  // We are doing experiment to see if there is any webpage breaking after we
+  // only allow one fullscreen when the user activation state is active.
+  if (LocalFrame::ConsumeTransientUserActivation(document.GetFrame()))
     return true;
 
   //  The algorithm is triggered by a user generated orientation change.
@@ -239,8 +241,9 @@ bool AllowedToRequestFullscreen(Document& document) {
   String message = ExceptionMessages::FailedToExecute(
       "requestFullscreen", "Element",
       "API can only be initiated by a user gesture.");
-  document.AddConsoleMessage(ConsoleMessage::Create(
-      kJSMessageSource, mojom::ConsoleMessageLevel::kWarning, message));
+  document.AddConsoleMessage(
+      ConsoleMessage::Create(mojom::ConsoleMessageSource::kJavaScript,
+                             mojom::ConsoleMessageLevel::kWarning, message));
 
   return false;
 }
@@ -578,7 +581,7 @@ ScriptPromise Fullscreen::RequestFullscreen(Element& pending,
   if (script_state) {
     // We should only be creating promises for unprefixed variants.
     DCHECK_EQ(Fullscreen::RequestType::kUnprefixed, request_type);
-    resolver = ScriptPromiseResolver::Create(script_state);
+    resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   }
 
   bool for_cross_process_descendant =
@@ -789,7 +792,7 @@ ScriptPromise Fullscreen::ExitFullscreen(Document& doc,
   }
 
   if (script_state)
-    resolver = ScriptPromiseResolver::Create(script_state);
+    resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
 
   // 3. Let |resize| be false.
   bool resize = false;

@@ -79,6 +79,7 @@ target(link_target_type, "service_sources") {
   ]
 
   public_deps = [
+    "//base/util/type_safety",
     "//gpu/command_buffer/common:common_sources",
     "//url:url",
   ]
@@ -108,6 +109,8 @@ target(link_target_type, "gles2_sources") {
 
   sources = [
     "abstract_texture.h",
+    "abstract_texture_impl_shared_context_state.cc",
+    "abstract_texture_impl_shared_context_state.h",
     "buffer_manager.cc",
     "buffer_manager.h",
     "client_service_map.h",
@@ -237,6 +240,8 @@ target(link_target_type, "gles2_sources") {
     "shared_image_manager.h",
     "shared_image_representation.cc",
     "shared_image_representation.h",
+    "shared_image_representation_skia_gl.cc",
+    "shared_image_representation_skia_gl.h",
     "skia_utils.cc",
     "skia_utils.h",
     "texture_definition.cc",
@@ -257,11 +262,16 @@ target(link_target_type, "gles2_sources") {
     "webgpu_cmd_validation_implementation_autogen.h",
     "webgpu_decoder.cc",
     "webgpu_decoder.h",
-    "webgpu_decoder_impl.cc",
-    "webgpu_decoder_impl.h",
     "wrapped_sk_image.cc",
     "wrapped_sk_image.h",
   ]
+
+  if (use_dawn) {
+    sources += [
+      "webgpu_decoder_impl.cc",
+      "webgpu_decoder_impl.h",
+    ]
+  }
 
   configs += [
     "//build/config:precompiled_headers",
@@ -275,18 +285,21 @@ target(link_target_type, "gles2_sources") {
   include_dirs = [ "//third_party/mesa_headers" ]
 
   public_deps = [
+    "//base/util/type_safety",
     "//cc/paint",
     "//gpu/command_buffer/common",
     "//gpu/command_buffer/common:gles2_sources",
     "//gpu/command_buffer/common:raster_sources",
     "//gpu/command_buffer/common:webgpu_sources",
     "//skia",
+    "//third_party/dawn/src/dawn:dawn_headers",
   ]
   deps = [
     ":disk_cache_proto",
     ":service",
     "//base",
     "//base/third_party/dynamic_annotations",
+    "//components/crash/core/common",
     "//components/viz/common:resource_format_utils",
     "//gpu/command_buffer/client",
     "//gpu/command_buffer/common:gles2_utils",
@@ -304,8 +317,13 @@ target(link_target_type, "gles2_sources") {
     "//ui/gfx/geometry",
     "//ui/gfx/ipc/color",
     "//ui/gl",
+    "//ui/gl:buildflags",
     "//ui/gl/init",
   ]
+
+  if (use_dawn) {
+    deps += [ "//third_party/dawn:libdawn_native" ]
+  }
 
   if (enable_vulkan) {
     deps += [
@@ -313,7 +331,7 @@ target(link_target_type, "gles2_sources") {
       "//gpu/vulkan",
     ]
 
-    if (is_linux) {
+    if (is_linux || is_fuchsia) {
       sources += [
         "external_vk_image_backing.cc",
         "external_vk_image_backing.h",
@@ -332,6 +350,7 @@ target(link_target_type, "gles2_sources") {
   }
 
   if (is_mac) {
+    deps += [ "//components/viz/common:metal_context_provider" ]
     sources += [
       "shared_image_backing_factory_iosurface.h",
       "shared_image_backing_factory_iosurface.mm",
@@ -341,6 +360,7 @@ target(link_target_type, "gles2_sources") {
     libs = [
       "Cocoa.framework",
       "IOSurface.framework",
+      "Metal.framework",
       "OpenGL.framework",
     ]
   }
@@ -370,6 +390,13 @@ target(link_target_type, "gles2_sources") {
         "//gpu/vulkan:vulkan",
       ]
     }
+  }
+
+  if (is_win) {
+    sources += [
+      "swap_chain_factory_dxgi.cc",
+      "swap_chain_factory_dxgi.h",
+    ]
   }
 }
 

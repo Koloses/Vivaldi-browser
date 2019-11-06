@@ -8,10 +8,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
 #include "extensions/buildflags/buildflags.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "extensions/api/show_menu/show_menu_api.h"
+#include "extensions/api/menubar/menubar_api.h"
 #include "extensions/api/vivaldi_utilities/vivaldi_utilities_api.h"
 #endif
 
@@ -64,6 +65,15 @@ bool NeedsDisabledMacMenuItem(int action) {
     case IDC_VIV_TASK_MANAGER:
     case IDC_VIV_DEVELOPER_TOOLS:
     case IDC_VIV_WINDOW_MINIMIZE:
+    case IDC_VIV_DEVTOOLS_INSPECTOR:
+    case IDC_VIV_DEVTOOLS_CONSOLE:
+    case IDC_VIV_COMMAND_IMPORT_CALENDAR:
+    case IDC_VIV_SET_LOAD_IMAGES_ALWAYS:
+    case IDC_VIV_SET_LOAD_IMAGES_NEVER:
+    case IDC_VIV_SET_LOAD_IMAGES_CACHE:
+    case IDC_VIV_SET_ANIMATIONS_LOOP:
+    case IDC_VIV_SET_ANIMATIONS_NEVER:
+    case IDC_VIV_SET_ANIMATIONS_ONCE:
       return true;
     break;
   }
@@ -133,6 +143,28 @@ void UpdateCommandsForVivaldi(CommandUpdater* command_updater_) {
                                          true);
   command_updater_->UpdateCommandEnabled(IDC_VIV_WINDOW_MINIMIZE, true);
   command_updater_->UpdateCommandEnabled(IDC_VIV_ALLOW_APPLE_EVENTS, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_DEVTOOLS_INSPECTOR, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_DEVTOOLS_CONSOLE, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_COMMAND_IMPORT_CALENDAR, true);
+
+  command_updater_->UpdateCommandEnabled(IDC_VIV_MAIL_REPLY, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_MAIL_FORWARD, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_MAIL_DELETE_PERMANENTLY, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_MAIL_MARK_READ, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_MAIL_MARK_THREAD_READ, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_MAIL_MARK_THREAD_UNREAD, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_MAIL_MARK_UNREAD, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_MAIL_ENABLE_SENDER_VIEW, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_MAIL_ENABLE_THREADED_VIEW,
+                                         true);
+  command_updater_->UpdateCommandEnabled(
+      IDC_VIV_MAIL_MARK_READ_AND_GOTO_NEXT_UNREAD, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_SET_LOAD_IMAGES_ALWAYS, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_SET_LOAD_IMAGES_NEVER, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_SET_LOAD_IMAGES_CACHE, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_SET_ANIMATIONS_LOOP, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_SET_ANIMATIONS_NEVER, true);
+  command_updater_->UpdateCommandEnabled(IDC_VIV_SET_ANIMATIONS_ONCE, true);
 }
 
 bool ExecuteVivaldiCommands(Browser* browser, int id) {
@@ -192,10 +224,29 @@ bool ExecuteVivaldiCommands(Browser* browser, int id) {
     case IDC_VIV_TOGGLE_IMAGES:
     case IDC_VIV_WINDOW_PANEL:
     case IDC_VIV_WINDOW_MINIMIZE:
-    case IDC_VIV_ALLOW_APPLE_EVENTS: {
+    case IDC_VIV_ALLOW_APPLE_EVENTS:
+    case IDC_VIV_DEVTOOLS_INSPECTOR:
+    case IDC_VIV_DEVTOOLS_CONSOLE:
+    case IDC_VIV_COMMAND_IMPORT_CALENDAR:
+    case IDC_VIV_MAIL_REPLY:
+    case IDC_VIV_MAIL_FORWARD:
+    case IDC_VIV_MAIL_DELETE_PERMANENTLY:
+    case IDC_VIV_MAIL_MARK_READ:
+    case IDC_VIV_MAIL_MARK_THREAD_READ:
+    case IDC_VIV_MAIL_MARK_THREAD_UNREAD:
+    case IDC_VIV_MAIL_MARK_UNREAD:
+    case IDC_VIV_MAIL_ENABLE_SENDER_VIEW:
+    case IDC_VIV_MAIL_ENABLE_THREADED_VIEW:
+    case IDC_VIV_MAIL_MARK_READ_AND_GOTO_NEXT_UNREAD:
+    case IDC_VIV_SET_LOAD_IMAGES_ALWAYS:
+    case IDC_VIV_SET_LOAD_IMAGES_NEVER:
+    case IDC_VIV_SET_LOAD_IMAGES_CACHE:
+    case IDC_VIV_SET_ANIMATIONS_LOOP:
+    case IDC_VIV_SET_ANIMATIONS_NEVER:
+    case IDC_VIV_SET_ANIMATIONS_ONCE: {
       // The API is registered with a regular profile.
       Profile* profile = browser->profile()->GetOriginalProfile();
-      extensions::ShowMenuAPI::SendCommandExecuted(
+      extensions::MenubarAPI::SendOnActivated(
           profile, browser->session_id().id(), id);
       break;
     }

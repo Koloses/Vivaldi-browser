@@ -39,15 +39,20 @@ apps::mojom::AppPtr Convert(const app_list::InternalApp& internal_app) {
   }
 
   app->icon_key = apps::mojom::IconKey::New(
-      apps::mojom::AppType::kBuiltIn,
-      static_cast<uint64_t>(internal_app.icon_resource_id), std::string(),
-      apps::IconEffects::kNone);
+      apps::mojom::IconKey::kDoesNotChangeOverTime,
+      internal_app.icon_resource_id, apps::IconEffects::kNone);
 
   app->last_launch_time = base::Time();
   app->install_time = base::Time();
 
-  app->installed_internally = apps::mojom::OptionalBool::kTrue;
+  app->install_source = apps::mojom::InstallSource::kSystem;
+
   app->is_platform_app = apps::mojom::OptionalBool::kFalse;
+  app->recommendable = internal_app.recommendable
+                           ? apps::mojom::OptionalBool::kTrue
+                           : apps::mojom::OptionalBool::kFalse;
+  app->searchable = internal_app.searchable ? apps::mojom::OptionalBool::kTrue
+                                            : apps::mojom::OptionalBool::kFalse;
   app->show_in_launcher = internal_app.show_in_launcher
                               ? apps::mojom::OptionalBool::kTrue
                               : apps::mojom::OptionalBool::kFalse;
@@ -79,6 +84,15 @@ void BuiltInChromeOsApps::Initialize(
   profile_ = profile;
 }
 
+bool BuiltInChromeOsApps::hide_settings_app_for_testing_ = false;
+
+// static
+bool BuiltInChromeOsApps::SetHideSettingsAppForTesting(bool hide) {
+  bool old_value = hide_settings_app_for_testing_;
+  hide_settings_app_for_testing_ = hide;
+  return old_value;
+}
+
 void BuiltInChromeOsApps::Connect(apps::mojom::SubscriberPtr subscriber,
                                   apps::mojom::ConnectOptionsPtr opts) {
   std::vector<apps::mojom::AppPtr> apps;
@@ -98,6 +112,11 @@ void BuiltInChromeOsApps::Connect(apps::mojom::SubscriberPtr subscriber,
 
       apps::mojom::AppPtr app = Convert(internal_app);
       if (!app.is_null()) {
+        if (hide_settings_app_for_testing_ &&
+            (internal_app.internal_app_name ==
+             app_list::InternalAppName::kSettings)) {
+          app->show_in_search = apps::mojom::OptionalBool::kFalse;
+        }
         apps.push_back(std::move(app));
       }
     }
@@ -112,18 +131,19 @@ void BuiltInChromeOsApps::Connect(apps::mojom::SubscriberPtr subscriber,
 }
 
 void BuiltInChromeOsApps::LoadIcon(
+    const std::string& app_id,
     apps::mojom::IconKeyPtr icon_key,
     apps::mojom::IconCompression icon_compression,
     int32_t size_hint_in_dip,
     bool allow_placeholder_icon,
     LoadIconCallback callback) {
   constexpr bool is_placeholder_icon = false;
-  if (!icon_key.is_null() && (icon_key->u_key != 0) &&
-      (icon_key->u_key <= INT_MAX)) {
-    int resource_id = static_cast<int>(icon_key->u_key);
-    LoadIconFromResource(
-        icon_compression, size_hint_in_dip, resource_id, is_placeholder_icon,
-        static_cast<IconEffects>(icon_key->icon_effects), std::move(callback));
+  if (icon_key &&
+      (icon_key->resource_id != apps::mojom::IconKey::kInvalidResourceId)) {
+    LoadIconFromResource(icon_compression, size_hint_in_dip,
+                         icon_key->resource_id, is_placeholder_icon,
+                         static_cast<IconEffects>(icon_key->icon_effects),
+                         std::move(callback));
     return;
   }
   // On failure, we still run the callback, with the zero IconValue.
@@ -136,6 +156,8 @@ void BuiltInChromeOsApps::Launch(const std::string& app_id,
                                  int64_t display_id) {
   switch (launch_source) {
     case apps::mojom::LaunchSource::kUnknown:
+    case apps::mojom::LaunchSource::kFromKioskNextHome:
+    case apps::mojom::LaunchSource::kFromParentalControls:
       break;
     case apps::mojom::LaunchSource::kFromAppListGrid:
     case apps::mojom::LaunchSource::kFromAppListGridContextMenu:
@@ -159,7 +181,8 @@ void BuiltInChromeOsApps::SetPermission(const std::string& app_id,
 }
 
 void BuiltInChromeOsApps::Uninstall(const std::string& app_id) {
-  NOTIMPLEMENTED();
+  LOG(ERROR) << "Uninstall failed, could not remove built-in app with id "
+             << app_id;
 }
 
 void BuiltInChromeOsApps::OpenNativeSettings(const std::string& app_id) {

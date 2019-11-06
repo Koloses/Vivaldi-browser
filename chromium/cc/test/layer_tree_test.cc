@@ -23,8 +23,11 @@
 #include "cc/input/input_handler.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
+#include "cc/scheduler/compositor_timing_history.h"
 #include "cc/test/animation_test_common.h"
+#include "cc/test/fake_compositor_frame_reporting_controller.h"
 #include "cc/test/fake_layer_tree_host_client.h"
+#include "cc/test/test_layer_tree_frame_sink.h"
 #include "cc/test/test_ukm_recorder_factory.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_impl.h"
@@ -39,14 +42,15 @@
 #include "components/viz/test/fake_output_surface.h"
 #include "components/viz/test/fake_skia_output_surface.h"
 #include "components/viz/test/test_context_provider.h"
-#include "components/viz/test/test_layer_tree_frame_sink.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gfx/geometry/size_conversions.h"
+#include "ui/gl/gl_switches.h"
 
 namespace cc {
 namespace {
 
-class SynchronousLayerTreeFrameSink : public viz::TestLayerTreeFrameSink {
+class SynchronousLayerTreeFrameSink : public TestLayerTreeFrameSink {
  public:
   SynchronousLayerTreeFrameSink(
       scoped_refptr<viz::ContextProvider> compositor_context_provider,
@@ -57,24 +61,23 @@ class SynchronousLayerTreeFrameSink : public viz::TestLayerTreeFrameSink {
       double refresh_rate,
       viz::BeginFrameSource* begin_frame_source,
       bool use_software_renderer)
-      : viz::TestLayerTreeFrameSink(std::move(compositor_context_provider),
-                                    std::move(worker_context_provider),
-                                    gpu_memory_buffer_manager,
-                                    renderer_settings,
-                                    task_runner,
-                                    false,
-                                    false,
-                                    refresh_rate,
-                                    begin_frame_source),
+      : TestLayerTreeFrameSink(std::move(compositor_context_provider),
+                               std::move(worker_context_provider),
+                               gpu_memory_buffer_manager,
+                               renderer_settings,
+                               task_runner,
+                               false,
+                               false,
+                               refresh_rate,
+                               begin_frame_source),
         use_software_renderer_(use_software_renderer),
-        task_runner_(std::move(task_runner)),
-        weak_factory_(this) {}
+        task_runner_(std::move(task_runner)) {}
   ~SynchronousLayerTreeFrameSink() override = default;
 
   void set_viewport(const gfx::Rect& viewport) { viewport_ = viewport; }
 
   bool BindToClient(LayerTreeFrameSinkClient* client) override {
-    if (!viz::TestLayerTreeFrameSink::BindToClient(client))
+    if (!TestLayerTreeFrameSink::BindToClient(client))
       return false;
     client_ = client;
     return true;
@@ -82,7 +85,7 @@ class SynchronousLayerTreeFrameSink : public viz::TestLayerTreeFrameSink {
   void DetachFromClient() override {
     client_ = nullptr;
     weak_factory_.InvalidateWeakPtrs();
-    viz::TestLayerTreeFrameSink::DetachFromClient();
+    TestLayerTreeFrameSink::DetachFromClient();
   }
   void Invalidate(bool needs_draw) override {
     if (frame_request_pending_)
@@ -94,14 +97,14 @@ class SynchronousLayerTreeFrameSink : public viz::TestLayerTreeFrameSink {
                              bool hit_test_data_changed,
                              bool show_hit_test_borders) override {
     frame_ack_pending_ = true;
-    viz::TestLayerTreeFrameSink::SubmitCompositorFrame(
+    TestLayerTreeFrameSink::SubmitCompositorFrame(
         std::move(frame), hit_test_data_changed, show_hit_test_borders);
   }
   void DidReceiveCompositorFrameAck(
       const std::vector<viz::ReturnedResource>& resources) override {
     DCHECK(frame_ack_pending_);
     frame_ack_pending_ = false;
-    viz::TestLayerTreeFrameSink::DidReceiveCompositorFrameAck(resources);
+    TestLayerTreeFrameSink::DidReceiveCompositorFrameAck(resources);
     InvalidateIfPossible();
   }
 
@@ -126,7 +129,7 @@ class SynchronousLayerTreeFrameSink : public viz::TestLayerTreeFrameSink {
   gfx::Rect viewport_;
   const bool use_software_renderer_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  base::WeakPtrFactory<SynchronousLayerTreeFrameSink> weak_factory_;
+  base::WeakPtrFactory<SynchronousLayerTreeFrameSink> weak_factory_{this};
 };
 
 }  // namespace
@@ -158,9 +161,11 @@ void CreateVirtualViewportLayers(Layer* root_layer,
 
   inner_viewport_container_layer->SetBounds(inner_bounds);
   inner_viewport_scroll_layer->SetScrollable(inner_bounds);
+  inner_viewport_scroll_layer->SetHitTestable(true);
   inner_viewport_scroll_layer->SetBounds(outer_bounds);
   outer_viewport_container_layer->SetBounds(outer_bounds);
   outer_scroll_layer->SetScrollable(outer_bounds);
+  outer_scroll_layer->SetHitTestable(true);
 
   inner_viewport_scroll_layer->SetIsContainerForFixedPositionLayers(true);
   outer_scroll_layer->SetIsContainerForFixedPositionLayers(true);
@@ -184,6 +189,7 @@ void CreateVirtualViewportLayers(Layer* root_layer,
 
   outer_viewport_scroll_layer->SetBounds(scroll_bounds);
   outer_viewport_scroll_layer->SetIsDrawable(true);
+  outer_viewport_scroll_layer->SetHitTestable(true);
   CreateVirtualViewportLayers(root_layer, outer_viewport_scroll_layer,
                               inner_bounds, outer_bounds, host);
 }
@@ -222,7 +228,11 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
                           AnimationHost::CreateForTesting(ThreadInstance::IMPL),
                           0,
                           std::move(image_worker_task_runner)),
-        test_hooks_(test_hooks) {}
+        test_hooks_(test_hooks) {
+    compositor_frame_reporting_controller_ =
+        std::make_unique<FakeCompositorFrameReportingController>(
+            settings.single_thread_proxy_scheduler);
+  }
 
   std::unique_ptr<RasterBufferProvider> CreateRasterBufferProvider() override {
     return test_hooks_->CreateRasterBufferProvider(this);
@@ -244,15 +254,17 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     test_hooks_->WillSendBeginMainFrameOnThread(this);
   }
 
-  void DidSendBeginMainFrame() override {
-    LayerTreeHostImpl::DidSendBeginMainFrame();
+  void DidSendBeginMainFrame(const viz::BeginFrameArgs& args) override {
+    LayerTreeHostImpl::DidSendBeginMainFrame(args);
     test_hooks_->DidSendBeginMainFrameOnThread(this);
   }
 
   void BeginMainFrameAborted(
       CommitEarlyOutReason reason,
-      std::vector<std::unique_ptr<SwapPromise>> swap_promises) override {
-    LayerTreeHostImpl::BeginMainFrameAborted(reason, std::move(swap_promises));
+      std::vector<std::unique_ptr<SwapPromise>> swap_promises,
+      const viz::BeginFrameArgs& args) override {
+    LayerTreeHostImpl::BeginMainFrameAborted(reason, std::move(swap_promises),
+                                             args);
     test_hooks_->BeginMainFrameAbortedOnThread(this, reason);
   }
 
@@ -437,6 +449,7 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
 
   void DidBeginMainFrame() override { test_hooks_->DidBeginMainFrame(); }
 
+  void WillUpdateLayers() override {}
   void DidUpdateLayers() override {}
 
   void BeginMainFrame(const viz::BeginFrameArgs& args) override {
@@ -452,8 +465,7 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
     test_hooks_->ApplyViewportChanges(args);
   }
 
-  void RecordWheelAndTouchScrollingCount(bool has_scrolled_by_wheel,
-                                         bool has_scrolled_by_touch) override {}
+  void RecordManipulationTypeCounts(ManipulationInfo info) override {}
 
   void SendOverscrollEventFromImplSide(
       const gfx::Vector2dF& overscroll_delta,
@@ -498,8 +510,6 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
   void DidPresentCompositorFrame(
       uint32_t frame_token,
       const gfx::PresentationFeedback& feedback) override {}
-  void DidGenerateLocalSurfaceIdAllocation(
-      const viz::LocalSurfaceIdAllocation& allocation) override {}
 
  private:
   explicit LayerTreeHostClientForTesting(TestHooks* test_hooks)
@@ -590,12 +600,12 @@ class LayerTreeHostForTesting : public LayerTreeHost {
 };
 
 class LayerTreeTestLayerTreeFrameSinkClient
-    : public viz::TestLayerTreeFrameSinkClient {
+    : public TestLayerTreeFrameSinkClient {
  public:
   explicit LayerTreeTestLayerTreeFrameSinkClient(TestHooks* hooks)
       : hooks_(hooks) {}
 
-  // viz::TestLayerTreeFrameSinkClient implementation.
+  // TestLayerTreeFrameSinkClient implementation.
   std::unique_ptr<viz::SkiaOutputSurface> CreateDisplaySkiaOutputSurface()
       override {
     return hooks_->CreateDisplaySkiaOutputSurfaceOnThread();
@@ -629,8 +639,7 @@ class LayerTreeTestLayerTreeFrameSinkClient
 
 LayerTreeTest::LayerTreeTest()
     : layer_tree_frame_sink_client_(
-          new LayerTreeTestLayerTreeFrameSinkClient(this)),
-      weak_factory_(this) {
+          new LayerTreeTestLayerTreeFrameSinkClient(this)) {
   main_thread_weak_ptr_ = weak_factory_.GetWeakPtr();
 
   // Tests should timeout quickly unless --cc-layer-tree-test-no-timeout was
@@ -905,6 +914,7 @@ void LayerTreeTest::SetupTree() {
                                              initial_device_scale_factor_,
                                              viz::LocalSurfaceIdAllocation());
   layer_tree_host()->root_layer()->SetIsDrawable(true);
+  layer_tree_host()->root_layer()->SetHitTestable(true);
   layer_tree_host()->SetElementIdsForTesting();
 }
 
@@ -1047,13 +1057,19 @@ void LayerTreeTest::RunTest(CompositorMode mode) {
 
   if (mode == CompositorMode::THREADED)
     settings_.commit_to_active_tree = false;
-  // Spend less time waiting for BeginFrame because the output is
-  // mocked out.
-  settings_.background_animation_rate = 200.0;
   // Disable latency recovery to make the scheduler more predictable in its
   // actions and less dependent on timings to make decisions.
   settings_.enable_latency_recovery = false;
   InitializeSettings(&settings_);
+
+  if (use_vulkan()) {
+    auto* command_line = base::CommandLine::ForCurrentProcess();
+    bool use_gpu = command_line->HasSwitch(::switches::kUseGpuInTests);
+    command_line->AppendSwitchASCII(
+        ::switches::kUseVulkan,
+        use_gpu ? ::switches::kVulkanImplementationNameNative
+                : ::switches::kVulkanImplementationNameSwiftshader);
+  }
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
@@ -1075,16 +1091,16 @@ void LayerTreeTest::RunTest(CompositorMode mode) {
 
 void LayerTreeTest::RequestNewLayerTreeFrameSink() {
   scoped_refptr<viz::TestContextProvider> shared_context_provider =
-      use_software_renderer_ ? nullptr : viz::TestContextProvider::Create();
+      use_software_renderer() ? nullptr : viz::TestContextProvider::Create();
   scoped_refptr<viz::TestContextProvider> worker_context_provider =
-      use_software_renderer_ ? nullptr
-                             : viz::TestContextProvider::CreateWorker();
+      use_software_renderer() ? nullptr
+                              : viz::TestContextProvider::CreateWorker();
 
   viz::RendererSettings renderer_settings;
   // Spend less time waiting for BeginFrame because the output is
   // mocked out.
   constexpr double refresh_rate = 200.0;
-  renderer_settings.use_skia_renderer = use_skia_renderer_;
+  renderer_settings.use_skia_renderer = use_skia_renderer();
   auto layer_tree_frame_sink = CreateLayerTreeFrameSink(
       renderer_settings, refresh_rate, std::move(shared_context_provider),
       std::move(worker_context_provider));
@@ -1092,8 +1108,7 @@ void LayerTreeTest::RequestNewLayerTreeFrameSink() {
   layer_tree_host_->SetLayerTreeFrameSink(std::move(layer_tree_frame_sink));
 }
 
-std::unique_ptr<viz::TestLayerTreeFrameSink>
-LayerTreeTest::CreateLayerTreeFrameSink(
+std::unique_ptr<TestLayerTreeFrameSink> LayerTreeTest::CreateLayerTreeFrameSink(
     const viz::RendererSettings& renderer_settings,
     double refresh_rate,
     scoped_refptr<viz::ContextProvider> compositor_context_provider,
@@ -1110,10 +1125,10 @@ LayerTreeTest::CreateLayerTreeFrameSink(
     return std::make_unique<SynchronousLayerTreeFrameSink>(
         compositor_context_provider, std::move(worker_context_provider),
         gpu_memory_buffer_manager(), renderer_settings, impl_task_runner_,
-        refresh_rate, begin_frame_source_, use_software_renderer_);
+        refresh_rate, begin_frame_source_, use_software_renderer());
   }
 
-  return std::make_unique<viz::TestLayerTreeFrameSink>(
+  return std::make_unique<TestLayerTreeFrameSink>(
       compositor_context_provider, std::move(worker_context_provider),
       gpu_memory_buffer_manager(), renderer_settings, impl_task_runner_,
       synchronous_composite, disable_display_vsync, refresh_rate,
@@ -1129,7 +1144,7 @@ std::unique_ptr<viz::OutputSurface>
 LayerTreeTest::CreateDisplayOutputSurfaceOnThread(
     scoped_refptr<viz::ContextProvider> compositor_context_provider) {
   // By default the Display shares a context with the LayerTreeHostImpl.
-  if (use_software_renderer_) {
+  if (use_software_renderer()) {
     return viz::FakeOutputSurface::CreateSoftware(
         std::make_unique<viz::SoftwareOutputDevice>());
   }

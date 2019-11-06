@@ -11,12 +11,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/themes/theme_properties.h"
-#include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/hosted_app_button_container.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/grit/theme_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -134,7 +134,12 @@ bool BrowserNonClientFrameView::EverHasVisibleBackgroundTabShapes() const {
 
 bool BrowserNonClientFrameView::CanDrawStrokes() const {
   // Hosted apps should not draw strokes, as they don't have a tab strip.
-  return !browser_view_->browser()->hosted_app_controller();
+  return !browser_view_->browser()->app_controller();
+}
+
+SkColor BrowserNonClientFrameView::GetCaptionColor(
+    ActiveState active_state) const {
+  return color_utils::GetColorWithMaxContrast(GetFrameColor(active_state));
 }
 
 SkColor BrowserNonClientFrameView::GetFrameColor(
@@ -148,13 +153,21 @@ SkColor BrowserNonClientFrameView::GetFrameColor(
   if (frame_->ShouldUseTheme())
     return GetThemeProviderForProfile()->GetColor(color_id);
 
-  extensions::HostedAppBrowserController* hosted_app_controller =
-      browser_view_->browser()->hosted_app_controller();
-  if (hosted_app_controller && hosted_app_controller->GetThemeColor())
-    return *hosted_app_controller->GetThemeColor();
+  web_app::AppBrowserController* app_controller =
+      browser_view_->browser()->app_controller();
+  if (app_controller && app_controller->GetThemeColor())
+    return *app_controller->GetThemeColor();
 
   return ThemeProperties::GetDefaultColor(color_id,
                                           browser_view_->IsIncognito());
+}
+
+void BrowserNonClientFrameView::UpdateFrameColor() {
+  // Only hosted app windows support dynamic frame colors set by HTML meta tags.
+  if (!hosted_app_button_container_)
+    return;
+  hosted_app_button_container_->UpdateCaptionColors();
+  SchedulePaint();
 }
 
 SkColor BrowserNonClientFrameView::GetToolbarTopSeparatorColor() const {
@@ -194,9 +207,18 @@ int BrowserNonClientFrameView::GetTabBackgroundResourceId(
   return id;
 }
 
-void BrowserNonClientFrameView::UpdateClientArea() {}
-
 void BrowserNonClientFrameView::UpdateMinimumSize() {}
+
+void BrowserNonClientFrameView::Layout() {
+  // BrowserView updates most UI visibility on layout based on fullscreen
+  // state. However, it doesn't have access to hosted_app_button_container_. Do
+  // it here. This is necessary since otherwise the visibility of ink drop
+  // layers won't be updated; see crbug.com/964215.
+  if (hosted_app_button_container_)
+    hosted_app_button_container_->SetVisible(!frame_->IsFullscreen());
+
+  NonClientFrameView::Layout();
+}
 
 void BrowserNonClientFrameView::VisibilityChanged(views::View* starting_from,
                                                   bool is_visible) {
@@ -222,11 +244,6 @@ int BrowserNonClientFrameView::NonClientHitTest(const gfx::Point& point) {
 void BrowserNonClientFrameView::ResetWindowControls() {
   if (hosted_app_button_container_)
     hosted_app_button_container_->UpdateStatusIconsVisibility();
-}
-
-SkColor BrowserNonClientFrameView::GetCaptionColor(
-    ActiveState active_state) const {
-  return color_utils::GetColorWithMaxContrast(GetFrameColor(active_state));
 }
 
 bool BrowserNonClientFrameView::ShouldPaintAsActive(
@@ -266,18 +283,10 @@ void BrowserNonClientFrameView::ChildPreferredSizeChanged(views::View* child) {
     Layout();
 }
 
-void BrowserNonClientFrameView::ActivationChanged(bool active) {
-  // On Windows, while deactivating the widget, this is called before the
-  // active HWND has actually been changed.  Since we want the state to reflect
-  // that the window is inactive, we force NonClientFrameView to see the
-  // "correct" state as an override.
-  set_active_state_override(&active);
-
+void BrowserNonClientFrameView::PaintAsActiveChanged(bool active) {
   // The toolbar top separator color (used as the stroke around the tabs and
   // the new tab button) needs to be recalculated.
   browser_view_->tabstrip()->FrameColorsChanged();
-
-  set_active_state_override(nullptr);
 
   if (hosted_app_button_container_)
     hosted_app_button_container_->SetPaintAsActive(active);
@@ -369,6 +378,15 @@ void BrowserNonClientFrameView::OnProfileHighResAvatarLoaded(
                                    frame_->GetNativeWindow());
 #endif
 }
+
+#if defined(OS_WIN)
+int BrowserNonClientFrameView::GetSystemMenuY() const {
+  if (!browser_view()->IsTabStripVisible())
+    return GetTopInset(false);
+  return GetBoundsForTabStripRegion(browser_view()->tabstrip()).bottom() -
+         GetLayoutConstant(TABSTRIP_TOOLBAR_OVERLAP);
+}
+#endif
 
 void BrowserNonClientFrameView::MaybeObserveTabstrip() {
   if (browser_view_->tabstrip()) {

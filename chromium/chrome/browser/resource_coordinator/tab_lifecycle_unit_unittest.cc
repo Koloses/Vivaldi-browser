@@ -39,8 +39,8 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
 #include "content/public/test/web_contents_tester.h"
-#include "device/usb/public/cpp/fake_usb_device_manager.h"
-#include "device/usb/public/mojom/device_manager.mojom.h"
+#include "services/device/public/cpp/test/fake_usb_device_manager.h"
+#include "services/device/public/mojom/usb_manager.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace resource_coordinator {
@@ -61,6 +61,8 @@ class MockTabLifecycleObserver : public TabLifecycleObserver {
                     bool is_discarded));
   MOCK_METHOD2(OnAutoDiscardableStateChange,
                void(content::WebContents* contents, bool is_auto_discardable));
+  MOCK_METHOD2(OnFrozenStateChange,
+               void(content::WebContents* contents, bool is_frozen));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockTabLifecycleObserver);
@@ -199,7 +201,7 @@ void TabLifecycleUnitTest::TestCannotDiscardBasedOnHeuristicUsage(
   test_clock_.Advance(kBackgroundUrgentProtectionTime);
 
   auto* observer = ResourceCoordinatorTabHelper::FromWebContents(web_contents_)
-                       ->local_site_characteristics_wc_observer_for_testing();
+                       ->local_site_characteristics_wc_observer();
   test_clock_.Advance(base::TimeDelta::FromSeconds(1));
   testing::MarkWebContentsAsLoadedInBackground(web_contents_);
   if (notify_feature_usage_method) {
@@ -236,7 +238,7 @@ void TabLifecycleUnitTest::TestCannotDiscardBasedOnHeuristicUsage(
   }
 
   testing::GetLocalSiteCharacteristicsDataImplForWC(web_contents_)
-      ->NotifySiteUnloaded(TabVisibility::kBackground);
+      ->NotifySiteUnloaded(performance_manager::TabVisibility::kBackground);
 }
 
 TEST_F(TabLifecycleUnitTest, AsTabLifecycleUnitExternal) {
@@ -397,14 +399,14 @@ TEST_F(TabLifecycleUnitTest, CannotDiscardVideoCapture) {
   test_clock_.Advance(kBackgroundUrgentProtectionTime);
   ExpectCanDiscardTrueAllReasons(&tab_lifecycle_unit);
 
-  blink::MediaStreamDevices video_devices{
-      blink::MediaStreamDevice(blink::MEDIA_DEVICE_VIDEO_CAPTURE,
-                               "fake_media_device", "fake_media_device")};
+  blink::MediaStreamDevices video_devices{blink::MediaStreamDevice(
+      blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE, "fake_media_device",
+      "fake_media_device")};
   std::unique_ptr<content::MediaStreamUI> ui =
       MediaCaptureDevicesDispatcher::GetInstance()
           ->GetMediaStreamCaptureIndicator()
           ->RegisterMediaStream(web_contents_, video_devices);
-  ui->OnStarted(base::OnceClosure(), base::RepeatingClosure());
+  ui->OnStarted(base::OnceClosure(), content::MediaStreamUI::SourceCallback());
   ExpectCanDiscardFalseAllReasons(&tab_lifecycle_unit,
                                   DecisionFailureReason::LIVE_STATE_CAPTURING);
 
@@ -420,14 +422,14 @@ TEST_F(TabLifecycleUnitTest, CannotDiscardDesktopCapture) {
   test_clock_.Advance(kBackgroundUrgentProtectionTime);
   ExpectCanDiscardTrueAllReasons(&tab_lifecycle_unit);
 
-  blink::MediaStreamDevices desktop_capture_devices{
-      blink::MediaStreamDevice(blink::MEDIA_GUM_DESKTOP_VIDEO_CAPTURE,
-                               "fake_media_device", "fake_media_device")};
+  blink::MediaStreamDevices desktop_capture_devices{blink::MediaStreamDevice(
+      blink::mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE,
+      "fake_media_device", "fake_media_device")};
   std::unique_ptr<content::MediaStreamUI> ui =
       MediaCaptureDevicesDispatcher::GetInstance()
           ->GetMediaStreamCaptureIndicator()
           ->RegisterMediaStream(web_contents_, desktop_capture_devices);
-  ui->OnStarted(base::OnceClosure(), base::RepeatingClosure());
+  ui->OnStarted(base::OnceClosure(), content::MediaStreamUI::SourceCallback());
   ExpectCanDiscardFalseAllReasons(
       &tab_lifecycle_unit, DecisionFailureReason::LIVE_STATE_DESKTOP_CAPTURE);
 
@@ -690,7 +692,9 @@ TEST_F(TabLifecycleUnitTest, CannotFreezeAFrozenTab) {
     DecisionDetails decision_details;
     EXPECT_TRUE(tab_lifecycle_unit.CanFreeze(&decision_details));
   }
+  EXPECT_CALL(observer_, OnFrozenStateChange(web_contents_, true));
   tab_lifecycle_unit.Freeze();
+  ::testing::Mock::VerifyAndClear(&observer_);
   {
     DecisionDetails decision_details;
     EXPECT_FALSE(tab_lifecycle_unit.CanFreeze(&decision_details));
@@ -833,7 +837,10 @@ TEST_F(TabLifecycleUnitTest, ReloadingAFrozenTabUnfreezeIt) {
   DecisionDetails decision_details;
   EXPECT_TRUE(tab_lifecycle_unit.CanFreeze(&decision_details));
 
+  EXPECT_CALL(observer_, OnFrozenStateChange(web_contents_, true));
   tab_lifecycle_unit.Freeze();
+  ::testing::Mock::VerifyAndClear(&observer_);
+
   web_contents_->GetController().Reload(content::ReloadType::NORMAL, false);
   EXPECT_NE(LifecycleUnitState::FROZEN, tab_lifecycle_unit.GetState());
 }

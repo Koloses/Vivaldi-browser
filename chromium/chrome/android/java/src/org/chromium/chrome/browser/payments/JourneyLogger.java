@@ -145,9 +145,8 @@ public class JourneyLogger {
      */
     public void setCompleted() {
         assert !mHasRecorded;
-        assert mWasPaymentRequestTriggered;
 
-        if (!mHasRecorded && mWasPaymentRequestTriggered) {
+        if (!mHasRecorded) {
             mHasRecorded = true;
             nativeSetCompleted(mJourneyLoggerAndroid);
         }
@@ -164,7 +163,7 @@ public class JourneyLogger {
 
         // The abort reasons on Android cascade into each other, so only the first one should be
         // recorded.
-        if (!mHasRecorded && mWasPaymentRequestTriggered) {
+        if (!mHasRecorded) {
             mHasRecorded = true;
             nativeSetAborted(mJourneyLoggerAndroid, reason);
         }
@@ -177,13 +176,23 @@ public class JourneyLogger {
      */
     public void setNotShown(int reason) {
         assert reason < NotShownReason.MAX;
-        assert !mWasPaymentRequestTriggered;
         assert !mHasRecorded;
 
         if (!mHasRecorded) {
             mHasRecorded = true;
             nativeSetNotShown(mJourneyLoggerAndroid, reason);
         }
+    }
+
+    /**
+     * Records amount of completed/triggered transactions separated by currency.
+     *
+     * @param curreny A string indicating the curreny of the transaction.
+     * @param value A string indicating the value of the transaction.
+     * @param completed A boolean indicating whether the transaction has completed or not.
+     */
+    public void recordTransactionAmount(String currency, String value, boolean completed) {
+        nativeRecordTransactionAmount(mJourneyLoggerAndroid, currency, value, completed);
     }
 
     private native long nativeInitJourneyLoggerAndroid(
@@ -209,4 +218,6 @@ public class JourneyLogger {
     private native void nativeSetCompleted(long nativeJourneyLoggerAndroid);
     private native void nativeSetAborted(long nativeJourneyLoggerAndroid, int reason);
     private native void nativeSetNotShown(long nativeJourneyLoggerAndroid, int reason);
+    private native void nativeRecordTransactionAmount(
+            long nativeJourneyLoggerAndroid, String currency, String value, boolean completed);
 }

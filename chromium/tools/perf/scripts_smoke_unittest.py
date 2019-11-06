@@ -34,9 +34,9 @@ class ScriptsSmokeTest(unittest.TestCase):
     return return_code, stdout
 
   def testRunBenchmarkHelp(self):
-    return_code, stdout = self.RunPerfScript('run_benchmark help')
+    return_code, stdout = self.RunPerfScript('run_benchmark --help')
     self.assertEquals(return_code, 0, stdout)
-    self.assertIn('Available commands are', stdout)
+    self.assertIn('usage: run_benchmark', stdout)
 
   def testRunBenchmarkRunListsOutBenchmarks(self):
     return_code, stdout = self.RunPerfScript('run_benchmark run')
@@ -45,7 +45,7 @@ class ScriptsSmokeTest(unittest.TestCase):
 
   def testRunBenchmarkRunNonExistingBenchmark(self):
     return_code, stdout = self.RunPerfScript('run_benchmark foo')
-    self.assertIn('No benchmark named "foo"', stdout)
+    self.assertIn('no such benchmark: foo', stdout)
     self.assertNotEquals(return_code, 0)
 
   def testRunRecordWprHelp(self):
@@ -108,6 +108,47 @@ class ScriptsSmokeTest(unittest.TestCase):
     finally:
       shutil.rmtree(tempdir)
 
+  @decorators.Enabled('linux')  # Testing platform-independent code.
+  def testRunPerformanceTestsTelemetry_NoTestResults(self):
+    """Test that test results output gets returned for complete failures."""
+    options = options_for_unittests.GetCopy()
+    browser_type = options.browser_type
+    tempdir = tempfile.mkdtemp()
+    benchmarks = ['benchmark1', 'benchmark2']
+    return_code, stdout = self.RunPerfScript(
+        '../../testing/scripts/run_performance_tests.py '
+        '../../tools/perf/testdata/fail_and_do_nothing '
+        '--benchmarks=%s '
+        '--browser=%s '
+        '--isolated-script-test-output=%s' % (
+            ','.join(benchmarks),
+            browser_type,
+            os.path.join(tempdir, 'output.json')
+        ))
+    self.assertNotEqual(return_code, 0)
+    try:
+      with open(os.path.join(tempdir, 'output.json')) as f:
+        test_results = json.load(f)
+        self.assertIsNotNone(
+            test_results, 'json_test_results should be populated: ' + stdout)
+        self.assertTrue(
+            test_results['interrupted'],
+            'if the benchmark does not populate test results, then we should '
+            'populate it with a failure.')
+      for benchmark in benchmarks:
+        with open(os.path.join(tempdir, benchmark, 'test_results.json')) as f:
+          test_results = json.load(f)
+          self.assertIsNotNone(
+              test_results, 'json_test_results should be populated: ' + stdout)
+          self.assertTrue(
+              test_results['interrupted'],
+              'if the benchmark does not populate test results, then we should '
+              'populate it with a failure.')
+    except IOError as e:
+      self.fail('json_test_results should be populated: ' + stdout + str(e))
+    finally:
+      shutil.rmtree(tempdir)
+
   # Android: crbug.com/932301
   # ChromeOS: crbug.com/754913
   @decorators.Disabled('chromeos', 'android')
@@ -124,6 +165,8 @@ class ScriptsSmokeTest(unittest.TestCase):
         '--test-shard-map-filename=smoke_test_benchmark_shard_map.json '
         '--browser=%s '
         '--run-ref-build '
+        '--isolated-script-test-filter=dummy_benchmark.noisy_benchmark_1/'
+        'dummy_page.html::dummy_benchmark.stable_benchmark_1/dummy_page.html '
         '--isolated-script-test-repeat=2 '
         '--isolated-script-test-also-run-disabled-tests '
         '--isolated-script-test-output=%s' % (
@@ -160,7 +203,6 @@ class ScriptsSmokeTest(unittest.TestCase):
       self.fail('KeyError: ' + stdout + str(e))
     finally:
       shutil.rmtree(tempdir)
-
 
   # Windows: ".exe" is auto-added which breaks Windows.
   # ChromeOS: crbug.com/754913.
@@ -230,6 +272,38 @@ class ScriptsSmokeTest(unittest.TestCase):
     original_browser_arg_index = command.index('--browser=release_x64')
     reference_browser_arg_index = command.index('--browser=reference')
     self.assertTrue(reference_browser_arg_index > original_browser_arg_index)
+
+  def testRunPerformanceTestsTelemetryCommandGenerator_StorySelectionConfig_Unabridged(self):
+    options = run_performance_tests.parse_arguments([
+        '../../tools/perf/run_benchmark', '--browser=release_x64',
+        '--run-ref-build',
+        r'--isolated-script-test-output=c:\a\b\c\output.json',
+    ])
+    story_selection_config = {
+        'abridged': False,
+        'begin': 1,
+        'end': 5,
+    }
+    command = run_performance_tests.TelemetryCommandGenerator(
+        'fake_benchmark_name', options, story_selection_config).generate(
+            'fake_output_dir')
+    self.assertIn('--run-full-story-set', command)
+    self.assertIn('--story-shard-begin-index=1', command)
+    self.assertIn('--story-shard-end-index=5', command)
+
+  def testRunPerformanceTestsTelemetryCommandGenerator_StorySelectionConfig_Abridged(self):
+    options = run_performance_tests.parse_arguments([
+        '../../tools/perf/run_benchmark', '--browser=release_x64',
+        '--run-ref-build',
+        r'--isolated-script-test-output=c:\a\b\c\output.json',
+    ])
+    story_selection_config = {
+        'abridged': True,
+    }
+    command = run_performance_tests.TelemetryCommandGenerator(
+        'fake_benchmark_name', options, story_selection_config).generate(
+            'fake_output_dir')
+    self.assertNotIn('--run-full-story-set', command)
 
   def testRunPerformanceTestsGtestArgsParser(self):
      options = run_performance_tests.parse_arguments([

@@ -29,11 +29,11 @@
 #include "components/prefs/pref_member.h"
 #include "components/security_state/core/security_state.h"
 #include "ui/base/material_design/material_design_controller_observer.h"
-#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
+#include "ui/views/animation/animation_delegate_views.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/focus_ring.h"
 #include "ui/views/drag_controller.h"
@@ -41,13 +41,12 @@
 class CommandUpdater;
 class ContentSettingBubbleModelDelegate;
 class GURL;
-class IntentPickerView;
 class KeywordHintView;
 class LocationIconView;
 enum class OmniboxPart;
 class OmniboxPopupView;
 enum class OmniboxTint;
-class PageActionIconContainerView;
+class OmniboxPageActionIconContainerView;
 class Profile;
 class SelectedKeywordView;
 class StarView;
@@ -55,12 +54,12 @@ class StarView;
 namespace autofill {
 class LocalCardMigrationIconView;
 class SaveCardIconView;
-}
+}  // namespace autofill
 
 namespace views {
 class ImageButton;
 class Label;
-}
+}  // namespace views
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -74,7 +73,7 @@ class LocationBarView : public LocationBar,
                         public LocationBarTesting,
                         public views::View,
                         public views::DragController,
-                        public gfx::AnimationDelegate,
+                        public views::AnimationDelegateViews,
                         public ChromeOmniboxEditController,
                         public DropdownBarHostDelegate,
                         public views::ButtonListener,
@@ -93,7 +92,7 @@ class LocationBarView : public LocationBar,
 
     // Returns ContentSettingBubbleModelDelegate.
     virtual ContentSettingBubbleModelDelegate*
-        GetContentSettingBubbleModelDelegate() = 0;
+    GetContentSettingBubbleModelDelegate() = 0;
 
    protected:
     virtual ~Delegate() {}
@@ -120,15 +119,12 @@ class LocationBarView : public LocationBar,
   // be called when the receiving instance is attached to a view container.
   bool IsInitialized() const;
 
-  // Helper to get the color for |part| using the current tint().
+  // Helper to get the color for |part| using the current CalculateTint().
   SkColor GetColor(OmniboxPart part) const;
 
   // Returns the location bar border color blended with the toolbar color.
   // It's guaranteed to be opaque.
   SkColor GetOpaqueBorderColor(bool incognito) const;
-
-  // Returns the cached theme color tint for the location bar and results.
-  OmniboxTint tint() const { return tint_; }
 
   // Returns a background that paints an (optionally stroked) rounded rect with
   // the given color.
@@ -144,12 +140,6 @@ class LocationBarView : public LocationBar,
   // Toggles the star on or off.
   void SetStarToggled(bool on);
 
-#if defined(OS_CHROMEOS)
-  // The intent picker, should not always be visible.  It will be null when
-  // |browser_| is null.
-  IntentPickerView* intent_picker_view() { return intent_picker_view_; }
-#endif  // defined(OS_CHROMEOS)
-
   // The star. It may not be visible.  It will be null when |browser_| is null.
   StarView* star_view() { return star_view_; }
 
@@ -163,8 +153,9 @@ class LocationBarView : public LocationBar,
     return local_card_migration_icon_view_;
   }
 
-  PageActionIconContainerView* page_action_icon_container_view() {
-    return page_action_icon_container_view_;
+  OmniboxPageActionIconContainerView*
+  omnibox_page_action_icon_container_view() {
+    return omnibox_page_action_icon_container_view_;
   }
 
   // Returns the screen coordinates of the omnibox (where the URL text appears,
@@ -212,7 +203,6 @@ class LocationBarView : public LocationBar,
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   void OnThemeChanged() override;
-  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
   void ChildPreferredSizeChanged(views::View* child) override;
 
   // ChromeOmniboxEditController:
@@ -247,7 +237,7 @@ class LocationBarView : public LocationBar,
   Browser* browser() { return browser_; }
 
   // LocationIconView::Delegate
-  bool IsEditingOrEmpty() override;
+  bool IsEditingOrEmpty() const override;
   void OnLocationIconPressed(const ui::MouseEvent& event) override;
   void OnLocationIconDragged(const ui::MouseEvent& event) override;
   bool ShowPageInfoDialog() override;
@@ -256,6 +246,9 @@ class LocationBarView : public LocationBar,
   gfx::ImageSkia GetLocationIcon(LocationIconView::Delegate::IconFetchedCallback
                                      on_icon_fetched) const override;
   SkColor GetLocationIconInkDropColor() const override;
+
+  // Gets the theme color tint for the location bar and results.
+  OmniboxTint CalculateTint() const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SecurityIndicatorTest, CheckIndicatorText);
@@ -303,8 +296,9 @@ class LocationBarView : public LocationBar,
   // Gets the OmniboxPopupView associated with the model in |omnibox_view_|.
   OmniboxPopupView* GetOmniboxPopupView();
 
-  // Gets the theme color tint for the location bar and results.
-  OmniboxTint GetTint();
+  // Called when the page info bubble is closed.
+  void OnPageInfoBubbleClosed(views::Widget::ClosedReason closed_reason,
+                              bool reload_prompt);
 
   // LocationBar:
   GURL GetDestinationURL() const override;
@@ -347,8 +341,9 @@ class LocationBarView : public LocationBar,
   // PageActionIconView::Delegate:
   SkColor GetPageActionInkDropColor() const override;
   content::WebContents* GetWebContentsForPageActionIconView() override;
+  bool IsLocationBarUserInputInProgress() const override;
 
-  // gfx::AnimationDelegate:
+  // views::AnimationDelegateViews:
   void AnimationProgressed(const gfx::Animation* animation) override;
   void AnimationEnded(const gfx::Animation* animation) override;
   void AnimationCanceled(const gfx::Animation* animation) override;
@@ -363,6 +358,12 @@ class LocationBarView : public LocationBar,
 
   // ui::MaterialDesignControllerObserver:
   void OnTouchUiChanged() override;
+
+  // Called with an async fetched for the keyword view.
+  void OnKeywordFaviconFetched(const gfx::Image& icon);
+
+  // Updates the visibility of the send tab to self icon.
+  bool UpdateSendTabToSelfIcon();
 
   // The Browser this LocationBarView is in.  Note that at least
   // chromeos::SimpleWebViewDialog uses a LocationBarView outside any browser
@@ -400,7 +401,8 @@ class LocationBarView : public LocationBar,
   ContentSettingViews content_setting_views_;
 
   // The page action icons.
-  PageActionIconContainerView* page_action_icon_container_view_ = nullptr;
+  OmniboxPageActionIconContainerView* omnibox_page_action_icon_container_view_ =
+      nullptr;
 
   // The save credit card icon.  It will be null when |browser_| is null.
   autofill::SaveCardIconView* save_credit_card_icon_view_ = nullptr;
@@ -408,12 +410,6 @@ class LocationBarView : public LocationBar,
   // The icon for the local card migration prompt.
   autofill::LocalCardMigrationIconView* local_card_migration_icon_view_ =
       nullptr;
-
-#if defined(OS_CHROMEOS)
-  // The intent picker for accessing ARC's apps.  It will be null when
-  // |browser_| is null.
-  IntentPickerView* intent_picker_view_ = nullptr;
-#endif  // defined(OS_CHROMEOS)
 
   // The star for bookmarking.  It will be null when |browser_| is null.
   StarView* star_view_ = nullptr;
@@ -429,9 +425,6 @@ class LocationBarView : public LocationBar,
   // bar is read-only.
   const bool is_popup_mode_;
 
-  // The theme tint. Updated based on the profile and theme settings.
-  OmniboxTint tint_;
-
   // Tracks this preference to determine whether bookmark editing is allowed.
   BooleanPrefMember edit_bookmarks_enabled_;
 
@@ -442,15 +435,13 @@ class LocationBarView : public LocationBar,
   // The focus ring, if one is in use.
   std::unique_ptr<views::FocusRing> focus_ring_;
 
+  bool is_initialized_ = false;
+
   ScopedObserver<ui::MaterialDesignController,
                  ui::MaterialDesignControllerObserver>
       md_observer_{this};
 
-  // Used to scope the lifetime of asynchronous icon fetch callbacks to the
-  // lifetime of the object. Weak pointers issued by this factory are
-  // invalidated whenever we start a new icon fetch, so don't use this weak
-  // factory for any other purposes.
-  base::WeakPtrFactory<LocationBarView> icon_fetch_weak_ptr_factory_{this};
+  base::WeakPtrFactory<LocationBarView> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarView);
 };

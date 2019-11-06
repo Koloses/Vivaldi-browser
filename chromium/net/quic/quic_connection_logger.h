@@ -12,15 +12,16 @@
 
 #include "base/macros.h"
 #include "base/timer/timer.h"
+#include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/log/net_log_with_source.h"
 #include "net/socket/socket_performance_watcher.h"
-#include "net/third_party/quic/core/crypto/crypto_handshake_message.h"
-#include "net/third_party/quic/core/http/quic_spdy_session.h"
-#include "net/third_party/quic/core/quic_connection.h"
-#include "net/third_party/quic/core/quic_packets.h"
+#include "net/third_party/quiche/src/quic/core/crypto/crypto_handshake_message.h"
+#include "net/third_party/quiche/src/quic/core/http/quic_spdy_session.h"
+#include "net/third_party/quiche/src/quic/core/quic_connection.h"
+#include "net/third_party/quiche/src/quic/core/quic_packets.h"
 
 namespace base {
 class HistogramBase;
@@ -50,7 +51,8 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
                     quic::QuicPacketNumber original_packet_number,
                     quic::TransmissionType transmission_type,
                     quic::QuicTime sent_time) override;
-  void OnIncomingAck(const quic::QuicAckFrame& frame,
+  void OnIncomingAck(quic::QuicPacketNumber ack_packet_number,
+                     const quic::QuicAckFrame& frame,
                      quic::QuicTime ack_receive_time,
                      quic::QuicPacketNumber largest_observed,
                      bool rtt_updated,
@@ -81,8 +83,7 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   void OnPublicResetPacket(const quic::QuicPublicResetPacket& packet) override;
   void OnVersionNegotiationPacket(
       const quic::QuicVersionNegotiationPacket& packet) override;
-  void OnConnectionClosed(quic::QuicErrorCode error,
-                          const std::string& error_details,
+  void OnConnectionClosed(const quic::QuicConnectionCloseFrame& frame,
                           quic::ConnectionCloseSource source) override;
   void OnSuccessfulVersionNegotiation(
       const quic::ParsedQuicVersion& version) override;

@@ -5,6 +5,8 @@
 #include "chrome/browser/resource_coordinator/tab_lifecycle_unit_source.h"
 
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/macros.h"
@@ -41,18 +43,6 @@ namespace {
 
 constexpr base::TimeDelta kShortDelay = base::TimeDelta::FromSeconds(1);
 
-class NoUnloadListenerTabStripModelDelegate : public TestTabStripModelDelegate {
- public:
-  NoUnloadListenerTabStripModelDelegate() = default;
-  bool RunUnloadListenerBeforeClosing(content::WebContents* contents) override {
-    // The default TestTabStripModelDelegate prevents tabs from being closed.
-    return false;
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NoUnloadListenerTabStripModelDelegate);
-};
-
 class MockLifecycleUnitSourceObserver : public LifecycleUnitSourceObserver {
  public:
   MockLifecycleUnitSourceObserver() = default;
@@ -73,6 +63,8 @@ class MockTabLifecycleObserver : public TabLifecycleObserver {
                     bool is_discarded));
   MOCK_METHOD2(OnAutoDiscardableStateChange,
                void(content::WebContents* contents, bool is_auto_discardable));
+  MOCK_METHOD2(OnFrozenStateChange,
+               void(content::WebContents* contents, bool is_frozen));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockTabLifecycleObserver);
@@ -290,7 +282,7 @@ class TabLifecycleUnitSourceTest
     ExpectCanDiscardFalseTrivialAllReasons(first_lifecycle_unit);
 
     // Create a second tab strip.
-    NoUnloadListenerTabStripModelDelegate other_tab_strip_model_delegate;
+    TestTabStripModelDelegate other_tab_strip_model_delegate;
     TabStripModel other_tab_strip_model(&other_tab_strip_model_delegate,
                                         profile());
     other_tab_strip_model.AddObserver(source_);
@@ -457,7 +449,7 @@ class TabLifecycleUnitSourceTest
     return web_contents;
   }
 
-  NoUnloadListenerTabStripModelDelegate tab_strip_model_delegate_;
+  TestTabStripModelDelegate tab_strip_model_delegate_;
   ScopedSetTickClockForTesting scoped_set_tick_clock_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(TabLifecycleUnitSourceTest);
@@ -658,7 +650,9 @@ TEST_F(TabLifecycleUnitSourceTest, CannotFreezeADiscardedTab) {
       tab_strip_model_->GetWebContentsAt(0)->GetController().GetPendingEntry());
 
   // Should be able to freeze the reloaded tab.
+  EXPECT_CALL(tab_observer_, OnFrozenStateChange(::testing::_, true));
   EXPECT_TRUE(background_lifecycle_unit->Freeze());
+  ::testing::Mock::VerifyAndClear(&tab_observer_);
 }
 
 TEST_F(TabLifecycleUnitSourceTest, TabProactiveDiscardedByFrozenCallback) {

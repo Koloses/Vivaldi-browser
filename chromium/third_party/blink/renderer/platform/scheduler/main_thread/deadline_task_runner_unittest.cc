@@ -19,11 +19,9 @@ class DeadlineTaskRunnerTest : public testing::Test {
  public:
   DeadlineTaskRunnerTest()
       : task_environment_(
-            base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME,
-            base::test::ScopedTaskEnvironment::ExecutionMode::QUEUED) {
-    // Null clock might trigger some assertions.
-    task_environment_.FastForwardBy(base::TimeDelta::FromMilliseconds(5));
-  }
+            base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME,
+            base::test::ScopedTaskEnvironment::ThreadPoolExecutionMode::
+                QUEUED) {}
   ~DeadlineTaskRunnerTest() override = default;
 
   void SetUp() override {

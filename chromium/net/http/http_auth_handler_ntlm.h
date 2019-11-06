@@ -40,6 +40,18 @@
 
 namespace net {
 
+#if defined(NTLM_PORTABLE)
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class NtlmV2Usage : int {
+  kDisabledOverInsecure = 0,
+  kDisabledOverSecure,
+  kEnabledOverInsecure,
+  kEnabledOverSecure,
+  kMaxValue = kEnabledOverSecure
+};
+#endif
+
 class HttpAuthPreferences;
 
 // Code for handling HTTP NTLM authentication.
@@ -124,24 +136,23 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
                       const HttpAuthPreferences* http_auth_preferences);
 #endif
 
+  // HttpAuthHandler
   bool NeedsIdentity() override;
-
   bool AllowsDefaultCredentials() override;
-
-  HttpAuth::AuthorizationResult HandleAnotherChallenge(
-      HttpAuthChallengeTokenizer* challenge) override;
 
  protected:
   // This function acquires a credentials handle in the SSPI implementation.
   // It does nothing in the portable implementation.
   int InitializeBeforeFirstChallenge();
 
+  // HttpAuthHandler
   bool Init(HttpAuthChallengeTokenizer* tok, const SSLInfo& ssl_info) override;
-
   int GenerateAuthTokenImpl(const AuthCredentials* credentials,
                             const HttpRequestInfo* request,
                             CompletionOnceCallback callback,
                             std::string* auth_token) override;
+  HttpAuth::AuthorizationResult HandleAnotherChallengeImpl(
+      HttpAuthChallengeTokenizer* challenge) override;
 
  private:
   ~HttpAuthHandlerNTLM() override;

@@ -24,13 +24,15 @@ class CupsPrintJob {
     STATE_SUSPENDED,
     STATE_RESUMED,
     STATE_DOCUMENT_DONE,
-    STATE_ERROR
+    STATE_FAILED,
   };
 
   enum class ErrorCode {
     NO_ERROR,
     PAPER_JAM,
+    OUT_OF_PAPER,
     OUT_OF_INK,
+    DOOR_OPEN,
     PRINTER_UNREACHABLE,
     FILTER_FAILED,
     UNKNOWN_ERROR,
@@ -50,6 +52,9 @@ class CupsPrintJob {
 
   // Returns weak pointer to |this| CupsPrintJob
   base::WeakPtr<CupsPrintJob> GetWeakPtr();
+
+  // Returns whether this print_job has timed out or not.
+  bool IsExpired() const;
 
   // Getters.
   const Printer& printer() const { return printer_; }

@@ -13,7 +13,7 @@
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper_delegate.h"
 #include "ppapi/buildflags/buildflags.h"
-#include "third_party/blink/public/platform/modules/permissions/permission_status.mojom.h"
+#include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
 
 namespace extensions {
 class WebViewGuest;
@@ -29,7 +29,7 @@ class ChromeWebViewPermissionHelperDelegate
   // WebViewPermissionHelperDelegate implementation.
   void CanDownload(const GURL& url,
                    const std::string& request_method,
-                   const base::Callback<void(bool)>& callback) override;
+                   base::OnceCallback<void(bool)> callback) override;
   void RequestPointerLockPermission(
       bool user_gesture,
       bool last_unlocked_by_target,
@@ -38,7 +38,7 @@ class ChromeWebViewPermissionHelperDelegate
       int bridge_id,
       const GURL& requesting_frame,
       bool user_gesture,
-      const base::Callback<void(bool)>& callback) override;
+      base::OnceCallback<void(bool)> callback) override;
   void CancelGeolocationPermissionRequest(int bridge_id) override;
   void RequestNotificationPermission(
       int bridge_id,
@@ -80,7 +80,7 @@ class ChromeWebViewPermissionHelperDelegate
   void OnGeolocationPermissionResponse(
       int bridge_id,
       bool user_gesture,
-      const base::Callback<void(ContentSetting)>& callback,
+      base::OnceCallback<void(ContentSetting)> callback,
       bool allow,
       const std::string& user_input);
 
@@ -96,10 +96,9 @@ class ChromeWebViewPermissionHelperDelegate
       bool allow,
       const std::string& user_input);
 
-  void OnDownloadPermissionResponse(
-      const base::Callback<void(bool)>& callback,
-      bool allow,
-      const std::string& user_input);
+  void OnDownloadPermissionResponse(base::OnceCallback<void(bool)> callback,
+                                    bool allow,
+                                    const std::string& user_input);
 
   void OnPointerLockPermissionResponse(
       const base::Callback<void(bool)>& callback,
@@ -123,7 +122,8 @@ class ChromeWebViewPermissionHelperDelegate
 
   std::map<int, int> bridge_id_to_request_id_map_;
 
-  base::WeakPtrFactory<ChromeWebViewPermissionHelperDelegate> weak_factory_;
+  base::WeakPtrFactory<ChromeWebViewPermissionHelperDelegate> weak_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(ChromeWebViewPermissionHelperDelegate);
 };

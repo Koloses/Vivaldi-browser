@@ -67,7 +67,7 @@ cvox.OptionsPage.init = function() {
     $('virtual_braille_display_rows_input').value = items['virtualBrailleRows'];
   });
   chrome.storage.local.get({'virtualBrailleColumns': 40}, function(items) {
-    $('virtual_braille_display_columns_input').value =
+    $('virtual-braille-display-columns-input').value =
         items['virtualBrailleColumns'];
   });
   var changeToInterleave =
@@ -108,6 +108,14 @@ cvox.OptionsPage.init = function() {
         }
       });
 
+  chrome.commandLinePrivate.hasSwitch(
+      'enable-experimental-accessibility-chromevox-rich-text-indication',
+      function(enabled) {
+        if (!enabled) {
+          $('richTextIndicationOption').style.display = 'none';
+        }
+      });
+
   var registerEventStreamFiltersListener = function() {
     $('toggleEventStreamFilters').addEventListener('click', function(evt) {
       if ($('eventStreamFilters').hidden) {
@@ -120,28 +128,17 @@ cvox.OptionsPage.init = function() {
     });
   };
 
-  var toggleShowDeveloperOptions = function() {
-    $('developerSpeechLogging').hidden = !$('developerSpeechLogging').hidden;
-    $('developerEarconLogging').hidden = !$('developerEarconLogging').hidden;
-    $('developerBrailleLogging').hidden = !$('developerBrailleLogging').hidden;
-    $('developerEventStream').hidden = !$('developerEventStream').hidden;
-    $('showDeveloperLog').hidden = !$('showDeveloperLog').hidden;
-    $('chromeVoxDeveloperOptionsMore').hidden =
-        !($('chromeVoxDeveloperOptionsMore').hidden);
-    $('chromeVoxDeveloperOptionsLess').hidden =
-        !($('chromeVoxDeveloperOptionsLess').hidden);
-  };
-
-  $('chromeVoxDeveloperOptionsMore').addEventListener('click', function(evt) {
-    toggleShowDeveloperOptions();
-  });
-
-  $('chromeVoxDeveloperOptionsLess').addEventListener('click', function(evt) {
-    toggleShowDeveloperOptions();
+  $('chromeVoxDeveloperOptions').addEventListener('expanded-changed', () => {
+    const hidden = !$('chromeVoxDeveloperOptions').expanded;
+    $('developerSpeechLogging').hidden = hidden;
+    $('developerEarconLogging').hidden = hidden;
+    $('developerBrailleLogging').hidden = hidden;
+    $('developerEventStream').hidden = hidden;
+    $('showDeveloperLog').hidden = hidden;
   });
 
   $('openDeveloperLog').addEventListener('click', function(evt) {
-    let logPage = {url: 'cvox2/background/log.html'};
+    const logPage = {url: 'cvox2/background/log.html'};
     chrome.tabs.create(logPage);
   });
 

@@ -14,7 +14,6 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/tracing_controller.h"
-#include "content/public/common/service_manager_connection.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 #include "services/service_manager/public/cpp/connector.h"
 
@@ -58,17 +57,15 @@ void Supervisor::SetClientConnectionManagerConstructor(
   constructor_ = constructor;
 }
 
-void Supervisor::Start(content::ServiceManagerConnection* connection,
+void Supervisor::Start(service_manager::Connector* connector,
                        base::OnceClosure closure) {
-  bool stream_samples = !IsInProcessModeEnabled();
-  Start(connection, GetModeForStartup(), GetStackModeForStartup(),
-        stream_samples, GetSamplingRateForStartup(), std::move(closure));
+  Start(connector, GetModeForStartup(), GetStackModeForStartup(),
+        GetSamplingRateForStartup(), std::move(closure));
 }
 
-void Supervisor::Start(content::ServiceManagerConnection* connection,
+void Supervisor::Start(service_manager::Connector* connector,
                        Mode mode,
                        mojom::StackMode stack_mode,
-                       bool stream_samples,
                        uint32_t sampling_rate,
                        base::OnceClosure closure) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
@@ -77,8 +74,7 @@ void Supervisor::Start(content::ServiceManagerConnection* connection,
   base::CreateSingleThreadTaskRunnerWithTraits({content::BrowserThread::IO})
       ->PostTask(FROM_HERE, base::BindOnce(&Supervisor::StartServiceOnIOThread,
                                            base::Unretained(this),
-                                           connection->GetConnector()->Clone(),
-                                           mode, stack_mode, stream_samples,
+                                           connector->Clone(), mode, stack_mode,
                                            sampling_rate, std::move(closure)));
 }
 
@@ -91,17 +87,6 @@ void Supervisor::StartManualProfiling(base::ProcessId pid) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   DCHECK(HasStarted());
   client_connection_manager_->StartProfilingProcess(pid);
-}
-
-void Supervisor::SetKeepSmallAllocations(bool keep_small_allocations) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  DCHECK(HasStarted());
-
-  base::CreateSingleThreadTaskRunnerWithTraits({content::BrowserThread::IO})
-      ->PostTask(
-          FROM_HERE,
-          base::BindOnce(&Supervisor::SetKeepSmallAllocationsOnIOThread,
-                         base::Unretained(this), keep_small_allocations));
 }
 
 void Supervisor::GetProfiledPids(GetProfiledPidsCallback callback) {
@@ -182,13 +167,12 @@ void Supervisor::StartServiceOnIOThread(
     std::unique_ptr<service_manager::Connector> connector,
     Mode mode,
     mojom::StackMode stack_mode,
-    bool stream_samples,
     uint32_t sampling_rate,
     base::OnceClosure closure) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
 
-  controller_.reset(new Controller(std::move(connector), stack_mode,
-                                   stream_samples, sampling_rate));
+  controller_.reset(
+      new Controller(std::move(connector), stack_mode, sampling_rate));
   base::WeakPtr<Controller> controller_weak_ptr = controller_->GetWeakPtr();
 
   base::CreateSingleThreadTaskRunnerWithTraits({content::BrowserThread::UI})
@@ -230,11 +214,6 @@ void Supervisor::GetProfiledPidsOnIOThread(GetProfiledPidsCallback callback) {
       },
       std::move(callback));
   controller_->GetProfiledPids(std::move(post_result_to_ui_thread));
-}
-
-void Supervisor::SetKeepSmallAllocationsOnIOThread(
-    bool keep_small_allocations) {
-  controller_->SetKeepSmallAllocations(keep_small_allocations);
 }
 
 }  // namespace heap_profiling

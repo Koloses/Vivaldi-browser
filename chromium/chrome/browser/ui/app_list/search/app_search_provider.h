@@ -50,6 +50,7 @@ class AppSearchProvider : public SearchProvider {
 
   // SearchProvider overrides:
   void Start(const base::string16& query) override;
+  void ViewClosing() override;
   void Train(const std::string& id, RankingItemType type) override;
 
   // Refreshes apps and updates results inline
@@ -75,6 +76,11 @@ class AppSearchProvider : public SearchProvider {
   void UpdateRecommendedResults(
       const base::flat_map<std::string, uint16_t>& id_to_app_list_index);
   void UpdateQueriedResults();
+
+  // Publishes either the queried results or recommendation.
+  // |is_queried_search|: true for queried results, false for recommendation.
+  void PublishQueriedResultsOrRecommendation(bool is_queried_search,
+                                             Results* new_results);
 
   // Records the app search provider's latency when user initiates a search or
   // gets the zero state suggestions.

@@ -24,9 +24,10 @@ enum { FONT_HELVETICA, FONT_HELVETICA_NEUE, FONT_HELVETICA_NEUE_LIGHT };
 // localized string corresponding to |idsAccessibilityLabel|.
 // |englishUiAutomationName| is the name used in JavaScript UI Automation test
 // scripts to identify the |element|.
-void SetA11yLabelAndUiAutomationName(UIView* element,
-                                     int idsAccessibilityLabel,
-                                     NSString* englishUiAutomationName);
+void SetA11yLabelAndUiAutomationName(
+    NSObject<UIAccessibilityIdentification>* element,
+    int idsAccessibilityLabel,
+    NSString* englishUiAutomationName);
 
 // Sets the given |button|'s width to exactly fit its image and text.  Does not
 // modify the button's height.
@@ -170,6 +171,10 @@ UIImage* BlurImage(UIImage* image,
 // ignored. If the color has alpha value of less than one, then the entire
 // output image's alpha is scaled by the color's alpha value.
 UIImage* TintImage(UIImage* image, UIColor* color);
+
+// Returns the first responder in the subviews of |view|, or nil if no view in
+// the subtree is the first responder.
+UIView* GetFirstResponderSubview(UIView* view);
 
 // Returns a cropped image using |cropRect| on |image|.
 UIImage* CropImage(UIImage* image, const CGRect& cropRect);

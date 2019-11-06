@@ -10,11 +10,13 @@
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/optional.h"
+#include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 
 namespace net {
+struct SHA256HashValue;
 class URLRequestContextGetter;
 }
 
@@ -44,6 +46,7 @@ class SignedExchangePrefetchHandler final
       base::RepeatingCallback<int(void)> frame_tree_node_id_getter,
       const network::ResourceRequest& resource_request,
       const network::ResourceResponseHead& response,
+      mojo::ScopedDataPipeConsumerHandle response_body,
       network::mojom::URLLoaderPtr network_loader,
       network::mojom::URLLoaderClientRequest network_client_request,
       scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory,
@@ -64,6 +67,18 @@ class SignedExchangePrefetchHandler final
   network::mojom::URLLoaderClientRequest FollowRedirect(
       network::mojom::URLLoaderRequest loader_request);
 
+  // Returns the header integrity value of the loaded signed exchange if
+  // available. This is available after OnReceiveRedirect() of
+  // |forwarding_client| is called and before FollowRedirect() of |this| is
+  // called. Otherwise returns nullopt.
+  base::Optional<net::SHA256HashValue> ComputeHeaderIntegrity() const;
+
+  // Returns the signature expire time of the loaded signed exchange if
+  // available. This is available after OnReceiveRedirect() of
+  // |forwarding_client| is called and before FollowRedirect() of |this| is
+  // called. Otherwise returns a null Time.
+  base::Time GetSignatureExpireTime() const;
+
  private:
   // network::mojom::URLLoaderClient overrides:
   void OnReceiveResponse(const network::ResourceResponseHead& head) override;
@@ -72,7 +87,7 @@ class SignedExchangePrefetchHandler final
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         base::OnceCallback<void()> callback) override;
-  void OnReceiveCachedMetadata(const std::vector<uint8_t>& data) override;
+  void OnReceiveCachedMetadata(mojo_base::BigBuffer data) override;
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
   void OnStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) override;

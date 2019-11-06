@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/task/post_task.h"
@@ -26,6 +27,7 @@
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/security_events/security_event_recorder_factory.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
@@ -38,15 +40,19 @@
 #include "chrome/browser/sync/user_event_service_factory.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
+#include "chrome/browser/web_applications/web_app_provider_factory.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/buildflags.h"
-#include "components/browser_sync/browser_sync_switches.h"
-#include "components/browser_sync/profile_sync_service.h"
+#include "chrome/common/channel_info.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/invalidation/impl/invalidation_switches.h"
 #include "components/invalidation/impl/profile_identity_provider.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/network_time/network_time_tracker.h"
+#include "components/sync/driver/profile_sync_service.h"
+#include "components/sync/driver/sync_driver_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -72,10 +78,8 @@
 #endif  // defined(OS_CHROMEOS)
 
 #include "app/vivaldi_apptools.h"
-#include "sync/vivaldi_syncmanager.h"
-#include "sync/vivaldi_syncmanager_factory.h"
-
-using browser_sync::ProfileSyncService;
+#include "sync/vivaldi_profile_sync_service.h"
+#include "sync/vivaldi_profile_sync_service_factory.h"
 
 namespace {
 
@@ -102,7 +106,7 @@ void UpdateNetworkTime(const base::Time& network_time,
 ProfileSyncServiceFactory* ProfileSyncServiceFactory::GetInstance() {
 #if defined(VIVALDI_BUILD)
   if (vivaldi::IsVivaldiRunning())
-    return vivaldi::VivaldiSyncManagerFactory::GetInstance();
+    return vivaldi::VivaldiProfileSyncServiceFactory::GetInstance();
 #endif
   return base::Singleton<ProfileSyncServiceFactory>::get();
 }
@@ -112,7 +116,7 @@ syncer::SyncService* ProfileSyncServiceFactory::GetForProfile(
     Profile* profile) {
 #if defined(VIVALDI_BUILD)
   if (vivaldi::IsVivaldiRunning())
-    return vivaldi::VivaldiSyncManagerFactory::GetInstance()
+    return vivaldi::VivaldiProfileSyncServiceFactory::GetInstance()
               ->GetForProfile(profile);
 #endif
 
@@ -125,9 +129,9 @@ syncer::SyncService* ProfileSyncServiceFactory::GetForProfile(
 }
 
 // static
-ProfileSyncService*
+syncer::ProfileSyncService*
 ProfileSyncServiceFactory::GetAsProfileSyncServiceForProfile(Profile* profile) {
-  return static_cast<ProfileSyncService*>(GetForProfile(profile));
+  return static_cast<syncer::ProfileSyncService*>(GetForProfile(profile));
 }
 
 ProfileSyncServiceFactory::ProfileSyncServiceFactory()
@@ -155,9 +159,11 @@ ProfileSyncServiceFactory::ProfileSyncServiceFactory()
   DependsOn(invalidation::ProfileInvalidationProviderFactory::GetInstance());
   DependsOn(ModelTypeStoreServiceFactory::GetInstance());
   DependsOn(PasswordStoreFactory::GetInstance());
+  DependsOn(SecurityEventRecorderFactory::GetInstance());
   DependsOn(SendTabToSelfSyncServiceFactory::GetInstance());
   DependsOn(SpellcheckServiceFactory::GetInstance());
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
+  DependsOn(SupervisedUserServiceFactory::GetInstance());
   DependsOn(SupervisedUserSettingsServiceFactory::GetInstance());
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
   DependsOn(SessionSyncServiceFactory::GetInstance());
@@ -170,6 +176,7 @@ ProfileSyncServiceFactory::ProfileSyncServiceFactory()
   DependsOn(
       extensions::ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
   DependsOn(extensions::StorageFrontend::GetFactoryInstance());
+  DependsOn(web_app::WebAppProviderFactory::GetInstance());
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 #if defined(OS_CHROMEOS)
   DependsOn(chromeos::SyncedPrintersManagerFactory::GetInstance());
@@ -180,7 +187,7 @@ ProfileSyncServiceFactory::~ProfileSyncServiceFactory() = default;
 
 KeyedService* ProfileSyncServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
-  ProfileSyncService::InitParams init_params;
+  syncer::ProfileSyncService::InitParams init_params;
 
   Profile* profile = Profile::FromBrowserContext(context);
 
@@ -196,7 +203,11 @@ KeyedService* ProfileSyncServiceFactory::BuildServiceInstanceFor(
           ->GetURLLoaderFactoryForBrowserProcess();
   init_params.network_connection_tracker =
       content::GetNetworkConnectionTracker();
+  init_params.channel = chrome::GetChannel();
   init_params.debug_identifier = profile->GetDebugName();
+  init_params.autofill_enable_account_wallet_storage =
+      base::FeatureList::IsEnabled(
+          autofill::features::kAutofillEnableAccountWalletStorage);
 
   bool local_sync_backend_enabled = false;
 
@@ -218,7 +229,7 @@ KeyedService* ProfileSyncServiceFactory::BuildServiceInstanceFor(
     if (local_sync_backend_folder.empty())
       return nullptr;
 
-    init_params.start_behavior = ProfileSyncService::AUTO_START;
+    init_params.start_behavior = syncer::ProfileSyncService::AUTO_START;
   }
 #endif  // defined(OS_WIN)
 
@@ -264,12 +275,19 @@ KeyedService* ProfileSyncServiceFactory::BuildServiceInstanceFor(
     // need to take care that ProfileSyncService doesn't get tripped up between
     // those two cases. Bug 88109.
     init_params.start_behavior = browser_defaults::kSyncAutoStarts
-                                     ? ProfileSyncService::AUTO_START
-                                     : ProfileSyncService::MANUAL_START;
+                                     ? syncer::ProfileSyncService::AUTO_START
+                                     : syncer::ProfileSyncService::MANUAL_START;
   }
 
-  auto pss = std::make_unique<ProfileSyncService>(std::move(init_params));
+  auto pss =
+      std::make_unique<syncer::ProfileSyncService>(std::move(init_params));
   pss->Initialize();
+
+  // Hook PSS into PersonalDataManager (a circular dependency).
+  autofill::PersonalDataManager* pdm =
+      autofill::PersonalDataManagerFactory::GetForProfile(profile);
+  pdm->OnSyncServiceInitialized(pss.get());
+
   return pss.release();
 }
 

@@ -26,8 +26,8 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/account_info.h"
-#include "components/signin/core/browser/signin_pref_names.h"
+#include "components/signin/public/base/signin_pref_names.h"
+#include "components/signin/public/identity_manager/account_info.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gfx/image/image.h"
@@ -100,7 +100,7 @@ class GAIAInfoUpdateServiceTestBase : public ProfileInfoCacheTest {
     return profile_;
   }
 
-  identity::IdentityTestEnvironment* identity_test_env() {
+  signin::IdentityTestEnvironment* identity_test_env() {
     return identity_test_env_adaptor_->identity_test_env();
   }
 
@@ -361,7 +361,7 @@ TEST_F(GAIAInfoUpdateServiceTest, LogOut) {
   ProfileAttributesEntry* entry = storage()->GetAllProfilesAttributes().front();
   entry->SetGAIAName(gaia_name);
   gfx::Image gaia_picture = gfx::test::CreateImage(256, 256);
-  entry->SetGAIAPicture(&gaia_picture);
+  entry->SetGAIAPicture(gaia_picture);
 
   // Set a fake picture URL.
   profile()->GetPrefs()->SetString(prefs::kProfileGAIAInfoPictureURL,
@@ -392,7 +392,7 @@ TEST_F(GAIAInfoUpdateServiceMiscTest, ClearGaiaInfoOnStartup) {
   entry->SetGAIAName(base::UTF8ToUTF16("foo"));
   entry->SetGAIAGivenName(base::UTF8ToUTF16("Pat Foo"));
   gfx::Image gaia_picture = gfx::test::CreateImage(256, 256);
-  entry->SetGAIAPicture(&gaia_picture);
+  entry->SetGAIAPicture(gaia_picture);
 
   GetCache()->AddObserver(this);
 

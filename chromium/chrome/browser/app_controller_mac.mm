@@ -116,7 +116,7 @@
 #include "app/vivaldi_constants.h"
 #include "app/vivaldi_resources.h"
 #include "browser/vivaldi_app_observer.h"
-#include "extensions/api/show_menu/show_menu_api.h"
+#include "extensions/api/menubar/menubar_api.h"
 #include "prefs/vivaldi_gen_prefs.h"
 #import  "third_party/sparkle_lib/Sparkle.framework/Headers/SUUpdater.h"
 #include "ui/vivaldi_bookmark_menu_mac.h"
@@ -191,8 +191,14 @@ void RecordLastRunAppBundlePath() {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
 
-  base::FilePath app_bundle_path =
-      chrome::GetVersionedDirectory().DirName().DirName().DirName();
+  // Go up five levels from the versioned sub-directory of the framework, which
+  // is at C.app/Contents/Frameworks/C.framework/Versions/V.
+  base::FilePath app_bundle_path = chrome::GetFrameworkBundlePath()
+                                       .DirName()
+                                       .DirName()
+                                       .DirName()
+                                       .DirName()
+                                       .DirName();
   base::ScopedCFTypeRef<CFStringRef> app_bundle_path_cfstring(
       base::SysUTF8ToCFStringRef(app_bundle_path.value()));
   CFPreferencesSetAppValue(
@@ -237,9 +243,6 @@ bool IsProfileSignedOut(Profile* profile) {
 // this method is called, and that tab is the NTP, then this method closes the
 // NTP after all the |urls| have been opened.
 - (void)openUrlsReplacingNTP:(const std::vector<GURL>&)urls;
-
-// Whether instances of this class should use the Handoff feature.
-- (BOOL)shouldUseHandoff;
 
 // This method passes |handoffURL| to |handoffManager_|.
 - (void)passURLToHandoffManager:(const GURL&)handoffURL;
@@ -787,10 +790,12 @@ static base::mac::ScopedObjCClassSwizzler* g_swizzle_imk_input_session;
 
   // Record the path to the (browser) app bundle; this is used by the app mode
   // shim.
-  base::PostTaskWithTraits(FROM_HERE,
-                           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-                            base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-                           base::BindOnce(&RecordLastRunAppBundlePath));
+  if (base::mac::AmIBundled()) {
+    base::PostTaskWithTraits(FROM_HERE,
+                             {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+                              base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+                             base::BindOnce(&RecordLastRunAppBundlePath));
+  }
 
   // Makes "Services" menu items available.
   [self registerServicesMenuTypesTo:[notify object]];
@@ -1142,9 +1147,6 @@ static base::mac::ScopedObjCClassSwizzler* g_swizzle_imk_input_session;
     }
   }
 
-  // NOTE(tomas@vivaldi.com): Handle shorcuts and menu items selected when no
-  // window is open. First open a window, and then send the command to the
-  // vivaldi app via VivaldiAppObserver.
   if (vivaldi::IsVivaldiRunning()) {
     Browser* browser = chrome::FindLastActiveWithProfile(
         lastProfile->IsGuestSession() ? lastProfile->GetOffTheRecordProfile()
@@ -1153,7 +1155,22 @@ static base::mac::ScopedObjCClassSwizzler* g_swizzle_imk_input_session;
       browser = chrome::FindLastActiveWithProfile(
           lastProfile->GetOffTheRecordProfile());
 
+    if (browser && browser->window()->IsMinimized()) {
+      // NOTE(tomas@vivaldi.com): For minimized windows we don't want to
+      // unminimize any open windows for these commands, so we handle them here.
+      if (tag == IDC_VIV_NEW_PRIVATE_WINDOW) {
+        CreateBrowser(lastProfile->GetOffTheRecordProfile());
+        return;
+      } else if (tag == IDC_VIV_NEW_WINDOW) {
+        CreateBrowser(lastProfile);
+        return;
+      }
+    }
+
     if (!browser) {
+      // NOTE(tomas@vivaldi.com): Handle shorcuts and menu items when no
+      // window is open. First open a window, and then send the command to the
+      // vivaldi app via VivaldiAppObserver.
       if (tag == IDC_VIV_EXIT) {
         // Exit is a special case. We do not want to open a new window.
         [self tryToTerminateApplication:NSApp];
@@ -1282,7 +1299,7 @@ static base::mac::ScopedObjCClassSwizzler* g_swizzle_imk_input_session;
         // modifying several layers of chrome code.
         std::string parameter =
             base::SysNSStringToUTF8([sender representedObject]);
-        extensions::ShowMenuAPI::SendCommandExecuted(
+        extensions::MenubarAPI::SendOnActivated(
             browser->profile(), browser->session_id().id(), tag, parameter);
       }
       break;
@@ -1955,18 +1972,11 @@ static base::mac::ScopedObjCClassSwizzler* g_swizzle_imk_input_session;
 
 #pragma mark - Handoff Manager
 
-- (BOOL)shouldUseHandoff {
-  return base::mac::IsAtLeastOS10_10();
-}
-
 - (void)passURLToHandoffManager:(const GURL&)handoffURL {
   [handoffManager_ updateActiveURL:handoffURL];
 }
 
 - (void)updateHandoffManager:(content::WebContents*)webContents {
-  if (![self shouldUseHandoff])
-    return;
-
   if (!handoffManager_)
     handoffManager_.reset([[HandoffManager alloc] init]);
 
@@ -1985,7 +1995,7 @@ static base::mac::ScopedObjCClassSwizzler* g_swizzle_imk_input_session;
 
   // Handoff is not allowed from an incognito profile. To err on the safe side,
   // also disallow Handoff from a guest profile.
-  if (profile->GetProfileType() != Profile::REGULAR_PROFILE)
+  if (!profile->IsRegularProfile())
     return GURL();
 
   if (!webContents)

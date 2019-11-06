@@ -15,7 +15,7 @@
 #include "components/autofill/core/browser/test_autofill_provider.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/form_data.h"
-#include "components/autofill/core/common/submission_source.h"
+#include "components/autofill/core/common/mojom/autofill_types.mojom.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
@@ -29,10 +29,10 @@ using ::testing::_;
 using ::testing::Invoke;
 
 namespace autofill {
-namespace {
 
-const base::FilePath::CharType kDocRoot[] =
-    FILE_PATH_LITERAL("chrome/test/data");
+using mojom::SubmissionSource;
+
+namespace {
 
 class MockAutofillProvider : public TestAutofillProvider {
  public:
@@ -92,7 +92,6 @@ class AutofillProviderBrowserTest : public InProcessBrowserTest {
   void SetUpOnMainThread() override {
     autofill_client_ = std::make_unique<TestAutofillClient>();
     autofill_provider_ = std::make_unique<MockAutofillProvider>();
-    embedded_test_server()->AddDefaultHandlers(base::FilePath(kDocRoot));
     // Serve both a.com and b.com (and any other domain).
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(embedded_test_server()->Start());

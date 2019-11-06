@@ -16,10 +16,9 @@ namespace features {
 // https://crbug.com/709824.
 ASH_PUBLIC_EXPORT extern const base::Feature kDockedMagnifier;
 
-// Enables dragging one or more tabs out of a browser window in tablet mode.
-// TODO(xdai): Remove this after the feature is launched.
-// https://crbug.com/823769.
-ASH_PUBLIC_EXPORT extern const base::Feature kDragTabsInTabletMode;
+// Enables dragging and snapping an overview window in clamshell mode.
+// TODO(crbug.com/890029): Remove this when the feature is fully launched.
+ASH_PUBLIC_EXPORT extern const base::Feature kDragToSnapInClamshellMode;
 
 // Enables rounded corners in overview mode for testing.
 // TODO(crbug.com/903486): Remove this when new rounded corners implementation
@@ -38,10 +37,29 @@ ASH_PUBLIC_EXPORT extern const base::Feature kLockScreenInlineReply;
 ASH_PUBLIC_EXPORT extern const base::Feature
     kLockScreenHideSensitiveNotificationsSupport;
 
+// Enables user preference to control media keys on the lock screen.
+ASH_PUBLIC_EXPORT extern const base::Feature kLockScreenMediaKeys;
+
+// Enables lock screen media controls UI.
+ASH_PUBLIC_EXPORT extern const base::Feature kLockScreenMediaControls;
+
+// Enables hiding of ARC media notifications. If this is enabled, all ARC
+// notifications that are of the media type will not be shown. This
+// is because they will be replaced by native media session notifications.
+// TODO(beccahughes): Remove after launch. (https://crbug.com/897836)
+ASH_PUBLIC_EXPORT extern const base::Feature kHideArcMediaNotifications;
+
 // Enables the media session notification. If this is enabled, we will show
 // a notification that shows the currently playing media with controls.
 // TODO(beccahughes): Remove after launch. (https://crbug.com/897836)
 ASH_PUBLIC_EXPORT extern const base::Feature kMediaSessionNotification;
+
+// Enables multi-display support for overview and split view.
+// TODO(crbug.com/952461): Remove this when the feature is fully launched.
+ASH_PUBLIC_EXPORT extern const base::Feature kMultiDisplayOverviewAndSplitView;
+
+// Enables the redesigned managed device info UI in the system tray.
+ASH_PUBLIC_EXPORT extern const base::Feature kManagedDeviceUIRedesign;
 
 // Enables the Night Light feature.
 ASH_PUBLIC_EXPORT extern const base::Feature kNightLight;
@@ -80,12 +98,22 @@ ASH_PUBLIC_EXPORT extern const base::Feature kUseBluetoothSystemInAsh;
 // Enables the Supervised User Deprecation notices.
 ASH_PUBLIC_EXPORT extern const base::Feature kSupervisedUserDeprecationNotice;
 
-// Enables the notification stacking bar redesigned UI.
-ASH_PUBLIC_EXPORT extern const base::Feature kNotificationStackingBarRedesign;
+// Enables pagination for feature pod buttons in the system tray
+ASH_PUBLIC_EXPORT extern const base::Feature kSystemTrayFeaturePodsPagination;
+
+// Enables side volume button control based on screen orientation feature.
+// TODO(https://crbug.com/937907): Remove this after the feature is fully
+// launched.
+ASH_PUBLIC_EXPORT extern const base::Feature
+    kSwapSideVolumeButtonsForOrientation;
+
+ASH_PUBLIC_EXPORT bool IsHideArcMediaNotificationsEnabled();
 
 ASH_PUBLIC_EXPORT bool IsKeyboardShortcutViewerAppEnabled();
 
 ASH_PUBLIC_EXPORT bool IsLockScreenNotificationsEnabled();
+
+ASH_PUBLIC_EXPORT bool IsManagedDeviceUIRedesignEnabled();
 
 ASH_PUBLIC_EXPORT bool IsLockScreenInlineReplyEnabled();
 
@@ -107,7 +135,9 @@ ASH_PUBLIC_EXPORT bool IsVirtualDesksEnabled();
 
 ASH_PUBLIC_EXPORT bool IsSupervisedUserDeprecationNoticeEnabled();
 
-ASH_PUBLIC_EXPORT bool IsNotificationStackingBarRedesignEnabled();
+ASH_PUBLIC_EXPORT bool IsSystemTrayFeaturePodsPaginationEnabled();
+
+ASH_PUBLIC_EXPORT bool IsSwapSideVolumeButtonsForOrientationEnabled();
 
 }  // namespace features
 }  // namespace ash

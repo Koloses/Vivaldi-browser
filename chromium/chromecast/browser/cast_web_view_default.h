@@ -20,7 +20,6 @@
 
 namespace content {
 class BrowserContext;
-class RenderViewHost;
 class SiteInstance;
 }  // namespace content
 
@@ -55,16 +54,8 @@ class CastWebViewDefault : public CastWebView,
 
  private:
   // WebContentsObserver implementation:
-  void RenderViewCreated(content::RenderViewHost* render_view_host) override;
-  void DidFirstVisuallyNonEmptyPaint() override;
   void DidStartNavigation(
       content::NavigationHandle* navigation_handle) override;
-  void MediaStartedPlaying(const MediaPlayerInfo& media_info,
-                           const MediaPlayerId& id) override;
-  void MediaStoppedPlaying(
-      const MediaPlayerInfo& media_info,
-      const MediaPlayerId& id,
-      WebContentsObserver::MediaStoppedReason reason) override;
 
   // WebContentsDelegate implementation:
   content::WebContents* OpenURLFromTab(
@@ -74,9 +65,9 @@ class CastWebViewDefault : public CastWebView,
   void ActivateContents(content::WebContents* contents) override;
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
-                                  blink::MediaStreamType type) override;
+                                  blink::mojom::MediaStreamType type) override;
   bool DidAddMessageToConsole(content::WebContents* source,
-                              int32_t level,
+                              blink::mojom::ConsoleMessageLevel log_level,
                               const base::string16& message,
                               int32_t line_no,
                               const base::string16& source_id) override;
@@ -93,8 +84,8 @@ class CastWebViewDefault : public CastWebView,
   const scoped_refptr<content::SiteInstance> site_instance_;
 
   Delegate* const delegate_;
-  const bool transparent_;
   const bool allow_media_access_;
+  const std::string log_prefix_;
 
   std::unique_ptr<content::WebContents> web_contents_;
   CastWebContentsImpl cast_web_contents_;

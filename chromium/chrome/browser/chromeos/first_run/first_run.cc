@@ -16,7 +16,6 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
-#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -31,7 +30,8 @@
 #include "components/arc/arc_service_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/account_info.h"
+#include "components/signin/public/identity_manager/account_info.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_observer.h"
@@ -40,7 +40,6 @@
 #include "content/public/common/content_switches.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
-#include "services/identity/public/cpp/identity_manager.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace chromeos {
@@ -59,9 +58,11 @@ void LaunchDialogForProfile(Profile* profile) {
   if (!extension)
     return;
 
-  OpenApplication(AppLaunchParams(
-      profile, extension, extensions::LAUNCH_CONTAINER_WINDOW,
-      WindowOpenDisposition::NEW_WINDOW, extensions::SOURCE_CHROME_INTERNAL));
+  OpenApplication(
+      AppLaunchParams(profile, extension->id(),
+                      extensions::LaunchContainer::kLaunchContainerWindow,
+                      WindowOpenDisposition::NEW_WINDOW,
+                      extensions::AppLaunchSource::kSourceChromeInternal));
   profile->GetPrefs()->SetBoolean(prefs::kFirstRunTutorialShown, true);
 }
 
@@ -80,8 +81,7 @@ void TryLaunchFirstRunDialog(Profile* profile) {
   if (TabletModeClient::Get() && TabletModeClient::Get()->tablet_mode_enabled())
     return;
 
-  if (policy::ProfilePolicyConnectorFactory::GetForBrowserContext(profile)
-          ->IsManaged())
+  if (profile->GetProfilePolicyConnector()->IsManaged())
     return;
 
   if (command_line->HasSwitch(::switches::kTestType))

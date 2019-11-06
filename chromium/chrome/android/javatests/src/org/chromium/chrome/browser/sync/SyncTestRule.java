@@ -7,29 +7,34 @@ package org.chromium.chrome.browser.sync;
 import android.accounts.Account;
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;
+import android.support.v7.preference.TwoStatePreference;
 
 import org.junit.Assert;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
-import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.autofill.PersonalDataManager;
+import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGenerator;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGeneratorFactory;
 import org.chromium.chrome.browser.identity.UuidBasedUniqueIdentificationGenerator;
-import org.chromium.chrome.browser.signin.SigninManager;
+import org.chromium.chrome.browser.signin.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.SignoutReason;
 import org.chromium.chrome.browser.signin.UnifiedConsentServiceBridge;
 import org.chromium.chrome.test.ChromeActivityTestRule;
-import org.chromium.chrome.test.util.ApplicationTestUtils;
 import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
 import org.chromium.components.sync.AndroidSyncSettings;
 import org.chromium.components.sync.ModelType;
+import org.chromium.components.sync.protocol.AutofillWalletSpecifics;
+import org.chromium.components.sync.protocol.EntitySpecifics;
+import org.chromium.components.sync.protocol.SyncEntity;
+import org.chromium.components.sync.protocol.WalletMaskedCreditCard;
 import org.chromium.components.sync.test.util.MockSyncContentResolverDelegate;
 import org.chromium.content_public.browser.test.util.Criteria;
 import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TestThreadUtils;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -75,6 +80,19 @@ public class SyncTestRule extends ChromeActivityTestRule<ChromeActivity> {
     private FakeServerHelper mFakeServerHelper;
     private ProfileSyncService mProfileSyncService;
     private MockSyncContentResolverDelegate mSyncContentResolver;
+
+    private void ruleSetUp() throws Throwable {
+        // This must be called before super.setUp() in order for test authentication to work.
+        SigninTestUtil.setUpAuthForTest();
+    }
+
+    private void ruleTearDown() throws Exception {
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            mProfileSyncService.requestStop();
+            FakeServerHelper.deleteFakeServer();
+        });
+        SigninTestUtil.tearDownAuthForTest();
+    }
 
     public SyncTestRule() {
         super(ChromeActivity.class);
@@ -122,12 +140,7 @@ public class SyncTestRule extends ChromeActivityTestRule<ChromeActivity> {
     }
 
     public void startSync() {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mProfileSyncService.requestStart();
-            }
-        });
+        TestThreadUtils.runOnUiThreadBlocking(() -> { mProfileSyncService.requestStart(); });
     }
 
     public void startSyncAndWait() {
@@ -136,24 +149,15 @@ public class SyncTestRule extends ChromeActivityTestRule<ChromeActivity> {
     }
 
     public void stopSync() {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mProfileSyncService.requestStop();
-            }
-        });
+        TestThreadUtils.runOnUiThreadBlocking(() -> { mProfileSyncService.requestStop(); });
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
     public void signIn(final Account account) {
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            SigninManager.get().signIn(account, null, null);
-            if (ChromeFeatureList.isEnabled(ChromeFeatureList.UNIFIED_CONSENT)) {
-                // Outside of tests, URL-keyed anonymized data collection is enabled by sign-in UI.
-                // Note: If unified consent is not enabled, then UKM will be enabled based on
-                // the history sync state.
-                UnifiedConsentServiceBridge.setUrlKeyedAnonymizedDataCollectionEnabled(true);
-            }
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            IdentityServicesProvider.getSigninManager().signIn(account, null, null);
+            // Outside of tests, URL-keyed anonymized data collection is enabled by sign-in UI.
+            UnifiedConsentServiceBridge.setUrlKeyedAnonymizedDataCollectionEnabled(true);
         });
         SyncTestUtil.waitForSyncActive();
         SyncTestUtil.triggerSyncAndWaitForCompletion();
@@ -162,16 +166,14 @@ public class SyncTestRule extends ChromeActivityTestRule<ChromeActivity> {
 
     public void signOut() throws InterruptedException {
         final Semaphore s = new Semaphore(0);
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                SigninManager.get().signOut(SignoutReason.SIGNOUT_TEST, new Runnable() {
-                    @Override
-                    public void run() {
-                        s.release();
-                    }
-                });
-            }
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            IdentityServicesProvider.getSigninManager().signOut(
+                    SignoutReason.SIGNOUT_TEST, new Runnable() {
+                        @Override
+                        public void run() {
+                            s.release();
+                        }
+                    });
         });
         Assert.assertTrue(s.tryAcquire(SyncTestUtil.TIMEOUT_MS, TimeUnit.MILLISECONDS));
         Assert.assertNull(SigninTestUtil.getCurrentAccount());
@@ -193,7 +195,7 @@ public class SyncTestRule extends ChromeActivityTestRule<ChromeActivity> {
      * Enables the |modelType| Sync data type, which must be in USER_SELECTABLE_TYPES.
      */
     public void enableDataType(final int modelType) {
-        ThreadUtils.runOnUiThreadBlocking(() -> {
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
             Set<Integer> chosenTypes = mProfileSyncService.getChosenDataTypes();
             chosenTypes.add(modelType);
             mProfileSyncService.setChosenDataTypes(false, chosenTypes);
@@ -201,16 +203,29 @@ public class SyncTestRule extends ChromeActivityTestRule<ChromeActivity> {
     }
 
     /*
+     * Enables the |chosenDataTypes|, which must be in USER_SELECTABLE_TYPES.
+     */
+    public void setChosenDataTypes(boolean syncEverything, Set<Integer> chosenDataTypes) {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> { mProfileSyncService.setChosenDataTypes(syncEverything, chosenDataTypes); });
+    }
+
+    /*
+     * Sets payments integration to |enabled|.
+     */
+    public void setPaymentsIntegrationEnabled(final boolean enabled) {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> PersonalDataManager.setPaymentsIntegrationEnabled(enabled));
+    }
+
+    /*
      * Disables the |modelType| Sync data type, which must be in USER_SELECTABLE_TYPES.
      */
     public void disableDataType(final int modelType) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                Set<Integer> chosenTypes = mProfileSyncService.getChosenDataTypes();
-                chosenTypes.remove(modelType);
-                mProfileSyncService.setChosenDataTypes(false, chosenTypes);
-            }
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            Set<Integer> chosenTypes = mProfileSyncService.getChosenDataTypes();
+            chosenTypes.remove(modelType);
+            mProfileSyncService.setChosenDataTypes(false, chosenTypes);
         });
     }
 
@@ -229,21 +244,14 @@ public class SyncTestRule extends ChromeActivityTestRule<ChromeActivity> {
                 startMainActivityForSyncTest();
                 mContext = InstrumentationRegistry.getTargetContext();
 
-                ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-                    @Override
-                    public void run() {
-                        // Ensure SyncController is registered with the new AndroidSyncSettings.
-                        AndroidSyncSettings.get().registerObserver(SyncController.get(mContext));
-                        mFakeServerHelper = FakeServerHelper.get();
-                    }
+                TestThreadUtils.runOnUiThreadBlocking(() -> {
+                    // Ensure SyncController is registered with the new AndroidSyncSettings.
+                    AndroidSyncSettings.get().registerObserver(SyncController.get(mContext));
+                    mFakeServerHelper = FakeServerHelper.get();
                 });
                 FakeServerHelper.useFakeServer(mContext);
-                ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-                    @Override
-                    public void run() {
-                        mProfileSyncService = ProfileSyncService.get();
-                    }
-                });
+                TestThreadUtils.runOnUiThreadBlocking(
+                        () -> { mProfileSyncService = ProfileSyncService.get(); });
 
                 UniqueIdentificationGeneratorFactory.registerGenerator(
                         UuidBasedUniqueIdentificationGenerator.GENERATOR_ID,
@@ -267,26 +275,57 @@ public class SyncTestRule extends ChromeActivityTestRule<ChromeActivity> {
         };
     }
 
-    private void ruleSetUp() throws Throwable {
-        // This must be called before doing anything with the SharedPreferences because
-        // ChromeActivityTestRule's setUp normally wipes them clean between runs.
-        // Setting a SharedPreference here via the SigninTestUtil.setUpAuthForTest() call below
-        // causes Android to cache them before the files get cleared, meaning that a data clear
-        // is useless and test runs influence each other.
-        ApplicationTestUtils.clearAppData(InstrumentationRegistry.getTargetContext());
-
-        // This must be called before super.setUp() in order for test authentication to work.
-        SigninTestUtil.setUpAuthForTest();
+    /*
+     * Adds a credit card to server for autofill.
+     */
+    public void addServerAutofillCreditCard() {
+        final String serverId = "025eb937c022489eb8dc78cbaa969218";
+        WalletMaskedCreditCard card =
+                WalletMaskedCreditCard.newBuilder()
+                        .setId(serverId)
+                        .setStatus(WalletMaskedCreditCard.WalletCardStatus.VALID)
+                        .setNameOnCard("Jon Doe")
+                        .setType(WalletMaskedCreditCard.WalletCardType.UNKNOWN)
+                        .setLastFour("1111")
+                        .setExpMonth(11)
+                        .setExpYear(2020)
+                        .build();
+        AutofillWalletSpecifics wallet_specifics =
+                AutofillWalletSpecifics.newBuilder()
+                        .setType(AutofillWalletSpecifics.WalletInfoType.MASKED_CREDIT_CARD)
+                        .setMaskedCard(card)
+                        .build();
+        EntitySpecifics specifics =
+                EntitySpecifics.newBuilder().setAutofillWallet(wallet_specifics).build();
+        SyncEntity entity = SyncEntity.newBuilder()
+                                    .setName(serverId)
+                                    .setIdString(serverId)
+                                    .setSpecifics(specifics)
+                                    .build();
+        getFakeServerHelper().setWalletData(entity);
+        SyncTestUtil.triggerSyncAndWaitForCompletion();
     }
 
-    private void ruleTearDown() throws Exception {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                mProfileSyncService.requestStop();
-                FakeServerHelper.deleteFakeServer();
+    /*
+     * Checks if server has any credit card information to autofill.
+     */
+    public boolean hasServerAutofillCreditCards() {
+        return TestThreadUtils.runOnUiThreadBlockingNoException(() -> {
+            List<CreditCard> cards = PersonalDataManager.getInstance().getCreditCardsForSettings();
+            for (int i = 0; i < cards.size(); i++) {
+                if (!cards.get(i).getIsLocal()) return true;
             }
+            return false;
         });
-        SigninTestUtil.tearDownAuthForTest();
+    }
+
+    // UI interaction convenience methods.
+    public void togglePreference(final TwoStatePreference pref) {
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            boolean newValue = !pref.isChecked();
+            pref.getOnPreferenceChangeListener().onPreferenceChange(pref, newValue);
+            pref.setChecked(newValue);
+        });
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 }

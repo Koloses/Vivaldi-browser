@@ -8,6 +8,7 @@ import android.app.Activity;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.PorterDuff;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.support.annotation.IntDef;
@@ -22,6 +23,7 @@ import android.widget.BaseExpandableListAdapter;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.favicon.FaviconHelper.DefaultFaviconHelper;
@@ -295,7 +297,7 @@ public class RecentTabsRowAdapter extends BaseExpandableListAdapter {
                 viewHolder.domainView.setText("");
                 viewHolder.domainView.setVisibility(View.GONE);
             }
-            loadSyncedFavicon(viewHolder, sessionTab.url);
+            loadForeignFavicon(viewHolder, sessionTab.url);
         }
 
         @Override
@@ -505,6 +507,9 @@ public class RecentTabsRowAdapter extends BaseExpandableListAdapter {
                 Drawable drawable = getRoundedFavicon(historyIcon,
                         mActivity.getResources().getDimensionPixelSize(
                                 R.dimen.tile_view_icon_size_modern));
+                drawable.setColorFilter(ApiCompatibilityUtils.getColor(mActivity.getResources(),
+                                                R.color.default_icon_color),
+                        PorterDuff.Mode.SRC_IN);
                 viewHolder.imageView.setImageDrawable(drawable);
                 viewHolder.itemLayout.getLayoutParams().height =
                         mActivity.getResources().getDimensionPixelSize(
@@ -633,7 +638,7 @@ public class RecentTabsRowAdapter extends BaseExpandableListAdapter {
     }
 
     private static class FaviconCache {
-        private static final String SYNCED_FAVICON_PREFIX = "Synced";
+        private static final String FOREIGN_FAVICON_PREFIX = "Foreign";
         private static final String LOCAL_FAVICON_PREFIX = "Local";
 
         private final LruCache<String, Drawable> mMemoryCache;
@@ -642,12 +647,12 @@ public class RecentTabsRowAdapter extends BaseExpandableListAdapter {
             mMemoryCache = new LruCache<String, Drawable>(size);
         }
 
-        public Drawable getSyncedFaviconImage(String url) {
-            return mMemoryCache.get(SYNCED_FAVICON_PREFIX + url);
+        public Drawable getForeignFaviconImage(String url) {
+            return mMemoryCache.get(FOREIGN_FAVICON_PREFIX + url);
         }
 
-        public void putSyncedFaviconImage(String url, Drawable image) {
-            mMemoryCache.put(SYNCED_FAVICON_PREFIX + url, image);
+        public void putForeignFaviconImage(String url, Drawable image) {
+            mMemoryCache.put(FOREIGN_FAVICON_PREFIX + url, image);
         }
 
         public Drawable getLocalFaviconImage(String url) {
@@ -713,14 +718,30 @@ public class RecentTabsRowAdapter extends BaseExpandableListAdapter {
                 ViewUtils.DEFAULT_FAVICON_CORNER_RADIUS);
     }
 
-    private void loadSyncedFavicon(final ViewHolder viewHolder, final String url) {
-        Drawable image = mFaviconCache.getSyncedFaviconImage(url);
-        if (image == null) {
-            image = faviconDrawable(mRecentTabsManager.getSyncedFaviconImageForURL(url), url);
-            image = (image == null)
-                    ? mDefaultFaviconHelper.getDefaultFaviconDrawable(mActivity, url, true)
-                    : image;
-            mFaviconCache.putSyncedFaviconImage(url, image);
+    private void loadForeignFavicon(final ViewHolder viewHolder, final String url) {
+        Drawable image;
+        if (url == null) {
+            // URL is null for print jobs, for example.
+            image = mDefaultFaviconHelper.getDefaultFaviconDrawable(mActivity, url, true);
+        } else {
+            image = mFaviconCache.getLocalFaviconImage(url);
+            if (image == null) {
+                FaviconImageCallback imageCallback = new FaviconImageCallback() {
+                    @Override
+                    public void onFaviconAvailable(Bitmap bitmap, String iconUrl) {
+                        if (this != viewHolder.imageCallback) return;
+                        Drawable image = faviconDrawable(bitmap, url);
+                        image = image == null ? mDefaultFaviconHelper.getDefaultFaviconDrawable(
+                                        mActivity, url, true)
+                                              : image;
+                        mFaviconCache.putLocalFaviconImage(url, image);
+                        viewHolder.imageView.setImageDrawable(image);
+                    }
+                };
+                viewHolder.imageCallback = imageCallback;
+                mRecentTabsManager.getForeignFaviconForUrl(url, mFaviconSize, imageCallback);
+                image = mDefaultFaviconHelper.getDefaultFaviconDrawable(mActivity, url, true);
+            }
         }
         viewHolder.imageView.setImageDrawable(image);
     }

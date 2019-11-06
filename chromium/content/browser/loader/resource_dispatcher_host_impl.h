@@ -35,7 +35,6 @@
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_request_info.h"
-#include "content/public/browser/stream_handle.h"
 #include "content/public/common/previews_state.h"
 #include "content/public/common/resource_type.h"
 #include "net/base/load_states.h"
@@ -77,7 +76,6 @@ class ResourceHandler;
 class ResourceMessageDelegate;
 class ResourceRequesterInfo;
 class ResourceRequestInfoImpl;
-class ServiceWorkerNavigationHandleCore;
 struct NavigationRequestInfo;
 struct Referrer;
 struct ResourceRequest;
@@ -106,7 +104,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   // ResourceDispatcherHost implementation:
   void SetDelegate(ResourceDispatcherHostDelegate* delegate) override;
-  void SetAllowCrossOriginAuthPrompt(bool value) override;
   void RegisterInterceptor(const std::string& http_header,
                            const std::string& starts_with,
                            const InterceptorCallback& interceptor) override;
@@ -176,10 +173,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   void CancelBlockedRequestsForRoute(
       const GlobalFrameRoutingId& global_routing_id);
 
-  // Indicates whether third-party sub-content can pop-up HTTP basic auth
-  // dialog boxes.
-  bool allow_cross_origin_auth_prompt();
-
   ResourceDispatcherHostDelegate* delegate() {
     return delegate_;
   }
@@ -194,22 +187,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       bool is_content_initiated,
       bool must_download,
       bool is_new_request);
-
-  // Called to determine whether the response to |request| should be intercepted
-  // and handled as a stream. Streams are used to pass direct access to a
-  // resource response to another application (e.g. a web page) without being
-  // handled by the browser itself. If the request should be intercepted as a
-  // stream, a StreamResourceHandler is returned which provides access to the
-  // response.
-  //
-  // This function must be called after the ResourceRequestInfo has been created
-  // and associated with the request. If |payload| is set to a non-empty value,
-  // the caller must send it to the old resource handler instead of cancelling
-  // it.
-  virtual std::unique_ptr<ResourceHandler> MaybeInterceptAsStream(
-      net::URLRequest* request,
-      network::ResourceResponse* response,
-      std::string* payload);
 
   network::ResourceScheduler* scheduler() { return scheduler_.get(); }
 
@@ -235,7 +212,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       std::unique_ptr<NavigationUIData> navigation_ui_data,
       network::mojom::URLLoaderClientPtr url_loader_client,
       network::mojom::URLLoaderRequest url_loader_request,
-      ServiceWorkerNavigationHandleCore* service_worker_handle_core,
       AppCacheNavigationHandleCore* appcache_handle_core,
       uint32_t url_loader_options,
       net::RequestPriority net_priority,
@@ -294,7 +270,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   bool is_shutdown() const { return is_shutdown_; }
 
   // Creates a new request ID for browser initiated requests. See the comments
-  // of |request_id_| for the details. Must be called on the IO thread.
+  // of |request_id_| for the details. Can be called on any thread.
   int MakeRequestID();
 
   // Creates a new global request ID for browser initiated requests. The ID
@@ -395,7 +371,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // ResourceLoaderDelegate implementation:
   std::unique_ptr<LoginDelegate> CreateLoginDelegate(
       ResourceLoader* loader,
-      net::AuthChallengeInfo* auth_info) override;
+      const net::AuthChallengeInfo& auth_info) override;
   bool HandleExternalProtocol(ResourceLoader* loader, const GURL& url) override;
   void DidStartRequest(ResourceLoader* loader) override;
   void DidReceiveRedirect(ResourceLoader* loader,
@@ -592,7 +568,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       net::URLRequest* request,
       ResourceType resource_type,
       ResourceContext* resource_context,
-      network::mojom::FetchRequestMode fetch_request_mode,
+      network::mojom::RequestMode request_mode,
       blink::mojom::RequestContextType fetch_request_context_type,
       uint32_t url_loader_options,
       AppCacheService* appcache_service,
@@ -609,18 +585,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
                                              PreviewsState previews_state,
                                              bool download,
                                              ResourceContext* context);
-
-  // Relationship of resource being authenticated with the top level page.
-  enum HttpAuthRelationType {
-    HTTP_AUTH_RELATION_TOP,            // Top-level page itself
-    HTTP_AUTH_RELATION_SAME_DOMAIN,    // Sub-content from same domain
-    HTTP_AUTH_RELATION_BLOCKED_CROSS,  // Blocked Sub-content from cross domain
-    HTTP_AUTH_RELATION_ALLOWED_CROSS,  // Allowed Sub-content per command line
-    HTTP_AUTH_RELATION_LAST
-  };
-
-  HttpAuthRelationType HttpAuthRelationTypeOf(const GURL& request_url,
-                                              const GURL& first_party);
 
   ResourceLoader* GetLoader(const GlobalRequestID& id) const;
   ResourceLoader* GetLoader(int child_id, int request_id) const;
@@ -653,7 +617,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   static void RecordFetchRequestMode(const GURL& url,
                                      base::StringPiece method,
-                                     network::mojom::FetchRequestMode mode);
+                                     network::mojom::RequestMode request_mode);
 
   static net::NetworkTrafficAnnotationTag GetTrafficAnnotation();
 
@@ -674,7 +638,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // uninitialized variables.) This way, we no longer have the unlikely (but
   // observed in the real world!) event where we have two requests with the same
   // request_id_.
-  int request_id_;
+  std::atomic_int request_id_{-1};
 
   // True if the resource dispatcher host has been shut down.
   bool is_shutdown_;
@@ -725,8 +689,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   LoaderDelegate* loader_delegate_;
 
-  bool allow_cross_origin_auth_prompt_;
-
   std::unique_ptr<network::ResourceScheduler> scheduler_;
 
   // Used to invoke an interceptor for the HTTP header.
@@ -745,7 +707,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   // Used on the IO thread to allow PostTaskAndReply replies to the IO thread
   // to be abandoned if they run after OnShutdown().
-  base::WeakPtrFactory<ResourceDispatcherHostImpl> weak_factory_on_io_;
+  base::WeakPtrFactory<ResourceDispatcherHostImpl> weak_factory_on_io_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ResourceDispatcherHostImpl);
 };

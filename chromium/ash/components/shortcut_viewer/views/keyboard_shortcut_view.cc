@@ -5,6 +5,8 @@
 #include "ash/components/shortcut_viewer/views/keyboard_shortcut_view.h"
 
 #include <algorithm>
+#include <memory>
+#include <utility>
 
 #include "ash/components/shortcut_viewer/keyboard_shortcut_viewer_metadata.h"
 #include "ash/components/shortcut_viewer/vector_icons/vector_icons.h"
@@ -13,6 +15,7 @@
 #include "ash/components/shortcut_viewer/views/ksv_search_box_view.h"
 #include "ash/components/strings/grit/ash_components_strings.h"
 #include "ash/public/cpp/app_list/internal_app_id_constants.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/resources/grit/ash_public_unscaled_resources.h"
 #include "ash/public/cpp/shelf_item.h"
 #include "ash/public/cpp/window_properties.h"
@@ -34,6 +37,7 @@
 #include "ui/events/event_constants.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/presentation_feedback.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/image_view.h"
@@ -67,8 +71,9 @@ void SetupSearchIllustrationView(views::View* illustration_view,
   constexpr int kTopPadding = 98;
   views::BoxLayout* layout =
       illustration_view->SetLayoutManager(std::make_unique<views::BoxLayout>(
-          views::BoxLayout::kVertical, gfx::Insets(kTopPadding, 0, 0, 0)));
-  layout->set_main_axis_alignment(views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
+          views::BoxLayout::Orientation::kVertical,
+          gfx::Insets(kTopPadding, 0, 0, 0)));
+  layout->set_main_axis_alignment(views::BoxLayout::MainAxisAlignment::kStart);
   views::ImageView* image_view = new views::ImageView();
   image_view->SetImage(
       gfx::CreateVectorIcon(icon, kSearchIllustrationIconColor));
@@ -87,12 +92,60 @@ void SetupSearchIllustrationView(views::View* illustration_view,
   illustration_view->AddChildView(text);
 }
 
-views::ScrollView* CreateScrollView(views::View* content_view) {
-  views::ScrollView* const scroller = new views::ScrollView();
-  scroller->set_draw_overflow_indicator(false);
+class ShortcutsListScrollView : public views::ScrollView {
+ public:
+  ShortcutsListScrollView() {
+    GetViewAccessibility().OverrideRole(ax::mojom::Role::kScrollView);
+  }
+
+  ~ShortcutsListScrollView() override = default;
+
+  // views::View:
+  void OnFocus() override {
+    SetHasFocusIndicator(true);
+    NotifyAccessibilityEvent(ax::mojom::Event::kFocus, true);
+  }
+
+  void OnBlur() override { SetHasFocusIndicator(false); }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ShortcutsListScrollView);
+};
+
+std::unique_ptr<ShortcutsListScrollView> CreateScrollView(
+    std::unique_ptr<views::View> content_view) {
+  auto scroller = std::make_unique<ShortcutsListScrollView>();
+  scroller->SetDrawOverflowIndicator(false);
   scroller->ClipHeightTo(0, 0);
-  scroller->SetContents(content_view);
+  scroller->SetContents(std::move(content_view));
+  scroller->SetFocusBehavior(views::View::FocusBehavior::ALWAYS);
   return scroller;
+}
+
+void UpdateAXNodeDataPosition(
+    std::vector<KeyboardShortcutItemView*>& shortcut_items) {
+  // Update list item AXNodeData position for assistive tool.
+  const int number_shortcut_items = shortcut_items.size();
+  for (int i = 0; i < number_shortcut_items; ++i) {
+    shortcut_items.at(i)->GetViewAccessibility().OverridePosInSet(
+        i + 1, number_shortcut_items);
+  }
+}
+
+// Returns true if the given |item| should be excluded from the view, since
+// certain shortcuts can be associated with a disabled feature behind a flag.
+bool ShouldExcludeItem(const KeyboardShortcutItem& item) {
+  switch (item.description_message_id) {
+    case IDS_KSV_DESCRIPTION_DESKS_NEW_DESK:
+    case IDS_KSV_DESCRIPTION_DESKS_REMOVE_CURRENT_DESK:
+    case IDS_KSV_DESCRIPTION_DESKS_ACTIVATE_LEFT_DESK:
+    case IDS_KSV_DESCRIPTION_DESKS_ACTIVATE_RIGHT_DESK:
+    case IDS_KSV_DESCRIPTION_DESKS_MOVE_ACTIVE_ITEM_LEFT_DESK:
+    case IDS_KSV_DESCRIPTION_DESKS_MOVE_ACTIVE_ITEM_RIGHT_DESK:
+      return !ash::features::IsVirtualDesksEnabled();
+  }
+
+  return false;
 }
 
 }  // namespace
@@ -103,14 +156,14 @@ KeyboardShortcutView::~KeyboardShortcutView() {
 }
 
 // static
-views::Widget* KeyboardShortcutView::Toggle(base::TimeTicks start_time,
-                                            aura::Window* context) {
+views::Widget* KeyboardShortcutView::Toggle(aura::Window* context) {
   if (g_ksv_view) {
     if (g_ksv_view->GetWidget()->IsActive())
       g_ksv_view->GetWidget()->Close();
     else
       g_ksv_view->GetWidget()->Activate();
   } else {
+    const base::TimeTicks start_time = base::TimeTicks::Now();
     TRACE_EVENT0("shortcut_viewer", "CreateWidget");
     base::RecordAction(
         base::UserMetricsAction("KeyboardShortcutViewer.CreateWindow"));
@@ -172,6 +225,14 @@ const char* KeyboardShortcutView::GetClassName() const {
   return "KeyboardShortcutView";
 }
 
+ax::mojom::Role KeyboardShortcutView::GetAccessibleWindowRole() {
+  return ax::mojom::Role::kWindow;
+}
+
+base::string16 KeyboardShortcutView::GetAccessibleWindowTitle() const {
+  return l10n_util::GetStringUTF16(IDS_KSV_TITLE);
+}
+
 bool KeyboardShortcutView::AcceleratorPressed(
     const ui::Accelerator& accelerator) {
   DCHECK_EQ(ui::VKEY_W, accelerator.key_code());
@@ -199,7 +260,7 @@ void KeyboardShortcutView::Layout() {
   search_box_bounds.set_y(top + kSearchBoxTopPadding);
   search_box_view_->SetBoundsRect(search_box_bounds);
 
-  views::View* content_view = categories_tabbed_pane_->visible()
+  views::View* content_view = categories_tabbed_pane_->GetVisible()
                                   ? categories_tabbed_pane_
                                   : search_results_container_;
   const int search_box_used_height = search_box_bounds.height() +
@@ -309,6 +370,9 @@ void KeyboardShortcutView::InitViews() {
   // clear the cache.
   KeyboardShortcutItemView::ClearKeycodeToString16Cache();
   for (const auto& item : GetKeyboardShortcutItemList()) {
+    if (ShouldExcludeItem(item))
+      continue;
+
     for (auto category : item.categories) {
       shortcut_views_.emplace_back(
           std::make_unique<KeyboardShortcutItemView>(item, category));
@@ -319,8 +383,8 @@ void KeyboardShortcutView::InitViews() {
             [](const auto& lhs, const auto& rhs) {
               if (lhs->category() != rhs->category())
                 return lhs->category() < rhs->category();
-              return lhs->description_label_view()->text() <
-                     rhs->description_label_view()->text();
+              return lhs->description_label_view()->GetText() <
+                     rhs->description_label_view()->GetText();
             });
 
   // Init views of |categories_tabbed_pane_| and KeyboardShortcutItemListViews.
@@ -338,39 +402,52 @@ void KeyboardShortcutView::InitViews() {
 
 void KeyboardShortcutView::InitCategoriesTabbedPane(
     base::Optional<ShortcutCategory> initial_category) {
-  // If the tab count is 0, |GetSelectedTabIndex()| will return -1, which we do
-  // not want to cache.
-  active_tab_index_ =
-      std::max(0, categories_tabbed_pane_->GetSelectedTabIndex());
+  active_tab_index_ = categories_tabbed_pane_->GetSelectedTabIndex();
+  // If the tab count is 0, GetSelectedTabIndex() will return kNoSelectedTab,
+  // which we do not want to cache.
+  if (active_tab_index_ == views::TabStrip::kNoSelectedTab)
+    active_tab_index_ = 0;
+
   ShortcutCategory current_category = ShortcutCategory::kUnknown;
   KeyboardShortcutItemListView* item_list_view = nullptr;
+  std::vector<KeyboardShortcutItemView*> shortcut_items;
   const bool already_has_tabs = categories_tabbed_pane_->GetTabCount() > 0;
-  int tab_index = -1;
-  views::View* const tab_contents = categories_tabbed_pane_->child_at(1);
+  size_t tab_index = 0;
+  views::View* const tab_contents = categories_tabbed_pane_->children()[1];
   for (const auto& item_view : shortcut_views_) {
     const ShortcutCategory category = item_view->category();
     DCHECK_NE(ShortcutCategory::kUnknown, category);
     if (current_category != category) {
       current_category = category;
-      ++tab_index;
-      views::View* content_view = nullptr;
+      std::unique_ptr<views::View> content_view;
       // Delay constructing a KeyboardShortcutItemListView until it is needed.
       if (initial_category.value_or(category) == category) {
-        item_list_view = new KeyboardShortcutItemListView();
-        content_view = item_list_view;
+        auto list_view = std::make_unique<KeyboardShortcutItemListView>();
+        item_list_view = list_view.get();
+
+        // When in a new category, update the node data of the shortcut items in
+        // previous category and clear the vector in order to store items in
+        // current category.
+        UpdateAXNodeDataPosition(shortcut_items);
+        shortcut_items.clear();
+
+        content_view = std::move(list_view);
       } else {
-        content_view = new views::View();
+        content_view = std::make_unique<views::View>();
       }
 
       // Create new tabs or update the existing tabs' contents.
       if (already_has_tabs) {
-        auto* scroll_view =
-            static_cast<views::ScrollView*>(tab_contents->child_at(tab_index));
-        scroll_view->SetContents(content_view);
+        auto* scroll_view = static_cast<views::ScrollView*>(
+            tab_contents->children()[tab_index]);
+        scroll_view->SetContents(std::move(content_view));
       } else {
-        categories_tabbed_pane_->AddTab(GetStringForCategory(current_category),
-                                        CreateScrollView(content_view));
+        categories_tabbed_pane_->AddTab(
+            GetStringForCategory(current_category),
+            CreateScrollView(std::move(content_view)));
       }
+
+      ++tab_index;
     }
 
     // If |initial_category| has a value, we only initialize the pane with the
@@ -380,16 +457,20 @@ void KeyboardShortcutView::InitCategoriesTabbedPane(
       continue;
 
     // Add the item to the category contents container.
-    if (item_list_view->has_children())
+    if (!item_list_view->children().empty())
       item_list_view->AddHorizontalSeparator();
     views::StyledLabel* description_label_view =
         item_view->description_label_view();
     // Clear any styles used to highlight matched search query in search mode.
     description_label_view->ClearStyleRanges();
     item_list_view->AddChildView(item_view.get());
+    shortcut_items.emplace_back(item_view.get());
     // Remove the search query highlight.
     description_label_view->Layout();
   }
+  // Update node data for the last category.
+  UpdateAXNodeDataPosition(shortcut_items);
+
   tab_contents->Layout();
   Layout();
 }
@@ -407,7 +488,7 @@ void KeyboardShortcutView::UpdateViewsLayout(bool is_search_box_active) {
     // Remove all child views, including horizontal separator lines, to prepare
     // for showing search results next time.
     search_results_container_->RemoveAllChildViews(true);
-    if (!categories_tabbed_pane_->visible()) {
+    if (!categories_tabbed_pane_->GetVisible()) {
       // Repopulate |categories_tabbed_pane_| child views, which were removed
       // when they were added to |search_results_container_|.
       InitCategoriesTabbedPane(kAllCategories);
@@ -423,7 +504,6 @@ void KeyboardShortcutView::UpdateViewsLayout(bool is_search_box_active) {
 
 void KeyboardShortcutView::ShowSearchResults(
     const base::string16& search_query) {
-  const base::TimeTicks start_time = base::TimeTicks::Now();
   search_results_container_->RemoveAllChildViews(true);
   auto* search_container_content_view = search_no_result_view_.get();
   auto found_items_list_view = std::make_unique<KeyboardShortcutItemListView>();
@@ -431,11 +511,11 @@ void KeyboardShortcutView::ShowSearchResults(
       search_query);
   ShortcutCategory current_category = ShortcutCategory::kUnknown;
   bool has_category_item = false;
-  int number_search_results = 0;
+  std::vector<KeyboardShortcutItemView*> shortcut_items;
   for (const auto& item_view : shortcut_views_) {
     base::string16 description_text =
-        item_view->description_label_view()->text();
-    base::string16 shortcut_text = item_view->shortcut_label_view()->text();
+        item_view->description_label_view()->GetText();
+    base::string16 shortcut_text = item_view->shortcut_label_view()->GetText();
     size_t match_index = -1;
     size_t match_length = 0;
     // Only highlight |description_label_view_| in KeyboardShortcutItemView.
@@ -471,12 +551,14 @@ void KeyboardShortcutView::ShowSearchResults(
       }
 
       found_items_list_view->AddChildView(item_view.get());
-      ++number_search_results;
+      shortcut_items.emplace_back(item_view.get());
     }
   }
 
   std::vector<base::string16> replacement_strings;
-  if (found_items_list_view->has_children()) {
+  const int number_search_results = shortcut_items.size();
+  if (!found_items_list_view->children().empty()) {
+    UpdateAXNodeDataPosition(shortcut_items);
     replacement_strings.emplace_back(
         base::NumberToString16(number_search_results));
 
@@ -487,7 +569,7 @@ void KeyboardShortcutView::ShowSearchResults(
     found_items_list_view->SetBorder(views::CreateEmptyBorder(
         gfx::Insets(kTopPadding, kHorizontalPadding, 0, kHorizontalPadding)));
     search_container_content_view =
-        CreateScrollView(found_items_list_view.release());
+        CreateScrollView(std::move(found_items_list_view)).release();
   }
   replacement_strings.emplace_back(search_query);
   search_box_view_->SetAccessibleValue(l10n_util::GetStringFUTF16(
@@ -498,21 +580,6 @@ void KeyboardShortcutView::ShowSearchResults(
   search_results_container_->AddChildView(search_container_content_view);
   Layout();
   SchedulePaint();
-  constexpr int kBucketCount = 100;
-  UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-      "Keyboard.ShortcutViewer.SearchUpdateTime",
-      base::TimeTicks::Now() - start_time,
-      base::TimeDelta::FromMicroseconds(50), base::TimeDelta::FromSeconds(1),
-      kBucketCount);
-  GetWidget()->GetCompositor()->RequestPresentationTimeForNextFrame(
-      base::BindOnce(
-          [](base::TimeTicks start_time,
-             const gfx::PresentationFeedback& feedback) {
-            UMA_HISTOGRAM_TIMES(
-                "Keyboard.ShortcutViewer.SearchUpdateTimeVisual",
-                feedback.timestamp - start_time);
-          },
-          start_time));
 }
 
 bool KeyboardShortcutView::CanMaximize() const {
@@ -540,7 +607,7 @@ KeyboardShortcutView* KeyboardShortcutView::GetInstanceForTesting() {
   return g_ksv_view;
 }
 
-int KeyboardShortcutView::GetTabCountForTesting() const {
+size_t KeyboardShortcutView::GetTabCountForTesting() const {
   return categories_tabbed_pane_->GetTabCount();
 }
 
@@ -554,3 +621,11 @@ KSVSearchBoxView* KeyboardShortcutView::GetSearchBoxViewForTesting() {
 }
 
 }  // namespace keyboard_shortcut_viewer
+
+namespace ash {
+
+void ToggleKeyboardShortcutViewer() {
+  keyboard_shortcut_viewer::KeyboardShortcutView::Toggle(nullptr);
+}
+
+}  // namespace ash

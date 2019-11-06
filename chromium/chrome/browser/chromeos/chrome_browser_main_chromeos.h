@@ -27,6 +27,10 @@ class ArcServiceLauncher;
 class VoiceInteractionControllerClient;
 }  // namespace arc
 
+namespace policy {
+class LockToSingleUserManager;
+}  // namespace policy
+
 #if BUILDFLAG(ENABLE_CROS_ASSISTANT)
 class AssistantClient;
 #endif
@@ -36,10 +40,10 @@ namespace chromeos {
 class ArcKioskAppManager;
 class CrosUsbDetector;
 class DemoModeResourcesRemover;
-class DiagnosticsdBridge;
 class DiscoverManager;
 class EventRewriterDelegateImpl;
 class FastTransitionObserver;
+class GnubbyNotification;
 class IdleActionWarningObserver;
 class LowDiskNotification;
 class NetworkChangeManagerClient;
@@ -48,8 +52,10 @@ class NetworkThrottlingObserver;
 class PowerMetricsReporter;
 class RendererFreezer;
 class SchedulerConfigurationManager;
+class SessionTerminationManager;
 class ShutdownPolicyForwarder;
 class WakeOnWifiManager;
+class WilcoDtcSupportdManager;
 
 namespace default_app_order {
 class ExternalLoader;
@@ -63,7 +69,6 @@ class SystemTokenCertDBInitializer;
 namespace power {
 namespace ml {
 class AdaptiveScreenBrightnessManager;
-class UserActivityController;
 }  // namespace ml
 
 namespace auto_screen_brightness {
@@ -81,9 +86,8 @@ class DarkResumeController;
 // src/ash or chrome/browser/ui/ash.
 class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
  public:
-  ChromeBrowserMainPartsChromeos(
-      const content::MainFunctionParams& parameters,
-      ChromeFeatureListCreator* chrome_feature_list_creator);
+  ChromeBrowserMainPartsChromeos(const content::MainFunctionParams& parameters,
+                                 StartupData* startup_data);
   ~ChromeBrowserMainPartsChromeos() override;
 
   // ChromeBrowserMainParts overrides.
@@ -150,14 +154,12 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   std::unique_ptr<power::ml::AdaptiveScreenBrightnessManager>
       adaptive_screen_brightness_manager_;
 
-  std::unique_ptr<power::ml::UserActivityController> user_activity_controller_;
   std::unique_ptr<power::auto_screen_brightness::Controller>
       auto_screen_brightness_controller_;
 
   std::unique_ptr<DemoModeResourcesRemover> demo_mode_resources_remover_;
   std::unique_ptr<crostini::CrosvmMetrics> crosvm_metrics_;
   std::unique_ptr<DiscoverManager> discover_manager_;
-  std::unique_ptr<DiagnosticsdBridge> diagnosticsd_bridge_;
   std::unique_ptr<SchedulerConfigurationManager>
       scheduler_configuration_manager_;
 
@@ -165,6 +167,12 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   std::unique_ptr<chromeos::system::DarkResumeController>
       dark_resume_controller_;
+
+  std::unique_ptr<SessionTerminationManager> session_termination_manager_;
+  std::unique_ptr<policy::LockToSingleUserManager> lock_to_single_user_manager_;
+  std::unique_ptr<WilcoDtcSupportdManager> wilco_dtc_supportd_manager_;
+
+  std::unique_ptr<GnubbyNotification> gnubby_notification_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsChromeos);
 };

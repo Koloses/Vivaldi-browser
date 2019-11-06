@@ -16,7 +16,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/sequence_checker.h"
-#include "components/sync/base/cryptographer.h"
 #include "components/sync/base/time.h"
 #include "components/sync/engine/sync_manager.h"
 #include "components/sync/engine_impl/all_status.h"
@@ -27,16 +26,15 @@
 #include "components/sync/engine_impl/js_sync_manager_observer.h"
 #include "components/sync/engine_impl/net/server_connection_manager.h"
 #include "components/sync/engine_impl/nudge_handler.h"
-#include "components/sync/engine_impl/sync_encryption_handler_impl.h"
 #include "components/sync/engine_impl/sync_engine_event_listener.h"
 #include "components/sync/js/js_backend.h"
 #include "components/sync/syncable/change_reorder_buffer.h"
 #include "components/sync/syncable/directory_change_delegate.h"
-#include "components/sync/syncable/user_share.h"
 #include "services/network/public/cpp/network_connection_tracker.h"
 
 namespace syncer {
 
+class Cryptographer;
 class ModelTypeRegistry;
 class SyncCycleContext;
 class TypeDebugInfoObserver;
@@ -95,8 +93,9 @@ class SyncManagerImpl
   UserShare* GetUserShare() override;
   ModelTypeConnector* GetModelTypeConnector() override;
   std::unique_ptr<ModelTypeConnector> GetModelTypeConnectorProxy() override;
-  const std::string cache_guid() override;
-  bool ReceivedExperiment(Experiments* experiments) override;
+  std::string cache_guid() override;
+  std::string birthday() override;
+  std::string bag_of_chips() override;
   bool HasUnsyncedItemsForTest() override;
   SyncEncryptionHandler* GetEncryptionHandler() override;
   std::vector<std::unique_ptr<ProtocolEvent>> GetBufferedProtocolEvents()
@@ -174,7 +173,7 @@ class SyncManagerImpl
 
   const SyncScheduler* scheduler() const;
 
-  bool GetHasInvalidAuthTokenForTest() const;
+  static std::string GenerateCacheGUIDForTest();
 
  protected:
   // Helper functions.  Virtual for testing.
@@ -217,7 +216,7 @@ class SyncManagerImpl
                                Cryptographer* cryptographer) const;
 
   // Opens the directory.
-  bool OpenDirectory(const InitArgs* args);
+  bool OpenDirectory(InitArgs* args);
 
   void RequestNudgeForDataTypes(const base::Location& nudge_location,
                                 ModelTypeSet type);
@@ -256,7 +255,7 @@ class SyncManagerImpl
 
   // We give a handle to share_ to clients of the API for use when constructing
   // any transaction type.
-  UserShare share_;
+  UserShare* share_;
 
   // This can be called from any thread, but only between calls to
   // OpenDirectory() and ShutdownOnSyncThread().
@@ -316,12 +315,11 @@ class SyncManagerImpl
 
   base::Closure report_unrecoverable_error_function_;
 
-  // Sync's encryption handler. It tracks the set of encrypted types, manages
-  // changing passphrases, and in general handles sync-specific interactions
-  // with the cryptographer.
-  std::unique_ptr<SyncEncryptionHandlerImpl> sync_encryption_handler_;
+  SyncEncryptionHandler* sync_encryption_handler_;
 
-  base::WeakPtrFactory<SyncManagerImpl> weak_ptr_factory_;
+  std::unique_ptr<SyncEncryptionHandler::Observer> encryption_observer_proxy_;
+
+  base::WeakPtrFactory<SyncManagerImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(SyncManagerImpl);
 };

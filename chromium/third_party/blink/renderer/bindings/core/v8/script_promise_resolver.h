@@ -39,20 +39,13 @@ class CORE_EXPORT ScriptPromiseResolver
     : public GarbageCollectedFinalized<ScriptPromiseResolver>,
       public ContextLifecycleObserver {
   USING_GARBAGE_COLLECTED_MIXIN(ScriptPromiseResolver);
+  USING_PRE_FINALIZER(ScriptPromiseResolver, Dispose);
 
  public:
-  static ScriptPromiseResolver* Create(ScriptState* script_state) {
-    return MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  }
-
   explicit ScriptPromiseResolver(ScriptState*);
   virtual ~ScriptPromiseResolver();
 
-#if DCHECK_IS_ON()
-  // Eagerly finalized so as to ensure valid access to getExecutionContext()
-  // from the destructor's assert.
-  EAGERLY_FINALIZE();
-#endif
+  void Dispose();
 
   // Anything that can be passed to toV8 can be passed to this function.
   template <typename T>

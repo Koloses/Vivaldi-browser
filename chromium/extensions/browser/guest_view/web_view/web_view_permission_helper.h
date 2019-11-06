@@ -74,10 +74,10 @@ class WebViewPermissionHelper
                                     content::MediaResponseCallback callback);
   virtual bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
-                                  blink::MediaStreamType type);
+                                  blink::mojom::MediaStreamType type);
   virtual void CanDownload(const GURL& url,
                    const std::string& request_method,
-                   const base::Callback<void(bool)>& callback);
+                   base::OnceCallback<void(bool)> callback);
   virtual void RequestPointerLockPermission(bool user_gesture,
                                     bool last_unlocked_by_target,
                                     const base::Callback<void(bool)>& callback);
@@ -86,14 +86,8 @@ class WebViewPermissionHelper
   virtual void RequestGeolocationPermission(int bridge_id,
                                     const GURL& requesting_frame,
                                     bool user_gesture,
-                                    const base::Callback<void(bool)>& callback);
+                                    base::OnceCallback<void(bool)> callback);
   virtual void CancelGeolocationPermissionRequest(int bridge_id);
-
-  virtual void RequestNotificationPermission(int bridge_id,
-                                    const GURL& requesting_frame,
-                                    bool user_gesture,
-                                    const base::Callback<void(bool)>& callback);
-  virtual void CancelNotificationPermissionRequest(int bridge_id);
 
   virtual void RequestFileSystemPermission(const GURL& url,
                                    bool allowed_by_default,
@@ -140,6 +134,12 @@ class WebViewPermissionHelper
 
   void SetDownloadInformation(const content::DownloadInformation& info);
 
+  virtual void RequestNotificationPermission(int bridge_id,
+                                    const GURL& requesting_frame,
+                                    bool user_gesture,
+                                    const base::Callback<void(bool)>& callback);
+  virtual void CancelNotificationPermissionRequest(int bridge_id);
+
  protected:
   // vivaldi download information
   content::DownloadInformation download_info_;
@@ -169,7 +169,7 @@ class WebViewPermissionHelper
 
   bool default_media_access_permission_;
 
-  base::WeakPtrFactory<WebViewPermissionHelper> weak_factory_;
+  base::WeakPtrFactory<WebViewPermissionHelper> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WebViewPermissionHelper);
 };

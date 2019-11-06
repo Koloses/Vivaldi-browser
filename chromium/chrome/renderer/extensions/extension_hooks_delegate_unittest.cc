@@ -212,4 +212,55 @@ TEST_F(ExtensionHooksDelegateTest, SendRequestChannelLeftOpenToReplyAsync) {
       messaging_service()->HasPortForTesting(script_context(), port_id));
 }
 
+// Tests that overriding the runtime equivalents of chrome.extension methods
+// with accessors that throw does not cause a crash on access. Regression test
+// for https://crbug.com/949170.
+TEST_F(ExtensionHooksDelegateTest, RuntimeAliasesCorrupted) {
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = MainContext();
+
+  // Set a trap on chrome.runtime.sendMessage.
+  constexpr char kMutateChromeRuntime[] =
+      R"((function() {
+           Object.defineProperty(
+               chrome.runtime, 'sendMessage',
+               { get() { throw new Error('haha'); } });
+         }))";
+  RunFunctionOnGlobal(FunctionFromString(context, kMutateChromeRuntime),
+                      context, 0, nullptr);
+
+  // Touch chrome.extension.sendMessage, which is aliased to the runtime
+  // version. Though an error is thrown, we shouldn't crash.
+  constexpr char kTouchExtensionSendMessage[] =
+      "(function() { chrome.extension.sendMessage; })";
+  RunFunctionOnGlobal(FunctionFromString(context, kTouchExtensionSendMessage),
+                      context, 0, nullptr);
+}
+
+// Ensure that HandleGetURL allows extension URLs and doesn't allow arbitrary
+// non-extension URLs. Very similar to RuntimeHooksDeligateTest that tests a
+// similar function.
+TEST_F(ExtensionHooksDelegateTest, GetURL) {
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = MainContext();
+
+  auto get_url = [this, context](const char* args, const GURL& expected_url) {
+    SCOPED_TRACE(base::StringPrintf("Args: `%s`", args));
+    constexpr char kGetUrlTemplate[] =
+        "(function() { return chrome.extension.getURL(%s); })";
+    v8::Local<v8::Function> get_url =
+        FunctionFromString(context, base::StringPrintf(kGetUrlTemplate, args));
+    v8::Local<v8::Value> url = RunFunction(get_url, context, 0, nullptr);
+    ASSERT_FALSE(url.IsEmpty());
+    ASSERT_TRUE(url->IsString());
+    EXPECT_EQ(expected_url.spec(), gin::V8ToString(isolate(), url));
+  };
+
+  get_url("''", extension()->url());
+  get_url("'foo'", extension()->GetResourceURL("foo"));
+  get_url("'/foo'", extension()->GetResourceURL("foo"));
+  get_url("'https://www.google.com'",
+          GURL(extension()->url().spec() + "https://www.google.com"));
+}
+
 }  // namespace extensions

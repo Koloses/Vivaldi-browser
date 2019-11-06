@@ -25,8 +25,8 @@ struct EnumTraits<ash::mojom::AppListState, ash::AppListState> {
         return ash::mojom::AppListState::kStateApps;
       case ash::AppListState::kStateSearchResults:
         return ash::mojom::AppListState::kStateSearchResults;
-      case ash::AppListState::kStateStart:
-        return ash::mojom::AppListState::kStateStart;
+      case ash::AppListState::kStateStart_DEPRECATED:
+        return ash::mojom::AppListState::kStateStart_DEPRECATED;
       case ash::AppListState::kStateEmbeddedAssistant:
         return ash::mojom::AppListState::kStateEmbeddedAssistant;
       case ash::AppListState::kInvalidState:
@@ -45,8 +45,8 @@ struct EnumTraits<ash::mojom::AppListState, ash::AppListState> {
       case ash::mojom::AppListState::kStateSearchResults:
         *out = ash::AppListState::kStateSearchResults;
         return true;
-      case ash::mojom::AppListState::kStateStart:
-        *out = ash::AppListState::kStateStart;
+      case ash::mojom::AppListState::kStateStart_DEPRECATED:
+        *out = ash::AppListState::kStateStart_DEPRECATED;
         return true;
       case ash::mojom::AppListState::kStateEmbeddedAssistant:
         *out = ash::AppListState::kStateEmbeddedAssistant;
@@ -103,10 +103,6 @@ struct EnumTraits<ash::mojom::SearchResultType, ash::SearchResultType> {
         return ash::mojom::SearchResultType::kInstantApp;
       case ash::SearchResultType::kInternalApp:
         return ash::mojom::SearchResultType::kInternalApp;
-      case ash::SearchResultType::kWebStoreApp:
-        return ash::mojom::SearchResultType::kWebStoreApp;
-      case ash::SearchResultType::kWebStoreSearch:
-        return ash::mojom::SearchResultType::kWebStoreSearch;
       case ash::SearchResultType::kOmnibox:
         return ash::mojom::SearchResultType::kOmnibox;
       case ash::SearchResultType::kLauncher:
@@ -138,12 +134,6 @@ struct EnumTraits<ash::mojom::SearchResultType, ash::SearchResultType> {
         return true;
       case ash::mojom::SearchResultType::kInternalApp:
         *out = ash::SearchResultType::kInternalApp;
-        return true;
-      case ash::mojom::SearchResultType::kWebStoreApp:
-        *out = ash::SearchResultType::kWebStoreApp;
-        return true;
-      case ash::mojom::SearchResultType::kWebStoreSearch:
-        *out = ash::SearchResultType::kWebStoreSearch;
         return true;
       case ash::mojom::SearchResultType::kOmnibox:
         *out = ash::SearchResultType::kOmnibox;

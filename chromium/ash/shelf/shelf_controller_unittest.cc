@@ -8,12 +8,10 @@
 
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/cpp/shelf_model.h"
-#include "ash/public/cpp/shelf_model_observer.h"
 #include "ash/public/cpp/shelf_prefs.h"
 #include "ash/public/cpp/window_properties.h"
-#include "ash/public/interfaces/shelf.mojom.h"
 #include "ash/root_window_controller.h"
-#include "ash/session/session_controller.h"
+#include "ash/session/session_controller_impl.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
@@ -26,7 +24,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/prefs/pref_service.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/gfx/image/image_unittest_util.h"
@@ -55,45 +52,7 @@ void BuildAndSendNotification(message_center::MessageCenter* message_center,
   message_center->AddNotification(std::move(notification));
 }
 
-// A test implementation of the ShelfObserver mojo interface.
-class TestShelfObserver : public mojom::ShelfObserver {
- public:
-  TestShelfObserver() = default;
-  ~TestShelfObserver() override = default;
-
-  // mojom::ShelfObserver:
-  void OnShelfItemAdded(int32_t, const ShelfItem& item) override {
-    added_count_++;
-    last_item_ = item;
-  }
-  void OnShelfItemRemoved(const ShelfID&) override { removed_count_++; }
-  void OnShelfItemMoved(const ShelfID&, int32_t) override {}
-  void OnShelfItemUpdated(const ShelfItem& item) override { last_item_ = item; }
-  void OnShelfItemDelegateChanged(const ShelfID&,
-                                  mojom::ShelfItemDelegatePtr) override {}
-
-  size_t added_count() const { return added_count_; }
-  size_t removed_count() const { return removed_count_; }
-  const ShelfItem& last_item() const { return last_item_; }
-
- private:
-  size_t added_count_ = 0;
-  size_t removed_count_ = 0;
-  ShelfItem last_item_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestShelfObserver);
-};
-
 using ShelfControllerTest = AshTestBase;
-
-TEST_F(ShelfControllerTest, InitializesBackButtonAndAppListItemDelegate) {
-  ShelfModel* model = Shell::Get()->shelf_controller()->model();
-  EXPECT_EQ(2, model->item_count());
-  EXPECT_EQ(kBackButtonId, model->items()[0].id.app_id);
-  EXPECT_FALSE(model->GetShelfItemDelegate(ShelfID(kBackButtonId)));
-  EXPECT_EQ(kAppListId, model->items()[1].id.app_id);
-  EXPECT_TRUE(model->GetShelfItemDelegate(ShelfID(kAppListId)));
-}
 
 TEST_F(ShelfControllerTest, Shutdown) {
   // Simulate a display change occurring during shutdown (e.g. due to a screen
@@ -105,112 +64,6 @@ TEST_F(ShelfControllerTest, Shutdown) {
   // Ash does not crash during cleanup.
 }
 
-TEST_F(ShelfControllerTest, ShelfModelChangeSynchronization) {
-  ShelfController* controller = Shell::Get()->shelf_controller();
-
-  TestShelfObserver observer;
-  mojom::ShelfObserverAssociatedPtr observer_ptr;
-  mojo::AssociatedBinding<mojom::ShelfObserver> binding(
-      &observer, mojo::MakeRequestAssociatedWithDedicatedPipe(&observer_ptr));
-  controller->AddObserver(observer_ptr.PassInterface());
-  base::RunLoop().RunUntilIdle();
-
-  // The ShelfModel should be initialized with a two items, one for the back
-  // button and one for the AppList. The observer is immediately notified of
-  // existing shelf items.
-  EXPECT_EQ(2, controller->model()->item_count());
-  EXPECT_EQ(2u, observer.added_count());
-  EXPECT_EQ(0u, observer.removed_count());
-
-  // Add a ShelfModel item; |observer| should be notified.
-  ShelfItem item;
-  item.type = TYPE_PINNED_APP;
-  item.id = ShelfID("foo");
-  int index = controller->model()->Add(item);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(3, controller->model()->item_count());
-  EXPECT_EQ(3u, observer.added_count());
-  EXPECT_EQ(0u, observer.removed_count());
-
-  // Remove a ShelfModel item; |observer| should be notified.
-  controller->model()->RemoveItemAt(index);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(2, controller->model()->item_count());
-  EXPECT_EQ(3u, observer.added_count());
-  EXPECT_EQ(1u, observer.removed_count());
-
-  // Simulate adding an item remotely; Ash should apply the change.
-  // |observer| is not notified; see mojom::ShelfController for rationale.
-  controller->AddShelfItem(index, item);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(3, controller->model()->item_count());
-  EXPECT_EQ(3u, observer.added_count());
-  EXPECT_EQ(1u, observer.removed_count());
-
-  // Simulate removing an item remotely; Ash should apply the change.
-  // |observer| is not notified; see mojom::ShelfController for rationale.
-  controller->RemoveShelfItem(item.id);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(2, controller->model()->item_count());
-  EXPECT_EQ(3u, observer.added_count());
-  EXPECT_EQ(1u, observer.removed_count());
-}
-
-TEST_F(ShelfControllerTest, ShelfItemImageSynchronization) {
-  ShelfController* controller = Shell::Get()->shelf_controller();
-
-  TestShelfObserver observer;
-  mojom::ShelfObserverAssociatedPtr observer_ptr;
-  mojo::AssociatedBinding<mojom::ShelfObserver> binding(
-      &observer, mojo::MakeRequestAssociatedWithDedicatedPipe(&observer_ptr));
-  controller->AddObserver(observer_ptr.PassInterface());
-  base::RunLoop().RunUntilIdle();
-
-  // Create a ShelfItem struct with a valid image icon.
-  ShelfItem item;
-  item.type = TYPE_PINNED_APP;
-  item.id = ShelfID("foo");
-  item.image = gfx::test::CreateImageSkia(1, 1);
-
-  // Observers are notifed of added items without images for efficiency.
-  int index = controller->model()->Add(item);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(item.id, controller->model()->items()[index].id);
-  EXPECT_FALSE(controller->model()->items()[index].image.isNull());
-  EXPECT_EQ(item.id, observer.last_item().id);
-  EXPECT_TRUE(observer.last_item().image.isNull());
-
-  // Observers are notifed of updated items without images for efficiency.
-  item.type = TYPE_APP;
-  controller->model()->Set(index, item);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(item.type, controller->model()->items()[index].type);
-  EXPECT_FALSE(controller->model()->items()[index].image.isNull());
-  EXPECT_EQ(item.type, observer.last_item().type);
-  EXPECT_TRUE(observer.last_item().image.isNull());
-
-  // ShelfController should use images from remotely-added items.
-  item.id = ShelfID("bar");
-  controller->AddShelfItem(index, item);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(item.id, controller->model()->items()[index].id);
-  EXPECT_FALSE(controller->model()->items()[index].image.isNull());
-
-  // ShelfController should use images from remotely-updated items.
-  item.image = gfx::test::CreateImageSkia(2, 2);
-  controller->UpdateShelfItem(item);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(gfx::Size(2, 2), controller->model()->items()[index].image.size());
-
-  // ShelfController should retain images when remote updates have no image.
-  // Chrome will generally avoid image transport costs for unrelated updates.
-  item.image = gfx::ImageSkia();
-  controller->UpdateShelfItem(item);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(item.image.isNull());
-  EXPECT_FALSE(controller->model()->items()[index].image.isNull());
-}
-
 TEST_F(ShelfControllerTest, ShelfIDUpdate) {
   ShelfModel* model = Shell::Get()->shelf_controller()->model();
 
@@ -219,11 +72,11 @@ TEST_F(ShelfControllerTest, ShelfIDUpdate) {
 
   std::unique_ptr<aura::Window> window(
       CreateTestWindow(gfx::Rect(0, 0, 100, 100)));
-  window->SetProperty(kShelfIDKey, new std::string(id1.Serialize()));
+  window->SetProperty(kShelfIDKey, id1.Serialize());
   wm::ActivateWindow(window.get());
   EXPECT_EQ(id1, model->active_shelf_id());
 
-  window->SetProperty(kShelfIDKey, new std::string(id2.Serialize()));
+  window->SetProperty(kShelfIDKey, id2.Serialize());
   EXPECT_EQ(id2, model->active_shelf_id());
 
   window->ClearProperty(kShelfIDKey);
@@ -455,7 +308,7 @@ TEST_F(ShelfControllerPrefsTest, ShelfSettingsInTabletMode) {
 
   // Verify after entering tablet mode, the shelf alignment is bottom and the
   // auto hide behavior has not changed.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
 
@@ -468,7 +321,7 @@ TEST_F(ShelfControllerPrefsTest, ShelfSettingsInTabletMode) {
 
   // Verify after exiting tablet mode, the shelf alignment and auto hide
   // behavior get their stored pref values.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
   EXPECT_EQ(SHELF_ALIGNMENT_LEFT, shelf->alignment());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
 }
@@ -482,7 +335,7 @@ TEST_F(ShelfControllerAppModeTest, AutoHideBehavior) {
   Shelf* shelf = GetPrimaryShelf();
   EXPECT_EQ(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
 
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(true);
   EXPECT_EQ(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
 
   display_manager()->SetDisplayRotation(
@@ -490,7 +343,7 @@ TEST_F(ShelfControllerAppModeTest, AutoHideBehavior) {
       display::Display::ROTATE_90, display::Display::RotationSource::ACTIVE);
   EXPECT_EQ(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
 
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  Shell::Get()->tablet_mode_controller()->SetEnabledForTest(false);
   EXPECT_EQ(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
 }
 

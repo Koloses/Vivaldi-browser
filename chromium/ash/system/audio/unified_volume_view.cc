@@ -9,6 +9,7 @@
 #include "ash/system/audio/unified_volume_slider_controller.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_utils.h"
+#include "base/i18n/rtl.h"
 #include "base/stl_util.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -21,6 +22,7 @@
 #include "ui/views/animation/ink_drop_mask.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/layout/box_layout.h"
+#include "ui/views/view_class_properties.h"
 
 using chromeos::CrasAudioHandler;
 
@@ -58,7 +60,7 @@ class MoreButton : public views::Button {
   explicit MoreButton(views::ButtonListener* listener)
       : views::Button(listener) {
     SetLayoutManager(std::make_unique<views::BoxLayout>(
-        views::BoxLayout::kHorizontal,
+        views::BoxLayout::Orientation::kHorizontal,
         gfx::Insets((kTrayItemSize -
                      GetDefaultSizeOfVectorIcon(vector_icons::kHeadsetIcon)) /
                     2),
@@ -72,13 +74,21 @@ class MoreButton : public views::Button {
 
     auto* more = new views::ImageView();
     more->set_can_process_events_within_subtree(false);
+    auto icon_rotation = base::i18n::IsRTL()
+                             ? SkBitmapOperations::ROTATION_270_CW
+                             : SkBitmapOperations::ROTATION_90_CW;
     more->SetImage(gfx::ImageSkiaOperations::CreateRotatedImage(
         CreateVectorIcon(kUnifiedMenuExpandIcon, kUnifiedMenuIconColor),
-        SkBitmapOperations::ROTATION_90_CW));
+        icon_rotation));
     AddChildView(more);
 
     SetTooltipText(l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_AUDIO));
     TrayPopupUtils::ConfigureTrayPopupButton(this);
+
+    auto path = std::make_unique<SkPath>();
+    path->addRoundRect(gfx::RectToSkRect(gfx::Rect(CalculatePreferredSize())),
+                       kTrayItemSize / 2, kTrayItemSize / 2);
+    SetProperty(views::kHighlightPathKey, path.release());
   }
 
   ~MoreButton() override = default;
@@ -114,6 +124,8 @@ class MoreButton : public views::Button {
                                                          kTrayItemSize / 2);
   }
 
+  const char* GetClassName() const override { return "MoreButton"; }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(MoreButton);
 };
@@ -125,15 +137,17 @@ UnifiedVolumeView::UnifiedVolumeView(UnifiedVolumeSliderController* controller)
                         kSystemMenuVolumeHighIcon,
                         IDS_ASH_STATUS_TRAY_VOLUME),
       more_button_(new MoreButton(controller)) {
-  DCHECK(CrasAudioHandler::IsInitialized());
   CrasAudioHandler::Get()->AddAudioObserver(this);
   AddChildView(more_button_);
   Update(false /* by_user */);
 }
 
 UnifiedVolumeView::~UnifiedVolumeView() {
-  DCHECK(CrasAudioHandler::IsInitialized());
   CrasAudioHandler::Get()->RemoveAudioObserver(this);
+}
+
+const char* UnifiedVolumeView::GetClassName() const {
+  return "UnifiedVolumeView";
 }
 
 void UnifiedVolumeView::Update(bool by_user) {
@@ -141,7 +155,7 @@ void UnifiedVolumeView::Update(bool by_user) {
   float level = CrasAudioHandler::Get()->GetOutputVolumePercent() / 100.f;
 
   // Indicate that the slider is inactive when it's muted.
-  slider()->UpdateState(!is_muted);
+  slider()->SetIsActive(!is_muted);
 
   // The button should be gray whay muted and colored otherwise.
   button()->SetToggled(!is_muted);
@@ -155,7 +169,7 @@ void UnifiedVolumeView::Update(bool by_user) {
   // there will be a small discrepancy between slider's value and volume level
   // on audio side. To avoid the jittering in slider UI, do not set change
   // slider value if the change is less than the threshold.
-  if (std::abs(level - slider()->value()) < kSliderIgnoreUpdateThreshold)
+  if (std::abs(level - slider()->GetValue()) < kSliderIgnoreUpdateThreshold)
     return;
 
   SetSliderValue(level, by_user);
@@ -166,7 +180,7 @@ void UnifiedVolumeView::OnOutputNodeVolumeChanged(uint64_t node_id,
   Update(true /* by_user */);
 }
 
-void UnifiedVolumeView::OnOutputMuteChanged(bool mute_on, bool system_adjust) {
+void UnifiedVolumeView::OnOutputMuteChanged(bool mute_on) {
   Update(true /* by_user */);
 }
 

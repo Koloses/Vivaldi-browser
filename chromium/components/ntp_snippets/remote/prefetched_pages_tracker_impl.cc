@@ -4,11 +4,15 @@
 
 #include "components/ntp_snippets/remote/prefetched_pages_tracker_impl.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
+#include "components/offline_pages/core/page_criteria.h"
 
 using offline_pages::OfflinePageItem;
 using offline_pages::OfflinePageModel;
+using offline_pages::PageCriteria;
 
 namespace ntp_snippets {
 
@@ -23,9 +27,7 @@ bool IsOfflineItemPrefetchedPage(const OfflinePageItem& offline_page_item) {
 
 PrefetchedPagesTrackerImpl::PrefetchedPagesTrackerImpl(
     OfflinePageModel* offline_page_model)
-    : initialized_(false),
-      offline_page_model_(offline_page_model),
-      weak_ptr_factory_(this) {
+    : initialized_(false), offline_page_model_(offline_page_model) {
   DCHECK(offline_page_model_);
 }
 
@@ -47,8 +49,11 @@ void PrefetchedPagesTrackerImpl::Initialize(
     // calls to this method. In this case, there is at least one callback
     // already waiting.
     if (initialization_completed_callbacks_.size() == 1) {
-      offline_page_model_->GetPagesByNamespace(
-          offline_pages::kSuggestedArticlesNamespace,
+      PageCriteria criteria;
+      criteria.client_namespaces =
+          std::vector<std::string>{offline_pages::kSuggestedArticlesNamespace};
+      offline_page_model_->GetPagesWithCriteria(
+          criteria,
           base::BindOnce(&PrefetchedPagesTrackerImpl::OfflinePagesLoaded,
                          weak_ptr_factory_.GetWeakPtr()));
     }
@@ -79,8 +84,8 @@ void PrefetchedPagesTrackerImpl::OfflinePageAdded(
 }
 
 void PrefetchedPagesTrackerImpl::OfflinePageDeleted(
-    const offline_pages::OfflinePageModel::DeletedPageInfo& page_info) {
-  auto offline_id_it = offline_id_to_url_mapping_.find(page_info.offline_id);
+    const offline_pages::OfflinePageItem& deleted_page) {
+  auto offline_id_it = offline_id_to_url_mapping_.find(deleted_page.offline_id);
 
   if (offline_id_it == offline_id_to_url_mapping_.end()) {
     // We did not know about this page, thus, nothing to delete.

@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/platform_thread.h"
+#include "base/time/tick_clock.h"
 #include "base/time/time.h"
 #include "services/device/public/mojom/constants.mojom.h"
 #include "services/device/public/mojom/wake_lock_provider.mojom.h"
@@ -35,11 +36,6 @@ base::TimeDelta ClockNow(clockid_t clk_id) {
   return base::TimeDelta::FromTimeSpec(ts);
 }
 
-// Returns time ticks from boot including time ticks spent during sleeping.
-base::TimeTicks GetCurrentBootTime() {
-  return base::TimeTicks() + ClockNow(CLOCK_BOOTTIME);
-}
-
 }  // namespace
 
 PowerManagerProviderImpl::PowerManagerProviderImpl(
@@ -57,12 +53,11 @@ PowerManagerProviderImpl::AlarmId PowerManagerProviderImpl::AddWakeAlarm(
     uint64_t relative_time_ms,
     uint64_t max_delay_ms,
     assistant_client::Callback0 callback) {
-  DVLOG(1) << __func__ << " ExpirationTime= "
+  const AlarmId id = next_id_++;
+  DVLOG(1) << __func__ << "Add alarm ID " << id << " for "
            << base::Time::Now() +
                   base::TimeDelta::FromMilliseconds(relative_time_ms);
 
-  AlarmId id = next_id_;
-  next_id_++;
   main_thread_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&PowerManagerProviderImpl::AddWakeAlarmOnMainThread,
@@ -97,6 +92,12 @@ void PowerManagerProviderImpl::ReleaseWakeLock() {
                      weak_factory_.GetWeakPtr()));
 }
 
+base::TimeTicks PowerManagerProviderImpl::GetCurrentBootTime() {
+  if (tick_clock_)
+    return tick_clock_->NowTicks();
+  return base::TimeTicks() + ClockNow(CLOCK_BOOTTIME);
+}
+
 void PowerManagerProviderImpl::AddWakeAlarmOnMainThread(
     AlarmId id,
     base::TimeTicks absolute_expiration_time,
@@ -108,7 +109,8 @@ void PowerManagerProviderImpl::AddWakeAlarmOnMainThread(
   // Once the timer is created successfully, start the timer and store
   // associated data. The stored |callback| will be called in
   // |OnTimerFiredOnMainThread|.
-  DVLOG(1) << "Starting timer with ID " << id;
+  DVLOG(1) << "Starting timer with ID " << id << " for "
+           << absolute_expiration_time;
   timer->Start(
       absolute_expiration_time,
       base::BindOnce(&PowerManagerProviderImpl::OnTimerFiredOnMainThread,
@@ -128,13 +130,16 @@ void PowerManagerProviderImpl::AcquireWakeLockOnMainThread() {
     return;
   }
 
-  // Initialize |wake_lock_| if this is the first time we're using it.
+  // Initialize |wake_lock_| if this is the first time we're using it. Assistant
+  // can acquire a wake lock even when it has nothing to show on the display,
+  // this shouldn't wake the display up. Hence, the wake lock acquired is of
+  // type kPreventAppSuspension.
   if (!wake_lock_) {
     device::mojom::WakeLockProviderPtr provider;
     connector_->BindInterface(device::mojom::kServiceName,
                               mojo::MakeRequest(&provider));
     provider->GetWakeLockWithoutContext(
-        device::mojom::WakeLockType::kPreventDisplaySleepAllowDimming,
+        device::mojom::WakeLockType::kPreventAppSuspension,
         device::mojom::WakeLockReason::kOther, kWakeLockReason,
         mojo::MakeRequest(&wake_lock_));
   }

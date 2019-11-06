@@ -67,6 +67,10 @@ void FakeMojoPasswordManagerDriver::UserModifiedPasswordField() {
   called_user_modified_password_field_ = true;
 }
 
+void FakeMojoPasswordManagerDriver::UserModifiedNonPasswordField(
+    uint32_t renderer_id,
+    const base::string16& value) {}
+
 void FakeMojoPasswordManagerDriver::CheckSafeBrowsingReputation(
     const GURL& form_action,
     const GURL& frame_url) {
@@ -83,8 +87,6 @@ void FakeMojoPasswordManagerDriver::HideManualFallbackForSaving() {
 }
 
 void FakeMojoPasswordManagerDriver::FocusedInputChanged(
-    bool is_fillable,
-    bool is_password_field) {
-  last_focused_element_was_fillable_ = is_fillable;
-  last_focused_input_was_password_ = is_password_field;
+    autofill::mojom::FocusedFieldType focused_field_type) {
+  last_focused_field_type_ = focused_field_type;
 }

@@ -16,7 +16,7 @@
 #include "chromeos/services/device_sync/network_request_error.h"
 #include "chromeos/services/device_sync/public/mojom/device_sync.mojom.h"
 #include "chromeos/services/device_sync/remote_device_provider.h"
-#include "components/signin/core/browser/account_info.h"
+#include "components/signin/public/identity_manager/account_info.h"
 #include "services/preferences/public/cpp/pref_service_factory.h"
 #include "services/preferences/public/mojom/preferences.mojom.h"
 
@@ -31,9 +31,9 @@ namespace gcm {
 class GCMDriver;
 }  // namespace gcm
 
-namespace identity {
+namespace signin {
 class IdentityManager;
-}  // namespace identity
+}  // namespace signin
 
 namespace network {
 class SharedURLLoaderFactory;
@@ -47,8 +47,11 @@ namespace chromeos {
 
 namespace device_sync {
 
+class ClientAppMetadataProvider;
 class CryptAuthClientFactory;
 class CryptAuthDeviceManager;
+class CryptAuthScheduler;
+class CryptAuthKeyRegistry;
 class GcmDeviceInfoProvider;
 class SoftwareFeatureManager;
 
@@ -73,10 +76,11 @@ class DeviceSyncImpl : public DeviceSyncBase,
     // Note: |timer| should be a newly-created base::OneShotTimer object; this
     // parameter only exists for testing via dependency injection.
     virtual std::unique_ptr<DeviceSyncBase> BuildInstance(
-        identity::IdentityManager* identity_manager,
+        signin::IdentityManager* identity_manager,
         gcm::GCMDriver* gcm_driver,
         service_manager::Connector* connector,
         const GcmDeviceInfoProvider* gcm_device_info_provider,
+        ClientAppMetadataProvider* client_app_metadata_provider,
         scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
         std::unique_ptr<base::OneShotTimer> timer);
 
@@ -163,10 +167,11 @@ class DeviceSyncImpl : public DeviceSyncBase,
   };
 
   DeviceSyncImpl(
-      identity::IdentityManager* identity_manager,
+      signin::IdentityManager* identity_manager,
       gcm::GCMDriver* gcm_driver,
       service_manager::Connector* connector,
       const GcmDeviceInfoProvider* gcm_device_info_provider,
+      ClientAppMetadataProvider* client_app_metadata_provider,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       base::Clock* clock,
       std::unique_ptr<PrefConnectionDelegate> pref_connection_delegate,
@@ -207,10 +212,11 @@ class DeviceSyncImpl : public DeviceSyncBase,
   void SetPrefConnectionDelegateForTesting(
       std::unique_ptr<PrefConnectionDelegate> pref_connection_delegate);
 
-  identity::IdentityManager* identity_manager_;
+  signin::IdentityManager* identity_manager_;
   gcm::GCMDriver* gcm_driver_;
   service_manager::Connector* connector_;
   const GcmDeviceInfoProvider* gcm_device_info_provider_;
+  ClientAppMetadataProvider* client_app_metadata_provider_;
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   base::Clock* clock_;
   std::unique_ptr<PrefConnectionDelegate> pref_connection_delegate_;
@@ -225,6 +231,11 @@ class DeviceSyncImpl : public DeviceSyncBase,
 
   std::unique_ptr<CryptAuthGCMManager> cryptauth_gcm_manager_;
   std::unique_ptr<CryptAuthClientFactory> cryptauth_client_factory_;
+
+  // Only created and used if v2 Enrollment is enabled; null otherwise.
+  std::unique_ptr<CryptAuthKeyRegistry> cryptauth_key_registry_;
+  std::unique_ptr<CryptAuthScheduler> cryptauth_scheduler_;
+
   std::unique_ptr<CryptAuthEnrollmentManager> cryptauth_enrollment_manager_;
   std::unique_ptr<CryptAuthDeviceManager> cryptauth_device_manager_;
   std::unique_ptr<RemoteDeviceProvider> remote_device_provider_;

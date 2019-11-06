@@ -131,7 +131,9 @@ std::vector<mojom::SiteEngagementDetails> GetAllDetailsImpl(
 //  b. clicking on an omnibox suggestion brought up by typing a keyword
 //  c. clicking on a bookmark or opening a bookmark app
 //  d. a custom search engine keyword search (e.g. Wikipedia search box added as
-//  search engine).
+//  search engine)
+//  e. an automatically generated top level navigation (e.g. command line
+//  navigation, in product help link).
 bool IsEngagementNavigation(ui::PageTransition transition) {
   return ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED) ||
          ui::PageTransitionCoreTypeIs(transition,
@@ -139,7 +141,9 @@ bool IsEngagementNavigation(ui::PageTransition transition) {
          ui::PageTransitionCoreTypeIs(transition,
                                       ui::PAGE_TRANSITION_AUTO_BOOKMARK) ||
          ui::PageTransitionCoreTypeIs(transition,
-                                      ui::PAGE_TRANSITION_KEYWORD_GENERATED);
+                                      ui::PAGE_TRANSITION_KEYWORD_GENERATED) ||
+         ui::PageTransitionCoreTypeIs(transition,
+                                      ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
 }
 
 }  // namespace
@@ -184,10 +188,8 @@ SiteEngagementService::GetAllDetailsInBackground(
 
 SiteEngagementService::SiteEngagementService(Profile* profile)
     : SiteEngagementService(profile, base::DefaultClock::GetInstance()) {
-  content::BrowserThread::PostAfterStartupTask(
-      FROM_HERE,
-      base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::UI}),
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI, base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&SiteEngagementService::AfterStartupTask,
                      weak_factory_.GetWeakPtr()));
 
@@ -345,7 +347,7 @@ void SiteEngagementService::SetAndroidService(
 
 SiteEngagementService::SiteEngagementService(Profile* profile,
                                              base::Clock* clock)
-    : profile_(profile), clock_(clock), weak_factory_(this) {
+    : profile_(profile), clock_(clock) {
   // May be null in tests.
   history::HistoryService* history = HistoryServiceFactory::GetForProfile(
       profile, ServiceAccessType::IMPLICIT_ACCESS);
@@ -473,7 +475,7 @@ void SiteEngagementService::MaybeRecordMetrics() {
   // purposes.
   //
   // The profile and its KeyedServices are normally destroyed before the
-  // TaskScheduler shuts down background threads, so the task needs to hold a
+  // ThreadPool shuts down background threads, so the task needs to hold a
   // strong reference to HostContentSettingsMap (which supports outliving the
   // profile), and needs to avoid using any members of SiteEngagementService
   // (which does not). See https://crbug.com/900022.

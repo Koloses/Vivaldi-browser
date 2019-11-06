@@ -9,7 +9,8 @@
 #include "chrome/browser/performance_manager/graph/mock_graphs.h"
 #include "chrome/browser/performance_manager/graph/page_node_impl.h"
 #include "chrome/browser/performance_manager/graph/process_node_impl.h"
-#include "chrome/browser/performance_manager/resource_coordinator_clock.h"
+#include "chrome/browser/performance_manager/performance_manager_clock.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace performance_manager {
@@ -19,13 +20,13 @@ namespace {
 class FrameNodeImplTest : public GraphTestHarness {
  public:
   void SetUp() override {
-    ResourceCoordinatorClock::SetClockForTesting(&clock_);
+    PerformanceManagerClock::SetClockForTesting(&clock_);
 
     // Sets a valid starting time.
     clock_.SetNowTicks(base::TimeTicks::Now());
   }
 
-  void TearDown() override { ResourceCoordinatorClock::ResetClockForTesting(); }
+  void TearDown() override { PerformanceManagerClock::ResetClockForTesting(); }
 
  protected:
   void AdvanceClock(base::TimeDelta delta) { clock_.Advance(delta); }
@@ -34,162 +35,218 @@ class FrameNodeImplTest : public GraphTestHarness {
   base::SimpleTestTickClock clock_;
 };
 
-using FrameNodeImplDeathTest = FrameNodeImplTest;
-
 }  // namespace
 
-TEST_F(FrameNodeImplTest, AddChildFrameBasic) {
-  auto frame1_cu = CreateCoordinationUnit<FrameNodeImpl>();
-  auto frame2_cu = CreateCoordinationUnit<FrameNodeImpl>();
-  auto frame3_cu = CreateCoordinationUnit<FrameNodeImpl>();
-
-  frame1_cu->AddChildFrame(frame2_cu->id());
-  frame1_cu->AddChildFrame(frame3_cu->id());
-  EXPECT_EQ(nullptr, frame1_cu->GetParentFrameNode());
-  EXPECT_EQ(2u, frame1_cu->child_frame_coordination_units_for_testing().size());
-  EXPECT_EQ(frame1_cu.get(), frame2_cu->GetParentFrameNode());
-  EXPECT_EQ(frame1_cu.get(), frame3_cu->GetParentFrameNode());
+TEST_F(FrameNodeImplTest, SafeDowncast) {
+  auto process = CreateNode<ProcessNodeImpl>();
+  auto page = CreateNode<PageNodeImpl>();
+  auto frame = CreateNode<FrameNodeImpl>(process.get(), page.get());
+  FrameNode* node = frame.get();
+  EXPECT_EQ(frame.get(), FrameNodeImpl::FromNode(node));
+  NodeBase* base = frame.get();
+  EXPECT_EQ(base, NodeBase::FromNode(node));
+  EXPECT_EQ(static_cast<Node*>(node), base->ToNode());
 }
 
-TEST_F(FrameNodeImplDeathTest, AddChildFrameOnCyclicReference) {
-  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+TEST_F(FrameNodeImplTest, AddFrameHierarchyBasic) {
+  auto process = CreateNode<ProcessNodeImpl>();
+  auto page = CreateNode<PageNodeImpl>();
+  auto parent_node = CreateNode<FrameNodeImpl>(process.get(), page.get());
+  auto child2_node = CreateNode<FrameNodeImpl>(process.get(), page.get(),
+                                               parent_node.get(), 1);
+  auto child3_node = CreateNode<FrameNodeImpl>(process.get(), page.get(),
+                                               parent_node.get(), 2);
 
-  auto frame1_cu = CreateCoordinationUnit<FrameNodeImpl>();
-  auto frame2_cu = CreateCoordinationUnit<FrameNodeImpl>();
-  auto frame3_cu = CreateCoordinationUnit<FrameNodeImpl>();
+  EXPECT_EQ(nullptr, parent_node->parent_frame_node());
+  EXPECT_EQ(2u, parent_node->child_frame_nodes().size());
+  EXPECT_EQ(parent_node.get(), child2_node->parent_frame_node());
+  EXPECT_EQ(parent_node.get(), child3_node->parent_frame_node());
+}
 
-  frame1_cu->AddChildFrame(frame2_cu->id());
-  frame2_cu->AddChildFrame(frame3_cu->id());
-// |frame3_cu| can't add |frame1_cu| because |frame1_cu| is an ancestor of
-// |frame3_cu|, and this will hit a DCHECK because of cyclic reference.
-#if !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
-  EXPECT_DEATH_IF_SUPPORTED(frame3_cu->AddChildFrame(frame1_cu->id()), "");
-#else
-  frame3_cu->AddChildFrame(frame1_cu->id());
-#endif  // !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
+TEST_F(FrameNodeImplTest, NavigationCommitted_SameDocument) {
+  auto process = CreateNode<ProcessNodeImpl>();
+  auto page = CreateNode<PageNodeImpl>();
+  auto frame_node = CreateNode<FrameNodeImpl>(process.get(), page.get());
+  EXPECT_TRUE(frame_node->url().is_empty());
+  const GURL url("http://www.foo.com/");
+  frame_node->OnNavigationCommitted(url, /* same_document */ true);
+  EXPECT_EQ(url, frame_node->url());
+}
 
-  EXPECT_EQ(1u, frame1_cu->child_frame_coordination_units_for_testing().count(
-                    frame2_cu.get()));
-  EXPECT_EQ(1u, frame2_cu->child_frame_coordination_units_for_testing().count(
-                    frame3_cu.get()));
-  // |frame1_cu| was not added successfully because |frame1_cu| is one of the
-  // ancestors of |frame3_cu|.
-  EXPECT_EQ(0u, frame3_cu->child_frame_coordination_units_for_testing().count(
-                    frame1_cu.get()));
+TEST_F(FrameNodeImplTest, NavigationCommitted_DifferentDocument) {
+  auto process = CreateNode<ProcessNodeImpl>();
+  auto page = CreateNode<PageNodeImpl>();
+  auto frame_node = CreateNode<FrameNodeImpl>(process.get(), page.get());
+  EXPECT_TRUE(frame_node->url().is_empty());
+  const GURL url("http://www.foo.com/");
+  frame_node->OnNavigationCommitted(url, /* same_document */ false);
+  EXPECT_EQ(url, frame_node->url());
 }
 
 TEST_F(FrameNodeImplTest, RemoveChildFrame) {
-  auto parent_frame_cu = CreateCoordinationUnit<FrameNodeImpl>();
-  auto child_frame_cu = CreateCoordinationUnit<FrameNodeImpl>();
-
-  // Parent-child relationships have not been established yet.
-  EXPECT_EQ(
-      0u, parent_frame_cu->child_frame_coordination_units_for_testing().size());
-  EXPECT_TRUE(!parent_frame_cu->GetParentFrameNode());
-  EXPECT_EQ(
-      0u, child_frame_cu->child_frame_coordination_units_for_testing().size());
-  EXPECT_TRUE(!child_frame_cu->GetParentFrameNode());
-
-  parent_frame_cu->AddChildFrame(child_frame_cu->id());
+  auto process = CreateNode<ProcessNodeImpl>();
+  auto page = CreateNode<PageNodeImpl>();
+  auto parent_frame_node = CreateNode<FrameNodeImpl>(process.get(), page.get());
+  auto child_frame_node = CreateNode<FrameNodeImpl>(process.get(), page.get(),
+                                                    parent_frame_node.get(), 1);
 
   // Ensure correct Parent-child relationships have been established.
-  EXPECT_EQ(
-      1u, parent_frame_cu->child_frame_coordination_units_for_testing().size());
-  EXPECT_TRUE(!parent_frame_cu->GetParentFrameNode());
-  EXPECT_EQ(
-      0u, child_frame_cu->child_frame_coordination_units_for_testing().size());
-  EXPECT_EQ(parent_frame_cu.get(), child_frame_cu->GetParentFrameNode());
+  EXPECT_EQ(1u, parent_frame_node->child_frame_nodes().size());
+  EXPECT_TRUE(!parent_frame_node->parent_frame_node());
+  EXPECT_EQ(0u, child_frame_node->child_frame_nodes().size());
+  EXPECT_EQ(parent_frame_node.get(), child_frame_node->parent_frame_node());
 
-  parent_frame_cu->RemoveChildFrame(child_frame_cu->id());
+  child_frame_node.reset();
 
   // Parent-child relationships should no longer exist.
-  EXPECT_EQ(
-      0u, parent_frame_cu->child_frame_coordination_units_for_testing().size());
-  EXPECT_TRUE(!parent_frame_cu->GetParentFrameNode());
-  EXPECT_EQ(
-      0u, child_frame_cu->child_frame_coordination_units_for_testing().size());
-  EXPECT_TRUE(!child_frame_cu->GetParentFrameNode());
+  EXPECT_EQ(0u, parent_frame_node->child_frame_nodes().size());
+  EXPECT_TRUE(!parent_frame_node->parent_frame_node());
 }
 
-int64_t GetLifecycleState(PageNodeImpl* cu) {
-  int64_t value;
-  if (cu->GetProperty(
-          resource_coordinator::mojom::PropertyType::kLifecycleState, &value))
-    return value;
-  // Initial state is running.
-  return static_cast<int64_t>(
-      resource_coordinator::mojom::LifecycleState::kRunning);
+TEST_F(FrameNodeImplTest, IsAdFrame) {
+  auto process = CreateNode<ProcessNodeImpl>();
+  auto page = CreateNode<PageNodeImpl>();
+  auto frame_node = CreateNode<FrameNodeImpl>(process.get(), page.get());
+  EXPECT_FALSE(frame_node->is_ad_frame());
+  frame_node->SetIsAdFrame();
+  EXPECT_TRUE(frame_node->is_ad_frame());
+  frame_node->SetIsAdFrame();
+  EXPECT_TRUE(frame_node->is_ad_frame());
 }
 
-#define EXPECT_FROZEN(cu)                                              \
-  EXPECT_EQ(static_cast<int64_t>(                                      \
-                resource_coordinator::mojom::LifecycleState::kFrozen), \
-            GetLifecycleState(cu.get()))
-#define EXPECT_RUNNING(cu)                                              \
-  EXPECT_EQ(static_cast<int64_t>(                                       \
-                resource_coordinator::mojom::LifecycleState::kRunning), \
-            GetLifecycleState(cu.get()))
+namespace {
 
-TEST_F(FrameNodeImplTest, LifecycleStatesTransitions) {
-  MockMultiplePagesWithMultipleProcessesGraph cu_graph(
-      coordination_unit_graph());
-  // Verifying the model.
-  ASSERT_TRUE(cu_graph.frame->IsMainFrame());
-  ASSERT_TRUE(cu_graph.other_frame->IsMainFrame());
-  ASSERT_FALSE(cu_graph.child_frame->IsMainFrame());
-  ASSERT_EQ(cu_graph.child_frame->GetParentFrameNode(),
-            cu_graph.other_frame.get());
-  ASSERT_EQ(cu_graph.frame->GetPageNode(), cu_graph.page.get());
-  ASSERT_EQ(cu_graph.other_frame->GetPageNode(), cu_graph.other_page.get());
+class LenientMockObserver : public FrameNodeImpl::Observer {
+ public:
+  LenientMockObserver() {}
+  ~LenientMockObserver() override {}
 
-  // Freezing a child frame should not affect the page state.
-  cu_graph.child_frame->SetLifecycleState(
+  MOCK_METHOD1(OnFrameNodeAdded, void(const FrameNode*));
+  MOCK_METHOD1(OnBeforeFrameNodeRemoved, void(const FrameNode*));
+  MOCK_METHOD1(OnIsCurrentChanged, void(const FrameNode*));
+  MOCK_METHOD1(OnNetworkAlmostIdleChanged, void(const FrameNode*));
+  MOCK_METHOD1(OnFrameLifecycleStateChanged, void(const FrameNode*));
+  MOCK_METHOD1(OnNonPersistentNotificationCreated, void(const FrameNode*));
+  MOCK_METHOD1(OnURLChanged, void(const FrameNode*));
+
+  void SetNotifiedFrameNode(const FrameNode* frame_node) {
+    notified_frame_node_ = frame_node;
+  }
+
+  const FrameNode* TakeNotifiedFrameNode() {
+    const FrameNode* node = notified_frame_node_;
+    notified_frame_node_ = nullptr;
+    return node;
+  }
+
+ private:
+  const FrameNode* notified_frame_node_ = nullptr;
+};
+
+using MockObserver = ::testing::StrictMock<LenientMockObserver>;
+
+using testing::_;
+using testing::Invoke;
+
+}  // namespace
+
+TEST_F(FrameNodeImplTest, ObserverWorks) {
+  auto process = CreateNode<ProcessNodeImpl>();
+  auto page = CreateNode<PageNodeImpl>();
+
+  MockObserver obs;
+  graph()->AddFrameNodeObserver(&obs);
+
+  // Create a frame node and expect a matching call to "OnFrameNodeAdded".
+  EXPECT_CALL(obs, OnFrameNodeAdded(_))
+      .WillOnce(Invoke(&obs, &MockObserver::SetNotifiedFrameNode));
+  auto frame_node = CreateNode<FrameNodeImpl>(process.get(), page.get());
+  const FrameNode* raw_frame_node = frame_node.get();
+  EXPECT_EQ(raw_frame_node, obs.TakeNotifiedFrameNode());
+
+  // Invoke "SetIsCurrent" and expect a "OnIsCurrentChanged" callback.
+  EXPECT_CALL(obs, OnIsCurrentChanged(_))
+      .WillOnce(Invoke(&obs, &MockObserver::SetNotifiedFrameNode));
+  frame_node->SetIsCurrent(true);
+  EXPECT_EQ(raw_frame_node, obs.TakeNotifiedFrameNode());
+
+  // Invoke "SetNetworkAlmostIdle" and expect an "OnNetworkAlmostIdleChanged"
+  // callback.
+  EXPECT_CALL(obs, OnNetworkAlmostIdleChanged(_))
+      .WillOnce(Invoke(&obs, &MockObserver::SetNotifiedFrameNode));
+  frame_node->SetNetworkAlmostIdle();
+  EXPECT_EQ(raw_frame_node, obs.TakeNotifiedFrameNode());
+
+  // Invoke "SetLifecycleState" and expect an "OnFrameLifecycleStateChanged"
+  // callback.
+  EXPECT_CALL(obs, OnFrameLifecycleStateChanged(_))
+      .WillOnce(Invoke(&obs, &MockObserver::SetNotifiedFrameNode));
+  frame_node->SetLifecycleState(
       resource_coordinator::mojom::LifecycleState::kFrozen);
-  EXPECT_RUNNING(cu_graph.page);
-  EXPECT_RUNNING(cu_graph.other_page);
+  EXPECT_EQ(raw_frame_node, obs.TakeNotifiedFrameNode());
 
-  // Freezing the only frame in a page should freeze that page.
-  cu_graph.frame->SetLifecycleState(
-      resource_coordinator::mojom::LifecycleState::kFrozen);
-  EXPECT_FROZEN(cu_graph.page);
-  EXPECT_RUNNING(cu_graph.other_page);
+  // Invoke "OnNonPersistentNotificationCreated" and expect an
+  // "OnNonPersistentNotificationCreated" callback.
+  EXPECT_CALL(obs, OnNonPersistentNotificationCreated(_))
+      .WillOnce(Invoke(&obs, &MockObserver::SetNotifiedFrameNode));
+  frame_node->OnNonPersistentNotificationCreated();
+  EXPECT_EQ(raw_frame_node, obs.TakeNotifiedFrameNode());
 
-  // Unfreeze the child frame in the other page.
-  cu_graph.child_frame->SetLifecycleState(
-      resource_coordinator::mojom::LifecycleState::kRunning);
-  EXPECT_FROZEN(cu_graph.page);
-  EXPECT_RUNNING(cu_graph.other_page);
+  // Invoke "OnNavigationCommitted" and expect an "OnURLChanged" callback.
+  EXPECT_CALL(obs, OnURLChanged(_))
+      .WillOnce(Invoke(&obs, &MockObserver::SetNotifiedFrameNode));
+  frame_node->OnNavigationCommitted(GURL("https://foo.com/"), true);
+  EXPECT_EQ(raw_frame_node, obs.TakeNotifiedFrameNode());
 
-  // Freezing the main frame in the other page should not alter that pages
-  // state, as there is still a child frame that is running.
-  cu_graph.other_frame->SetLifecycleState(
-      resource_coordinator::mojom::LifecycleState::kFrozen);
-  EXPECT_FROZEN(cu_graph.page);
-  EXPECT_RUNNING(cu_graph.other_page);
+  // Release the frame node and expect a call to "OnBeforeFrameNodeRemoved".
+  EXPECT_CALL(obs, OnBeforeFrameNodeRemoved(_))
+      .WillOnce(Invoke(&obs, &MockObserver::SetNotifiedFrameNode));
+  frame_node.reset();
+  EXPECT_EQ(raw_frame_node, obs.TakeNotifiedFrameNode());
 
-  // Refreezing the child frame should freeze the page.
-  cu_graph.child_frame->SetLifecycleState(
-      resource_coordinator::mojom::LifecycleState::kFrozen);
-  EXPECT_FROZEN(cu_graph.page);
-  EXPECT_FROZEN(cu_graph.other_page);
+  graph()->RemoveFrameNodeObserver(&obs);
+}
 
-  // Unfreezing a main frame should unfreeze the associated page.
-  cu_graph.frame->SetLifecycleState(
-      resource_coordinator::mojom::LifecycleState::kRunning);
-  EXPECT_RUNNING(cu_graph.page);
-  EXPECT_FROZEN(cu_graph.other_page);
+TEST_F(FrameNodeImplTest, PublicInterface) {
+  auto process = CreateNode<ProcessNodeImpl>();
+  auto page = CreateNode<PageNodeImpl>();
+  auto frame_node = CreateNode<FrameNodeImpl>(process.get(), page.get());
+  const FrameNode* public_frame_node = frame_node.get();
 
-  // Unfreezing the child frame should unfreeze the associated page.
-  cu_graph.child_frame->SetLifecycleState(
-      resource_coordinator::mojom::LifecycleState::kRunning);
-  EXPECT_RUNNING(cu_graph.page);
-  EXPECT_RUNNING(cu_graph.other_page);
+  // Simply test that the public interface impls yield the same result as their
+  // private counterpart.
 
-  // Unfreezing the main frame shouldn't change anything.
-  cu_graph.other_frame->SetLifecycleState(
-      resource_coordinator::mojom::LifecycleState::kRunning);
-  EXPECT_RUNNING(cu_graph.page);
-  EXPECT_RUNNING(cu_graph.other_page);
+  EXPECT_EQ(static_cast<const FrameNode*>(frame_node->parent_frame_node()),
+            public_frame_node->GetParentFrameNode());
+  EXPECT_EQ(static_cast<const PageNode*>(frame_node->page_node()),
+            public_frame_node->GetPageNode());
+  EXPECT_EQ(static_cast<const ProcessNode*>(frame_node->process_node()),
+            public_frame_node->GetProcessNode());
+  EXPECT_EQ(frame_node->frame_tree_node_id(),
+            public_frame_node->GetFrameTreeNodeId());
+  EXPECT_EQ(frame_node->dev_tools_token(),
+            public_frame_node->GetDevToolsToken());
+  EXPECT_EQ(frame_node->browsing_instance_id(),
+            public_frame_node->GetBrowsingInstanceId());
+  EXPECT_EQ(frame_node->site_instance_id(),
+            public_frame_node->GetSiteInstanceId());
+
+  auto child_frame_nodes = public_frame_node->GetChildFrameNodes();
+  for (auto* child_frame_node : frame_node->child_frame_nodes()) {
+    const FrameNode* child = child_frame_node;
+    EXPECT_TRUE(base::Contains(child_frame_nodes, child));
+  }
+  EXPECT_EQ(child_frame_nodes.size(), frame_node->child_frame_nodes().size());
+
+  EXPECT_EQ(frame_node->lifecycle_state(),
+            public_frame_node->GetLifecycleState());
+  EXPECT_EQ(frame_node->has_nonempty_beforeunload(),
+            public_frame_node->HasNonemptyBeforeUnload());
+  EXPECT_EQ(frame_node->url(), public_frame_node->GetURL());
+  EXPECT_EQ(frame_node->is_current(), public_frame_node->IsCurrent());
+  EXPECT_EQ(frame_node->network_almost_idle(),
+            public_frame_node->GetNetworkAlmostIdle());
+  EXPECT_EQ(frame_node->is_ad_frame(), public_frame_node->IsAdFrame());
 }
 
 }  // namespace performance_manager

@@ -14,7 +14,7 @@
 #include "base/values.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_service_manager_listener.h"
-#include "content/public/common/service_manager_connection.h"
+#include "content/public/browser/system_connector.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "services/data_decoder/public/cpp/safe_json_parser.h"
@@ -29,12 +29,9 @@ using data_decoder::SafeJsonParser;
 
 constexpr char kTestJson[] = "[\"awesome\", \"possum\"]";
 
-std::string MaybeToJson(const base::Value* value) {
-  if (!value)
-    return "(null)";
-
+std::string MaybeToJson(const base::Value& value) {
   std::string json;
-  if (!base::JSONWriter::Write(*value, &json))
+  if (!base::JSONWriter::Write(value, &json))
     return "(invalid value)";
 
   return json;
@@ -60,34 +57,34 @@ class SafeJsonParserTest : public InProcessBrowserTest {
     DCHECK(!message_loop_runner_);
     message_loop_runner_ = new content::MessageLoopRunner;
 
-    std::string error;
-    std::unique_ptr<base::Value> value =
-        base::JSONReader::ReadAndReturnErrorDeprecated(
-            json, base::JSON_PARSE_RFC, nullptr, &error);
+    base::JSONReader::ValueWithError value_with_error =
+        base::JSONReader::ReadAndReturnValueWithError(json,
+                                                      base::JSON_PARSE_RFC);
 
     SafeJsonParser::SuccessCallback success_callback;
     SafeJsonParser::ErrorCallback error_callback;
-    if (value) {
-      success_callback =
-          base::Bind(&SafeJsonParserTest::ExpectValue, base::Unretained(this),
-                     base::Passed(&value));
-      error_callback = base::Bind(&SafeJsonParserTest::FailWithError,
-                                  base::Unretained(this));
+    if (value_with_error.value) {
+      success_callback = base::BindOnce(&SafeJsonParserTest::ExpectValue,
+                                        base::Unretained(this),
+                                        std::move(*value_with_error.value));
+      error_callback = base::BindOnce(&SafeJsonParserTest::FailWithError,
+                                      base::Unretained(this));
     } else {
-      success_callback = base::Bind(&SafeJsonParserTest::FailWithValue,
-                                    base::Unretained(this));
-      error_callback = base::Bind(&SafeJsonParserTest::ExpectError,
-                                  base::Unretained(this), error);
+      success_callback = base::BindOnce(&SafeJsonParserTest::FailWithValue,
+                                        base::Unretained(this));
+      error_callback = base::BindOnce(&SafeJsonParserTest::ExpectError,
+                                      base::Unretained(this),
+                                      value_with_error.error_message);
     }
 
     if (batch_id) {
-      SafeJsonParser::ParseBatch(
-          content::ServiceManagerConnection::GetForProcess()->GetConnector(),
-          json, success_callback, error_callback, *batch_id);
+      SafeJsonParser::ParseBatch(content::GetSystemConnector(), json,
+                                 std::move(success_callback),
+                                 std::move(error_callback), *batch_id);
     } else {
-      SafeJsonParser::Parse(
-          content::ServiceManagerConnection::GetForProcess()->GetConnector(),
-          json, success_callback, error_callback);
+      SafeJsonParser::Parse(content::GetSystemConnector(), json,
+                            std::move(success_callback),
+                            std::move(error_callback));
     }
 
     message_loop_runner_->Run();
@@ -99,11 +96,10 @@ class SafeJsonParserTest : public InProcessBrowserTest {
   }
 
  private:
-  void ExpectValue(std::unique_ptr<base::Value> expected_value,
-                   std::unique_ptr<base::Value> actual_value) {
-    EXPECT_EQ(*expected_value, *actual_value)
-        << "Expected: " << MaybeToJson(expected_value.get())
-        << " Actual: " << MaybeToJson(actual_value.get());
+  void ExpectValue(base::Value expected_value, base::Value actual_value) {
+    EXPECT_EQ(expected_value, actual_value)
+        << "Expected: " << MaybeToJson(expected_value)
+        << " Actual: " << MaybeToJson(actual_value);
     message_loop_runner_->Quit();
   }
 
@@ -113,8 +109,8 @@ class SafeJsonParserTest : public InProcessBrowserTest {
     message_loop_runner_->Quit();
   }
 
-  void FailWithValue(std::unique_ptr<base::Value> value) {
-    ADD_FAILURE() << MaybeToJson(value.get());
+  void FailWithValue(base::Value value) {
+    ADD_FAILURE() << MaybeToJson(value);
     message_loop_runner_->Quit();
   }
 

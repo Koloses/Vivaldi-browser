@@ -91,12 +91,12 @@ AccessibilityTreeFormatter::Create() {
 }
 
 // static
-std::vector<AccessibilityTreeFormatter::FormatterFactory>
+std::vector<AccessibilityTreeFormatter::TestPass>
 AccessibilityTreeFormatter::GetTestPasses() {
   // Note: Android doesn't do a "blink" pass; the blink tree is different on
   // Android because we exclude inline text boxes, for performance.
   return {
-      &AccessibilityTreeFormatter::Create,
+      {"android", &AccessibilityTreeFormatter::Create},
   };
 }
 
@@ -150,7 +150,7 @@ void AccessibilityTreeFormatterAndroid::AddProperties(
   dict->SetBoolean("interesting", android_node->IsInterestingOnAndroid());
 
   // String attributes.
-  dict->SetString("name", android_node->GetText());
+  dict->SetString("name", android_node->GetInnerText());
   dict->SetString("hint", android_node->GetHint());
   dict->SetString("role_description", android_node->GetRoleDescription());
 

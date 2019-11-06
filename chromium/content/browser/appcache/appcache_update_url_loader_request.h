@@ -35,6 +35,7 @@ class AppCacheUpdateJob::UpdateURLLoaderRequest
     : public network::mojom::URLLoaderClient {
  public:
   UpdateURLLoaderRequest(URLLoaderFactoryGetter* loader_factory_getter,
+                         base::WeakPtr<StoragePartitionImpl> partition,
                          const GURL& url,
                          int buffer_size,
                          URLFetcher* fetcher);
@@ -99,7 +100,7 @@ class AppCacheUpdateJob::UpdateURLLoaderRequest
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback ack_callback) override;
-  void OnReceiveCachedMetadata(const std::vector<uint8_t>& data) override;
+  void OnReceiveCachedMetadata(mojo_base::BigBuffer data) override;
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
   void OnStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) override;
@@ -118,6 +119,9 @@ class AppCacheUpdateJob::UpdateURLLoaderRequest
   // Used to retrieve the network URLLoader interface to issue network
   // requests
   scoped_refptr<URLLoaderFactoryGetter> loader_factory_getter_;
+  // If NavigationLoaderOnUI is enabled, |partition_| is used to get the network
+  // URLLoader.
+  base::WeakPtr<StoragePartitionImpl> partition_;
 
   network::ResourceRequest request_;
   network::ResourceResponseHead response_;

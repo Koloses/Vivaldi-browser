@@ -15,6 +15,8 @@ class FeaturePodButton;
 class FeaturePodsContainerView;
 class TopShortcutsView;
 class NotificationHiddenView;
+class PageIndicatorView;
+class UnifiedManagedDeviceView;
 class UnifiedMessageCenterView;
 class UnifiedSystemInfoView;
 class UnifiedSystemTrayController;
@@ -40,6 +42,7 @@ class UnifiedSlidersContainerView : public views::View {
   // views::View:
   void Layout() override;
   gfx::Size CalculatePreferredSize() const override;
+  const char* GetClassName() const override;
 
  private:
   double expanded_amount_;
@@ -48,6 +51,12 @@ class UnifiedSlidersContainerView : public views::View {
 };
 
 // View class of the main bubble in UnifiedSystemTray.
+//
+// The UnifiedSystemTray contains two sub components:
+//    1. MessageCenter: contains the list of notifications
+//    2. SystemTray: contains quick settings controls
+// Note that the term "UnifiedSystemTray" refers to entire bubble containing
+// both (1) and (2).
 class ASH_EXPORT UnifiedSystemTrayView : public views::View,
                                          public views::FocusTraversable {
  public:
@@ -71,18 +80,28 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   // It deletes |detailed_view| and children.
   void ResetDetailedView();
 
-  // Save and restore keyboard focus of feature pod.
-  void SaveFeaturePodFocus();
-  void RestoreFeaturePodFocus();
+  // Save and restore keyboard focus of the currently focused element. Called
+  // before transitioning into a detailed view.
+  void SaveFocus();
+  void RestoreFocus();
 
   // Change the expanded state. 0.0 if collapsed, and 1.0 if expanded.
   // Otherwise, it shows intermediate state.
   void SetExpandedAmount(double expanded_amount);
 
-  // Get height of the view when |expanded_amount| is set to 1.0.
-  int GetExpandedHeight() const;
+  // Get height of the system tray (excluding the message center) when
+  // |expanded_amount| is set to 1.0.
+  //
+  // Note that this function is used to calculate the transform-based
+  // collapse/expand animation, which is currently only enabled when there are
+  // no notifications.
+  int GetExpandedSystemTrayHeight() const;
 
-  // Get current height of the view.
+  // Get height of the system menu (excluding the message center) when
+  // |expanded_amount| is set to 0.0.
+  int GetCollapsedSystemTrayHeight() const;
+
+  // Get current height of the view (including the message center).
   int GetCurrentHeight() const;
 
   // Return true if layer transform can be used against the view. During
@@ -97,6 +116,9 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   // UnifiedSystemTrayView. It can be empty.
   void SetNotificationRectBelowScroll(const gfx::Rect& rect_below_scroll);
 
+  // Returns the number of visible feature pods.
+  int GetVisibleFeaturePodCount() const;
+
   // Create background of UnifiedSystemTray that is semi-transparent and has
   // rounded corners.
   static std::unique_ptr<views::Background> CreateBackground();
@@ -104,6 +126,7 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   // views::View:
   void OnGestureEvent(ui::GestureEvent* event) override;
   void ChildPreferredSizeChanged(views::View* child) override;
+  const char* GetClassName() const override;
   views::FocusTraversable* GetFocusTraversable() override;
 
   // views::FocusTraversable:
@@ -114,6 +137,8 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   NotificationHiddenView* notification_hidden_view_for_testing() {
     return notification_hidden_view_;
   }
+
+  View* detailed_view_for_testing() { return detailed_view_container_; }
 
  private:
   class FocusSearch;
@@ -127,11 +152,21 @@ class ASH_EXPORT UnifiedSystemTrayView : public views::View,
   NotificationHiddenView* const notification_hidden_view_;
   TopShortcutsView* const top_shortcuts_view_;
   FeaturePodsContainerView* const feature_pods_container_;
+  PageIndicatorView* const page_indicator_view_;
   UnifiedSlidersContainerView* const sliders_container_;
   UnifiedSystemInfoView* const system_info_view_;
   views::View* const system_tray_container_;
   views::View* const detailed_view_container_;
   UnifiedMessageCenterView* const message_center_view_;
+
+  // Null if kManagedDeviceUIRedesign is disabled.
+  UnifiedManagedDeviceView* managed_device_view_ = nullptr;
+
+  // The maximum height available to the view.
+  int max_height_ = 0;
+
+  // The view that is saved by calling SaveFocus().
+  views::View* saved_focused_view_ = nullptr;
 
   const std::unique_ptr<FocusSearch> focus_search_;
   const std::unique_ptr<ui::EventHandler> interacted_by_tap_recorder_;

@@ -35,8 +35,7 @@ BrowserRenderer::BrowserRenderer(
       browser_(browser),
       ui_processing_time_(sliding_time_size),
       ui_controller_update_time_(sliding_time_size),
-      ui_(std::move(ui)),
-      weak_ptr_factory_(this) {
+      ui_(std::move(ui)) {
   scheduler_delegate_->SetBrowserRenderer(this);
 }
 
@@ -284,14 +283,14 @@ void BrowserRenderer::UpdateUi(const RenderInfo& render_info,
 }
 
 void BrowserRenderer::ProcessControllerInputForWebXr(
+    const gfx::Transform& head_pose,
     base::TimeTicks current_time) {
   TRACE_EVENT0("gpu", "Vr.ProcessControllerInputForWebXr");
   DCHECK(input_delegate_);
   DCHECK(ui_);
   base::TimeTicks timing_start = base::TimeTicks::Now();
 
-  // No transform required for input handling while in WebXR.
-  input_delegate_->UpdateController(gfx::Transform(), current_time, true);
+  input_delegate_->UpdateController(head_pose, current_time, true);
   auto input_event_list = input_delegate_->GetGestures(current_time);
   ui_->HandleMenuButtonEvents(&input_event_list);
 

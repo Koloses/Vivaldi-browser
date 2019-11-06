@@ -4,29 +4,32 @@
 
 """Test runners for iOS."""
 
-import collections
 import errno
+import signal
+import sys
+
+import collections
 import glob
 import json
 import logging
+from multiprocessing import pool
 import os
 import plistlib
+import psutil
 import re
 import shutil
-import signal
 import subprocess
-import sys
 import tempfile
+import threading
 import time
-
-from multiprocessing import pool
 
 import gtest_utils
 import xctest_utils
 
-
 LOGGER = logging.getLogger(__name__)
 DERIVED_DATA = os.path.expanduser('~/Library/Developer/Xcode/DerivedData')
+READLINE_TIMEOUT = 180
+
 
 class Error(Exception):
   """Base class for errors."""
@@ -144,6 +147,78 @@ class ShardingDisabledError(TestRunnerError):
       'Sharding has not been implemented!')
 
 
+def terminate_process(proc):
+  """Terminates the process.
+
+  If an error occurs ignore it, just print out a message.
+
+  Args:
+    proc: A subprocess to terminate.
+  """
+  try:
+    LOGGER.info('Killing hung process %s' % proc.pid)
+    proc.terminate()
+    attempts_to_kill = 3
+    ps = psutil.Process(proc.pid)
+    for _ in range(attempts_to_kill):
+      # Check whether proc.pid process is still alive.
+      if ps.is_running():
+        LOGGER.info(
+            'Process iossim is still alive! Xcodebuild process might block it.')
+        xcodebuild_processes = [
+            p for p in psutil.process_iter()
+            # Use as_dict() to avoid API changes across versions of psutil.
+            if 'xcodebuild' == p.as_dict(attrs=['name'])['name']]
+        if not xcodebuild_processes:
+          LOGGER.debug('There are no running xcodebuild processes.')
+          break
+        LOGGER.debug('List of running xcodebuild processes: %s'
+                     % xcodebuild_processes)
+        # Killing xcodebuild processes
+        for p in xcodebuild_processes:
+          p.send_signal(signal.SIGKILL)
+        psutil.wait_procs(xcodebuild_processes)
+      else:
+        LOGGER.info('Process was killed!')
+        break
+  except OSError as ex:
+    LOGGER.info('Error while killing a process: %s' % ex)
+
+
+def print_process_output(proc, parser, timeout=READLINE_TIMEOUT):
+  """Logs process messages in console and waits until process is done.
+
+  Method waits until no output message and if no message for timeout seconds,
+  process will be terminated.
+
+  Args:
+    proc: A running process.
+    Parser: A parser.
+    timeout: Timeout(in seconds) to subprocess.stdout.readline method.
+  """
+  out = []
+  while True:
+    # subprocess.stdout.readline() might be stuck from time to time
+    # and tests fail because of TIMEOUT.
+    # Try to fix the issue by adding timer-thread for `timeout` seconds
+    # that will kill `frozen` running process if no new line is read
+    # and will finish test attempt.
+    # If new line appears in timeout, just cancel timer.
+    timer = threading.Timer(timeout, terminate_process, [proc])
+    timer.start()
+    line = proc.stdout.readline()
+    timer.cancel()
+    if not line:
+      break
+    line = line.rstrip()
+    out.append(line)
+    parser.ProcessLine(line)
+    LOGGER.info(line)
+    sys.stdout.flush()
+  LOGGER.debug('Finished print_process_output.')
+  return out
+
+
 def get_kif_test_filter(tests, invert=False):
   """Returns the KIF test filter to filter the given test cases.
 
@@ -204,7 +279,7 @@ def install_xcode(xcode_build_version, mac_toolchain_cmd, xcode_app_path):
   Args:
     xcode_build_version: (string) Xcode build version to install.
     mac_toolchain_cmd: (string) Path to mac_toolchain command to install Xcode.
-      See https://chromium.googlesource.com/infra/infra/+/master/go/src/infra/cmd/mac_toolchain/
+    See https://chromium.googlesource.com/infra/infra/+/master/go/src/infra/cmd/mac_toolchain/
     xcode_app_path: (string) Path to install the contents of Xcode.app.
 
   Returns:
@@ -259,6 +334,23 @@ def get_current_xcode_info():
   }
 
 
+def get_test_names(app_path):
+  """Gets list of tests from test app.
+
+  Args:
+     app_path: A path to test target bundle.
+
+  Returns:
+     List of tests.
+  """
+  cmd = ['otool', '-ov', app_path]
+  test_pattern = re.compile(
+      'imp (?:0[xX][0-9a-fA-F]+ )?-\['
+      '(?P<testSuite>[A-Za-z_][A-Za-z0-9_]*Test(?:Case)?)\s'
+      '(?P<testMethod>test[A-Za-z0-9_]*)\]')
+  return test_pattern.findall(subprocess.check_output(cmd))
+
+
 def shard_xctest(object_path, shards, test_cases=None):
   """Gets EarlGrey test methods inside a test target and splits them into shards
 
@@ -270,12 +362,7 @@ def shard_xctest(object_path, shards, test_cases=None):
   Returns:
     A list of test shards.
   """
-  cmd = ['otool', '-ov', object_path]
-  test_pattern = re.compile(
-    'imp -\[(?P<testSuite>[A-Za-z_][A-Za-z0-9_]*Test[Case]*) '
-    '(?P<testMethod>test[A-Za-z0-9_]*)\]')
-  test_names = test_pattern.findall(subprocess.check_output(cmd))
-
+  test_names = get_test_names(object_path)
   # If test_cases are passed in, only shard the intersection of them and the
   # listed tests.  Format of passed-in test_cases can be either 'testSuite' or
   # 'testSuite/testMethod'.  The listed tests are tuples of ('testSuite',
@@ -528,16 +615,8 @@ class TestRunner(object):
           stderr=subprocess.STDOUT,
       )
       old_handler = self.set_sigterm_handler(
-        lambda _signum, _frame: self.handle_sigterm(proc))
-
-      while True:
-        line = proc.stdout.readline()
-        if not line:
-          break
-        line = line.rstrip()
-        parser.ProcessLine(line)
-        LOGGER.info(line)
-        sys.stdout.flush()
+          lambda _signum, _frame: self.handle_sigterm(proc))
+      print_process_output(proc, parser)
 
       LOGGER.info('Waiting for test process to terminate.')
       proc.wait()
@@ -740,6 +819,7 @@ class SimulatorTestRunner(TestRunner):
   def kill_simulators():
     """Kills all running simulators."""
     try:
+      LOGGER.info('Killing simulators.')
       subprocess.check_call([
           'pkill',
           '-9',
@@ -883,13 +963,7 @@ class SimulatorTestRunner(TestRunner):
         stderr=subprocess.STDOUT,
     )
 
-    out = []
-    while True:
-      line = proc.stdout.readline()
-      if not line:
-        break
-      out.append(line.rstrip())
-
+    out = print_process_output(proc, xctest_utils.XCTestLogParser())
     self.deleteSimulator(udid)
     return (out, udid, proc.returncode)
 
@@ -943,6 +1017,7 @@ class SimulatorTestRunner(TestRunner):
       test_filter: List of test cases to filter.
       invert: Whether to invert the filter or not. Inverted, the filter will
         match everything except the given test cases.
+      test_shard: How many shards the tests should be divided into.
 
     Returns:
       A list of strings forming the command to launch the test.
@@ -1167,14 +1242,7 @@ class WprProxySimulatorTestRunner(SimulatorTestRunner):
     else:
       parser = gtest_utils.GTestLogParser()
 
-    while True:
-      line = proc.stdout.readline()
-      if not line:
-        break
-      line = line.rstrip()
-      parser.ProcessLine(line)
-      LOGGER.info(line)
-      sys.stdout.flush()
+    print_process_output(proc, parser)
 
     proc.wait()
     self.set_sigterm_handler(old_handler)
@@ -1450,9 +1518,6 @@ class DeviceTestRunner(TestRunner):
     if len(self.udid.splitlines()) != 1:
       raise DeviceDetectionError(self.udid)
     if xctest:
-      xcode_info = get_current_xcode_info()
-      xcode_version = float(xcode_info['version'])
-      inject_path = 'usr/lib/libXCTestBundleInject.dylib'
       self.xctestrun_file = tempfile.mkstemp()[1]
       self.xctestrun_data = {
         'TestTargetName': {
@@ -1461,7 +1526,8 @@ class DeviceTestRunner(TestRunner):
           'TestHostPath': '%s' % self.app_path,
           'TestingEnvironmentVariables': {
             'DYLD_INSERT_LIBRARIES':
-              '__PLATFORMS__/iPhoneOS.platform/Developer/%s' % inject_path,
+              '__PLATFORMS__/iPhoneOS.platform/Developer/usr/lib/'
+              'libXCTestBundleInject.dylib',
             'DYLD_LIBRARY_PATH':
               '__PLATFORMS__/iPhoneOS.platform/Developer/Library',
             'DYLD_FRAMEWORK_PATH':

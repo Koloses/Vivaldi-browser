@@ -4,6 +4,8 @@
 
 #include "chrome/browser/apps/app_shim/app_shim_host_mac.h"
 
+#include <unistd.h>
+
 #include <memory>
 #include <tuple>
 #include <vector>
@@ -48,11 +50,8 @@ class TestingAppShim : public chrome::mojom::AppShim {
   }
 
   // chrome::mojom::AppShim implementation.
-  void CreateViewsBridgeFactory(
-      views_bridge_mac::mojom::BridgeFactoryAssociatedRequest request)
-      override {}
-  void CreateContentNSViewBridgeFactory(
-      content::mojom::NSViewBridgeFactoryAssociatedRequest request) override {}
+  void CreateRemoteCocoaApplication(
+      remote_cocoa::mojom::ApplicationAssociatedRequest request) override {}
   void CreateCommandDispatcherForWidget(uint64_t widget_id) override {}
   void Hide() override {}
   void UnhideWithoutActivation() override {}
@@ -87,7 +86,7 @@ class TestingAppShimHostBootstrap : public AppShimHostBootstrap {
  public:
   explicit TestingAppShimHostBootstrap(
       chrome::mojom::AppShimHostBootstrapRequest host_request)
-      : test_weak_factory_(this) {
+      : AppShimHostBootstrap(getpid()), test_weak_factory_(this) {
     // AppShimHost will bind to the request from ServeChannel. For testing
     // purposes, have this request passed in at creation.
     host_bootstrap_binding_.Bind(std::move(host_request));

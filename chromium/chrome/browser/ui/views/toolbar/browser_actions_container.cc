@@ -23,6 +23,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
 #include "chrome/browser/ui/views/frame/app_menu_button.h"
@@ -46,6 +47,13 @@
 #include "ui/views/controls/resize_area.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/widget/widget.h"
+
+////////////////////////////////////////////////////////////////////////////////
+// BrowserActionsContainer::Delegate
+
+bool BrowserActionsContainer::Delegate::CanShowIconInToolbar() const {
+  return true;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserActionsContainer::DropPosition
@@ -73,11 +81,12 @@ BrowserActionsContainer::BrowserActionsContainer(
     BrowserActionsContainer* main_container,
     Delegate* delegate,
     bool interactive)
-    : delegate_(delegate),
+    : AnimationDelegateViews(this),
+      delegate_(delegate),
       browser_(browser),
       main_container_(main_container),
       interactive_(interactive) {
-  set_id(VIEW_ID_BROWSER_ACTION_TOOLBAR);
+  SetID(VIEW_ID_BROWSER_ACTION_TOOLBAR);
 
   toolbar_actions_bar_ = delegate_->CreateToolbarActionsBar(
       this, browser,
@@ -94,6 +103,8 @@ BrowserActionsContainer::BrowserActionsContainer(
       separator_ = new views::Separator();
       AddChildView(separator_);
     }
+  } else {
+    DCHECK(!base::FeatureList::IsEnabled(features::kExtensionsToolbarMenu));
   }
 }
 
@@ -129,7 +140,7 @@ void BrowserActionsContainer::RefreshToolbarActionViews() {
 size_t BrowserActionsContainer::VisibleBrowserActions() const {
   size_t visible_actions = 0;
   for (const auto& view : toolbar_action_views_) {
-    if (view->visible())
+    if (view->GetVisible())
       ++visible_actions;
   }
   return visible_actions;
@@ -146,11 +157,15 @@ bool BrowserActionsContainer::ShownInsideMenu() const {
   return main_container_ != nullptr;
 }
 
+bool BrowserActionsContainer::CanShowIconInToolbar() const {
+  return delegate_->CanShowIconInToolbar();
+}
+
 void BrowserActionsContainer::OnToolbarActionViewDragDone() {
   toolbar_actions_bar_->OnDragEnded();
 }
 
-views::MenuButton* BrowserActionsContainer::GetOverflowReferenceView() {
+views::LabelButton* BrowserActionsContainer::GetOverflowReferenceView() {
   return delegate_->GetOverflowReferenceView();
 }
 
@@ -292,7 +307,7 @@ void BrowserActionsContainer::ShowToolbarActionBubble(
         GetViewForId(controller->GetAnchorActionId());
     if (action_view) {
       anchor_view =
-          action_view->visible() ? action_view : GetOverflowReferenceView();
+          action_view->GetVisible() ? action_view : GetOverflowReferenceView();
       anchored_to_action_view = true;
     } else {
       anchor_view = BrowserView::GetBrowserViewForBrowser(browser_)
@@ -597,7 +612,7 @@ int BrowserActionsContainer::OnPerformDrop(
     --i;
 
   ToolbarActionsBar::DragType drag_type = ToolbarActionsBar::DRAG_TO_SAME;
-  if (!toolbar_action_views_[data.index()]->visible())
+  if (!toolbar_action_views_[data.index()]->GetVisible())
     drag_type = ShownInsideMenu() ? ToolbarActionsBar::DRAG_TO_OVERFLOW :
         ToolbarActionsBar::DRAG_TO_MAIN;
 
@@ -758,7 +773,7 @@ void BrowserActionsContainer::OnPaint(gfx::Canvas* canvas) {
 }
 
 void BrowserActionsContainer::ViewHierarchyChanged(
-    const ViewHierarchyChangedDetails& details) {
+    const views::ViewHierarchyChangedDetails& details) {
   if (!toolbar_actions_bar_->enabled())
     return;
 

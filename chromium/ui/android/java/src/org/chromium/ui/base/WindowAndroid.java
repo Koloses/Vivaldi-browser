@@ -44,6 +44,8 @@ import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.VSyncMonitor;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.DisplayAndroid.DisplayAndroidObserver;
+import org.chromium.ui.touchless.CursorObserver;
+import org.chromium.ui.touchless.TouchlessEventHandler;
 import org.chromium.ui.widget.Toast;
 
 import java.lang.ref.WeakReference;
@@ -58,6 +60,10 @@ import java.util.List;
 @JNINamespace("ui")
 public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidObserver {
     private static final String TAG = "WindowAndroid";
+
+    // Arbitrary error margin to account for cases where the display's refresh rate might not
+    // exactly match the target rate.
+    private static final float MAX_REFRESH_RATE_DELTA = 2.f;
 
     private KeyboardVisibilityDelegate mKeyboardVisibilityDelegate =
             KeyboardVisibilityDelegate.getInstance();
@@ -159,6 +165,20 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
     private ObserverList<ActivityStateObserver> mActivityStateObservers = new ObserverList<>();
 
     /**
+     * An interface to notify listeners of the changes in selection handles state.
+     */
+    public interface SelectionHandlesObserver {
+        /**
+         * Called when the selection handles state changes.
+         */
+        void onSelectionHandlesStateChanged(boolean active);
+    }
+
+    private boolean mSelectionHandlesActive;
+    private ObserverList<SelectionHandlesObserver> mSelectionHandlesObservers =
+            new ObserverList<>();
+
+    /**
      * Gets the view for readback.
      */
     public View getReadbackView() {
@@ -182,6 +202,23 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
             }
         }
     };
+
+    private final CursorObserver mCursorObserver =
+            new CursorObserver() {
+                @Override
+                public void onCursorVisibilityChanged(boolean visible) {
+                    if (mNativeWindowAndroid != 0) {
+                        nativeOnCursorVisibilityChanged(mNativeWindowAndroid, visible);
+                    }
+                }
+
+                @Override
+                public void onFallbackCursorModeToggled(boolean isOn) {
+                    if (mNativeWindowAndroid != 0) {
+                        nativeOnFallbackCursorModeToggled(mNativeWindowAndroid, isOn);
+                    }
+                }
+            };
 
     /**
      * Extract the activity if the given Context either is or wraps one.
@@ -242,7 +279,7 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) recomputeSupportedRefreshRates();
 
         // Temporary solution for flaky tests, see https://crbug.com/767624 for context
-        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
             mVSyncMonitor =
                     new VSyncMonitor(context, mVSyncListener, mDisplayAndroid.getRefreshRate());
             mAccessibilityManager =
@@ -259,6 +296,8 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
             boolean isScreenWideColorGamut = ApiHelperForO.isScreenWideColorGamut(configuration);
             display.updateIsDisplayServerWideColorGamut(isScreenWideColorGamut);
         }
+
+        TouchlessEventHandler.addCursorObserver(mCursorObserver);
     }
 
     @CalledByNative
@@ -593,6 +632,27 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
         mActivityStateObservers.removeObserver(observer);
     }
 
+    public void addSelectionHandlesObserver(SelectionHandlesObserver observer) {
+        assert !mSelectionHandlesObservers.hasObserver(observer);
+        mSelectionHandlesObservers.addObserver(observer);
+        observer.onSelectionHandlesStateChanged(mSelectionHandlesActive);
+    }
+
+    public void removeSelectionHandlesObserver(SelectionHandlesObserver observer) {
+        assert mSelectionHandlesObservers.hasObserver(observer);
+        mSelectionHandlesObservers.removeObserver(observer);
+    }
+
+    /**
+     * Removes a new {@link ActivityStateObserver} instance.
+     */
+    @CalledByNative
+    private void onSelectionHandlesStateChanged(boolean active) {
+        mSelectionHandlesActive = active;
+        for (SelectionHandlesObserver observer : mSelectionHandlesObservers)
+            observer.onSelectionHandlesStateChanged(active);
+    }
+
     /**
      * @return Current state of the associated {@link Activity}. Can be overriden
      *         to return the correct state. {@code ActivityState.DESTROYED} by default.
@@ -650,6 +710,8 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             if (mTouchExplorationMonitor != null) mTouchExplorationMonitor.destroy();
         }
+
+        TouchlessEventHandler.removeCursorObserver(mCursorObserver);
     }
 
     /**
@@ -661,9 +723,7 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
     private long getNativePointer() {
         if (mNativeWindowAndroid == 0) {
             mNativeWindowAndroid = nativeInit(mDisplayAndroid.getDisplayId(),
-                    getMouseWheelScrollFactor(), getWindowIsWideColorGamut(), getRefreshRate(),
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? getSupportedRefreshRates()
-                                                                   : null);
+                    getMouseWheelScrollFactor(), getWindowIsWideColorGamut());
             nativeSetVSyncPaused(mNativeWindowAndroid, mVSyncPaused);
         }
         return mNativeWindowAndroid;
@@ -909,6 +969,7 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
         }
     }
 
+    @CalledByNative
     private float getRefreshRate() {
         return mDisplayAndroid.getRefreshRate();
     }
@@ -916,6 +977,7 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
     @SuppressLint("NewApi")
     // mSupportedRefreshRateModes should only be set if Display.Mode is available.
     @TargetApi(Build.VERSION_CODES.M)
+    @CalledByNative
     private float[] getSupportedRefreshRates() {
         if (mSupportedRefreshRateModes == null) return null;
 
@@ -925,25 +987,50 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
         return supportedRefreshRates;
     }
 
-    @SuppressLint("NewApi") // This should only be called if Display.Mode is available.
+    @SuppressLint("NewApi")
     @CalledByNative
     private void setPreferredRefreshRate(float preferredRefreshRate) {
-        for (int i = 0; i < mSupportedRefreshRateModes.size(); ++i) {
-            if (preferredRefreshRate != mSupportedRefreshRateModes.get(i).getRefreshRate())
-                continue;
+        // Using this setting is gated to Q due to bugs on Razer phones which can freeze the device
+        // if the API is used. See crbug.com/990646.
+        if (mSupportedRefreshRateModes == null || !BuildInfo.isAtLeastQ()) return;
 
-            Window window = getWindow();
-            WindowManager.LayoutParams params = window.getAttributes();
-            params.preferredDisplayModeId = mSupportedRefreshRateModes.get(i).getModeId();
-            window.setAttributes(params);
-            return;
-        }
+        int preferredModeId = getPreferredModeId(preferredRefreshRate);
+        Window window = getWindow();
+        WindowManager.LayoutParams params = window.getAttributes();
+        if (params.preferredDisplayModeId == preferredModeId) return;
 
-        assert false : "Must use one of the supported refresh rates";
+        params.preferredDisplayModeId = preferredModeId;
+        window.setAttributes(params);
     }
 
-    private native long nativeInit(int displayId, float scrollFactor,
-            boolean windowIsWideColorGamut, float refreshRate, float[] supportedRefreshRates);
+    @SuppressLint("NewApi")
+    // mSupportedRefreshRateModes should only be set if Display.Mode is available.
+    @TargetApi(Build.VERSION_CODES.M)
+    private int getPreferredModeId(float preferredRefreshRate) {
+        if (preferredRefreshRate == 0) return 0;
+
+        Display.Mode preferredMode = null;
+        float preferredModeDelta = Float.MAX_VALUE;
+
+        for (int i = 0; i < mSupportedRefreshRateModes.size(); ++i) {
+            Display.Mode mode = mSupportedRefreshRateModes.get(i);
+            float delta = Math.abs(preferredRefreshRate - mode.getRefreshRate());
+            if (delta < preferredModeDelta) {
+                preferredModeDelta = delta;
+                preferredMode = mode;
+            }
+        }
+
+        if (preferredModeDelta > MAX_REFRESH_RATE_DELTA) {
+            Log.e(TAG, "Refresh rate not supported : " + preferredRefreshRate);
+            return 0;
+        }
+
+        return preferredMode.getModeId();
+    }
+
+    private native long nativeInit(
+            int displayId, float scrollFactor, boolean windowIsWideColorGamut);
     private native void nativeOnVSync(long nativeWindowAndroid,
                                       long vsyncTimeMicros,
                                       long vsyncPeriodMicros);
@@ -953,6 +1040,8 @@ public class WindowAndroid implements AndroidPermissionDelegate, DisplayAndroidO
     private native void nativeSetVSyncPaused(long nativeWindowAndroid, boolean paused);
     private native void nativeOnUpdateRefreshRate(long nativeWindowAndroid, float refreshRate);
     private native void nativeDestroy(long nativeWindowAndroid);
+    private native void nativeOnCursorVisibilityChanged(long nativeWindowAndroid, boolean visible);
+    private native void nativeOnFallbackCursorModeToggled(long nativeWindowAndroid, boolean isOn);
     private native void nativeOnSupportedRefreshRatesUpdated(
             long nativeWindowAndroid, float[] supportedRefreshRates);
 }

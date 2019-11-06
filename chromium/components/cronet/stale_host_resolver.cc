@@ -49,6 +49,9 @@ enum RequestOutcome {
   // Stale data returned; network got ERR_NAME_NOT_RESOLVED.
   STALE_INSTEAD_OF_NETWORK_NAME_NOT_RESOLVED = 6,
 
+  // Stale data is explicitly requested and returned immediately.
+  STALE_SYNCHRONOUS = 7,
+
   MAX_REQUEST_OUTCOME
 };
 
@@ -166,7 +169,7 @@ class StaleHostResolver::RequestImpl
   // Current HostCache size at the time the cache was checked.
   size_t current_size_;
 
-  base::WeakPtrFactory<RequestImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<RequestImpl> weak_ptr_factory_{this};
 };
 
 StaleHostResolver::RequestImpl::RequestImpl(
@@ -182,8 +185,7 @@ StaleHostResolver::RequestImpl::RequestImpl(
       cache_error_(net::ERR_DNS_CACHE_MISS),
       stale_timer_(tick_clock),
       restore_size_(0),
-      current_size_(0),
-      weak_ptr_factory_(this) {
+      current_size_(0) {
   DCHECK(resolver_);
 }
 
@@ -214,6 +216,13 @@ int StaleHostResolver::RequestImpl::Start(
       (!cache_request_->GetStaleInfo() ||
        !cache_request_->GetStaleInfo().value().is_stale())) {
     RecordSynchronousRequest();
+    return cache_error_;
+  }
+
+  if (cache_error_ != net::ERR_DNS_CACHE_MISS &&
+      input_parameters_.cache_usage ==
+          net::HostResolver::ResolveHostParameters::CacheUsage::STALE_ALLOWED) {
+    RecordRequestOutcome(STALE_SYNCHRONOUS);
     return cache_error_;
   }
 
@@ -425,9 +434,7 @@ StaleHostResolver::StaleOptions::StaleOptions()
 StaleHostResolver::StaleHostResolver(
     std::unique_ptr<net::ContextHostResolver> inner_resolver,
     const StaleOptions& stale_options)
-    : inner_resolver_(std::move(inner_resolver)),
-      options_(stale_options),
-      weak_ptr_factory_(this) {
+    : inner_resolver_(std::move(inner_resolver)), options_(stale_options) {
   DCHECK_LE(0, stale_options.max_expired_time.InMicroseconds());
   DCHECK_LE(0, stale_options.max_stale_uses);
 }
@@ -445,24 +452,17 @@ StaleHostResolver::CreateRequest(
       optional_parameters.value_or(ResolveHostParameters()), tick_clock_);
 }
 
-bool StaleHostResolver::HasCached(base::StringPiece hostname,
-                                  net::HostCache::Entry::Source* source_out,
-                                  net::HostCache::EntryStaleness* stale_out,
-                                  bool* secure_out) const {
-  return inner_resolver_->HasCached(hostname, source_out, stale_out,
-                                    secure_out);
-}
-
-void StaleHostResolver::SetDnsClientEnabled(bool enabled) {
-  inner_resolver_->SetDnsClientEnabled(enabled);
-}
-
 net::HostCache* StaleHostResolver::GetHostCache() {
   return inner_resolver_->GetHostCache();
 }
 
 std::unique_ptr<base::Value> StaleHostResolver::GetDnsConfigAsValue() const {
   return inner_resolver_->GetDnsConfigAsValue();
+}
+
+void StaleHostResolver::SetRequestContext(
+    net::URLRequestContext* request_context) {
+  inner_resolver_->SetRequestContext(request_context);
 }
 
 void StaleHostResolver::OnNetworkRequestComplete(

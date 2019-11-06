@@ -21,7 +21,7 @@
 #include "chrome/browser/media/router/test/mock_media_router.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/ash/cast_config_client_media_router.h"
+#include "chrome/browser/ui/ash/cast_config_controller_media_router.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -359,13 +359,13 @@ class FileSystemExtensionApiTestBase : public extensions::ExtensionApiTest {
     media_router_ = std::make_unique<media_router::MockMediaRouter>();
     ON_CALL(*media_router_, RegisterMediaSinksObserver(testing::_))
         .WillByDefault(testing::Return(true));
-    CastConfigClientMediaRouter::SetMediaRouterForTest(media_router_.get());
+    CastConfigControllerMediaRouter::SetMediaRouterForTest(media_router_.get());
 
     extensions::ExtensionApiTest::SetUpOnMainThread();
   }
 
   void TearDownOnMainThread() override {
-    CastConfigClientMediaRouter::SetMediaRouterForTest(nullptr);
+    CastConfigControllerMediaRouter::SetMediaRouterForTest(nullptr);
     extensions::ExtensionApiTest::TearDownOnMainThread();
   }
 
@@ -826,8 +826,9 @@ IN_PROC_BROWSER_TEST_F(LocalFileSystemExtensionApiTest, DefaultFileHandler) {
 //
 // RestrictedFileSystemExtensionApiTests.
 //
+// TODO(crbug.com/986072): Re-enable this.
 IN_PROC_BROWSER_TEST_F(RestrictedFileSystemExtensionApiTest,
-                       FileSystemOperations) {
+                       DISABLED_FileSystemOperations) {
   EXPECT_TRUE(RunFileSystemExtensionApiTest(
       "file_browser/filesystem_operations_test",
       FILE_PATH_LITERAL("manifest.json"),
@@ -908,7 +909,6 @@ IN_PROC_BROWSER_TEST_F(MultiProfileDriveFileSystemExtensionApiTest,
 
 //
 // LocalAndDriveFileSystemExtensionApiTests.
-//
 IN_PROC_BROWSER_TEST_F(LocalAndDriveFileSystemExtensionApiTest,
                        AppFileHandlerMulti) {
   EXPECT_TRUE(

@@ -24,7 +24,7 @@
 class Browser;
 class PrefService;
 class Profile;
-class ToolbarActionsBar;
+class ExtensionsContainer;
 class ToolbarActionViewController;
 
 namespace extensions {
@@ -39,7 +39,7 @@ class ExtensionRegistry;
 // model, but if the window is too narrow, actions may end up pushed into the
 // overflow menu on a per-window basis. Callers interested in the arrangement of
 // actions in a particular window should check that window's instance of
-// ToolbarActionsBar, which is responsible for the per-window layout.
+// ExtensionsContainer, which is responsible for the per-window layout.
 class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
                             public extensions::LoadErrorReporter::Observer,
                             public extensions::ExtensionRegistryObserver,
@@ -101,6 +101,9 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
     // can catch up.
     virtual void OnToolbarModelInitialized() = 0;
 
+    // Called whenever the pinned actions change.
+    virtual void OnToolbarPinnedActionsChanged() = 0;
+
    protected:
     virtual ~Observer() {}
   };
@@ -140,10 +143,12 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
 
   std::vector<std::unique_ptr<ToolbarActionViewController>> CreateActions(
       Browser* browser,
-      ToolbarActionsBar* bar);
+      ExtensionsContainer* main_bar,
+      bool in_overflow_menu);
   std::unique_ptr<ToolbarActionViewController> CreateActionForId(
       Browser* browser,
-      ToolbarActionsBar* bar,
+      ExtensionsContainer* main_bar,
+      bool in_overflow_menu,
       const ActionId& action_id);
 
   const std::vector<ActionId>& action_ids() const {
@@ -179,6 +184,14 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   std::unique_ptr<extensions::ExtensionMessageBubbleController>
   GetExtensionMessageBubbleController(Browser* browser);
 
+  // Returns true if the action is pinned to the toolbar.
+  bool IsActionPinned(const ActionId& action_id) const;
+
+  // Returns the ordered list of ids of pinned actions.
+  const std::vector<ActionId>& pinned_action_ids() const {
+    return pinned_action_ids_;
+  }
+
  private:
   // Callback when actions are ready.
   void OnReady();
@@ -203,8 +216,6 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   void OnLoadFailure(content::BrowserContext* browser_context,
                      const base::FilePath& extension_path,
                      const std::string& error) override;
-
-  void OnPageActionsUpdated(content::WebContents* web_contents) override;
 
   // To be called after the extension service is ready; gets loaded extensions
   // from the ExtensionRegistry, their saved order from the pref service, and
@@ -252,6 +263,10 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   // Returns true if the action is visible on the toolbar.
   bool IsActionVisible(const ActionId& action_id) const;
 
+  // Gets a list of pinned action ids that only contains that only contains IDs
+  // with a corresponding action in the model.
+  std::vector<ActionId> GetFilteredPinnedActionIds() const;
+
   // Our observers.
   base::ObserverList<Observer>::Unchecked observers_;
 
@@ -278,6 +293,9 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
 
   // List of browser action IDs which should be highlighted.
   std::vector<ActionId> highlighted_action_ids_;
+
+  // Set of pinned action IDs.
+  std::vector<ActionId> pinned_action_ids_;
 
   // The current type of highlight (with HIGHLIGHT_NONE indicating no current
   // highlight).
@@ -315,7 +333,7 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
                  extensions::LoadErrorReporter::Observer>
       load_error_reporter_observer_;
 
-  base::WeakPtrFactory<ToolbarActionsModel> weak_ptr_factory_;
+  base::WeakPtrFactory<ToolbarActionsModel> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ToolbarActionsModel);
 };

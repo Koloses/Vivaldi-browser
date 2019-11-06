@@ -82,7 +82,6 @@ class CONTENT_EXPORT IndexedDBCallbacks
 
   static bool CreateAllBlobs(
       scoped_refptr<ChromeBlobStorageContext> blob_context,
-      scoped_refptr<base::SequencedTaskRunner> idb_runner,
       std::vector<IndexedDBValueBlob> value_blobs);
 
   IndexedDBCallbacks(base::WeakPtr<IndexedDBDispatcherHost> dispatcher_host,
@@ -116,23 +115,9 @@ class CONTENT_EXPORT IndexedDBCallbacks
                          const blink::IndexedDBKey& primary_key,
                          IndexedDBValue* value);
 
-  // IndexedDBCursor::Continue / Advance
-  virtual void OnSuccess(const blink::IndexedDBKey& key,
-                         const blink::IndexedDBKey& primary_key,
-                         IndexedDBValue* value);
-
-  // IndexedDBCursor::PrefetchContinue
-  virtual void OnSuccessWithPrefetch(
-      const std::vector<blink::IndexedDBKey>& keys,
-      const std::vector<blink::IndexedDBKey>& primary_keys,
-      std::vector<IndexedDBValue>* values);
-
   // IndexedDBDatabase::Get
   // IndexedDBCursor::Advance
   virtual void OnSuccess(IndexedDBReturnValue* value);
-
-  // IndexedDBDatabase::GetAll
-  virtual void OnSuccessArray(std::vector<IndexedDBReturnValue>* values);
 
   // IndexedDBDatabase::Put / IndexedDBCursor::Update
   virtual void OnSuccess(const blink::IndexedDBKey& key);
@@ -146,13 +131,13 @@ class CONTENT_EXPORT IndexedDBCallbacks
   // IndexedDBCursor::Continue / Advance (when complete)
   virtual void OnSuccess();
 
+  void OnConnectionError();
+
  protected:
   virtual ~IndexedDBCallbacks();
 
  private:
   friend class base::RefCounted<IndexedDBCallbacks>;
-
-  class Helper;
 
   // Stores if this callbacks object is complete and should not be called again.
   bool complete_ = false;
@@ -168,7 +153,11 @@ class CONTENT_EXPORT IndexedDBCallbacks
   // The "blocked" event should be sent at most once per request.
   bool sent_blocked_ = false;
 
-  std::unique_ptr<Helper> helper_;
+  base::WeakPtr<IndexedDBDispatcherHost> dispatcher_host_;
+  url::Origin origin_;
+  scoped_refptr<base::SequencedTaskRunner> idb_runner_;
+  blink::mojom::IDBCallbacksAssociatedPtr callbacks_;
+
   SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(IndexedDBCallbacks);

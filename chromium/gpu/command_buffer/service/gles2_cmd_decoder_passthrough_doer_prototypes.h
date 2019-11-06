@@ -172,6 +172,7 @@ error::Error DoDisableVertexAttribArray(GLuint index);
 error::Error DoDispatchCompute(GLuint num_groups_x,
                                GLuint num_groups_y,
                                GLuint num_groups_z);
+error::Error DoDispatchComputeIndirect(GLintptr offset);
 error::Error DoDrawArrays(GLenum mode, GLint first, GLsizei count);
 error::Error DoDrawElements(GLenum mode,
                             GLsizei count,
@@ -200,12 +201,12 @@ error::Error DoFramebufferTextureLayer(GLenum target,
                                        GLuint texture,
                                        GLint level,
                                        GLint layer);
-error::Error DoFramebufferTextureMultiviewLayeredANGLE(GLenum target,
-                                                       GLenum attachment,
-                                                       GLuint texture,
-                                                       GLint level,
-                                                       GLint base_view_index,
-                                                       GLsizei num_views);
+error::Error DoFramebufferTextureMultiviewOVR(GLenum target,
+                                              GLenum attachment,
+                                              GLuint texture,
+                                              GLint level,
+                                              GLint base_view_index,
+                                              GLsizei num_views);
 error::Error DoFrontFace(GLenum mode);
 error::Error DoGenBuffers(GLsizei n, volatile GLuint* buffers);
 error::Error DoGenerateMipmap(GLenum target);
@@ -877,7 +878,6 @@ error::Error DoDiscardFramebufferEXT(GLenum target,
                                      const volatile GLenum* attachments);
 error::Error DoLoseContextCHROMIUM(GLenum current, GLenum other);
 error::Error DoDescheduleUntilFinishedCHROMIUM();
-error::Error DoInsertFenceSyncCHROMIUM(GLuint64 release_count);
 error::Error DoWaitSyncTokenCHROMIUM(CommandBufferNamespace namespace_id,
                                      CommandBufferId command_buffer_id,
                                      GLuint64 release_count);
@@ -894,16 +894,20 @@ error::Error DoScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
                                             GLfloat uv_y,
                                             GLfloat uv_width,
                                             GLfloat uv_height,
+                                            bool enable_blend,
                                             GLuint gpu_fence_id);
-error::Error DoScheduleCALayerSharedStateCHROMIUM(GLfloat opacity,
-                                                  GLboolean is_clipped,
-                                                  const GLfloat* clip_rect,
-                                                  GLint sorting_context_id,
-                                                  const GLfloat* transform);
+error::Error DoScheduleCALayerSharedStateCHROMIUM(
+    GLfloat opacity,
+    GLboolean is_clipped,
+    const GLfloat* clip_rect,
+    const GLfloat* rounded_corner_bounds,
+    GLint sorting_context_id,
+    const GLfloat* transform);
 error::Error DoScheduleCALayerCHROMIUM(GLuint contents_texture_id,
                                        const GLfloat* contents_rect,
                                        GLuint background_color,
                                        GLuint edge_aa_mask,
+                                       GLenum filter,
                                        const GLfloat* bounds_rect);
 error::Error DoScheduleCALayerInUseQueryCHROMIUM(
     GLuint n,
@@ -1115,8 +1119,8 @@ error::Error DoUnlockDiscardableTextureCHROMIUM(GLuint texture_id);
 error::Error DoLockDiscardableTextureCHROMIUM(GLuint texture_id);
 error::Error DoCreateAndTexStorage2DSharedImageINTERNAL(
     GLuint client_id,
-    const volatile GLbyte* mailbox,
-    GLenum internalformat);
+    GLenum internalformat,
+    const volatile GLbyte* mailbox);
 error::Error DoBeginSharedImageAccessDirectCHROMIUM(GLuint client_id,
                                                     GLenum mode);
 error::Error DoEndSharedImageAccessDirectCHROMIUM(GLuint client_id);

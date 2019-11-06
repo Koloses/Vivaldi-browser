@@ -4,6 +4,7 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -325,7 +326,8 @@ class DataReductionProxyCompressionStats::DailyContentLengthUpdate {
 
   int64_t GetListPrefValue(size_t index) {
     MaybeInitialize();
-    return GetInt64PrefValue(*update_, index);
+    return std::max(GetInt64PrefValue(*update_, index),
+                    static_cast<int64_t>(0));
   }
 
  private:
@@ -429,8 +431,7 @@ DataReductionProxyCompressionStats::DataReductionProxyCompressionStats(
       pref_service_(prefs),
       delay_(delay),
       data_usage_map_is_dirty_(false),
-      current_data_usage_load_status_(NOT_LOADED),
-      weak_factory_(this) {
+      current_data_usage_load_status_(NOT_LOADED) {
   DCHECK(service);
   DCHECK(prefs);
   DCHECK_GE(delay.InMilliseconds(), 0);
@@ -524,7 +525,7 @@ void DataReductionProxyCompressionStats::RecordDataUseWithMimeType(
     data_use_measurement::DataUseUserData::DataUseContentType content_type,
     int32_t service_hash_code) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  TRACE_EVENT0("loader",
+  TRACE_EVENT0("loading",
                "DataReductionProxyCompressionStats::RecordDataUseWithMimeType")
 
   IncreaseInt64Pref(data_reduction_proxy::prefs::kHttpReceivedContentLength,

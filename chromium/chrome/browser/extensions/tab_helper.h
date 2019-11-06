@@ -178,9 +178,6 @@ class TabHelper : public content::WebContentsObserver,
   // non-extension apps.
   SkBitmap extension_app_icon_;
 
-  // Cached web app info data.
-  WebApplicationInfo web_app_info_;
-
   // Which deferred action to perform when OnDidGetWebApplicationInfo is
   // notified from a WebContents.
   WebAppAction pending_web_app_action_;
@@ -204,10 +201,10 @@ class TabHelper : public content::WebContentsObserver,
       registry_observer_;
 
   // Vend weak pointers that can be invalidated to stop in-progress loads.
-  base::WeakPtrFactory<TabHelper> image_loader_ptr_factory_;
+  base::WeakPtrFactory<TabHelper> image_loader_ptr_factory_{this};
 
   // Generic weak ptr factory for posting callbacks.
-  base::WeakPtrFactory<TabHelper> weak_ptr_factory_;
+  base::WeakPtrFactory<TabHelper> weak_ptr_factory_{this};
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 

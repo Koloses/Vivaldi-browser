@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromecast/base/cast_features.h"
 #include "chromecast/base/chromecast_switches.h"
@@ -23,6 +25,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "ipc/ipc_message.h"
 #include "net/base/net_errors.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "url/gurl.h"
@@ -60,12 +63,10 @@ CastWebViewDefault::CastWebViewDefault(
       browser_context_(browser_context),
       site_instance_(std::move(site_instance)),
       delegate_(params.delegate),
-      transparent_(params.transparent),
       allow_media_access_(params.allow_media_access),
+      log_prefix_(params.log_prefix),
       web_contents_(CreateWebContents(browser_context_, site_instance_)),
-      cast_web_contents_(
-          web_contents_.get(),
-          {delegate_, params.enabled_for_dev, params.use_cma_renderer}),
+      cast_web_contents_(web_contents_.get(), params.web_contents_params),
       window_(shell::CastContentWindow::Create(params.window_params)),
       resize_window_when_navigation_starts_(true) {
   DCHECK(delegate_);
@@ -80,18 +81,9 @@ CastWebViewDefault::CastWebViewDefault(
 #endif
 
 #if BUILDFLAG(IS_ANDROID_THINGS)
-// Configure the ducking multiplier for AThings speakers. When CMA backend is
-// used we don't want the Chromium MediaSession to duck since we are doing
-// our own ducking. When no CMA backend is used we rely on the MediaSession
-// for ducking. In that case set it to a proper value to match the ducking
-// done in CMA backend.
-#if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
-  // passthrough, i.e., disable ducking
+  // Configure the ducking multiplier for AThings speakers. We don't want the
+  // Chromium MediaSession to duck since we are doing our own ducking.
   constexpr double kDuckingMultiplier = 1.0;
-#else
-  // duck by -30dB
-  constexpr double kDuckingMultiplier = 0.03;
-#endif
   content::MediaSession::Get(web_contents_.get())
       ->SetDuckingVolumeMultiplier(kDuckingMultiplier);
 #endif
@@ -140,17 +132,22 @@ void CastWebViewDefault::InitializeWindow(CastWindowManager* window_manager,
                                           CastWindowManager::WindowId z_order,
                                           VisibilityPriority initial_priority) {
   DCHECK(window_manager);
+  DCHECK(window_);
   window_->CreateWindowForWebContents(web_contents_.get(), window_manager,
                                       z_order, initial_priority);
   web_contents_->Focus();
 }
 
 void CastWebViewDefault::GrantScreenAccess() {
+  if (!window_)
+    return;
   window_->GrantScreenAccess();
 }
 
 void CastWebViewDefault::RevokeScreenAccess() {
   resize_window_when_navigation_starts_ = false;
+  if (!window_)
+    return;
   window_->RevokeScreenAccess();
 }
 
@@ -177,7 +174,7 @@ void CastWebViewDefault::ActivateContents(content::WebContents* contents) {
 bool CastWebViewDefault::CheckMediaAccessPermission(
     content::RenderFrameHost* render_frame_host,
     const GURL& security_origin,
-    blink::MediaStreamType type) {
+    blink::mojom::MediaStreamType type) {
   if (!chromecast::IsFeatureEnabled(kAllowUserMediaAccess) &&
       !allow_media_access_) {
     LOG(WARNING) << __func__ << ": media access is disabled.";
@@ -188,12 +185,18 @@ bool CastWebViewDefault::CheckMediaAccessPermission(
 
 bool CastWebViewDefault::DidAddMessageToConsole(
     content::WebContents* source,
-    int32_t level,
+    blink::mojom::ConsoleMessageLevel log_level,
     const base::string16& message,
     int32_t line_no,
     const base::string16& source_id) {
-  return delegate_->OnAddMessageToConsoleReceived(level, message, line_no,
-                                                  source_id);
+  base::string16 single_line_message;
+  // Mult-line message is not friendly to dumpstate redact.
+  base::ReplaceChars(message, base::ASCIIToUTF16("\n"),
+                     base::ASCIIToUTF16("\\n "), &single_line_message);
+  logging::LogMessage("CONSOLE", line_no, ::logging::LOG_INFO).stream()
+      << log_prefix_ << ": \"" << single_line_message
+      << "\", source: " << source_id << " (" << line_no << ")";
+  return true;
 }
 
 const blink::MediaStreamDevice* GetRequestedDeviceOrDefault(
@@ -221,9 +224,10 @@ void CastWebViewDefault::RequestMediaAccessPermission(
   if (!chromecast::IsFeatureEnabled(kAllowUserMediaAccess) &&
       !allow_media_access_) {
     LOG(WARNING) << __func__ << ": media access is disabled.";
-    std::move(callback).Run(blink::MediaStreamDevices(),
-                            blink::MEDIA_DEVICE_NOT_SUPPORTED,
-                            std::unique_ptr<content::MediaStreamUI>());
+    std::move(callback).Run(
+        blink::MediaStreamDevices(),
+        blink::mojom::MediaStreamRequestResult::NOT_SUPPORTED,
+        std::unique_ptr<content::MediaStreamUI>());
     return;
   }
 
@@ -231,31 +235,33 @@ void CastWebViewDefault::RequestMediaAccessPermission(
       content::MediaCaptureDevices::GetInstance()->GetAudioCaptureDevices();
   auto video_devices =
       content::MediaCaptureDevices::GetInstance()->GetVideoCaptureDevices();
-  VLOG(2) << __func__ << " audio_devices=" << audio_devices.size()
-          << " video_devices=" << video_devices.size();
+  DVLOG(2) << __func__ << " audio_devices=" << audio_devices.size()
+           << " video_devices=" << video_devices.size();
 
   blink::MediaStreamDevices devices;
-  if (request.audio_type == blink::MEDIA_DEVICE_AUDIO_CAPTURE) {
+  if (request.audio_type ==
+      blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE) {
     const blink::MediaStreamDevice* device = GetRequestedDeviceOrDefault(
         audio_devices, request.requested_audio_device_id);
     if (device) {
-      VLOG(1) << __func__ << "Using audio device: id=" << device->id
-              << " name=" << device->name;
+      DVLOG(1) << __func__ << "Using audio device: id=" << device->id
+               << " name=" << device->name;
       devices.push_back(*device);
     }
   }
 
-  if (request.video_type == blink::MEDIA_DEVICE_VIDEO_CAPTURE) {
+  if (request.video_type ==
+      blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE) {
     const blink::MediaStreamDevice* device = GetRequestedDeviceOrDefault(
         video_devices, request.requested_video_device_id);
     if (device) {
-      VLOG(1) << __func__ << "Using video device: id=" << device->id
-              << " name=" << device->name;
+      DVLOG(1) << __func__ << "Using video device: id=" << device->id
+               << " name=" << device->name;
       devices.push_back(*device);
     }
   }
 
-  std::move(callback).Run(devices, blink::MEDIA_DEVICE_OK,
+  std::move(callback).Run(devices, blink::mojom::MediaStreamRequestResult::OK,
                           std::unique_ptr<content::MediaStreamUI>());
 }
 
@@ -267,22 +273,6 @@ CastWebViewDefault::RunBluetoothChooser(
   return chooser
              ? std::move(chooser)
              : WebContentsDelegate::RunBluetoothChooser(frame, event_handler);
-}
-
-void CastWebViewDefault::RenderViewCreated(
-    content::RenderViewHost* render_view_host) {
-  content::RenderWidgetHostView* view =
-      render_view_host->GetWidget()->GetView();
-  if (view) {
-    view->SetBackgroundColor(
-        transparent_ ? SK_ColorTRANSPARENT
-                     : chromecast::GetSwitchValueColor(
-                           switches::kCastAppBackgroundColor, SK_ColorBLACK));
-  }
-}
-
-void CastWebViewDefault::DidFirstVisuallyNonEmptyPaint() {
-  metrics::CastMetricsHelper::GetInstance()->LogTimeToFirstPaint();
 }
 
 void CastWebViewDefault::DidStartNavigation(
@@ -300,18 +290,6 @@ void CastWebViewDefault::DidStartNavigation(
   content_window->SetBounds(
       gfx::Rect(display_size.width(), display_size.height()));
 #endif
-}
-
-void CastWebViewDefault::MediaStartedPlaying(const MediaPlayerInfo& media_info,
-                                             const MediaPlayerId& id) {
-  metrics::CastMetricsHelper::GetInstance()->LogMediaPlay();
-}
-
-void CastWebViewDefault::MediaStoppedPlaying(
-    const MediaPlayerInfo& media_info,
-    const MediaPlayerId& id,
-    WebContentsObserver::MediaStoppedReason reason) {
-  metrics::CastMetricsHelper::GetInstance()->LogMediaPause();
 }
 
 }  // namespace chromecast

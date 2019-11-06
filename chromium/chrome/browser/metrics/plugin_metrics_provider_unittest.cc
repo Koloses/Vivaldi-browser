@@ -119,7 +119,7 @@ TEST_F(PluginMetricsProviderTest, Plugins) {
 
 TEST_F(PluginMetricsProviderTest, RecordCurrentStateWithDelay) {
   content::TestBrowserThreadBundle thread_bundle(
-      base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME);
+      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME);
 
   PluginMetricsProvider provider(prefs());
 
@@ -134,7 +134,7 @@ TEST_F(PluginMetricsProviderTest, RecordCurrentStateWithDelay) {
 
 TEST_F(PluginMetricsProviderTest, RecordCurrentStateIfPending) {
   content::TestBrowserThreadBundle thread_bundle(
-      base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME);
+      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME);
 
   PluginMetricsProvider provider(prefs());
 
@@ -168,8 +168,10 @@ TEST_F(PluginMetricsProviderTest, ProvideStabilityMetricsWhenPendingTask) {
 
   // Increase number of process launches which should also start a delayed
   // task.
-  content::ChildProcessTerminationInfo abnormal_termination_info{
-      base::TERMINATION_STATUS_ABNORMAL_TERMINATION, 1};
+  content::ChildProcessTerminationInfo abnormal_termination_info;
+  abnormal_termination_info.status =
+      base::TERMINATION_STATUS_ABNORMAL_TERMINATION;
+  abnormal_termination_info.exit_code = 1;
   content::ChildProcessData child_process_data1(
       content::PROCESS_TYPE_PPAPI_PLUGIN);
   child_process_data1.name = base::UTF8ToUTF16("p1");

@@ -8,8 +8,9 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
-#include "ash/public/interfaces/login_user_info.mojom.h"
+#include "ash/public/cpp/login_types.h"
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -18,9 +19,11 @@
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/chromeos/login/challenge_response_auth_keys_loader.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chromeos/login/auth/auth_status_consumer.h"
+#include "chromeos/login/auth/challenge_response_key.h"
 #include "chromeos/login/auth/user_context.h"
 #include "components/user_manager/user.h"
 #include "mojo/public/cpp/bindings/binding.h"
@@ -57,13 +60,6 @@ class ScreenLocker : public AuthStatusConsumer,
     // Called by ScreenLocker to notify that ash lock animation finishes.
     virtual void OnAshLockAnimationFinished() = 0;
 
-    // Called when fingerprint state has changed.
-    virtual void SetFingerprintState(const AccountId& account_id,
-                                     ash::mojom::FingerprintState state) = 0;
-
-    // Called after a fingerprint authentication attempt.
-    virtual void NotifyFingerprintAuthResult(const AccountId& account_id,
-                                             bool success) = 0;
    private:
     DISALLOW_COPY_AND_ASSIGN(Delegate);
   };
@@ -89,12 +85,14 @@ class ScreenLocker : public AuthStatusConsumer,
   // unlock the device.
   void OnPasswordAuthSuccess(const UserContext& user_context);
 
-  // Enables or disables authentication for the user with |account_id|. Notifies
-  // lock screen UI. |auth_reenabled_time| is used to display informaton in the
-  // UI.
-  void SetAuthEnabledForUser(const AccountId& account_id,
-                             bool is_enabled,
-                             base::Optional<base::Time> auth_reenabled_time);
+  // Disables authentication for the user with |account_id|. Notifies lock
+  // screen UI.
+  void EnableAuthForUser(const AccountId& account_id);
+
+  // Enables authentication for the user with |account_id|. Notifies lock screen
+  // UI. |auth_disabled_data| is used to display information in the UI.
+  void DisableAuthForUser(const AccountId& account_id,
+                          const ash::AuthDisabledData& auth_disabled_data);
 
   // Authenticates the user with given |user_context|.
   void Authenticate(const UserContext& user_context,
@@ -171,10 +169,17 @@ class ScreenLocker : public AuthStatusConsumer,
   friend class base::DeleteHelper<ScreenLocker>;
   friend class ViewsScreenLocker;
 
-  // Track whether the user used pin or password to unlock the lock screen.
-  // Values corrospond to UMA histograms, do not modify, or add or delete other
+  // Track the type of the authentication that the user used to unlock the lock
+  // screen.
+  // Values correspond to UMA histograms; do not modify, or add or delete other
   // than directly before AUTH_COUNT.
-  enum UnlockType { AUTH_PASSWORD = 0, AUTH_PIN, AUTH_FINGERPRINT, AUTH_COUNT };
+  enum UnlockType {
+    AUTH_PASSWORD = 0,
+    AUTH_PIN = 1,
+    AUTH_FINGERPRINT = 2,
+    AUTH_CHALLENGE_RESPONSE = 3,
+    AUTH_COUNT
+  };
 
   ~ScreenLocker() override;
 
@@ -196,6 +201,13 @@ class ScreenLocker : public AuthStatusConsumer,
   // ash is fully locked and post lock animation finishes. Otherwise, the start
   // lock request is failed.
   void OnStartLockCallback(bool locked);
+
+  // Callback to be invoked when the |cert_provider_based_auth_preparer_|
+  // completes building the currently available challenge-response keys. Used
+  // only during the challenge-response unlock.
+  void OnChallengeResponseKeysPrepared(
+      const UserContext& user_context,
+      std::vector<ChallengeResponseKey> challenge_response_keys);
 
   void OnPinAttemptDone(const UserContext& user_context, bool success);
 
@@ -266,6 +278,8 @@ class ScreenLocker : public AuthStatusConsumer,
   // Password is required every 24 hours in order to use fingerprint unlock.
   // This is used to update fingerprint state when password is required.
   base::OneShotTimer update_fingerprint_state_timer_;
+
+  ChallengeResponseAuthKeysLoader challenge_response_auth_keys_loader_;
 
   base::WeakPtrFactory<ScreenLocker> weak_factory_;
 

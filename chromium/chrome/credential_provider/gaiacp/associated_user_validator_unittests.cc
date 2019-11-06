@@ -68,18 +68,25 @@ class AssociatedUserValidatorTest : public ::testing::Test {
     return &fake_http_url_fetcher_factory_;
   }
 
+  FakeInternetAvailabilityChecker* fake_internet_checker() {
+    return &fake_internet_checker_;
+  }
+
  private:
   FakeOSUserManager fake_os_user_manager_;
   FakeWinHttpUrlFetcherFactory fake_http_url_fetcher_factory_;
   registry_util::RegistryOverrideManager registry_override_;
+  FakeInternetAvailabilityChecker fake_internet_checker_;
+  FakeScopedLsaPolicyFactory fake_scoped_lsa_factory_;
 };
 
 AssociatedUserValidatorTest::AssociatedUserValidatorTest() = default;
 AssociatedUserValidatorTest ::~AssociatedUserValidatorTest() = default;
 
 void AssociatedUserValidatorTest::SetUp() {
-  ASSERT_NO_FATAL_FAILURE(
-      registry_override_.OverrideRegistry(HKEY_LOCAL_MACHINE));
+  InitializeRegistryOverrideForTesting(&registry_override_);
+  ScopedLsaPolicy::SetCreatorForTesting(
+      fake_scoped_lsa_factory_.GetCreatorCallback());
 }
 
 TEST_F(AssociatedUserValidatorTest, CleanupStaleUsers) {
@@ -148,6 +155,7 @@ TEST_F(AssociatedUserValidatorTest, CleanupStaleUsers) {
 
 TEST_F(AssociatedUserValidatorTest, NoTokenHandles) {
   FakeAssociatedUserValidator validator;
+
   validator.StartRefreshingTokenHandleValidity();
 
   // If there is no associated user then all token handles are valid.
@@ -158,6 +166,7 @@ TEST_F(AssociatedUserValidatorTest, NoTokenHandles) {
 
 TEST_F(AssociatedUserValidatorTest, ValidTokenHandle) {
   FakeAssociatedUserValidator validator;
+
   CComBSTR sid;
   ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
                       L"username", L"password", L"fullname", L"comment",
@@ -176,6 +185,7 @@ TEST_F(AssociatedUserValidatorTest, ValidTokenHandle) {
 
 TEST_F(AssociatedUserValidatorTest, InvalidTokenHandle) {
   FakeAssociatedUserValidator validator;
+
   CComBSTR sid;
   ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
                       L"username", L"password", L"fullname", L"comment",
@@ -194,7 +204,7 @@ TEST_F(AssociatedUserValidatorTest, InvalidTokenHandle) {
 
 TEST_F(AssociatedUserValidatorTest, InvalidTokenHandleNoInternet) {
   FakeAssociatedUserValidator validator;
-  FakeInternetAvailabilityChecker internet_checker(
+  fake_internet_checker()->SetHasInternetConnection(
       FakeInternetAvailabilityChecker::kHicForceNo);
 
   CComBSTR sid;
@@ -209,7 +219,6 @@ TEST_F(AssociatedUserValidatorTest, InvalidTokenHandleNoInternet) {
 
 TEST_F(AssociatedUserValidatorTest, InvalidTokenHandleTimeout) {
   FakeAssociatedUserValidator validator(base::TimeDelta::FromMilliseconds(50));
-  FakeInternetAvailabilityChecker internet_checker;
   CComBSTR sid;
   ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
                       L"username", L"password", L"fullname", L"comment",
@@ -230,23 +239,111 @@ TEST_F(AssociatedUserValidatorTest, InvalidTokenHandleTimeout) {
 
 TEST_F(AssociatedUserValidatorTest, TokenHandleValidityStillFresh) {
   FakeAssociatedUserValidator validator;
-  FakeInternetAvailabilityChecker internet_checker;
 
   CComBSTR sid;
   ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
                       L"username", L"password", L"fullname", L"comment",
                       L"gaia-id", base::string16(), &sid));
 
-  validator.StartRefreshingTokenHandleValidity();
-
   // Valid token fetch result.
   fake_http_url_fetcher_factory()->SetFakeResponse(
       GURL(AssociatedUserValidator::kTokenInfoUrl),
       FakeWinHttpUrlFetcher::Headers(), "{\"expires_in\":1}");
 
+  validator.StartRefreshingTokenHandleValidity();
+
   EXPECT_TRUE(validator.IsTokenHandleValidForUser(OLE2W(sid)));
   EXPECT_TRUE(validator.IsTokenHandleValidForUser(OLE2W(sid)));
   EXPECT_EQ(1u, fake_http_url_fetcher_factory()->requests_created());
+}
+
+TEST_F(AssociatedUserValidatorTest, BlockDenyUserAccess) {
+  FakeAssociatedUserValidator validator;
+
+  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
+
+  CComBSTR sid;
+  ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
+                      L"username", L"password", L"fullname", L"comment",
+                      L"gaia-id", base::string16(), &sid));
+
+  // Invalid token fetch result.
+  fake_http_url_fetcher_factory()->SetFakeResponse(
+      GURL(AssociatedUserValidator::kTokenInfoUrl),
+      FakeWinHttpUrlFetcher::Headers(), "{}");
+
+  validator.StartRefreshingTokenHandleValidity();
+
+  // Apply two levels blocks to deny access. This should prevent users from
+  // being blocked from accessing the system.
+  {
+    AssociatedUserValidator::ScopedBlockDenyAccessUpdate deny_blocker_outer(
+        &validator);
+    {
+      AssociatedUserValidator::ScopedBlockDenyAccessUpdate deny_blocker_inner(
+          &validator);
+      EXPECT_FALSE(
+          validator.DenySigninForUsersWithInvalidTokenHandles(CPUS_LOGON));
+      EXPECT_FALSE(validator.IsUserAccessBlockedForTesting(OLE2W(sid)));
+    }
+
+    EXPECT_FALSE(
+        validator.DenySigninForUsersWithInvalidTokenHandles(CPUS_LOGON));
+    EXPECT_FALSE(validator.IsUserAccessBlockedForTesting(OLE2W(sid)));
+  }
+  // Unblock deny access. User should not be blocked.
+  EXPECT_TRUE(validator.DenySigninForUsersWithInvalidTokenHandles(CPUS_LOGON));
+  EXPECT_TRUE(validator.IsUserAccessBlockedForTesting(OLE2W(sid)));
+
+  EXPECT_EQ(1u, fake_http_url_fetcher_factory()->requests_created());
+}
+
+// Deny user access when the gaia handle is invalidated for a
+// local OS user.
+TEST_F(AssociatedUserValidatorTest,
+       DenySigninForLocalUserWithInvalidTokenHandle) {
+  FakeAssociatedUserValidator validator;
+
+  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
+
+  CComBSTR sid;
+  // Created a local test os user that is not domain joined.
+  ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
+                      L"username", L"password", L"fullname", L"comment",
+                      L"gaia-id", base::string16(), &sid));
+
+  // Invalid token fetch result.
+  fake_http_url_fetcher_factory()->SetFakeResponse(
+      GURL(AssociatedUserValidator::kTokenInfoUrl),
+      FakeWinHttpUrlFetcher::Headers(), "{}");
+
+  validator.StartRefreshingTokenHandleValidity();
+  EXPECT_FALSE(validator.IsTokenHandleValidForUser(OLE2W(sid)));
+  EXPECT_TRUE(validator.DenySigninForUsersWithInvalidTokenHandles(CPUS_LOGON));
+}
+
+// Donot deny user access even when the gaia handle is invalidated for a
+// domain joined OS user.
+TEST_F(AssociatedUserValidatorTest,
+       DonotDenySigninForADUserWithInvalidTokenHandle) {
+  FakeAssociatedUserValidator validator;
+
+  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
+
+  CComBSTR sid;
+  // Created a test os user with an assigned domain.
+  ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
+                      L"username", L"password", L"fullname", L"comment",
+                      L"gaia-id", base::string16(), L"domain", &sid));
+
+  // Invalid token fetch result.
+  fake_http_url_fetcher_factory()->SetFakeResponse(
+      GURL(AssociatedUserValidator::kTokenInfoUrl),
+      FakeWinHttpUrlFetcher::Headers(), "{}");
+
+  validator.StartRefreshingTokenHandleValidity();
+  EXPECT_FALSE(validator.IsTokenHandleValidForUser(OLE2W(sid)));
+  EXPECT_FALSE(validator.DenySigninForUsersWithInvalidTokenHandles(CPUS_LOGON));
 }
 
 // Tests various scenarios where user access is blocked.
@@ -263,27 +360,39 @@ class AssociatedUserValidatorUserAccessBlockingTest
                      bool,
                      bool,
                      bool,
+                     bool,
+                     bool,
                      bool>> {
  private:
   FakeScopedLsaPolicyFactory fake_scoped_lsa_policy_factory_;
 };
 
-TEST_P(AssociatedUserValidatorUserAccessBlockingTest,
-       BlockUserAccessAsNeeded) {
+TEST_P(AssociatedUserValidatorUserAccessBlockingTest, BlockUserAccessAsNeeded) {
   const CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus = std::get<0>(GetParam());
   const bool token_handle_valid = std::get<1>(GetParam());
   const bool mdm_url_set = std::get<2>(GetParam());
   const bool mdm_enrolled = std::get<3>(GetParam());
   const bool internet_available = std::get<4>(GetParam());
+  const bool password_recovery_enabled = std::get<5>(GetParam());
+  const bool contains_stored_password = std::get<6>(GetParam());
   GoogleMdmEnrolledStatusForTesting forced_status(mdm_enrolled);
 
+#if !defined(GOOGLE_CHROME_BUILD)
+  GoogleMdmEscrowServiceEnablerForTesting escrow_service_enabler(true);
+#endif
+
   FakeAssociatedUserValidator validator;
-  FakeInternetAvailabilityChecker internet_checker(
+  fake_internet_checker()->SetHasInternetConnection(
       internet_available ? FakeInternetAvailabilityChecker::kHicForceYes
                          : FakeInternetAvailabilityChecker::kHicForceNo);
 
   if (mdm_url_set)
     ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
+
+  if (password_recovery_enabled) {
+    ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmEscrowServiceServerUrl,
+                                            L"https://escrow.com"));
+  }
 
   bool should_user_locking_be_enabled =
       internet_available && mdm_url_set &&
@@ -298,6 +407,14 @@ TEST_P(AssociatedUserValidatorUserAccessBlockingTest,
                       username, L"password", L"fullname", L"comment",
                       L"gaia-id", base::string16(), &sid));
 
+  if (contains_stored_password) {
+    base::string16 store_key = GetUserPasswordLsaStoreKey(OLE2W(sid));
+    auto policy = ScopedLsaPolicy::Create(POLICY_ALL_ACCESS);
+    EXPECT_TRUE(SUCCEEDED(
+        policy->StorePrivateData(store_key.c_str(), L"encrypted_data")));
+    EXPECT_TRUE(policy->PrivateDataExists(store_key.c_str()));
+  }
+
   // Token handle fetch result.
   fake_http_url_fetcher_factory()->SetFakeResponse(
       GURL(AssociatedUserValidator::kTokenInfoUrl),
@@ -310,23 +427,22 @@ TEST_P(AssociatedUserValidatorUserAccessBlockingTest,
   DWORD reg_value = 0;
 
   bool should_user_be_blocked =
-      should_user_locking_be_enabled && (!mdm_enrolled || !token_handle_valid);
+      should_user_locking_be_enabled &&
+      (!mdm_enrolled || !token_handle_valid ||
+       (password_recovery_enabled && !contains_stored_password));
 
   EXPECT_EQ(!internet_available || (!mdm_url_set && token_handle_valid) ||
-                (mdm_url_set && mdm_enrolled && token_handle_valid),
+                (mdm_url_set && mdm_enrolled && token_handle_valid &&
+                 (!password_recovery_enabled ||
+                  password_recovery_enabled && contains_stored_password)),
             validator.IsTokenHandleValidForUser(OLE2W(sid)));
   EXPECT_EQ(should_user_be_blocked,
-            validator.IsUserAccessBlocked(OLE2W(sid)));
-  if (should_user_be_blocked) {
-    EXPECT_EQ(S_OK, GetMachineRegDWORD(kWinlogonUserListRegKey, username,
-                                       &reg_value));
-    EXPECT_EQ(0u, reg_value);
-  }
+            validator.IsUserAccessBlockedForTesting(OLE2W(sid)));
 
   // Unlock the user.
   validator.AllowSigninForUsersWithInvalidTokenHandles();
 
-  EXPECT_EQ(false, validator.IsUserAccessBlocked(OLE2W(sid)));
+  EXPECT_EQ(false, validator.IsUserAccessBlockedForTesting(OLE2W(sid)));
   EXPECT_NE(S_OK,
             GetMachineRegDWORD(kWinlogonUserListRegKey, username, &reg_value));
 }
@@ -339,6 +455,8 @@ INSTANTIATE_TEST_SUITE_P(
                                          CPUS_UNLOCK_WORKSTATION,
                                          CPUS_CHANGE_PASSWORD,
                                          CPUS_CREDUI),
+                       ::testing::Bool(),
+                       ::testing::Bool(),
                        ::testing::Bool(),
                        ::testing::Bool(),
                        ::testing::Bool(),
@@ -366,12 +484,12 @@ TEST_F(AssociatedUserValidatorTest, ValidTokenHandle_Refresh) {
                       L"gaia-id", base::string16(), &sid));
   ASSERT_EQ(S_OK, SetUserProperty(OLE2W(sid), kUserTokenHandle, L"th"));
 
-  validator.StartRefreshingTokenHandleValidity();
-
   // Valid token fetch result.
   fake_http_url_fetcher_factory()->SetFakeResponse(
       GURL(AssociatedUserValidator::kTokenInfoUrl),
       FakeWinHttpUrlFetcher::Headers(), "{\"expires_in\":1}");
+
+  validator.StartRefreshingTokenHandleValidity();
 
   EXPECT_TRUE(validator.IsTokenHandleValidForUser(OLE2W(sid)));
 
@@ -392,6 +510,70 @@ TEST_F(AssociatedUserValidatorTest, ValidTokenHandle_Refresh) {
       base::TimeDelta::FromMilliseconds(1);
   EXPECT_FALSE(validator.IsTokenHandleValidForUser(OLE2W(sid)));
   EXPECT_EQ(2u, fake_http_url_fetcher_factory()->requests_created());
+}
+
+TEST_F(AssociatedUserValidatorTest, InvalidTokenHandle_MissingPasswordLsaData) {
+#if !defined(GOOGLE_CHROME_BUILD)
+  GoogleMdmEscrowServiceEnablerForTesting escrow_service_enabler(true);
+#endif
+
+  FakeAssociatedUserValidator validator;
+  CComBSTR sid;
+  ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
+                      L"username", L"password", L"fullname", L"comment",
+                      L"gaia-id", base::string16(), &sid));
+  ASSERT_EQ(S_OK, SetUserProperty(OLE2W(sid), kUserTokenHandle, L"th"));
+  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
+  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmEscrowServiceServerUrl,
+                                          L"https://escrow.com"));
+  GoogleMdmEnrolledStatusForTesting force_success(true);
+
+  base::string16 store_key = GetUserPasswordLsaStoreKey(OLE2W(sid));
+
+  auto policy = ScopedLsaPolicy::Create(POLICY_ALL_ACCESS);
+  EXPECT_FALSE(policy->PrivateDataExists(store_key.c_str()));
+
+  // Valid token fetch result.
+  fake_http_url_fetcher_factory()->SetFakeResponse(
+      GURL(AssociatedUserValidator::kTokenInfoUrl),
+      FakeWinHttpUrlFetcher::Headers(), "{\"expires_in\":1}");
+
+  validator.StartRefreshingTokenHandleValidity();
+
+  EXPECT_FALSE(validator.IsTokenHandleValidForUser(OLE2W(sid)));
+}
+
+TEST_F(AssociatedUserValidatorTest, ValidTokenHandle_PresentPasswordLsaData) {
+#if !defined(GOOGLE_CHROME_BUILD)
+  GoogleMdmEscrowServiceEnablerForTesting escrow_service_enabler(true);
+#endif
+
+  FakeAssociatedUserValidator validator;
+  CComBSTR sid;
+  ASSERT_EQ(S_OK, fake_os_user_manager()->CreateTestOSUser(
+                      L"username", L"password", L"fullname", L"comment",
+                      L"gaia-id", base::string16(), &sid));
+  ASSERT_EQ(S_OK, SetUserProperty(OLE2W(sid), kUserTokenHandle, L"th"));
+  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmUrl, L"https://mdm.com"));
+  ASSERT_EQ(S_OK, SetGlobalFlagForTesting(kRegMdmEscrowServiceServerUrl,
+                                          L"https://escrow.com"));
+  GoogleMdmEnrolledStatusForTesting force_success(true);
+
+  base::string16 store_key = GetUserPasswordLsaStoreKey(OLE2W(sid));
+
+  auto policy = ScopedLsaPolicy::Create(POLICY_ALL_ACCESS);
+  EXPECT_TRUE(SUCCEEDED(
+      policy->StorePrivateData(store_key.c_str(), L"encrypted_data")));
+  EXPECT_TRUE(policy->PrivateDataExists(store_key.c_str()));
+
+  // Valid token fetch result.
+  fake_http_url_fetcher_factory()->SetFakeResponse(
+      GURL(AssociatedUserValidator::kTokenInfoUrl),
+      FakeWinHttpUrlFetcher::Headers(), "{\"expires_in\":1}");
+
+  validator.StartRefreshingTokenHandleValidity();
+
+  EXPECT_TRUE(validator.IsTokenHandleValidForUser(OLE2W(sid)));
 }
 
 }  // namespace testing

@@ -17,7 +17,6 @@
 #if defined(USE_AURA)
 #include "ui/aura/window.h"
 #include "ui/aura/window_targeter.h"
-#include "ui/base/ui_base_features.h"
 #endif
 
 #if defined(OS_WIN)
@@ -129,7 +128,7 @@ RoundedOmniboxResultsFrame::RoundedOmniboxResultsFrame(
   contents_host_->layer()->SetFillsBoundsOpaquely(false);
 
   // Use a solid background. Note this is clipped to get rounded corners.
-  const OmniboxTint tint = location_bar->tint();
+  const OmniboxTint tint = location_bar->CalculateTint();
   const SkColor background_color =
       GetOmniboxColor(OmniboxPart::RESULTS_BACKGROUND, tint);
   contents_host_->SetBackground(views::CreateSolidBackground(background_color));
@@ -234,13 +233,7 @@ void RoundedOmniboxResultsFrame::AddedToWidget() {
   // portion of the Widget to pass through to the omnibox beneath it.
   auto results_targeter = std::make_unique<aura::WindowTargeter>();
   results_targeter->SetInsets(GetInsets() + GetContentInsets());
-  aura::Window* window = GetWidget()->GetNativeWindow();
-  if (features::IsUsingWindowService()) {
-    // The WindowService ends up creating an additional window (by way of
-    // DesktopNativeWidgetAura). The targeter needs to be installed on it.
-    window = window->GetRootWindow();
-  }
-  window->SetEventTargeter(std::move(results_targeter));
+  GetWidget()->GetNativeWindow()->SetEventTargeter(std::move(results_targeter));
 #endif  // USE_AURA
 }
 

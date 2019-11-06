@@ -10,6 +10,7 @@
 
 #include <string>
 #include <vector>
+
 #include "base/strings/utf_string_conversions.h"
 #include "calendar/calendar_type.h"
 #include "calendar/event_type.h"
@@ -55,6 +56,11 @@ bool EventDatabase::CreateEventTable() {
       "etag LONGVARCHAR,"
       "href LONGVARCHAR,"
       "uid LONGVARCHAR,"
+      "event_type_id INTEGER,"
+      "task INTEGER,"
+      "complete INTEGER,"
+      "trash INTEGER,"
+      "trash_time INTEGER, "
       "created INTEGER,"
       "last_modified INTEGER"
       ")");
@@ -68,8 +74,10 @@ EventID EventDatabase::CreateCalendarEvent(calendar::EventRow row) {
       "INSERT OR REPLACE INTO events "
       "(calendar_id, alarm_id, title, description, "
       "start, end, all_day, is_recurring, start_recurring, end_recurring, "
-      "location, url, etag, href, uid) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+      "location, url, etag, href, uid, event_type_id, task, complete, trash, "
+      "trash_time, created, last_modified) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+      "?)"));
 
   statement.BindInt64(0, row.calendar_id());
   statement.BindInt64(1, row.alarm_id());
@@ -86,6 +94,14 @@ EventID EventDatabase::CreateCalendarEvent(calendar::EventRow row) {
   statement.BindString(12, row.etag());
   statement.BindString(13, row.href());
   statement.BindString(14, row.uid());
+  statement.BindInt64(15, row.event_type_id());
+  statement.BindInt(16, row.task() ? 1 : 0);
+  statement.BindInt(17, row.complete() ? 1 : 0);
+  statement.BindInt(18, row.trash() ? 1 : 0);
+  statement.BindInt64(19,
+                      row.trash() ? base::Time().Now().ToInternalValue() : 0);
+  statement.BindInt64(20, base::Time().Now().ToInternalValue());
+  statement.BindInt64(21, base::Time().Now().ToInternalValue());
 
   if (!statement.Run()) {
     return 0;
@@ -127,7 +143,8 @@ bool EventDatabase::UpdateEventRow(const EventRow& event) {
                                                       "UPDATE events SET \
         calendar_id=?, alarm_id=?, title=?, description=?, start=?, end=?, \
         all_day=?, is_recurring=?, start_recurring=?, end_recurring=?, \
-        location=?, url=?, etag=?, href=?, uid=? \
+        location=?, url=?, etag=?, href=?, uid=?, event_type_id=?, \
+        task=?, complete=?, trash=?, trash_time=? \
         WHERE id=?"));
   statement.BindInt64(0, event.calendar_id());
   statement.BindInt64(1, event.alarm_id());
@@ -144,7 +161,13 @@ bool EventDatabase::UpdateEventRow(const EventRow& event) {
   statement.BindString(12, event.etag());
   statement.BindString(13, event.href());
   statement.BindString(14, event.uid());
-  statement.BindInt64(15, event.id());
+  statement.BindInt64(15, event.event_type_id());
+  statement.BindInt(16, event.task() ? 1 : 0);
+  statement.BindInt(17, event.complete() ? 1 : 0);
+  statement.BindInt(18, event.trash() ? 1 : 0);
+  statement.BindInt64(19, event.trash() ?
+    base::Time().Now().ToInternalValue() : 0);
+  statement.BindInt64(20, event.id());
 
   return statement.Run();
 }
@@ -168,6 +191,11 @@ void EventDatabase::FillEventRow(sql::Statement& s, EventRow* event) {
   std::string etag = s.ColumnString(13);
   std::string href = s.ColumnString(14);
   std::string uid = s.ColumnString(15);
+  EventTypeID event_type_id = s.ColumnInt64(16);
+  int task = s.ColumnInt(17);
+  int complete = s.ColumnInt(18);
+  int trash = s.ColumnInt(19);
+  base::Time trash_time = base::Time::FromInternalValue(s.ColumnInt64(20));
 
   event->set_id(id);
   event->set_calendar_id(calendar_id);
@@ -185,6 +213,11 @@ void EventDatabase::FillEventRow(sql::Statement& s, EventRow* event) {
   event->set_etag(etag);
   event->set_href(href);
   event->set_uid(uid);
+  event->set_event_type_id(event_type_id);
+  event->set_task(task == 1 ? true : false);
+  event->set_complete(complete == 1 ? true : false);
+  event->set_trash(trash == 1 ? true : false);
+  event->set_trash_time(trash_time);
 }
 
 bool EventDatabase::DeleteEvent(calendar::EventID event_id) {
@@ -192,6 +225,13 @@ bool EventDatabase::DeleteEvent(calendar::EventID event_id) {
       SQL_FROM_HERE, "DELETE from events WHERE id=?"));
   statement.BindInt64(0, event_id);
 
+  return statement.Run();
+}
+
+bool EventDatabase::DeleteEventsForCalendar(CalendarID calendar_id) {
+  sql::Statement statement(GetDB().GetCachedStatement(
+      SQL_FROM_HERE, "DELETE FROM events WHERE calendar_id=?"));
+  statement.BindInt64(0, calendar_id);
   return statement.Run();
 }
 

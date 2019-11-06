@@ -71,7 +71,7 @@ void LookalikeUrlInterstitialPage::RecordUkmEvent(
 }
 
 content::InterstitialPageDelegate::TypeID
-LookalikeUrlInterstitialPage::GetTypeForTesting() const {
+LookalikeUrlInterstitialPage::GetTypeForTesting() {
   return LookalikeUrlInterstitialPage::kTypeForTesting;
 }
 
@@ -84,9 +84,15 @@ void LookalikeUrlInterstitialPage::PopulateInterstitialStrings(
   CHECK(load_time_data);
 
   PopulateStringsForSharedHTML(load_time_data);
+  security_interstitials::common_string_util::PopulateDarkModeDisplaySetting(
+      load_time_data);
 
-  load_time_data->SetString("tabTitle",
-                            l10n_util::GetStringUTF16(IDS_LOOKALIKE_URL_TITLE));
+  load_time_data->SetString(
+      "tabTitle",
+      l10n_util::GetStringFUTF16(
+          IDS_LOOKALIKE_URL_TITLE,
+          security_interstitials::common_string_util::GetFormattedHostName(
+              request_url())));
   load_time_data->SetString(
       "heading",
       l10n_util::GetStringFUTF16(
@@ -98,6 +104,9 @@ void LookalikeUrlInterstitialPage::PopulateInterstitialStrings(
       l10n_util::GetStringUTF16(IDS_LOOKALIKE_URL_PRIMARY_PARAGRAPH));
   load_time_data->SetString(
       "proceedButtonText", l10n_util::GetStringUTF16(IDS_LOOKALIKE_URL_IGNORE));
+  load_time_data->SetString(
+      "primaryButtonText",
+      l10n_util::GetStringUTF16(IDS_LOOKALIKE_URL_CONTINUE));
 }
 
 void LookalikeUrlInterstitialPage::OnInterstitialClosing() {
@@ -170,7 +179,6 @@ void LookalikeUrlInterstitialPage::PopulateStringsForSharedHTML(
   load_time_data->SetString("openDetails", "");
   load_time_data->SetString("explanationParagraph", "");
   load_time_data->SetString("finalParagraph", "");
-  load_time_data->SetString("primaryButtonText", "");
 
   load_time_data->SetString("type", "LOOKALIKE");
 }

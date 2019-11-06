@@ -38,31 +38,35 @@ import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
 import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
+import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
+import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcher;
+import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcherImpl;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.tabmodel.DocumentModeAssassin;
-import org.chromium.chrome.browser.upgrade.UpgradeActivity;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.DisplayUtil;
 import org.chromium.ui.modaldialog.ModalDialogManager;
+import org.chromium.ui.modaldialog.ModalDialogManagerHolder;
 
 import java.lang.reflect.Field;
 
 /**
  * An activity that talks with application and activity level delegates for async initialization.
  */
-public abstract class AsyncInitializationActivity
-        extends ChromeBaseAppCompatActivity implements ChromeActivityNativeDelegate, BrowserParts {
+public abstract class AsyncInitializationActivity extends ChromeBaseAppCompatActivity
+        implements ChromeActivityNativeDelegate, BrowserParts, ModalDialogManagerHolder {
     private static final String TAG = "AsyncInitActivity";
     protected final Handler mHandler;
 
     private final NativeInitializationController mNativeInitializationController =
             new NativeInitializationController(this);
 
-    private final ActivityLifecycleDispatcher mLifecycleDispatcher =
-            new ActivityLifecycleDispatcher();
+    private final ActivityLifecycleDispatcherImpl mLifecycleDispatcher =
+            new ActivityLifecycleDispatcherImpl();
+    private final MultiWindowModeStateDispatcherImpl mMultiWindowModeStateDispatcher =
+            new MultiWindowModeStateDispatcherImpl(this);
 
     /** Time at which onCreate is called. This is realtime, counted in ms since device boot. */
     private long mOnCreateTimestampMs;
@@ -88,6 +92,7 @@ public abstract class AsyncInitializationActivity
     private boolean mFirstDrawComplete;
 
     private Runnable mOnInflationCompleteCallback;
+    private boolean mInitialLayoutInflationComplete;
 
     public AsyncInitializationActivity() {
         mHandler = new Handler();
@@ -129,11 +134,21 @@ public abstract class AsyncInitializationActivity
         return true;
     }
 
-    @CallSuper
     @Override
-    public void preInflationStartup() {
+    public final void preInflationStartup() {
+        performPreInflationStartup();
+    }
+
+    /**
+     * Perform pre-inflation startup for the activity. Sub-classes providing custom pre-inflation
+     * startup logic should override this method.
+     */
+    @CallSuper
+    protected void performPreInflationStartup() {
         mIsTablet = DeviceFormFactor.isNonMultiDisplayContextOnTablet(this);
         mHadWarmStart = LibraryLoader.getInstance().isInitialized();
+        // TODO(https://crbug.com/948745): Dispatch in #preInflationStartup instead so that
+        // subclass's #performPreInflationStartup has executed before observers are notified.
         mLifecycleDispatcher.dispatchPreInflationStartup();
     }
 
@@ -157,28 +172,31 @@ public abstract class AsyncInitializationActivity
     /** Controls the parameter of {@link NativeInitializationController#startBackgroundTasks}.*/
     @VisibleForTesting
     public boolean shouldAllocateChildConnection() {
-        return true;
+        // If a spare WebContents exists, a child connection has already been allocated that will be
+        // used by the next created tab.
+        return !WarmupManager.getInstance().hasSpareWebContents();
     }
 
-    @CallSuper
     @Override
-    public void postInflationStartup() {
-        final View firstDrawView = getViewToBeDrawnBeforeInitializingNative();
-        assert firstDrawView != null;
-        ViewTreeObserver.OnPreDrawListener firstDrawListener =
-                new ViewTreeObserver.OnPreDrawListener() {
-            @Override
-            public boolean onPreDraw() {
-                firstDrawView.getViewTreeObserver().removeOnPreDrawListener(this);
-                mFirstDrawComplete = true;
-                if (!mStartupDelayed) {
-                    onFirstDrawComplete();
-                }
-                return true;
-            }
-        };
-        firstDrawView.getViewTreeObserver().addOnPreDrawListener(firstDrawListener);
+    public final void postInflationStartup() {
+        performPostInflationStartup();
         mLifecycleDispatcher.dispatchPostInflationStartup();
+    }
+
+    /**
+     * Perform post-inflation startup for the activity. Sub-classes providing custom post-inflation
+     * startup logic should override this method.
+     */
+    @CallSuper
+    protected void performPostInflationStartup() {
+        View firstDrawView = getViewToBeDrawnBeforeInitializingNative();
+        assert firstDrawView != null;
+        FirstDrawDetector.waitForFirstDraw(firstDrawView, () -> {
+            mFirstDrawComplete = true;
+            if (!mStartupDelayed) {
+                onFirstDrawComplete();
+            }
+        });
     }
 
     /**
@@ -270,19 +288,6 @@ public abstract class AsyncInitializationActivity
             abortLaunch(dispatchAction);
             return;
         }
-        if (DocumentModeAssassin.getInstance().isMigrationNecessary()) {
-            // Some Samsung devices load fonts from disk, crbug.com/691706.
-            try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
-                super.onCreate(null);
-            }
-
-            // Kick the user to the MigrationActivity.
-            UpgradeActivity.launchInstance(this, getIntent());
-
-            // Don't remove this task -- it may be a DocumentActivity that exists only in Recents.
-            finish();
-            return;
-        }
 
         Intent intent = getIntent();
         if (!isStartedUpCorrectly(intent)) {
@@ -298,7 +303,7 @@ public abstract class AsyncInitializationActivity
         }
 
         // Some Samsung devices load fonts from disk, crbug.com/691706.
-        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
             super.onCreate(transformSavedInstanceStateForOnCreate(savedInstanceState));
         }
         mOnCreateTimestampMs = SystemClock.elapsedRealtime();
@@ -492,6 +497,7 @@ public abstract class AsyncInitializationActivity
 
     @Override
     public final void onCreateWithNative() {
+        mLifecycleDispatcher.onCreateWithNative();
         try {
             ChromeBrowserInitializer.getInstance(this).handlePostNativeStartup(true, this);
         } catch (ProcessInitException e) {
@@ -529,6 +535,18 @@ public abstract class AsyncInitializationActivity
     }
 
     @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        mLifecycleDispatcher.dispatchOnConfigurationChanged(newConfig);
+    }
+
+    @Override
+    public void onMultiWindowModeChanged(boolean inMultiWindowMode) {
+        super.onMultiWindowModeChanged(inMultiWindowMode);
+        mMultiWindowModeStateDispatcher.dipatchMultiWindowModeChanged(inMultiWindowMode);
+    }
+
+    @Override
     public abstract boolean shouldStartGpuProcess();
 
     @CallSuper
@@ -540,13 +558,8 @@ public abstract class AsyncInitializationActivity
     private void onFirstDrawComplete() {
         assert mFirstDrawComplete;
         assert !mStartupDelayed;
-
-        mHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                mNativeInitializationController.firstDrawComplete();
-            }
-        });
+        TraceEvent.instant("onFirstDrawComplete");
+        mNativeInitializationController.firstDrawComplete();
     }
 
     @Override
@@ -585,6 +598,7 @@ public abstract class AsyncInitializationActivity
      * @return The {@link ModalDialogManager} that manages the display of modal dialogs (e.g.
      *         JavaScript dialogs).
      */
+    @Override
     public ModalDialogManager getModalDialogManager() {
         return mModalDialogManager;
     }
@@ -744,6 +758,14 @@ public abstract class AsyncInitializationActivity
         if (mOnInflationCompleteCallback == null) return;
         mOnInflationCompleteCallback.run();
         mOnInflationCompleteCallback = null;
+        mInitialLayoutInflationComplete = true;
+    }
+
+    /**
+     * Returns whether initial inflation is complete.
+     */
+    public boolean isInitialLayoutInflationComplete() {
+        return mInitialLayoutInflationComplete;
     }
 
     /**
@@ -751,6 +773,13 @@ public abstract class AsyncInitializationActivity
      */
     public ActivityLifecycleDispatcher getLifecycleDispatcher() {
         return mLifecycleDispatcher;
+    }
+
+    /**
+     * @return {@link MultiWindowModeStateDispatcher} associated with this activity.
+     */
+    public MultiWindowModeStateDispatcher getMultiWindowModeStateDispatcher() {
+        return mMultiWindowModeStateDispatcher;
     }
 
     /**

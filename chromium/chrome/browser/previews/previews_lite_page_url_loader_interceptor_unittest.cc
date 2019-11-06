@@ -24,6 +24,14 @@
 #include "services/network/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+// TODO(crbug.com/961073): Fix memory leaks in tests and re-enable on LSAN.
+#ifdef LEAK_SANITIZER
+#define MAYBE_InterceptRequestPreviewsState \
+  DISABLED_InterceptRequestPreviewsState
+#else
+#define MAYBE_InterceptRequestPreviewsState InterceptRequestPreviewsState
+#endif
+
 namespace previews {
 
 namespace {
@@ -41,7 +49,7 @@ class PreviewsLitePageURLLoaderInterceptorTest : public testing::Test {
 
   void SetUp() override {
     interceptor_ = std::make_unique<PreviewsLitePageURLLoaderInterceptor>(
-        shared_factory_, 1);
+        shared_factory_, 1, 2);
   }
 
   void SetFakeResponse(const GURL& url,
@@ -62,7 +70,7 @@ class PreviewsLitePageURLLoaderInterceptorTest : public testing::Test {
 
   void ResetTest() {
     interceptor_ = std::make_unique<PreviewsLitePageURLLoaderInterceptor>(
-        shared_factory_, 1);
+        shared_factory_, 1, 2);
     callback_was_empty_ = base::nullopt;
   }
 
@@ -80,12 +88,12 @@ class PreviewsLitePageURLLoaderInterceptorTest : public testing::Test {
 };
 
 TEST_F(PreviewsLitePageURLLoaderInterceptorTest,
-       InterceptRequestPreviewsState) {
+       MAYBE_InterceptRequestPreviewsState) {
   base::HistogramTester histogram_tester;
 
   network::ResourceRequest request;
   request.url = GURL("https://google.com");
-  request.resource_type = static_cast<int>(content::RESOURCE_TYPE_MAIN_FRAME);
+  request.resource_type = static_cast<int>(content::ResourceType::kMainFrame);
   request.method = "GET";
 
   SetFakeResponse(
@@ -95,7 +103,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest,
   // Check that we don't trigger when previews are not allowed.
   request.previews_state = content::PREVIEWS_OFF;
   interceptor().MaybeCreateLoader(
-      request, nullptr,
+      request, nullptr, nullptr,
       base::BindOnce(&PreviewsLitePageURLLoaderInterceptorTest::HandlerCallback,
                      base::Unretained(this)));
 
@@ -114,7 +122,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest,
   // Check that we trigger when previews are allowed.
   request.previews_state = content::LITE_PAGE_REDIRECT_ON;
   interceptor().MaybeCreateLoader(
-      request, nullptr,
+      request, nullptr, nullptr,
       base::BindOnce(&PreviewsLitePageURLLoaderInterceptorTest::HandlerCallback,
                      base::Unretained(this)));
 
@@ -133,7 +141,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest, InterceptRequestRedirect) {
   base::HistogramTester histogram_tester;
   network::ResourceRequest request;
   request.url = GURL("https://google.com");
-  request.resource_type = static_cast<int>(content::RESOURCE_TYPE_MAIN_FRAME);
+  request.resource_type = static_cast<int>(content::ResourceType::kMainFrame);
   request.method = "GET";
   request.previews_state = content::LITE_PAGE_REDIRECT_ON;
   SetFakeResponse(
@@ -142,7 +150,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest, InterceptRequestRedirect) {
       net::URLRequestStatus::SUCCESS);
 
   interceptor().MaybeCreateLoader(
-      request, nullptr,
+      request, nullptr, nullptr,
       base::BindOnce(&PreviewsLitePageURLLoaderInterceptorTest::HandlerCallback,
                      base::Unretained(this)));
 
@@ -158,7 +166,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest,
   base::HistogramTester histogram_tester;
   network::ResourceRequest request;
   request.url = GURL("https://google.com");
-  request.resource_type = static_cast<int>(content::RESOURCE_TYPE_MAIN_FRAME);
+  request.resource_type = static_cast<int>(content::ResourceType::kMainFrame);
   request.method = "GET";
   request.previews_state = content::LITE_PAGE_REDIRECT_ON;
   SetFakeResponse(
@@ -167,7 +175,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest,
       net::URLRequestStatus::SUCCESS);
 
   interceptor().MaybeCreateLoader(
-      request, nullptr,
+      request, nullptr, nullptr,
       base::BindOnce(&PreviewsLitePageURLLoaderInterceptorTest::HandlerCallback,
                      base::Unretained(this)));
 
@@ -184,7 +192,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest,
   base::HistogramTester histogram_tester;
   network::ResourceRequest request;
   request.url = GURL("https://google.com");
-  request.resource_type = static_cast<int>(content::RESOURCE_TYPE_MAIN_FRAME);
+  request.resource_type = static_cast<int>(content::ResourceType::kMainFrame);
   request.method = "GET";
   request.previews_state = content::LITE_PAGE_REDIRECT_ON;
   SetFakeResponse(
@@ -192,7 +200,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest,
       "Fake Body", net::HTTP_FORBIDDEN, net::URLRequestStatus::SUCCESS);
 
   interceptor().MaybeCreateLoader(
-      request, nullptr,
+      request, nullptr, nullptr,
       base::BindOnce(&PreviewsLitePageURLLoaderInterceptorTest::HandlerCallback,
                      base::Unretained(this)));
 
@@ -208,7 +216,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest, NetStackError) {
   base::HistogramTester histogram_tester;
   network::ResourceRequest request;
   request.url = GURL("https://google.com");
-  request.resource_type = static_cast<int>(content::RESOURCE_TYPE_MAIN_FRAME);
+  request.resource_type = static_cast<int>(content::ResourceType::kMainFrame);
   request.method = "GET";
   request.previews_state = content::LITE_PAGE_REDIRECT_ON;
   SetFakeResponse(
@@ -216,7 +224,7 @@ TEST_F(PreviewsLitePageURLLoaderInterceptorTest, NetStackError) {
       "Fake Body", net::HTTP_OK, net::URLRequestStatus::FAILED);
 
   interceptor().MaybeCreateLoader(
-      request, nullptr,
+      request, nullptr, nullptr,
       base::BindOnce(&PreviewsLitePageURLLoaderInterceptorTest::HandlerCallback,
                      base::Unretained(this)));
 

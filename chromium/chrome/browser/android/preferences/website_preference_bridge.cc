@@ -17,6 +17,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/stl_util.h"
+#include "chrome/android/chrome_jni_headers/WebsitePreferenceBridge_jni.h"
 #include "chrome/browser/android/search_permissions/search_permissions_service.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
@@ -39,7 +40,6 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "jni/WebsitePreferenceBridge_jni.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom.h"
@@ -187,7 +187,7 @@ void JNI_WebsitePreferenceBridge_GetOrigins(
 
   for (const auto& settings_it : embargo_settings) {
     const std::string origin = settings_it.primary_pattern.ToString();
-    if (base::ContainsValue(seen_origins, origin)) {
+    if (base::Contains(seen_origins, origin)) {
       // This origin has already been added to the list, so don't add it again.
       continue;
     }
@@ -266,6 +266,17 @@ ChooserContextBase* GetChooserContext(ContentSettingsType type) {
     default:
       NOTREACHED();
       return nullptr;
+  }
+}
+
+std::string GetChooserObjectName(ContentSettingsType type,
+                                 base::Value& object) {
+  switch (type) {
+    case CONTENT_SETTINGS_TYPE_USB_CHOOSER_DATA:
+      return UsbChooserContext::GetObjectName(object);
+    default:
+      NOTREACHED();
+      return std::string();
   }
 }
 
@@ -545,8 +556,9 @@ static void JNI_WebsitePreferenceBridge_GetChosenObjects(
     JNIEnv* env,
     jint content_settings_type,
     const JavaParamRef<jobject>& list) {
-  ChooserContextBase* context = GetChooserContext(
-      static_cast<ContentSettingsType>(content_settings_type));
+  ContentSettingsType type =
+      static_cast<ContentSettingsType>(content_settings_type);
+  ChooserContextBase* context = GetChooserContext(type);
   for (const auto& object : context->GetAllGrantedObjects()) {
     // Remove the trailing slash so that origins are matched correctly in
     // SingleWebsitePreferences.mergePermissionInfoForTopLevelOrigin.
@@ -563,7 +575,7 @@ static void JNI_WebsitePreferenceBridge_GetChosenObjects(
       jembedder = ConvertUTF8ToJavaString(env, embedder);
 
     ScopedJavaLocalRef<jstring> jname =
-        ConvertUTF8ToJavaString(env, context->GetObjectName(object->value));
+        ConvertUTF8ToJavaString(env, GetChooserObjectName(type, object->value));
 
     std::string serialized;
     bool written = base::JSONWriter::Write(object->value, &serialized);
@@ -571,9 +583,12 @@ static void JNI_WebsitePreferenceBridge_GetChosenObjects(
     ScopedJavaLocalRef<jstring> jserialized =
         ConvertUTF8ToJavaString(env, serialized);
 
+    jboolean jis_managed =
+        object->source == content_settings::SETTING_SOURCE_POLICY;
+
     Java_WebsitePreferenceBridge_insertChosenObjectInfoIntoList(
         env, list, content_settings_type, jorigin, jembedder, jname,
-        jserialized);
+        jserialized, jis_managed);
   }
 }
 
@@ -595,7 +610,8 @@ static void JNI_WebsitePreferenceBridge_RevokeObjectPermission(
   DCHECK(object);
   ChooserContextBase* context = GetChooserContext(
       static_cast<ContentSettingsType>(content_settings_type));
-  context->RevokeObjectPermission(origin, embedder, *object);
+  context->RevokeObjectPermission(url::Origin::Create(origin),
+                                  url::Origin::Create(embedder), *object);
 }
 
 namespace {

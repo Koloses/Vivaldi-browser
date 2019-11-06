@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/web_contents.h"
@@ -29,7 +30,7 @@ constexpr int kIconSize = 20;
 void ShowPasswordReuseModalWarningDialog(
     content::WebContents* web_contents,
     ChromePasswordProtectionService* service,
-    ReusedPasswordType password_type,
+    PasswordType password_type,
     OnWarningDone done_callback) {
   PasswordReuseModalWarningDialog* dialog = new PasswordReuseModalWarningDialog(
       web_contents, service, password_type, std::move(done_callback));
@@ -41,16 +42,16 @@ void ShowPasswordReuseModalWarningDialog(
 PasswordReuseModalWarningDialog::PasswordReuseModalWarningDialog(
     content::WebContents* web_contents,
     ChromePasswordProtectionService* service,
-    ReusedPasswordType password_type,
+    PasswordType password_type,
     OnWarningDone done_callback)
     : content::WebContentsObserver(web_contents),
       done_callback_(std::move(done_callback)),
       service_(service),
-      url_(web_contents->GetLastCommittedURL()) {
+      url_(web_contents->GetLastCommittedURL()),
+      password_type_(password_type) {
   // |service| maybe NULL in tests.
   if (service_)
     service_->AddObserver(this);
-
   const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
   set_margins(
       provider->GetDialogInsetsForContentType(views::TEXT, views::TEXT));
@@ -131,7 +132,10 @@ base::string16 PasswordReuseModalWarningDialog::GetDialogButtonLabel(
     ui::DialogButton button) const {
   switch (button) {
     case ui::DIALOG_BUTTON_OK:
-      return l10n_util::GetStringUTF16(IDS_PAGE_INFO_CHANGE_PASSWORD_BUTTON);
+      return l10n_util::GetStringUTF16(
+          password_type_ == PasswordType::ENTERPRISE_PASSWORD
+              ? IDS_PAGE_INFO_CHANGE_PASSWORD_BUTTON
+              : IDS_PAGE_INFO_PROTECT_ACCOUNT_BUTTON);
     case ui::DIALOG_BUTTON_CANCEL:
       return l10n_util::GetStringUTF16(
           IDS_PAGE_INFO_IGNORE_PASSWORD_WARNING_BUTTON);

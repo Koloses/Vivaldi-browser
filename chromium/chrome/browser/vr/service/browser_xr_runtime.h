@@ -5,6 +5,9 @@
 #ifndef CHROME_BROWSER_VR_SERVICE_BROWSER_XR_RUNTIME_H_
 #define CHROME_BROWSER_VR_SERVICE_BROWSER_XR_RUNTIME_H_
 
+#include <set>
+#include <vector>
+
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "content/public/browser/render_frame_host.h"
@@ -43,7 +46,10 @@ class BrowserXRRuntimeObserver : public base::CheckedObserver {
 // device activation.
 class BrowserXRRuntime : public device::mojom::XRRuntimeEventListener {
  public:
-  explicit BrowserXRRuntime(device::mojom::XRRuntimePtr runtime,
+  using RequestSessionCallback =
+      base::OnceCallback<void(device::mojom::XRSessionPtr)>;
+  explicit BrowserXRRuntime(device::mojom::XRDeviceId id,
+                            device::mojom::XRRuntimePtr runtime,
                             device::mojom::VRDisplayInfoPtr info);
   ~BrowserXRRuntime() override;
 
@@ -57,7 +63,7 @@ class BrowserXRRuntime : public device::mojom::XRRuntimeEventListener {
   void ExitPresent(XRDeviceImpl* device);
   void RequestSession(XRDeviceImpl* device,
                       const device::mojom::XRRuntimeSessionOptionsPtr& options,
-                      device::mojom::XRDevice::RequestSessionCallback callback);
+                      RequestSessionCallback callback);
   XRDeviceImpl* GetPresentingRendererDevice() {
     return presenting_renderer_device_;
   }
@@ -77,6 +83,7 @@ class BrowserXRRuntime : public device::mojom::XRRuntimeEventListener {
   void RemoveObserver(BrowserXRRuntimeObserver* observer) {
     observers_.RemoveObserver(observer);
   }
+  device::mojom::XRDeviceId GetId() { return id_; }
 
  private:
   // device::XRRuntimeEventListener
@@ -92,12 +99,13 @@ class BrowserXRRuntime : public device::mojom::XRRuntimeEventListener {
   void OnRequestSessionResult(
       base::WeakPtr<XRDeviceImpl> device,
       device::mojom::XRRuntimeSessionOptionsPtr options,
-      device::mojom::XRDevice::RequestSessionCallback callback,
+      RequestSessionCallback callback,
       device::mojom::XRSessionPtr session,
       device::mojom::XRSessionControllerPtr immersive_session_controller);
   void OnImmersiveSessionError();
   void OnInitialized();
 
+  device::mojom::XRDeviceId id_;
   device::mojom::XRRuntimePtr runtime_;
   device::mojom::XRSessionControllerPtr immersive_session_controller_;
 
@@ -113,7 +121,7 @@ class BrowserXRRuntime : public device::mojom::XRRuntimeEventListener {
 
   base::ObserverList<BrowserXRRuntimeObserver> observers_;
 
-  base::WeakPtrFactory<BrowserXRRuntime> weak_ptr_factory_;
+  base::WeakPtrFactory<BrowserXRRuntime> weak_ptr_factory_{this};
 };
 
 }  // namespace vr

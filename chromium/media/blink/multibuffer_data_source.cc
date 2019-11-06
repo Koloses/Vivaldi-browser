@@ -139,8 +139,7 @@ MultibufferDataSource::MultibufferDataSource(
       playback_rate_(0.0),
       media_log_(media_log),
       host_(host),
-      downloading_cb_(downloading_cb),
-      weak_factory_(this) {
+      downloading_cb_(downloading_cb) {
   weak_ptr_ = weak_factory_.GetWeakPtr();
   DCHECK(host_);
   DCHECK(downloading_cb_);
@@ -299,8 +298,7 @@ UrlData::CorsMode MultibufferDataSource::cors_mode() const {
 
 void MultibufferDataSource::MediaPlaybackRateChanged(double playback_rate) {
   DCHECK(render_task_runner_->BelongsToCurrentThread());
-
-  if (playback_rate < 0.0)
+  if (playback_rate < 0 || playback_rate == playback_rate_)
     return;
 
   playback_rate_ = playback_rate;
@@ -310,6 +308,9 @@ void MultibufferDataSource::MediaPlaybackRateChanged(double playback_rate) {
 
 void MultibufferDataSource::MediaIsPlaying() {
   DCHECK(render_task_runner_->BelongsToCurrentThread());
+  if (media_has_played_)
+    return;
+
   media_has_played_ = true;
   cancel_on_defer_ = false;
   // Once we start playing, we need preloading.

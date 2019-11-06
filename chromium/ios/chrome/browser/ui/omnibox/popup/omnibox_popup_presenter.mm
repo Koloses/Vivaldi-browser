@@ -45,20 +45,10 @@ const CGFloat kVerticalOffset = 6;
     ToolbarConfiguration* configuration = [[ToolbarConfiguration alloc]
         initWithStyle:incognito ? INCOGNITO : NORMAL];
 
-    UIBlurEffect* effect = [configuration blurEffect];
-
-    if (effect) {
-      UIVisualEffectView* effectView =
-          [[UIVisualEffectView alloc] initWithEffect:effect];
-      [effectView.contentView addSubview:viewController.view];
-      _popupContainerView = effectView;
-
-    } else {
-      UIView* containerView = [[UIView alloc] init];
-      [containerView addSubview:viewController.view];
-      _popupContainerView = containerView;
-    }
-    _popupContainerView.backgroundColor = [configuration blurBackgroundColor];
+    UIView* containerView = [[UIView alloc] init];
+    [containerView addSubview:viewController.view];
+    _popupContainerView = containerView;
+    _popupContainerView.backgroundColor = [configuration backgroundColor];
     _popupContainerView.translatesAutoresizingMaskIntoConstraints = NO;
     viewController.view.translatesAutoresizingMaskIntoConstraints = NO;
     AddSameConstraints(viewController.view, _popupContainerView);
@@ -67,10 +57,10 @@ const CGFloat kVerticalOffset = 6;
 }
 
 - (void)updatePopup {
-  BOOL popupSizeIsZero = CGSizeEqualToSize(
-      [self.viewController.view intrinsicContentSize], CGSizeZero);
+  BOOL popupHeightIsZero =
+      self.viewController.view.intrinsicContentSize.height == 0;
   BOOL popupIsOnscreen = self.popupContainerView.superview != nil;
-  if (popupSizeIsZero && popupIsOnscreen) {
+  if (popupHeightIsZero && popupIsOnscreen) {
     // If intrinsic size is 0 and popup is onscreen, we want to remove the
     // popup view.
     if (!IsIPadIdiom()) {
@@ -83,7 +73,7 @@ const CGFloat kVerticalOffset = 6;
 
     self.open = NO;
     [self.delegate popupDidCloseForPresenter:self];
-  } else if (!popupSizeIsZero && !popupIsOnscreen) {
+  } else if (!popupHeightIsZero && !popupIsOnscreen) {
     // If intrinsic size is nonzero and popup is offscreen, we want to add it.
     UIViewController* parentVC =
         [self.delegate popupParentViewControllerForPresenter:self];
@@ -131,7 +121,6 @@ const CGFloat kVerticalOffset = 6;
     topConstraint,
   ]];
 
-  [popup layoutIfNeeded];
   [[popup superview] layoutIfNeeded];
 }
 

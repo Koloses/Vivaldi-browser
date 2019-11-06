@@ -23,6 +23,8 @@ ARC_EXPORT extern const char kArcDataRemoveRequested[];
 ARC_EXPORT extern const char kArcEnabled[];
 ARC_EXPORT extern const char kArcFastAppReinstallPackages[];
 ARC_EXPORT extern const char kArcFastAppReinstallStarted[];
+ARC_EXPORT extern const char kArcFrameworkVersion[];
+ARC_EXPORT extern const char kArcHasAccessToRemovableMedia[];
 ARC_EXPORT extern const char kArcInitialSettingsPending[];
 ARC_EXPORT extern const char kArcLocationServiceEnabled[];
 ARC_EXPORT extern const char kArcPackages[];
@@ -46,10 +48,7 @@ ARC_EXPORT extern const char kEngagementTimeTotal[];
 // TODO(b/110211045): Move Assistant related prefs to ash.
 ARC_EXPORT extern const char kVoiceInteractionContextEnabled[];
 ARC_EXPORT extern const char kVoiceInteractionEnabled[];
-ARC_EXPORT extern const char kVoiceInteractionHotwordAlwaysOn[];
 ARC_EXPORT extern const char kVoiceInteractionHotwordEnabled[];
-ARC_EXPORT extern const char kVoiceInteractionLaunchWithMicOpen[];
-ARC_EXPORT extern const char kVoiceInteractionNotificationEnabled[];
 
 // Local state prefs in lexicographical order.
 ARC_EXPORT extern const char kStabilityMetrics[];

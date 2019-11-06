@@ -16,6 +16,8 @@
 #include "base/strings/stringprintf.h"
 #include "base/task/post_task.h"
 #include "chrome/browser/media/cast_mirroring_service_host.h"
+#include "chrome/browser/media/router/event_page_request_manager.h"
+#include "chrome/browser/media/router/event_page_request_manager_factory.h"
 #include "chrome/browser/media/router/issues_observer.h"
 #include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media/router/media_router_feature.h"
@@ -32,7 +34,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/media_router/media_source_helper.h"
+#include "chrome/common/media_router/media_source.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
@@ -127,9 +129,7 @@ MediaRouterMojoImpl::MediaSinksQuery::MediaSinksQuery() = default;
 MediaRouterMojoImpl::MediaSinksQuery::~MediaSinksQuery() = default;
 
 MediaRouterMojoImpl::MediaRouterMojoImpl(content::BrowserContext* context)
-    : instance_id_(base::GenerateGUID()),
-      context_(context),
-      weak_factory_(this) {
+    : instance_id_(base::GenerateGUID()), context_(context) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 
@@ -142,7 +142,7 @@ void MediaRouterMojoImpl::RegisterMediaRouteProvider(
     mojom::MediaRouteProviderPtr media_route_provider_ptr,
     mojom::MediaRouter::RegisterMediaRouteProviderCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(!base::ContainsKey(media_route_providers_, provider_id));
+  DCHECK(!base::Contains(media_route_providers_, provider_id));
   media_route_provider_ptr.set_connection_error_handler(
       base::BindOnce(&MediaRouterMojoImpl::OnProviderConnectionError,
                      weak_factory_.GetWeakPtr(), provider_id));
@@ -261,7 +261,7 @@ void MediaRouterMojoImpl::CreateRoute(const MediaSource::Id& source_id,
     return;
   }
 
-  if (IsTabMirroringMediaSource(MediaSource(source_id))) {
+  if (MediaSource(source_id).IsTabMirroringSource()) {
     // Ensure the CastRemotingConnector is created before mirroring starts.
     CastRemotingConnector* const connector =
         CastRemotingConnector::Get(web_contents);
@@ -460,10 +460,6 @@ scoped_refptr<MediaRouteController> MediaRouterMojoImpl::GetRouteController(
       return nullptr;
     case RouteControllerType::kGeneric:
       route_controller = new MediaRouteController(route_id, context_, this);
-      break;
-    case RouteControllerType::kHangouts:
-      route_controller =
-          new HangoutsMediaRouteController(route_id, context_, this);
       break;
     case RouteControllerType::kMirroring:
       route_controller =
@@ -1007,9 +1003,11 @@ void MediaRouterMojoImpl::GetMirroringServiceHostForDesktop(
     const std::string& desktop_stream_id,
     mirroring::mojom::MirroringServiceHostRequest request) {
   if (ShouldUseMirroringService()) {
+    // TODO(crbug.com/974335): Remove this code once we fully launch the native
+    // Cast Media Route Provider.
     mirroring::CastMirroringServiceHost::GetForDesktop(
-        GetWebContentsFromId(initiator_tab_id, context_,
-                             true /* include_incognito */),
+        EventPageRequestManagerFactory::GetApiForBrowserContext(context_)
+            ->GetEventPageWebContents(),
         desktop_stream_id, std::move(request));
   }
 }

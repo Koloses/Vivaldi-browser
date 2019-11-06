@@ -9,11 +9,11 @@
 #include "base/i18n/icu_util.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "base/run_loop.h"
-#include "base/task/task_scheduler/task_scheduler.h"
+#include "base/task/single_thread_task_executor.h"
+#include "base/task/thread_pool/thread_pool.h"
 #include "build/build_config.h"
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "components/viz/service/display_embedder/server_shared_bitmap_manager.h"
@@ -28,7 +28,7 @@
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/ime/input_method_initializer.h"
+#include "ui/base/ime/init/input_method_initializer.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/compositor/test/in_process_context_factory.h"
 #include "ui/events/event.h"
@@ -143,9 +143,10 @@ int DemoMain() {
   display::win::SetDefaultDeviceScaleFactor(1.0f);
 #endif
 
-  // Create the message-loop here before creating the root window.
-  base::MessageLoopForUI message_loop;
-  base::TaskScheduler::CreateAndStartWithDefaultParams("demo");
+  // Create the task executor here before creating the root window.
+  base::SingleThreadTaskExecutor main_task_executor(
+      base::MessagePump::Type::UI);
+  base::ThreadPoolInstance::CreateAndStartWithDefaultParams("demo");
   ui::InitializeInputMethodForTesting();
 
   // The ContextFactory must exist before any Compositors are created.
@@ -158,8 +159,8 @@ int DemoMain() {
       &host_frame_sink_manager, &frame_sink_manager);
   context_factory->set_use_test_surface(false);
 
-  base::PowerMonitor power_monitor(
-      base::WrapUnique(new base::PowerMonitorDeviceSource));
+  base::PowerMonitor::Initialize(
+      std::make_unique<base::PowerMonitorDeviceSource>());
 
   std::unique_ptr<aura::Env> env = aura::Env::CreateInstance();
   env->set_context_factory(context_factory.get());

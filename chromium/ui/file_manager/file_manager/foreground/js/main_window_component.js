@@ -132,8 +132,7 @@ function MainWindowComponent(
   directoryModel.addEventListener(
       'directory-changed', this.onDirectoryChanged_.bind(this));
   volumeManager.addEventListener(
-      'drive-connection-changed',
-      this.onDriveConnectionChanged_.bind(this));
+      'drive-connection-changed', this.onDriveConnectionChanged_.bind(this));
   this.onDriveConnectionChanged_();
   document.addEventListener('keydown', this.onKeyDown_.bind(this));
   document.addEventListener('keyup', this.onKeyUp_.bind(this));
@@ -194,8 +193,13 @@ MainWindowComponent.prototype.onFileListFocus_ = function() {
   // is selected.
   if (this.pressingTab_) {
     const selection = this.selectionHandler_.selection;
-    if (selection && selection.totalCount == 0) {
-      this.directoryModel_.selectIndex(0);
+    if (selection && selection.totalCount === 0) {
+      const selectionModel = this.directoryModel_.getFileListSelection();
+      const targetIndex =
+          selectionModel.anchorIndex && selectionModel.anchorIndex !== -1 ?
+          selectionModel.anchorIndex :
+          0;
+      this.directoryModel_.selectIndex(targetIndex);
     }
   }
 };
@@ -288,6 +292,10 @@ MainWindowComponent.prototype.onToggleViewButtonClick_ = function(event) {
       ListContainer.ListType.THUMBNAIL :
       ListContainer.ListType.DETAIL;
   this.ui_.setCurrentListType(listType);
+  const msgId = listType === ListContainer.ListType.DETAIL ?
+      'FILE_LIST_CHANGED_TO_LIST_VIEW' :
+      'FILE_LIST_CHANGED_TO_LIST_THUMBNAIL_VIEW';
+  this.ui_.speakA11yMessage(str(msgId));
   this.appStateController_.saveViewOptions();
 
   this.ui_.listContainer.focus();
@@ -378,8 +386,7 @@ MainWindowComponent.prototype.onListKeyDown_ = function(event) {
 
     case 'Enter':  // Enter => Change directory or perform default action.
       const selection = this.selectionHandler_.selection;
-      if (selection.totalCount === 1 &&
-          selection.entries[0].isDirectory &&
+      if (selection.totalCount === 1 && selection.entries[0].isDirectory &&
           !DialogType.isFolderDialog(this.dialogType_)) {
         const item = this.ui_.listContainer.currentList.getListItemByIndex(
             selection.indexes[0]);
@@ -427,7 +434,8 @@ MainWindowComponent.prototype.onDirectoryChanged_ = function(event) {
   event = /** @type {DirectoryChangeEvent} */ (event);
 
   const newVolumeInfo = event.newDirEntry ?
-      this.volumeManager_.getVolumeInfo(event.newDirEntry) : null;
+      this.volumeManager_.getVolumeInfo(event.newDirEntry) :
+      null;
 
   // Update unformatted volume status.
   if (newVolumeInfo && newVolumeInfo.error) {
@@ -448,13 +456,15 @@ MainWindowComponent.prototype.onDirectoryChanged_ = function(event) {
     this.ui_.locationLine.show(event.newDirEntry);
     // Updates UI.
     if (this.dialogType_ === DialogType.FULL_PAGE) {
-      const locationInfo = this.volumeManager_.getLocationInfo(event.newDirEntry);
+      const locationInfo =
+          this.volumeManager_.getLocationInfo(event.newDirEntry);
       if (locationInfo) {
         const label = util.getEntryLabel(locationInfo, event.newDirEntry);
         document.title = `${str('FILEMANAGER_APP_NAME')} - ${label}`;
       } else {
-        console.error('Could not find location info for entry: '
-                      + event.newDirEntry.fullPath);
+        console.error(
+            'Could not find location info for entry: ' +
+            event.newDirEntry.fullPath);
       }
     }
   } else {

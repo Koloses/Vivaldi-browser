@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/feature_list.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/net/net_error_diagnostics_dialog.h"
-#include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
 #include "chrome/browser/ui/browser.h"
@@ -38,7 +38,6 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/error_page/common/error_page_switches.h"
 #include "components/google/core/common/google_util.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
@@ -87,10 +86,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/chrome_browser_main_chromeos.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/settings/stub_install_attributes.h"
+#include "chromeos/tpm/stub_install_attributes.h"
 #include "components/policy/core/common/policy_types.h"
 #else
-#include "chrome/browser/policy/profile_policy_connector_factory.h"
+#include "chrome/browser/policy/profile_policy_connector_builder.h"
 #endif
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 
@@ -324,6 +323,12 @@ class DNSErrorPageTest : public ErrorPageTest {
                content::URLLoaderInterceptor::RequestParams* params) {
               // Add an interceptor that serves LinkDoctor responses
               if (google_util::LinkDoctorBaseURL() == params->url_request.url) {
+                // The origin header should exist and be opaque.
+                std::string origin;
+                bool has_origin = params->url_request.headers.GetHeader(
+                    net::HttpRequestHeaders::kOrigin, &origin);
+                EXPECT_TRUE(has_origin);
+                EXPECT_EQ(origin, "null");
                 // Send RequestCreated so that anyone blocking on
                 // WaitForRequests can continue.
                 base::PostTaskWithTraits(
@@ -579,7 +584,8 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, DNSError_DoSearch) {
   // notification that they've run, and scripts that trigger a navigation may
   // not send that notification.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.getElementById('search-link').click();"));
+      base::ASCIIToUTF16("document.getElementById('search-link').click();"),
+      base::NullCallback());
   nav_observer.Wait();
   EXPECT_EQ(base::ASCIIToUTF16("Title Of More Awesomeness"),
             title_watcher.WaitAndGetTitle());
@@ -626,7 +632,8 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, DNSError_DoReload) {
   // notification that they've run, and scripts that trigger a navigation may
   // not send that notification.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.getElementById('reload-button').click();"));
+      base::ASCIIToUTF16("document.getElementById('reload-button').click();"),
+      base::NullCallback());
   nav_observer.Wait();
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
 
@@ -657,7 +664,7 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest,
   // Do a same-document navigation on the error page, which should not result
   // in a new navigation.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.location='#';"));
+      base::ASCIIToUTF16("document.location='#';"), base::NullCallback());
   content::WaitForLoadStop(web_contents);
   // Page being displayed should not change.
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
@@ -671,7 +678,8 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest,
   // notification that they've run, and scripts that trigger a navigation may
   // not send that notification.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.getElementById('reload-button').click();"));
+      base::ASCIIToUTF16("document.getElementById('reload-button').click();"),
+      base::NullCallback());
   nav_observer2.Wait();
   ExpectDisplayingNavigationCorrections(browser(), net::ERR_NAME_NOT_RESOLVED);
 
@@ -706,12 +714,13 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, DNSError_DoClickLink) {
   // The tracking request is triggered by onmousedown, so it catches middle
   // mouse button clicks, as well as left clicks.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16(link_selector + ".onmousedown();"));
+      base::ASCIIToUTF16(link_selector + ".onmousedown();"),
+      base::NullCallback());
   // Can't use content::ExecuteScript because it waits for scripts to send
   // notification that they've run, and scripts that trigger a navigation may
   // not send that notification.
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16(link_selector + ".click();"));
+      base::ASCIIToUTF16(link_selector + ".click();"), base::NullCallback());
   EXPECT_EQ(base::ASCIIToUTF16("Title Of Awesomeness"),
             title_watcher.WaitAndGetTitle());
 
@@ -796,7 +805,8 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, IFrameDNSError_JavaScript) {
     content::WindowedNotificationObserver load_observer(
         content::NOTIFICATION_LOAD_STOP,
         content::Source<NavigationController>(&wc->GetController()));
-    wc->GetMainFrame()->ExecuteJavaScriptForTests(base::ASCIIToUTF16(script));
+    wc->GetMainFrame()->ExecuteJavaScriptForTests(base::ASCIIToUTF16(script),
+                                                  base::NullCallback());
     load_observer.Wait();
 
     // Ensure we saw the expected failure.
@@ -816,7 +826,8 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, IFrameDNSError_JavaScript) {
     content::WindowedNotificationObserver load_observer(
         content::NOTIFICATION_LOAD_STOP,
         content::Source<NavigationController>(&wc->GetController()));
-    wc->GetMainFrame()->ExecuteJavaScriptForTests(base::ASCIIToUTF16(script));
+    wc->GetMainFrame()->ExecuteJavaScriptForTests(base::ASCIIToUTF16(script),
+                                                  base::NullCallback());
     load_observer.Wait();
   }
 
@@ -827,7 +838,8 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, IFrameDNSError_JavaScript) {
     content::WindowedNotificationObserver load_observer(
         content::NOTIFICATION_LOAD_STOP,
         content::Source<NavigationController>(&wc->GetController()));
-    wc->GetMainFrame()->ExecuteJavaScriptForTests(base::ASCIIToUTF16(script));
+    wc->GetMainFrame()->ExecuteJavaScriptForTests(base::ASCIIToUTF16(script),
+                                                  base::NullCallback());
     load_observer.Wait();
 
     EXPECT_EQ(fail_url, fail_observer.fail_url());
@@ -928,7 +940,7 @@ IN_PROC_BROWSER_TEST_F(DNSErrorPageTest, Incognito) {
 class ErrorPageAutoReloadTest : public InProcessBrowserTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kEnableOfflineAutoReload);
+    command_line->AppendSwitch(switches::kEnableAutoReload);
   }
 
   void TearDownOnMainThread() override { url_loader_interceptor_.reset(); }
@@ -1026,7 +1038,8 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, ManualReloadNotSuppressed) {
     browser()->tab_strip_model()->GetActiveWebContents();
   content::TestNavigationObserver nav_observer(web_contents, 1);
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.getElementById('reload-button').click();"));
+      base::ASCIIToUTF16("document.getElementById('reload-button').click();"),
+      base::NullCallback());
   nav_observer.Wait();
   EXPECT_FALSE(IsDisplayingText(
       browser(), l10n_util::GetStringUTF8(
@@ -1050,7 +1063,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, IgnoresSameDocumentNavigation) {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
-      base::ASCIIToUTF16("document.location='#';"));
+      base::ASCIIToUTF16("document.location='#';"), base::NullCallback());
   content::WaitForLoadStop(web_contents);
 
   // Same-document navigation on an error page should not have resulted in a
@@ -1159,8 +1172,7 @@ class ErrorPageOfflineTest : public ErrorPageTest {
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
         &policy_provider_);
 #else
-    policy::ProfilePolicyConnectorFactory::GetInstance()
-        ->PushProviderForTesting(&policy_provider_);
+    policy::PushProfilePolicyConnectorProviderForTesting(&policy_provider_);
 #endif
 
     ErrorPageTest::SetUpInProcessBrowserTestFixture();

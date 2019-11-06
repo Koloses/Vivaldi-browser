@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,7 +15,6 @@
 #include "base/component_export.h"
 #include "base/macros.h"
 #include "chromeos/dbus/dbus_client.h"
-#include "chromeos/dbus/dbus_client_implementation_type.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 
 namespace base {
@@ -90,6 +90,8 @@ enum RenameError {
 };
 
 // Format error reported by cros-disks.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
 enum FormatError {
   FORMAT_ERROR_NONE,
   FORMAT_ERROR_UNKNOWN,
@@ -100,6 +102,10 @@ enum FormatError {
   FORMAT_ERROR_FORMAT_PROGRAM_NOT_FOUND,
   FORMAT_ERROR_FORMAT_PROGRAM_FAILED,
   FORMAT_ERROR_DEVICE_NOT_ALLOWED,
+  FORMAT_ERROR_INVALID_OPTIONS,
+  FORMAT_ERROR_LONG_NAME,
+  FORMAT_ERROR_INVALID_CHARACTER,
+  FORMAT_ERROR_COUNT,
 };
 
 // Event type each corresponding to a signal sent from cros-disks.
@@ -148,9 +154,11 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) DiskInfo {
   // Disk mount path. (e.g. /media/removable/VOLUME)
   const std::string& mount_path() const { return mount_path_; }
 
-  // Disk system path given by udev.
-  // (e.g. /sys/devices/pci0000:00/.../8:0:0:0/block/sdb/sdb1)
-  const std::string& system_path() const { return system_path_; }
+  // Path of the scsi/mmc/nvme storage device that this disk is a part of.
+  // (e.g. /sys/devices/pci0000:00/.../mmc_host/mmc0/mmc0:0002)
+  const std::string& storage_device_path() const {
+    return storage_device_path_;
+  }
 
   // Is a drive or not. (i.e. true with /dev/sdb, false with /dev/sdb1)
   bool is_drive() const { return is_drive_; }
@@ -214,7 +222,7 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) DiskInfo {
 
   std::string device_path_;
   std::string mount_path_;
-  std::string system_path_;
+  std::string storage_device_path_;
   bool is_drive_;
   bool has_media_;
   bool on_boot_device_;
@@ -356,6 +364,7 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) CrosDisksClient : public DBusClient {
   // success, or with |false| otherwise.
   virtual void Format(const std::string& device_path,
                       const std::string& filesystem,
+                      const std::string& label,
                       VoidDBusMethodCallback callback) = 0;
 
   // Calls Rename method. On completion, |callback| is called, with |true| on
@@ -372,7 +381,7 @@ class COMPONENT_EXPORT(CHROMEOS_DBUS) CrosDisksClient : public DBusClient {
 
   // Factory function, creates a new instance and returns ownership.
   // For normal usage, access the singleton via DBusThreadManager::Get().
-  static CrosDisksClient* Create(DBusClientImplementationType type);
+  static std::unique_ptr<CrosDisksClient> Create();
 
   // Returns the path of the mount point for archive files.
   static base::FilePath GetArchiveMountPoint();

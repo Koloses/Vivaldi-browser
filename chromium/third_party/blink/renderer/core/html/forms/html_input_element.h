@@ -55,8 +55,6 @@ class CORE_EXPORT HTMLInputElement
   USING_GARBAGE_COLLECTED_MIXIN(HTMLInputElement);
 
  public:
-  static HTMLInputElement* Create(Document&, const CreateElementFlags);
-
   HTMLInputElement(Document&, const CreateElementFlags);
   ~HTMLInputElement() override;
   void Trace(Visitor*) override;
@@ -194,8 +192,8 @@ class CORE_EXPORT HTMLInputElement
                                    ExceptionState&);
 
   bool LayoutObjectIsNeeded(const ComputedStyle&) const final;
-  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
-  void DetachLayoutTree(const AttachContext& = AttachContext()) final;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
+  void DetachLayoutTree(bool performing_reattach) final;
   void UpdateFocusAppearanceWithOptions(SelectionBehaviorOnFocus,
                                         const FocusOptions*) final;
 

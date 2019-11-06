@@ -4,11 +4,14 @@
 
 #include "content/public/browser/media_session.h"
 
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/synchronization/lock.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -95,13 +98,15 @@ class MediaSessionBrowserTest : public ContentBrowserTest {
 
   void StartPlaybackAndWait(Shell* shell, const std::string& id) {
     shell->web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
-        base::ASCIIToUTF16("document.querySelector('#" + id + "').play();"));
+        base::ASCIIToUTF16("document.querySelector('#" + id + "').play();"),
+        base::NullCallback());
     WaitForStart(shell);
   }
 
   void StopPlaybackAndWait(Shell* shell, const std::string& id) {
     shell->web_contents()->GetMainFrame()->ExecuteJavaScriptForTests(
-        base::ASCIIToUTF16("document.querySelector('#" + id + "').pause();"));
+        base::ASCIIToUTF16("document.querySelector('#" + id + "').pause();"),
+        base::NullCallback());
     WaitForStop(shell);
   }
 
@@ -129,7 +134,8 @@ class MediaSessionBrowserTest : public ContentBrowserTest {
   }
 
   bool WasURLVisited(const GURL& url) {
-    return base::ContainsKey(visited_urls_, url);
+    base::AutoLock lock(visited_urls_lock_);
+    return base::Contains(visited_urls_, url);
   }
 
   MediaSession* SetupMediaImageTest() {
@@ -198,13 +204,19 @@ class MediaSessionBrowserTest : public ContentBrowserTest {
   };
 
   void OnServerRequest(const net::test_server::HttpRequest& request) {
+    // Note this method is called on the EmbeddedTestServer's background thread.
+    base::AutoLock lock(visited_urls_lock_);
     visited_urls_.insert(request.GetURL());
   }
 
+  // visited_urls_ is accessed both on the main thread and on the
+  // EmbeddedTestServer's background thread via OnServerRequest(), so it must be
+  // locked.
+  base::Lock visited_urls_lock_;
   std::set<GURL> visited_urls_;
 
-  base::test::ScopedFeatureList disabled_feature_list_;
   base::test::ScopedFeatureList scoped_feature_list_;
+  base::test::ScopedFeatureList disabled_feature_list_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaSessionBrowserTest);
 };
@@ -267,7 +279,13 @@ IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MultiplePlayersPlayPause) {
   EXPECT_TRUE(IsPlaying(shell(), "long-audio"));
 }
 
-IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, WebContents_Muted) {
+// Flaky on Mac. See https://crbug.com/980663
+#if defined(OS_MACOSX)
+#define MAYBE_WebContents_Muted DISABLED_WebContents_Muted
+#else
+#define MAYBE_WebContents_Muted WebContents_Muted
+#endif
+IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MAYBE_WebContents_Muted) {
   NavigateToURL(shell(), GetTestUrl("media/session", "media-session.html"));
 
   shell()->web_contents()->SetAudioMuted(true);

@@ -18,10 +18,10 @@
 #include "extensions/common/extension_features.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/renderer/dispatcher.h"
-#include "extensions/renderer/extension_bindings_system.h"
+#include "extensions/renderer/extension_interaction_provider.h"
 #include "extensions/renderer/extensions_renderer_client.h"
-#include "extensions/renderer/js_extension_bindings_system.h"
 #include "extensions/renderer/native_extension_bindings_system.h"
+#include "extensions/renderer/native_renderer_messaging_service.h"
 #include "extensions/renderer/service_worker_data.h"
 #include "extensions/renderer/worker_script_context_set.h"
 
@@ -33,12 +33,6 @@ base::LazyInstance<WorkerThreadDispatcher>::DestructorAtExit
     g_worker_thread_dispatcher_instance = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<base::ThreadLocalPointer<extensions::ServiceWorkerData>>::
     DestructorAtExit g_data_tls = LAZY_INSTANCE_INITIALIZER;
-
-ServiceWorkerData* GetServiceWorkerData() {
-  ServiceWorkerData* data = g_data_tls.Pointer()->Get();
-  DCHECK(data);
-  return data;
-}
 
 }  // namespace
 
@@ -58,7 +52,7 @@ void WorkerThreadDispatcher::Init(content::RenderThread* render_thread) {
 }
 
 // static
-ExtensionBindingsSystem* WorkerThreadDispatcher::GetBindingsSystem() {
+NativeExtensionBindingsSystem* WorkerThreadDispatcher::GetBindingsSystem() {
   return GetServiceWorkerData()->bindings_system();
 }
 
@@ -70,6 +64,13 @@ V8SchemaRegistry* WorkerThreadDispatcher::GetV8SchemaRegistry() {
 // static
 ScriptContext* WorkerThreadDispatcher::GetScriptContext() {
   return GetServiceWorkerData()->context();
+}
+
+// static
+ServiceWorkerData* WorkerThreadDispatcher::GetServiceWorkerData() {
+  ServiceWorkerData* data = g_data_tls.Pointer()->Get();
+  DCHECK(data);
+  return data;
 }
 
 // static
@@ -93,7 +94,7 @@ void WorkerThreadDispatcher::ForwardIPC(int worker_thread_id,
 bool WorkerThreadDispatcher::OnControlMessageReceived(
     const IPC::Message& message) {
   if (HandlesMessageOnWorkerThread(message)) {
-    int worker_thread_id = base::kInvalidThreadId;
+    int worker_thread_id = content::WorkerThread::kInvalidWorkerThreadId;
     // TODO(lazyboy): Route |message| directly to the child thread using routed
     // IPC. Probably using mojo?
     bool found = base::PickleIterator(message).ReadInt(&worker_thread_id);
@@ -101,6 +102,10 @@ bool WorkerThreadDispatcher::OnControlMessageReceived(
     if (worker_thread_id == kMainThreadId)
       return false;
     base::TaskRunner* runner = GetTaskRunnerFor(worker_thread_id);
+    // The TaskRunner may have been destroyed, for example, if the extension
+    // was unloaded, so check before trying to post a task.
+    if (runner == nullptr)
+      return false;
     bool task_posted = runner->PostTask(
         FROM_HERE, base::BindOnce(&WorkerThreadDispatcher::ForwardIPC,
                                   worker_thread_id, message));
@@ -131,7 +136,8 @@ void WorkerThreadDispatcher::OnMessageReceivedOnWorkerThread(
 base::TaskRunner* WorkerThreadDispatcher::GetTaskRunnerFor(
     int worker_thread_id) {
   base::AutoLock lock(task_runner_map_lock_);
-  return task_runner_map_[worker_thread_id];
+  auto it = task_runner_map_.find(worker_thread_id);
+  return it == task_runner_map_.end() ? nullptr : it->second;
 }
 
 bool WorkerThreadDispatcher::Send(IPC::Message* message) {
@@ -153,6 +159,17 @@ void WorkerThreadDispatcher::OnDispatchEvent(
     const base::ListValue& event_args) {
   ServiceWorkerData* data = g_data_tls.Pointer()->Get();
   DCHECK(data);
+
+  ScriptContext* script_context = data->context();
+  // Note |scoped_extension_interaction| requires a HandleScope.
+  v8::Isolate* isolate = script_context->isolate();
+  v8::HandleScope handle_scope(isolate);
+  std::unique_ptr<InteractionProvider::Scope> scoped_extension_interaction;
+  if (params.is_user_gesture) {
+    scoped_extension_interaction =
+        ExtensionInteractionProvider::Scope::ForWorker(
+            script_context->v8_context());
+  }
   data->bindings_system()->DispatchEventInContext(
       params.event_name, &event_args, &params.filtering_info, data->context());
   Send(new ExtensionHostMsg_EventAckWorker(data->service_worker_version_id(),
@@ -167,7 +184,7 @@ void WorkerThreadDispatcher::OnDispatchOnConnect(
     const ExtensionMsg_ExternalConnectionInfo& info) {
   DCHECK_EQ(worker_thread_id, content::WorkerThread::GetCurrentId());
   WorkerThreadDispatcher::GetBindingsSystem()
-      ->GetMessagingService()
+      ->messaging_service()
       ->DispatchOnConnect(Dispatcher::GetWorkerScriptContextSet(),
                           target_port_id, channel_name, source, info,
                           // Render frames do not matter.
@@ -178,7 +195,7 @@ void WorkerThreadDispatcher::OnValidateMessagePort(int worker_thread_id,
                                                    const PortId& id) {
   DCHECK_EQ(content::WorkerThread::GetCurrentId(), worker_thread_id);
   WorkerThreadDispatcher::GetBindingsSystem()
-      ->GetMessagingService()
+      ->messaging_service()
       ->ValidateMessagePort(Dispatcher::GetWorkerScriptContextSet(), id,
                             // Render frames do not matter.
                             nullptr);
@@ -188,7 +205,7 @@ void WorkerThreadDispatcher::OnDeliverMessage(int worker_thread_id,
                                               const PortId& target_port_id,
                                               const Message& message) {
   WorkerThreadDispatcher::GetBindingsSystem()
-      ->GetMessagingService()
+      ->messaging_service()
       ->DeliverMessage(Dispatcher::GetWorkerScriptContextSet(), target_port_id,
                        message,
                        // Render frames do not matter.
@@ -200,7 +217,7 @@ void WorkerThreadDispatcher::OnDispatchOnDisconnect(
     const PortId& port_id,
     const std::string& error_message) {
   WorkerThreadDispatcher::GetBindingsSystem()
-      ->GetMessagingService()
+      ->messaging_service()
       ->DispatchOnDisconnect(Dispatcher::GetWorkerScriptContextSet(), port_id,
                              error_message,
                              // Render frames do not matter.
@@ -209,17 +226,16 @@ void WorkerThreadDispatcher::OnDispatchOnDisconnect(
 
 void WorkerThreadDispatcher::AddWorkerData(
     int64_t service_worker_version_id,
-    ScriptContext* context,
-    std::unique_ptr<ExtensionBindingsSystem> bindings_system) {
+    ScriptContext* script_context,
+    std::unique_ptr<NativeExtensionBindingsSystem> bindings_system) {
   ServiceWorkerData* data = g_data_tls.Pointer()->Get();
   if (!data) {
     ServiceWorkerData* new_data = new ServiceWorkerData(
-        service_worker_version_id, context, std::move(bindings_system));
+        service_worker_version_id, script_context, std::move(bindings_system));
     g_data_tls.Pointer()->Set(new_data);
   }
 
-  int worker_thread_id = base::PlatformThread::CurrentId();
-  DCHECK_EQ(content::WorkerThread::GetCurrentId(), worker_thread_id);
+  int worker_thread_id = content::WorkerThread::GetCurrentId();
   {
     base::AutoLock lock(task_runner_map_lock_);
     auto* task_runner = base::ThreadTaskRunnerHandle::Get().get();
@@ -270,8 +286,7 @@ void WorkerThreadDispatcher::RemoveWorkerData(
     g_data_tls.Pointer()->Set(nullptr);
   }
 
-  int worker_thread_id = base::PlatformThread::CurrentId();
-  DCHECK_EQ(content::WorkerThread::GetCurrentId(), worker_thread_id);
+  int worker_thread_id = content::WorkerThread::GetCurrentId();
   {
     base::AutoLock lock(task_runner_map_lock_);
     task_runner_map_.erase(worker_thread_id);

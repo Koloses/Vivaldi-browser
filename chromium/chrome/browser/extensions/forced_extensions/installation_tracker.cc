@@ -89,6 +89,8 @@ void InstallationTracker::ReportResults(bool succeeded) {
   DCHECK(!reported_);
   // Report only if there was non-empty list of force-installed extensions.
   if (!forced_extensions_.empty()) {
+    UMA_HISTOGRAM_COUNTS_100("Extensions.ForceInstalledTotalCandidateCount",
+                             forced_extensions_.size());
     if (succeeded) {
       UMA_HISTOGRAM_LONG_TIMES("Extensions.ForceInstalledLoadTime",
                                base::Time::Now() - start_time_);
@@ -115,6 +117,17 @@ void InstallationTracker::ReportResults(bool succeeded) {
         if (!installation.failure_reason && installation.install_stage) {
           installation.failure_reason =
               InstallationReporter::FailureReason::IN_PROGRESS;
+          InstallationReporter::Stage install_stage =
+              installation.install_stage.value();
+          UMA_HISTOGRAM_ENUMERATION("Extensions.ForceInstalledStage",
+                                    install_stage);
+          if (install_stage == InstallationReporter::Stage::DOWNLOADING) {
+            DCHECK(installation.downloading_stage);
+            ExtensionDownloaderDelegate::Stage downloading_stage =
+                installation.downloading_stage.value();
+            UMA_HISTOGRAM_ENUMERATION(
+                "Extensions.ForceInstalledDownloadingStage", downloading_stage);
+          }
         }
         InstallationReporter::FailureReason failure_reason =
             installation.failure_reason.value_or(

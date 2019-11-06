@@ -125,6 +125,8 @@ class MEDIA_BLINK_EXPORT MultibufferDataSource : public DataSource {
     is_client_audio_element_ = is_client_audio_element;
   }
 
+  bool cancel_on_defer_for_testing() const { return cancel_on_defer_; }
+
   const std::string& mime_type() const { return mime_type_; }
 
  protected:
@@ -273,7 +275,7 @@ class MEDIA_BLINK_EXPORT MultibufferDataSource : public DataSource {
   // a persistent reference. This avoids problems with the thread-safety of
   // reaching into this class from multiple threads to attain a WeakPtr.
   base::WeakPtr<MultibufferDataSource> weak_ptr_;
-  base::WeakPtrFactory<MultibufferDataSource> weak_factory_;
+  base::WeakPtrFactory<MultibufferDataSource> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(MultibufferDataSource);
 };

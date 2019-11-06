@@ -45,8 +45,7 @@ RulesCacheDelegate::RulesCacheDelegate(Type type, bool log_storage_init_delay)
     : type_(type),
       browser_context_(nullptr),
       log_storage_init_delay_(log_storage_init_delay),
-      notified_registry_(false),
-      weak_ptr_factory_(this) {}
+      notified_registry_(false) {}
 
 RulesCacheDelegate::~RulesCacheDelegate() {}
 
@@ -89,14 +88,14 @@ void RulesCacheDelegate::Init(RulesRegistry* registry) {
       store->RegisterKey(storage_key_);
 
     system.ready().Post(
-        FROM_HERE, base::BindRepeating(
-                       &RulesCacheDelegate::ReadRulesForInstalledExtensions,
+        FROM_HERE,
+        base::BindOnce(&RulesCacheDelegate::ReadRulesForInstalledExtensions,
                        weak_ptr_factory_.GetWeakPtr()));
   }
 
   system.ready().Post(FROM_HERE,
-                      base::BindRepeating(&RulesCacheDelegate::CheckIfReady,
-                                          weak_ptr_factory_.GetWeakPtr()));
+                      base::BindOnce(&RulesCacheDelegate::CheckIfReady,
+                                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void RulesCacheDelegate::UpdateRules(const std::string& extension_id,
@@ -188,9 +187,10 @@ void RulesCacheDelegate::ReadFromStorage(const std::string& extension_id) {
     storage_init_time_ = base::Time::Now();
 
   if (!GetDeclarativeRulesStored(extension_id)) {
-    ExtensionSystem::Get(browser_context_)->ready().Post(
-        FROM_HERE, base::Bind(&RulesCacheDelegate::CheckIfReady,
-                              weak_ptr_factory_.GetWeakPtr()));
+    ExtensionSystem::Get(browser_context_)
+        ->ready()
+        .Post(FROM_HERE, base::BindOnce(&RulesCacheDelegate::CheckIfReady,
+                                        weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 
@@ -219,9 +219,10 @@ void RulesCacheDelegate::ReadFromStorageCallback(
   waiting_for_extensions_.erase(extension_id);
 
   if (waiting_for_extensions_.empty())
-    ExtensionSystem::Get(browser_context_)->ready().Post(
-        FROM_HERE, base::Bind(&RulesCacheDelegate::CheckIfReady,
-                              weak_ptr_factory_.GetWeakPtr()));
+    ExtensionSystem::Get(browser_context_)
+        ->ready()
+        .Post(FROM_HERE, base::BindOnce(&RulesCacheDelegate::CheckIfReady,
+                                        weak_ptr_factory_.GetWeakPtr()));
 }
 
 bool RulesCacheDelegate::GetDeclarativeRulesStored(

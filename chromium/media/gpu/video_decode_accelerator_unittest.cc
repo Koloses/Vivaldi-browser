@@ -34,9 +34,10 @@
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
+#include "base/hash/md5.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/md5.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/message_loop/message_loop.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
@@ -61,9 +62,9 @@
 #include "media/base/test_data_util.h"
 #include "media/base/video_frame.h"
 #include "media/gpu/buildflags.h"
-#include "media/gpu/fake_video_decode_accelerator.h"
 #include "media/gpu/format_utils.h"
 #include "media/gpu/gpu_video_decode_accelerator_factory.h"
+#include "media/gpu/test/fake_video_decode_accelerator.h"
 #include "media/gpu/test/rendering_helper.h"
 #include "media/gpu/test/texture_ref.h"
 #include "media/gpu/test/video_accelerator_unittest_helpers.h"
@@ -555,10 +556,11 @@ void GLRenderingVDAClient::ProvidePictureBuffers(
       TextureRefMap::iterator texture_it = active_textures_.find(buffer.id());
       ASSERT_NE(active_textures_.end(), texture_it);
 
-      const gfx::GpuMemoryBufferHandle& handle =
+      gfx::GpuMemoryBufferHandle handle =
           texture_it->second->ExportGpuMemoryBufferHandle();
       LOG_ASSERT(!handle.is_null()) << "Failed producing GMB handle";
-      decoder_->ImportBufferForPicture(buffer.id(), pixel_format, handle);
+      decoder_->ImportBufferForPicture(buffer.id(), pixel_format,
+                                       std::move(handle));
     }
   }
 }
@@ -864,20 +866,21 @@ void GLRenderingVDAClient::DecodeNextFragment() {
 
   // Populate the shared memory buffer w/ the fragment, duplicate its handle,
   // and hand it off to the decoder.
-  base::SharedMemory shm;
-  LOG_ASSERT(shm.CreateAndMapAnonymous(next_fragment_size));
-  memcpy(shm.memory(), next_fragment_bytes.data(), next_fragment_size);
-  base::SharedMemoryHandle dup_handle = shm.handle().Duplicate();
-  LOG_ASSERT(dup_handle.IsValid());
-
-  // TODO(erikchen): This may leak the SharedMemoryHandle.
-  // https://crbug.com/640840.
-  BitstreamBuffer bitstream_buffer(next_bitstream_buffer_id_, dup_handle,
-                                   next_fragment_size);
+  base::UnsafeSharedMemoryRegion shm_region =
+      base::UnsafeSharedMemoryRegion::Create(next_fragment_size);
+  LOG_ASSERT(shm_region.IsValid());
+  base::WritableSharedMemoryMapping shm_mapping = shm_region.Map();
+  LOG_ASSERT(shm_mapping.IsValid());
+  memcpy(shm_mapping.memory(), next_fragment_bytes.data(), next_fragment_size);
+  BitstreamBuffer bitstream_buffer(
+      next_bitstream_buffer_id_,
+      base::UnsafeSharedMemoryRegion::TakeHandleForSerialization(
+          std::move(shm_region)),
+      next_fragment_size);
   decode_start_time_[next_bitstream_buffer_id_] = base::TimeTicks::Now();
   // Mask against 30 bits, to avoid (undefined) wraparound on signed integer.
   next_bitstream_buffer_id_ = (next_bitstream_buffer_id_ + 1) & 0x3FFFFFFF;
-  decoder_->Decode(bitstream_buffer);
+  decoder_->Decode(std::move(bitstream_buffer));
   ++outstanding_decodes_;
   if (IsLastPlayThrough() &&
       -config_.delete_decoder_state == next_bitstream_buffer_id_) {
@@ -1402,7 +1405,7 @@ TEST_P(VideoDecodeAcceleratorParamTest, MAYBE_TestSimpleDecode) {
     base::FilePath filepath(test_video_files_[0]->file_name);
     auto golden_md5s = media::test::ReadGoldenThumbnailMD5s(
         filepath.AddExtension(FILE_PATH_LITERAL(".md5")));
-    bool is_valid_thumbnail = base::ContainsValue(golden_md5s, md5_string);
+    bool is_valid_thumbnail = base::Contains(golden_md5s, md5_string);
 
     // Convert raw RGBA into PNG for export.
     std::vector<unsigned char> png;
@@ -1692,60 +1695,6 @@ TEST_F(VideoDecodeAcceleratorTest, NoCrash) {
   WaitUntilDecodeFinish(notes_[0].get());
 }
 
-#if defined(OS_CHROMEOS)
-// This is the case only for generating md5 values of video frames on stream.
-// This is disabled by default. To run this, you should run this test with
-// --gtest_filter=VideoDecodeAcceleratorTest.DISABLED_GenMD5 and
-// --gtest_also_run_disabled_tests
-TEST_F(VideoDecodeAcceleratorTest, DISABLED_GenMD5) {
-  g_validate_frames = false;
-  g_calculate_checksums = true;
-  g_test_import = true;
-
-  ASSERT_EQ(test_video_files_.size(), 1u);
-  notes_.push_back(
-      std::make_unique<media::test::ClientStateNotification<ClientState>>());
-  const TestVideoFile* video_file = test_video_files_[0].get();
-  GLRenderingVDAClient::Config config;
-  config.frame_size = gfx::Size(video_file->width, video_file->height);
-  config.profile = video_file->profile;
-  config.fake_decoder = g_fake_decoder;
-  config.num_frames = video_file->num_frames;
-  auto video_frame_validator =
-      CreateAndInitializeVideoFrameValidator(video_file->file_name);
-  media::test::VideoFrameValidator* frame_validator =
-      video_frame_validator.get();
-  clients_.push_back(std::make_unique<GLRenderingVDAClient>(
-      std::move(config), video_file->data_str, &rendering_helper_,
-      std::move(video_frame_validator), nullptr, notes_[0].get()));
-  RenderingHelperParams helper_params;
-  helper_params.num_windows = 1;
-  InitializeRenderingHelper(helper_params);
-  CreateAndStartDecoder(clients_[0].get(), notes_[0].get());
-  ClientState last_state = WaitUntilDecodeFinish(notes_[0].get());
-  EXPECT_NE(CS_ERROR, last_state);
-
-  // Write out computed md5 values.
-  frame_validator->WaitUntilDone();
-  const std::vector<std::string>& frame_checksums =
-      frame_validator->GetFrameChecksums();
-  base::FilePath md5_file_path(video_file->file_name);
-  md5_file_path = md5_file_path.AddExtension(FILE_PATH_LITERAL(".frames.md5"));
-  base::File md5_file(md5_file_path, base::File::FLAG_CREATE_ALWAYS |
-                                         base::File::FLAG_WRITE |
-                                         base::File::FLAG_APPEND);
-  if (!md5_file.IsValid())
-    LOG(ERROR) << "Failed to create md5 file to write " << md5_file_path;
-
-  for (const std::string& frame_checksum : frame_checksums) {
-    md5_file.Write(0, frame_checksum.data(), frame_checksum.size());
-    md5_file.Write(0, "\n", 1);
-  }
-
-  g_test_import = false;
-}
-#endif
-
 // TODO(fischman, vrk): add more tests!  In particular:
 // - Test life-cycle: Seek/Stop/Pause/Play for a single decoder.
 // - Test alternate configurations
@@ -1809,7 +1758,8 @@ int main(int argc, char** argv) {
 
   // Needed to enable DVLOG through --vmodule.
   logging::LoggingSettings settings;
-  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  settings.logging_dest =
+      logging::LOG_TO_SYSTEM_DEBUG_LOG | logging::LOG_TO_STDERR;
   LOG_ASSERT(logging::InitLogging(settings));
 
   const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();

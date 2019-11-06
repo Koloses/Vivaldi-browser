@@ -151,7 +151,7 @@ class MODULES_EXPORT CanvasRenderingContext2D final
   void StyleDidChange(const ComputedStyle* old_style,
                       const ComputedStyle& new_style) override;
   HitTestCanvasResult* GetControlAndIdIfHitRegionExists(
-      const LayoutPoint& location) override;
+      const PhysicalOffset& location) override;
   String GetIdFromControl(const Element*) override;
 
   // SVGResourceClient implementation
@@ -179,7 +179,6 @@ class MODULES_EXPORT CanvasRenderingContext2D final
 
   cc::PaintCanvas* DrawingCanvas() const final;
   cc::PaintCanvas* ExistingDrawingCanvas() const final;
-  void DisableDeferral(DisableDeferralReason) final;
 
   void DidDraw(const SkIRect& dirty_rect) final;
   scoped_refptr<StaticBitmapImage> GetImage(AccelerationHint) const final;
@@ -272,12 +271,6 @@ class MODULES_EXPORT CanvasRenderingContext2D final
   bool should_prune_local_font_cache_;
   LinkedHashSet<String> font_lru_list_;
 };
-
-DEFINE_TYPE_CASTS(CanvasRenderingContext2D,
-                  CanvasRenderingContext,
-                  context,
-                  context->Is2d() && context->Host(),
-                  context.Is2d() && context.Host());
 
 }  // namespace blink
 

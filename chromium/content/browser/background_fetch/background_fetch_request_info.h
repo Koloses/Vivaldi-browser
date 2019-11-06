@@ -19,13 +19,13 @@
 #include "components/download/public/common/download_item.h"
 #include "content/browser/background_fetch/background_fetch_constants.h"
 #include "content/common/content_export.h"
-#include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/background_fetch_response.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom.h"
 #include "url/gurl.h"
 
 namespace storage {
 class BlobDataHandle;
-}
+}  // namespace storage
 
 namespace content {
 
@@ -33,9 +33,7 @@ struct BackgroundFetchResponse;
 struct BackgroundFetchResult;
 class ChromeBlobStorageContext;
 
-// Simple class to encapsulate the components of a fetch request.
-// TODO(peter): This can likely change to have a single owner, and thus become
-// an std::unique_ptr<>, when persistent storage has been implemented.
+// Class to encapsulate the components of a fetch request.
 class CONTENT_EXPORT BackgroundFetchRequestInfo
     : public base::RefCountedDeleteOnSequence<BackgroundFetchRequestInfo> {
  public:

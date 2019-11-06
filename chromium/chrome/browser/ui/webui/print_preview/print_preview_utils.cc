@@ -48,11 +48,9 @@ void PrintersToValues(const PrinterList& printer_list,
     auto printer_info = std::make_unique<base::DictionaryValue>();
     printer_info->SetString(kSettingDeviceName, printer.printer_name);
 
-    const auto printer_name_description = GetPrinterNameAndDescription(printer);
-    const std::string& printer_name = printer_name_description.first;
-    const std::string& printer_description = printer_name_description.second;
-    printer_info->SetString(kSettingPrinterName, printer_name);
-    printer_info->SetString(kSettingPrinterDescription, printer_description);
+    printer_info->SetString(kSettingPrinterName, printer.display_name);
+    printer_info->SetString(kSettingPrinterDescription,
+                            printer.printer_description);
 
     auto options = std::make_unique<base::DictionaryValue>();
     for (const auto opt_it : printer.options)
@@ -60,14 +58,14 @@ void PrintersToValues(const PrinterList& printer_list,
 
     printer_info->SetBoolean(
         kCUPSEnterprisePrinter,
-        base::ContainsKey(printer.options, kCUPSEnterprisePrinter) &&
+        base::Contains(printer.options, kCUPSEnterprisePrinter) &&
             printer.options.at(kCUPSEnterprisePrinter) == kValueTrue);
 
     printer_info->Set(kSettingPrinterOptions, std::move(options));
 
     printers->Append(std::move(printer_info));
 
-    VLOG(1) << "Found printer " << printer_name << " with device name "
+    VLOG(1) << "Found printer " << printer.display_name << " with device name "
             << printer.printer_name;
   }
 }
@@ -167,7 +165,7 @@ base::Value ValidateCddForPrintPreview(base::Value cdd) {
 }
 
 void ConvertPrinterListForCallback(
-    const PrinterHandler::AddedPrintersCallback& callback,
+    PrinterHandler::AddedPrintersCallback callback,
     PrinterHandler::GetPrintersDoneCallback done_callback,
     const PrinterList& printer_list) {
   base::ListValue printers;

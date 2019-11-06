@@ -55,9 +55,11 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/mime_handler_view_mode.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
+#include "content/public/test/no_renderer_crashes_assertion.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/filename_util.h"
 #include "net/dns/mock_host_resolver.h"
@@ -418,6 +420,43 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnly) {
   EXPECT_TRUE(base::ContentsEqual(GetTestDirFile("a.htm"), full_file_name));
 }
 
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveFileURL) {
+  GURL url = net::FilePathToFileURL(GetTestDirFile("text.txt"));
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  base::FilePath full_file_name, dir;
+  SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_ONLY_HTML, "test", 1, &dir,
+                 &full_file_name);
+  ASSERT_FALSE(HasFailure());
+
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  EXPECT_TRUE(base::PathExists(full_file_name));
+  EXPECT_FALSE(base::PathExists(dir));
+  EXPECT_TRUE(base::ContentsEqual(GetTestDirFile("text.txt"), full_file_name));
+}
+
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest,
+                       SaveHTMLOnly_CrossOriginReadPolicy) {
+  GURL url = embedded_test_server()->GetURL(
+      "/downloads/cross-origin-resource-policy-resource.txt");
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  base::FilePath full_file_name, dir;
+  SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_ONLY_HTML, "a", 1, &dir,
+                 &full_file_name);
+  ASSERT_FALSE(HasFailure());
+
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  EXPECT_TRUE(base::PathExists(full_file_name));
+  EXPECT_FALSE(base::PathExists(dir));
+
+  const base::FilePath::CharType kTestDir[] = FILE_PATH_LITERAL("downloads");
+  const base::FilePath kTestFile =
+      test_dir_.Append(base::FilePath(kTestDir))
+          .AppendASCII("cross-origin-resource-policy-resource.txt");
+  EXPECT_TRUE(base::ContentsEqual(kTestFile, full_file_name));
+}
+
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnlyCancel) {
   GURL url = NavigateToMockURL("a");
   DownloadManager* manager = GetDownloadManager();
@@ -494,7 +533,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyTabDestroy) {
                                         content::SAVE_PAGE_TYPE_AS_ONLY_HTML));
   std::vector<DownloadItem*> items;
   creation_observer.WaitForDownloadItem(&items);
-  ASSERT_TRUE(items.size() == 1);
+  ASSERT_EQ(1u, items.size());
 
   // Close the tab; does this cancel the download?
   GetCurrentTab(browser())->Close();
@@ -506,6 +545,10 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyTabDestroy) {
 }
 
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveViewSourceHTMLOnly) {
+  // TODO(lukasza): https://crbug.com/971811: Disallow renderer crashes once the
+  // bug is fixed.
+  content::ScopedAllowRendererCrashes scoped_allow_renderer_crashes;
+
   GURL mock_url = embedded_test_server()->GetURL("/save_page/a.htm");
   GURL view_source_url =
       GURL(content::kViewSourceScheme + std::string(":") + mock_url.spec());
@@ -523,6 +566,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveViewSourceHTMLOnly) {
   EXPECT_TRUE(base::ContentsEqual(GetTestDirFile("a.htm"), full_file_name));
 }
 
+// Regression test for https://crbug.com/974312 (saving a page that was served
+// with `Cross-Origin-Resource-Policy: same-origin` http response header).
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveCompleteHTML) {
   GURL url = NavigateToMockURL("b");
 
@@ -1095,14 +1140,19 @@ class SavePageOriginalVsSavedComparisonTest
   void RunObjectElementsTest(GURL url) {
     content::SavePageType save_page_type = GetParam();
 
-    // 7 comes from:
+    // The |expected_number_of_frames| comes from:
     // - main frame (frames-objects.htm)
     // - object with frame-nested.htm + 2 subframes (frames-nested2.htm + b.htm)
     // - iframe with a.htm
     // - object with svg.svg
     // - object with text.txt
-    // (pdf and png objects do not get a separate frame)
+    // - (in presence of MimeHandlerViewMode::UsesCrossProcessFrame) object with
+    //   pdf.pdf is responsible for presence of 2 extra frames (about:blank +
+    //   one frame for the actual pdf.pdf).  These frames are an implementation
+    //   detail and are not web-exposed (e.g. via window.frames).
     int expected_number_of_frames = 7;
+    if (content::MimeHandlerViewMode::UsesCrossProcessFrame())
+      expected_number_of_frames = 9;
 
     std::vector<std::string> expected_substrings = {
         "frames-objects.htm: 8da13db4-a512-4d9b-b1c5-dc1c134234b9",
@@ -1112,6 +1162,10 @@ class SavePageOriginalVsSavedComparisonTest
         "frames-nested2.htm: 6d23dc47-f283-4977-96ec-66bcf72301a4",
         "text-object.txt: ae52dd09-9746-4b7e-86a6-6ada5e2680c2",
         "svg: 0875fd06-131d-4708-95e1-861853c6b8dc",
+
+        // TODO(lukasza): Consider also verifying presence of "PDF test file"
+        // from <object data="pdf.pdf">.  This requires ensuring that the PDF is
+        // loaded before continuing with the test.
     };
 
     // TODO(lukasza): crbug.com/553478: Enable <object> testing of MHTML.
@@ -1134,8 +1188,8 @@ class SavePageOriginalVsSavedComparisonTest
     for (const auto& expected_substring : expected_substrings) {
       int actual_number_of_matches = ui_test_utils::FindInPage(
           GetCurrentTab(browser()), base::UTF8ToUTF16(expected_substring),
-          true,  // |forward|
-          true,  // |case_sensitive|
+          true,   // |forward|
+          false,  // |case_sensitive|
           nullptr, nullptr);
 
       EXPECT_EQ(1, actual_number_of_matches)
@@ -1144,16 +1198,16 @@ class SavePageOriginalVsSavedComparisonTest
     }
 
     std::string forbidden_substrings[] = {
-        "head", // Html markup should not be visible.
-        "err",  // "err" is a prefix of error messages + is strategically
-                // included in some tests in contents that should not render
-                // (i.e. inside of an object element and/or inside of a frame
-                // that should be hidden).
+        "head",  // Html markup should not be visible.
+        "err",   // "err" is a prefix of error messages + is strategically
+                 // included in some tests in contents that should not render
+                 // (i.e. inside of an object element and/or inside of a frame
+                 // that should be hidden).
     };
     for (const auto& forbidden_substring : forbidden_substrings) {
       int actual_number_of_matches = ui_test_utils::FindInPage(
           GetCurrentTab(browser()), base::UTF8ToUTF16(forbidden_substring),
-          true,  // |forward|
+          true,   // |forward|
           false,  // |case_sensitive|
           nullptr, nullptr);
       EXPECT_EQ(0, actual_number_of_matches)
@@ -1211,9 +1265,12 @@ IN_PROC_BROWSER_TEST_P(SavePageOriginalVsSavedComparisonTest,
 }
 
 // Tests that saving a page from file: URI works.
-// TODO(https://crbug.com/840063): Deflake and reenable.
 IN_PROC_BROWSER_TEST_P(SavePageOriginalVsSavedComparisonTest,
-                       DISABLED_ObjectElementsViaFile) {
+                       ObjectElementsViaFile) {
+  // TODO(lukasza): https://crbug.com/964364: Re-enable the test.
+  if (content::MimeHandlerViewMode::UsesCrossProcessFrame())
+    return;
+
   base::FilePath test_data_dir;
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
   GURL url(net::FilePathToFileURL(

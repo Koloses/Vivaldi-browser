@@ -12,6 +12,7 @@
 #include "chrome/browser/apps/app_service/icon_key_util.h"
 #include "chrome/services/app_service/public/mojom/app_service.mojom.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
+#include "extensions/browser/extension_prefs_observer.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/interface_ptr_set.h"
@@ -32,6 +33,7 @@ namespace apps {
 //
 // See chrome/services/app_service/README.md.
 class ExtensionApps : public apps::mojom::Publisher,
+                      public extensions::ExtensionPrefsObserver,
                       public extensions::ExtensionRegistryObserver,
                       public content_settings::Observer {
  public:
@@ -51,7 +53,8 @@ class ExtensionApps : public apps::mojom::Publisher,
   // apps::mojom::Publisher overrides.
   void Connect(apps::mojom::SubscriberPtr subscriber,
                apps::mojom::ConnectOptionsPtr opts) override;
-  void LoadIcon(apps::mojom::IconKeyPtr icon_key,
+  void LoadIcon(const std::string& app_id,
+                apps::mojom::IconKeyPtr icon_key,
                 apps::mojom::IconCompression icon_compression,
                 int32_t size_hint_in_dip,
                 bool allow_placeholder_icon,
@@ -71,6 +74,13 @@ class ExtensionApps : public apps::mojom::Publisher,
                                ContentSettingsType content_type,
                                const std::string& resource_identifier) override;
 
+  // extensions::ExtensionPrefsObserver overrides.
+  void OnExtensionLastLaunchTimeChanged(
+      const std::string& app_id,
+      const base::Time& last_launch_time) override;
+  void OnExtensionPrefsWillBeDestroyed(
+      extensions::ExtensionPrefs* prefs) override;
+
   // extensions::ExtensionRegistryObserver overrides.
   void OnExtensionInstalled(content::BrowserContext* browser_context,
                             const extensions::Extension* extension,
@@ -87,8 +97,13 @@ class ExtensionApps : public apps::mojom::Publisher,
   bool RunExtensionEnableFlow(const std::string& app_id);
 
   static bool IsBlacklisted(const std::string& app_id);
-  static apps::mojom::OptionalBool ShouldShowInAppManagement(
-      const extensions::Extension* extension);
+
+  static void SetShowInFields(apps::mojom::AppPtr& app,
+                              const extensions::Extension* extension,
+                              Profile* profile);
+  static bool ShouldShow(const extensions::Extension* extension,
+                         Profile* profile);
+
   void PopulatePermissions(const extensions::Extension* extension,
                            std::vector<mojom::PermissionPtr>* target);
   apps::mojom::AppPtr Convert(const extensions::Extension* extension,
@@ -102,9 +117,11 @@ class ExtensionApps : public apps::mojom::Publisher,
 
   Profile* profile_;
 
+  ScopedObserver<extensions::ExtensionPrefs, extensions::ExtensionPrefsObserver>
+      prefs_observer_;
   ScopedObserver<extensions::ExtensionRegistry,
                  extensions::ExtensionRegistryObserver>
-      observer_;
+      registry_observer_;
 
   apps_util::IncrementingIconKeyFactory icon_key_factory_;
 

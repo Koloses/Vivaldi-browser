@@ -3,11 +3,13 @@
 // found in the LICENSE file.
 
 #include "ui/accessibility/platform/ax_fragment_root_win.h"
+#include "ui/accessibility/platform/ax_platform_node_win.h"
 #include "ui/accessibility/platform/ax_platform_node_win_unittest.h"
 
 #include <UIAutomationClient.h>
 #include <UIAutomationCoreApi.h>
 
+#include "base/win/scoped_safearray.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using Microsoft::WRL::ComPtr;
@@ -42,25 +44,26 @@ TEST_F(AXFragmentRootTest, TestUIAGetRuntimeId) {
   ComPtr<IRawElementProviderFragment> fragment_provider;
   fragment_root_provider.As(&fragment_provider);
 
-  SAFEARRAY* runtime_id;
-  EXPECT_HRESULT_SUCCEEDED(fragment_provider->GetRuntimeId(&runtime_id));
-  EXPECT_EQ(runtime_id, nullptr);
+  base::win::ScopedSafearray runtime_id;
+  EXPECT_HRESULT_SUCCEEDED(
+      fragment_provider->GetRuntimeId(runtime_id.Receive()));
+  EXPECT_EQ(runtime_id.Get(), nullptr);
 }
 
 TEST_F(AXFragmentRootTest, TestUIAElementProviderFromPoint) {
   AXNodeData root_data;
-  root_data.id = 0;
-  root_data.child_ids.push_back(1);
-  root_data.child_ids.push_back(2);
+  root_data.id = 1;
   root_data.relative_bounds.bounds = gfx::RectF(0, 0, 80, 80);
 
   AXNodeData element1_data;
-  element1_data.id = 1;
+  element1_data.id = 2;
   element1_data.relative_bounds.bounds = gfx::RectF(0, 0, 50, 50);
+  root_data.child_ids.push_back(element1_data.id);
 
   AXNodeData element2_data;
-  element2_data.id = 2;
+  element2_data.id = 3;
   element2_data.relative_bounds.bounds = gfx::RectF(0, 50, 30, 30);
+  root_data.child_ids.push_back(element2_data.id);
 
   Init(root_data, element1_data, element2_data);
   InitFragmentRoot();
@@ -93,15 +96,15 @@ TEST_F(AXFragmentRootTest, TestUIAElementProviderFromPoint) {
 
 TEST_F(AXFragmentRootTest, TestUIAGetFocus) {
   AXNodeData root_data;
-  root_data.id = 0;
-  root_data.child_ids.push_back(1);
-  root_data.child_ids.push_back(2);
+  root_data.id = 1;
 
   AXNodeData element1_data;
-  element1_data.id = 1;
+  element1_data.id = 2;
+  root_data.child_ids.push_back(element1_data.id);
 
   AXNodeData element2_data;
-  element2_data.id = 2;
+  element2_data.id = 3;
+  root_data.child_ids.push_back(element2_data.id);
 
   Init(root_data, element1_data, element2_data);
   InitFragmentRoot();
@@ -150,7 +153,7 @@ TEST_F(AXFragmentRootTest, TestUIAErrorHandling) {
   ComPtr<IRawElementProviderSimple> returned_simple_provider;
   ComPtr<IRawElementProviderFragment> returned_fragment_provider;
   ComPtr<IRawElementProviderFragmentRoot> returned_fragment_root_provider;
-  SAFEARRAY* returned_runtime_id;
+  base::win::ScopedSafearray returned_runtime_id;
 
   EXPECT_EQ(
       static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE),
@@ -161,7 +164,7 @@ TEST_F(AXFragmentRootTest, TestUIAErrorHandling) {
       fragment_provider->get_FragmentRoot(&returned_fragment_root_provider));
 
   EXPECT_EQ(static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE),
-            fragment_provider->GetRuntimeId(&returned_runtime_id));
+            fragment_provider->GetRuntimeId(returned_runtime_id.Receive()));
 
   EXPECT_EQ(static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE),
             fragment_root_provider->ElementProviderFromPoint(
@@ -169,6 +172,47 @@ TEST_F(AXFragmentRootTest, TestUIAErrorHandling) {
 
   EXPECT_EQ(static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE),
             fragment_root_provider->GetFocus(&returned_fragment_provider));
+}
+
+TEST_F(AXFragmentRootTest, TestGetChildCount) {
+  AXNodeData root;
+  Init(root);
+  InitFragmentRoot();
+
+  AXPlatformNodeDelegate* fragment_root = ax_fragment_root_.get();
+  EXPECT_EQ(1, fragment_root->GetChildCount());
+
+  test_fragment_root_delegate_->child_ = nullptr;
+  EXPECT_EQ(0, fragment_root->GetChildCount());
+}
+
+TEST_F(AXFragmentRootTest, TestChildAtIndex) {
+  AXNodeData root;
+  Init(root);
+  InitFragmentRoot();
+
+  gfx::NativeViewAccessible native_view_accessible =
+      AXPlatformNodeFromNode(GetRootNode())->GetNativeViewAccessible();
+  AXPlatformNodeDelegate* fragment_root = ax_fragment_root_.get();
+  EXPECT_EQ(native_view_accessible, fragment_root->ChildAtIndex(0));
+  EXPECT_EQ(nullptr, fragment_root->ChildAtIndex(1));
+
+  test_fragment_root_delegate_->child_ = nullptr;
+  EXPECT_EQ(nullptr, fragment_root->ChildAtIndex(0));
+}
+
+TEST_F(AXFragmentRootTest, TestGetParent) {
+  AXNodeData root;
+  Init(root);
+  InitFragmentRoot();
+
+  AXPlatformNodeDelegate* fragment_root = ax_fragment_root_.get();
+  EXPECT_EQ(nullptr, fragment_root->GetParent());
+
+  gfx::NativeViewAccessible native_view_accessible =
+      AXPlatformNodeFromNode(GetRootNode())->GetNativeViewAccessible();
+  test_fragment_root_delegate_->parent_ = native_view_accessible;
+  EXPECT_EQ(native_view_accessible, fragment_root->GetParent());
 }
 
 }  // namespace ui

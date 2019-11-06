@@ -20,11 +20,13 @@
 
 namespace base {
 
-
 class Clock;
 class FileDescriptorWatcher;
-class TaskScheduler;
 class TickClock;
+
+namespace subtle {
+class ScopedTimeClockOverrides;
+}
 
 namespace test {
 
@@ -39,10 +41,13 @@ namespace test {
 // RunLoop::Run(UntilIdle) or ScopedTaskEnvironment::RunUntilIdle is called on
 // the thread where the ScopedTaskEnvironment lives.
 //
+// The TimeSource trait can be used to request that delayed tasks be under the
+// manual control of ScopedTaskEnvironment::FastForward*() methods.
+//
 // Tasks posted through base/task/post_task.h run on dedicated threads. If
-// ExecutionMode is QUEUED, they run when RunUntilIdle() or
-// ~ScopedTaskEnvironment is called. If ExecutionMode is ASYNC, they run as they
-// are posted.
+// ThreadPoolExecutionMode is QUEUED, they run when RunUntilIdle() or
+// ~ScopedTaskEnvironment is called. If ThreadPoolExecutionMode is ASYNC, they
+// run as they are posted.
 //
 // All methods of ScopedTaskEnvironment must be called from the same thread.
 //
@@ -52,19 +57,21 @@ namespace test {
 //    public:
 //     (...)
 //
+//    // protected rather than private visibility will allow controlling the
+//    // task environment (e.g. RunUntilIdle(), FastForwardBy(), etc.). from the
+//    // test body.
 //    protected:
-//     // Must be the first member (or at least before any member that cares
-//     // about tasks) to be initialized first and destroyed last. protected
-//     // instead of private visibility will allow controlling the task
-//     // environment (e.g. clock) once such features are added (see design doc
-//     // below for details), until then it at least doesn't hurt :).
-//     base::test::ScopedTaskEnvironment scoped_task_environment_;
+//     // Must generally be the first member to be initialized first and
+//     // destroyed last (some members that require single-threaded
+//     // initialization and tear down may need to come before -- e.g.
+//     // base::test::ScopedFeatureList). Extra traits, like TimeSource, are
+//     // best provided inline when declaring the ScopedTaskEnvironment, as
+//     // such:
+//     base::test::ScopedTaskEnvironment scoped_task_environment_{
+//         base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME};
 //
 //     // Other members go here (or further below in private section.)
 //   };
-//
-// Design and future improvements documented in
-// https://docs.google.com/document/d/1QabRo8c7D9LsYY3cEcaPQbOCLo8Tu-6VLykYXyl3Pkk/edit
 class ScopedTaskEnvironment {
  protected:
   // This enables a two-phase initialization for sub classes such as
@@ -75,63 +82,80 @@ class ScopedTaskEnvironment {
   struct SubclassCreatesDefaultTaskRunner {};
 
  public:
-  enum class MainThreadType {
-    // The main thread doesn't pump system messages.
-    DEFAULT,
-    // The main thread doesn't pump system messages and uses a mock clock for
-    // delayed tasks (controllable via FastForward*() methods).
-    // TODO(gab): Make this the default |main_thread_type|.
-    // TODO(gab): Also mock the TaskScheduler's clock simultaneously (this
-    // currently only mocks the main thread's clock).
+  enum class TimeSource {
+    // Delayed tasks and Time/TimeTicks::Now() use the real-time system clock.
+    SYSTEM_TIME,
+
+    // Delayed tasks use a mock clock which only advances (in increments to the
+    // soonest delay) when reaching idle during a FastForward*() call to this
+    // ScopedTaskEnvironment. Or when RunLoop::Run() goes idle on the main
+    // thread with no tasks remaining in the thread pool.
+    // Note: this does not affect threads outside this ScopedTaskEnvironment's
+    // purview (notably: independent base::Thread's).
     MOCK_TIME,
-    // The main thread pumps UI messages.
-    UI,
-    // The main thread pumps UI messages and uses a mock clock for delayed tasks
-    // (controllable via FastForward*() methods).
-    // TODO(gab@): Enable mock time on all threads and make MOCK_TIME
-    // configurable independent of MainThreadType.
-    UI_MOCK_TIME,
-    // The main thread pumps asynchronous IO messages and supports the
-    // FileDescriptorWatcher API on POSIX.
-    IO,
-    // The main thread pumps IO messages and uses a mock clock for delayed tasks
-    // (controllable via FastForward*() methods). In addition it supports the
-    // FileDescriptorWatcher API on POSIX.
-    IO_MOCK_TIME,
-  };
 
-  enum class ExecutionMode {
-    // Tasks are queued and only executed when RunUntilIdle() is explicitly
-    // called.
-    QUEUED,
-    // Tasks run as they are posted. RunUntilIdle() can still be used to block
-    // until done.
-    ASYNC,
-  };
-
-  enum class NowSource {
-    // base::Time::Now() and base::TimeTicks::Now() are real time.
-    REAL_TIME,
-
-    // base::Time::Now() and base::TimeTicks::Now() are driven from the main
-    // thread's MOCK_TIME. This may alter the order of delayed and non-delayed
-    // tasks on other threads.
+    // Mock Time/TimeTicks::Now() with the same mock clock used for delayed
+    // tasks. This is useful when a delayed task under test needs to check the
+    // amount of time that has passed since a previous sample of Now() (e.g.
+    // cache expiry).
     //
-    // Warning some platform APIs are still real time, and don't interact with
+    // Warning some platform APIs are still real-time, and don't interact with
     // MOCK_TIME as expected, e.g.:
     //   PlatformThread::Sleep
     //   WaitableEvent::TimedWait
     //   WaitableEvent::TimedWaitUntil
     //   ConditionVariable::TimedWait
-    MAIN_THREAD_MOCK_TIME,
+    //
+    // TODO(crbug.com/905412): Make MOCK_TIME always mock Time/TimeTicks::Now().
+    MOCK_TIME_AND_NOW,
+
+    // TODO(gab): Consider making MOCK_TIME the default mode.
+    DEFAULT = SYSTEM_TIME
+  };
+
+  enum class MainThreadType {
+    // The main thread doesn't pump system messages.
+    DEFAULT,
+    // The main thread pumps UI messages.
+    UI,
+    // The main thread pumps asynchronous IO messages and supports the
+    // FileDescriptorWatcher API on POSIX.
+    IO,
+  };
+
+  // Note that this is irrelevant (and ignored) under
+  // ThreadingMode::MAIN_THREAD_ONLY
+  enum class ThreadPoolExecutionMode {
+    // Thread pool tasks are queued and only executed when RunUntilIdle(),
+    // FastForwardBy(), or FastForwardUntilNoTasksRemain() are explicitly
+    // called. Note: RunLoop::Run() does *not* unblock the ThreadPool in this
+    // mode (it strictly runs only the main thread).
+    QUEUED,
+    // Thread pool tasks run as they are posted. RunUntilIdle() can still be
+    // used to block until done.
+    // Note that regardless of this trait, delayed tasks are always "queued"
+    // under TimeSource::MOCK_TIME mode.
+    ASYNC,
+    DEFAULT = ASYNC
+  };
+
+  enum class ThreadingMode {
+    // ThreadPool will be initialized, thus adding support for multi-threaded
+    // tests.
+    MULTIPLE_THREADS,
+    // No thread pool will be initialized. Useful for tests that want to run
+    // single threaded.
+    MAIN_THREAD_ONLY,
+    DEFAULT = MULTIPLE_THREADS
   };
 
   // List of traits that are valid inputs for the constructor below.
   struct ValidTrait {
+    ValidTrait(TimeSource);
     ValidTrait(MainThreadType);
-    ValidTrait(ExecutionMode);
-    ValidTrait(NowSource);
+    ValidTrait(ThreadPoolExecutionMode);
     ValidTrait(SubclassCreatesDefaultTaskRunner);
+    ValidTrait(ThreadingMode);
   };
 
   // Constructor accepts zero or more traits which customize the testing
@@ -141,16 +165,18 @@ class ScopedTaskEnvironment {
                 trait_helpers::AreValidTraits<ValidTrait, ArgTypes...>::value>>
   NOINLINE ScopedTaskEnvironment(ArgTypes... args)
       : ScopedTaskEnvironment(
+            trait_helpers::GetEnum<TimeSource, TimeSource::DEFAULT>(args...),
             trait_helpers::GetEnum<MainThreadType, MainThreadType::DEFAULT>(
                 args...),
-            trait_helpers::GetEnum<ExecutionMode, ExecutionMode::ASYNC>(
+            trait_helpers::GetEnum<ThreadPoolExecutionMode,
+                                   ThreadPoolExecutionMode::DEFAULT>(args...),
+            trait_helpers::GetEnum<ThreadingMode, ThreadingMode::DEFAULT>(
                 args...),
-            trait_helpers::GetEnum<NowSource, NowSource::REAL_TIME>(args...),
             trait_helpers::HasTrait<SubclassCreatesDefaultTaskRunner>(args...),
             trait_helpers::NotATraitTag()) {}
 
-  // Waits until no undelayed TaskScheduler tasks remain. Then, unregisters the
-  // TaskScheduler and the (Thread|Sequenced)TaskRunnerHandle.
+  // Waits until no undelayed ThreadPool tasks remain. Then, unregisters the
+  // ThreadPoolInstance and the (Thread|Sequenced)TaskRunnerHandle.
   virtual ~ScopedTaskEnvironment();
 
   // Returns a TaskRunner that schedules tasks on the main thread.
@@ -161,27 +187,45 @@ class ScopedTaskEnvironment {
   bool MainThreadIsIdle() const;
 
   // Runs tasks until both the (Thread|Sequenced)TaskRunnerHandle and the
-  // TaskScheduler's non-delayed queues are empty.
+  // ThreadPool's non-delayed queues are empty.
+  // While RunUntilIdle() is quite practical and sometimes even necessary -- for
+  // example, to flush all tasks bound to Unretained() state before destroying
+  // test members -- it should be used with caution per the following warnings:
+  //
+  // WARNING #1: This may run long (flakily timeout) and even never return! Do
+  //             not use this when repeating tasks such as animated web pages
+  //             are present.
+  // WARNING #2: This may return too early! For example, if used to run until an
+  //             incoming event has occurred but that event depends on a task in
+  //             a different queue -- e.g. a standalone base::Thread or a system
+  //             event.
+  //
+  // As such, prefer RunLoop::Run() with an explicit RunLoop::QuitClosure() when
+  // possible.
   void RunUntilIdle();
 
-  // Only valid for instances with a MOCK_TIME MainThreadType. Fast-forwards
-  // virtual time by |delta|, causing all tasks on the main thread with a
-  // remaining delay less than or equal to |delta| to be executed before this
-  // returns. |delta| must be non-negative.
-  // TODO(gab): Make this apply to TaskScheduler delayed tasks as well
-  // (currently only main thread time is mocked).
+  // Only valid for instances using TimeSource::MOCK_TIME. Fast-forwards
+  // virtual time by |delta|, causing all tasks on the main thread and thread
+  // pool with a remaining delay less than or equal to |delta| to be executed in
+  // their natural order before this returns. |delta| must be non-negative. Upon
+  // returning from this method, NowTicks() will be >= the initial |NowTicks() +
+  // delta|. It is guaranteed to be == iff tasks executed in this
+  // FastForwardBy() didn't result in nested calls to time-advancing-methods.
   void FastForwardBy(TimeDelta delta);
 
-  // Only valid for instances with a MOCK_TIME MainThreadType.
+  // Only valid for instances using TimeSource::MOCK_TIME.
   // Short for FastForwardBy(TimeDelta::Max()).
+  //
+  // WARNING: This has the same caveat as RunUntilIdle() and is even more likely
+  // to spin forever (any RepeatingTimer will cause this).
   void FastForwardUntilNoTasksRemain();
 
-  // Only valid for instances with a MOCK_TIME MainThreadType. Returns a
+  // Only valid for instances using TimeSource::MOCK_TIME. Returns a
   // TickClock whose time is updated by FastForward(By|UntilNoTasksRemain).
   const TickClock* GetMockTickClock() const;
   std::unique_ptr<TickClock> DeprecatedGetMockTickClock();
 
-  // Only valid for instances with a MOCK_TIME MainThreadType. Returns a
+  // Only valid for instances using TimeSource::MOCK_TIME. Returns a
   // Clock whose time is updated by FastForward(By|UntilNoTasksRemain). The
   // initial value is implementation defined and should be queried by tests that
   // depend on it.
@@ -189,24 +233,31 @@ class ScopedTaskEnvironment {
   // process. See time.h.
   const Clock* GetMockClock() const;
 
-  // Only valid for instances with a MOCK_TIME MainThreadType.
-  // Returns the current virtual tick time (initially starting at 0).
+  // Only valid for instances using TimeSource::MOCK_TIME. Returns the
+  // current virtual tick time (based on a realistic Now(), sampled when this
+  // ScopedTaskEnvironment was created, and manually advanced from that point
+  // on).
   base::TimeTicks NowTicks() const;
 
-  // Only valid for instances with a MOCK_TIME MainThreadType.
-  // Returns the number of pending tasks (delayed and non-delayed) of the main
-  // thread's TaskRunner.
+  // Only valid for instances using TimeSource::MOCK_TIME. Returns the
+  // number of pending tasks (delayed and non-delayed) of the main thread's
+  // TaskRunner. When debugging, you can use DescribePendingMainThreadTasks() to
+  // see what those are.
   size_t GetPendingMainThreadTaskCount() const;
 
-  // Only valid for instances with a MOCK_TIME MainThreadType.
+  // Only valid for instances using TimeSource::MOCK_TIME.
   // Returns the delay until the next pending task of the main thread's
   // TaskRunner if there is one, otherwise it returns TimeDelta::Max().
   TimeDelta NextMainThreadPendingTaskDelay() const;
 
-  // Only valid for instances with a MOCK_TIME MainThreadType.
+  // Only valid for instances using TimeSource::MOCK_TIME.
   // Returns true iff the next task is delayed. Returns false if the next task
   // is immediate or if there is no next task.
   bool NextTaskIsDelayed() const;
+
+  // For debugging purposes: Dumps information about pending tasks on the main
+  // thread.
+  void DescribePendingMainThreadTasks() const;
 
  protected:
   explicit ScopedTaskEnvironment(ScopedTaskEnvironment&& other);
@@ -215,8 +266,8 @@ class ScopedTaskEnvironment {
     return main_thread_type_;
   }
 
-  constexpr ExecutionMode execution_control_mode() const {
-    return execution_control_mode_;
+  constexpr ThreadPoolExecutionMode thread_pool_execution_mode() const {
+    return thread_pool_execution_mode_;
   }
 
   // Returns the TimeDomain driving this ScopedTaskEnvironment.
@@ -231,30 +282,42 @@ class ScopedTaskEnvironment {
   void NotifyDestructionObserversAndReleaseSequenceManager();
 
  private:
-  class MockTimeDomain;
   class TestTaskTracker;
+  class MockTimeDomain;
+
+  void InitializeThreadPool();
+  void DestroyThreadPool();
 
   void CompleteInitialization();
 
   // The template constructor has to be in the header but it delegates to this
   // constructor to initialize all other members out-of-line.
-  ScopedTaskEnvironment(MainThreadType main_thread_type,
-                        ExecutionMode execution_control_mode,
-                        NowSource now_source,
+  ScopedTaskEnvironment(TimeSource time_source,
+                        MainThreadType main_thread_type,
+                        ThreadPoolExecutionMode thread_pool_execution_mode,
+                        ThreadingMode threading_mode,
                         bool subclass_creates_default_taskrunner,
                         trait_helpers::NotATraitTag tag);
 
   const MainThreadType main_thread_type_;
-  const ExecutionMode execution_control_mode_;
+  const ThreadPoolExecutionMode thread_pool_execution_mode_;
+  const ThreadingMode threading_mode_;
   const bool subclass_creates_default_taskrunner_;
 
   std::unique_ptr<sequence_manager::SequenceManager> sequence_manager_;
+
+  // Manages the clock under TimeSource::MOCK_TIME modes. Null in
+  // TimeSource::SYSTEM_TIME mode.
   std::unique_ptr<MockTimeDomain> mock_time_domain_;
+
+  // Overrides Time/TimeTicks::Now() under TimeSource::MOCK_TIME_AND_NOW mode.
+  // Null in other modes.
+  std::unique_ptr<subtle::ScopedTimeClockOverrides> time_overrides_;
 
   scoped_refptr<sequence_manager::TaskQueue> task_queue_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
-  // Only set for instances with a MOCK_TIME MainThreadType.
+  // Only set for instances using TimeSource::MOCK_TIME.
   std::unique_ptr<Clock> mock_clock_;
 
 #if defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -262,10 +325,8 @@ class ScopedTaskEnvironment {
   std::unique_ptr<FileDescriptorWatcher> file_descriptor_watcher_;
 #endif
 
-  const TaskScheduler* task_scheduler_ = nullptr;
-
-  // Owned by |task_scheduler_|.
-  TestTaskTracker* const task_tracker_;
+  // Owned by the ThreadPoolInstance.
+  TestTaskTracker* task_tracker_ = nullptr;
 
   // Ensures destruction of lazy TaskRunners when this is destroyed.
   std::unique_ptr<internal::ScopedLazyTaskRunnerListForTesting>
@@ -282,4 +343,4 @@ class ScopedTaskEnvironment {
 }  // namespace test
 }  // namespace base
 
-#endif  // BASE_TEST_SCOPED_ASYNC_TASK_SCHEDULER_H_
+#endif  // BASE_TEST_SCOPED_TASK_ENVIRONMENT_H_

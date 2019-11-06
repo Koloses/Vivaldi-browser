@@ -4,12 +4,12 @@
 
 #include "android_webview/browser/gfx/aw_gl_functor.h"
 
+#include "android_webview/native_jni/AwGLFunctor_jni.h"
 #include "android_webview/public/browser/draw_gl.h"
 #include "base/stl_util.h"
 #include "base/task/post_task.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "jni/AwGLFunctor_jni.h"
 
 using base::android::AttachCurrentThread;
 using base::android::JavaParamRef;
@@ -109,7 +109,6 @@ void AwGLFunctor::DrawGL(AwDrawGLInfo* draw_info) {
       HardwareRendererDrawParams params{
           draw_info->clip_left,   draw_info->clip_top, draw_info->clip_right,
           draw_info->clip_bottom, draw_info->width,    draw_info->height,
-          draw_info->is_layer,
       };
       static_assert(base::size(decltype(draw_info->transform){}) ==
                         base::size(params.transform),

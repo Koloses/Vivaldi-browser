@@ -29,7 +29,6 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
-#include "components/signin/core/browser/account_consistency_method.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -53,12 +52,6 @@ const char kIsOmittedFromProfileListKey[] = "is_omitted_from_profile_list";
 const char kSigninRequiredKey[] = "signin_required";
 const char kSupervisedUserId[] = "managed_user_id";
 const char kAccountIdKey[] = "account_id_key";
-
-// TODO(dullweber): Remove these constants after the stored data is removed.
-const char kStatsBrowsingHistoryKeyDeprecated[] = "stats_browsing_history";
-const char kStatsPasswordsKeyDeprecated[] = "stats_passwords";
-const char kStatsBookmarksKeyDeprecated[] = "stats_bookmarks";
-const char kStatsSettingsKeyDeprecated[] = "stats_settings";
 
 void DeleteBitmap(const base::FilePath& image_path) {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
@@ -113,8 +106,6 @@ ProfileInfoCache::ProfileInfoCache(PrefService* prefs,
   // profile names.
   if (!disable_avatar_download_for_testing_)
     MigrateLegacyProfileNamesAndDownloadAvatars();
-
-  RemoveDeprecatedStatistics();
 }
 
 ProfileInfoCache::~ProfileInfoCache() {
@@ -532,7 +523,7 @@ void ProfileInfoCache::SetGAIAGivenNameOfProfileAtIndex(
 }
 
 void ProfileInfoCache::SetGAIAPictureOfProfileAtIndex(size_t index,
-                                                      const gfx::Image* image) {
+                                                      gfx::Image image) {
   base::FilePath path = GetPathOfProfileAtIndex(index);
   std::string key = CacheKeyFromProfilePath(path);
 
@@ -541,7 +532,7 @@ void ProfileInfoCache::SetGAIAPictureOfProfileAtIndex(size_t index,
       kGAIAPictureFileNameKey, &old_file_name);
   std::string new_file_name;
 
-  if (!image && old_file_name.empty()) {
+  if (image.IsEmpty() && old_file_name.empty()) {
     // On Windows, Taskbar and Desktop icons are refreshed every time
     // |OnProfileAvatarChanged| notification is fired.
     // Updating from an empty image to a null image is a no-op and it is
@@ -553,7 +544,7 @@ void ProfileInfoCache::SetGAIAPictureOfProfileAtIndex(size_t index,
 
   // Delete the old bitmap from cache.
   cached_avatar_images_.erase(key);
-  if (!image) {
+  if (image.IsEmpty()) {
     // Delete the old bitmap from disk.
     base::FilePath image_path = path.AppendASCII(old_file_name);
     file_task_runner_->PostTask(FROM_HERE,
@@ -743,19 +734,6 @@ void ProfileInfoCache::MigrateLegacyProfileNamesAndDownloadAvatars() {
     }
   }
 #endif
-}
-
-void ProfileInfoCache::RemoveDeprecatedStatistics() {
-  for (size_t i = 0; i < GetNumberOfProfiles(); i++) {
-    if (GetInfoForProfileAtIndex(i)->HasKey(kStatsBookmarksKeyDeprecated)) {
-      auto info = GetInfoForProfileAtIndex(i)->CreateDeepCopy();
-      info->Remove(kStatsBookmarksKeyDeprecated, nullptr);
-      info->Remove(kStatsBrowsingHistoryKeyDeprecated, nullptr);
-      info->Remove(kStatsPasswordsKeyDeprecated, nullptr);
-      info->Remove(kStatsSettingsKeyDeprecated, nullptr);
-      SetInfoForProfileAtIndex(i, std::move(info));
-    }
-  }
 }
 
 void ProfileInfoCache::AddProfile(const base::FilePath& profile_path,
